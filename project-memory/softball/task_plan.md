@@ -3,20 +3,18 @@
 ## Phase 0: Initialization
 
 - [x] Initial Task Breakdown
-- [x] Initialize Project Memory
 - [x] Register Spoke in `hub-spokes-map.md`
-- [x] Discovery: Recover context from `Announcer` project
+- [/] Re-Discovery: Planning, Strategy & Training
 - [ ] Final Confirmation from User
 
 ## Phase 1: B - Blueprint
 
-- [ ] Define JSON Data Schema
+- [ ] Define Strategy Data Schema (Rosters, Drills, Lineups)
 - [ ] Finalize Blueprint
 
 ## Phase 2: L - Link
 
-- [ ] Verify API connections
-- [ ] Create minimal handshake scripts
+- [ ] Verify API connections (e.g., Notion for strategy, Google Sheets for tracking)
 
 ## Phase 3: A - Architect
 
@@ -25,8 +23,4 @@
 
 ## Phase 4: S - Stylize
 
-- [ ] Refine Payload/UI
-
 ## Phase 5: T - Trigger
-
-- [ ] Deploy and Document
