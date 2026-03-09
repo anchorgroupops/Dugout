@@ -31,18 +31,19 @@ def compute_batting_score(player: dict, strategy: str = "balanced") -> float:
         'aggressive'  — Power/SLG-heavy, maximize run production
         'development' — Distribute at-bats more evenly, weight less on pure stats
     """
+    # Support both flat schema (new) and nested stats.hitting (legacy)
     hitting = player.get("stats", {}).get("hitting", {})
-    ab = hitting.get("ab", 0)
-    h = hitting.get("h", 0)
-    bb = hitting.get("bb", 0)
-    hbp = hitting.get("hbp", 0)
-    k = hitting.get("k", 0)
-    doubles = hitting.get("doubles", 0)
-    triples = hitting.get("triples", 0)
-    hr = hitting.get("hr", 0)
-    sb = hitting.get("sb", 0)
-    runs = hitting.get("runs", 0)
-    rbi = hitting.get("rbi", 0)
+    ab = player.get("ab", hitting.get("ab", 0)) or 0
+    h = player.get("h", hitting.get("h", 0)) or 0
+    bb = player.get("bb", hitting.get("bb", 0)) or 0
+    hbp = player.get("hbp", hitting.get("hbp", 0)) or 0
+    k = player.get("so", hitting.get("k", 0)) or 0
+    doubles = player.get("doubles", hitting.get("doubles", 0)) or 0
+    triples = player.get("triples", hitting.get("triples", 0)) or 0
+    hr = player.get("hr", hitting.get("hr", 0)) or 0
+    sb = player.get("sb", hitting.get("sb", 0)) or 0
+    runs = player.get("r", hitting.get("runs", 0)) or 0
+    rbi = player.get("rbi", hitting.get("rbi", 0)) or 0
 
     pa = ab + bb + hbp
     if pa == 0:
@@ -94,11 +95,11 @@ def slot_players(sorted_players: list[dict]) -> list[dict]:
     leadoff_scores = []
     for i, p in enumerate(pool):
         hitting = p.get("stats", {}).get("hitting", {})
-        ab = hitting.get("ab", 0)
-        h = hitting.get("h", 0)
-        bb = hitting.get("bb", 0)
-        hbp = hitting.get("hbp", 0)
-        sb = hitting.get("sb", 0)
+        ab = p.get("ab", hitting.get("ab", 0)) or 0
+        h = p.get("h", hitting.get("h", 0)) or 0
+        bb = p.get("bb", hitting.get("bb", 0)) or 0
+        hbp = p.get("hbp", hitting.get("hbp", 0)) or 0
+        sb = p.get("sb", hitting.get("sb", 0)) or 0
         pa = ab + bb + hbp
         obp = (h + bb + hbp) / pa if pa > 0 else 0
         speed = sb / max(pa, 1)
@@ -123,10 +124,12 @@ def slot_players(sorted_players: list[dict]) -> list[dict]:
         contact_scores = []
         for i, p in enumerate(pool):
             hitting = p.get("stats", {}).get("hitting", {})
-            ab = hitting.get("ab", 0)
-            h = hitting.get("h", 0)
-            k = hitting.get("k", 0)
-            pa = ab + hitting.get("bb", 0) + hitting.get("hbp", 0)
+            ab = p.get("ab", hitting.get("ab", 0)) or 0
+            h = p.get("h", hitting.get("h", 0)) or 0
+            k = p.get("so", hitting.get("k", 0)) or 0
+            bb = p.get("bb", hitting.get("bb", 0)) or 0
+            hbp = p.get("hbp", hitting.get("hbp", 0)) or 0
+            pa = ab + bb + hbp
             ba = h / ab if ab > 0 else 0
             k_rate = k / pa if pa > 0 else 1
             contact_scores.append((i, ba * 0.5 + (1 - k_rate) * 0.5))
@@ -181,7 +184,7 @@ def generate_lineup(
     strategy: str = "balanced",
 ) -> dict:
     """Generate an optimized batting lineup for The Sharks."""
-    roster = team_data.get("roster", [])
+    roster = team_data.get("roster", team_data.get("players", []))
     if not roster:
         return {"error": "No roster data found"}
 
@@ -240,7 +243,7 @@ def run():
     for strategy, data in results.items():
         print(f"\n{'='*50}")
         print(f"  STRATEGY: {strategy.upper()}")
-        print(f"  Compliant: {'✅' if data['compliant'] else '❌'}")
+        print(f"  Compliant: {'[PASS]' if data['compliant'] else '[FAIL]'}")
         print(f"{'='*50}")
         for entry in data["lineup"]:
             print(f"  {entry['slot']:>2}. #{entry.get('number', '?'):>2} {entry.get('name', '—'):<20} ({entry['role']})")
