@@ -22,3 +22,91 @@
 2026-03-06 22:36:34,700 [INFO] Scraping Schedule...
 2026-03-06 22:37:13,416 [INFO] Scraping Live Stats...
 2026-03-06 22:37:27,981 [INFO] --- Sync Cycle Complete ---
+2026-03-07 10:37:21,940 [INFO] Current State: IDLE. Next cycle in 43200 seconds.
+2026-03-07 10:37:21,964 [INFO] --- Starting Sync Cycle ---
+2026-03-07 10:37:21,965 [INFO] Scraping Schedule...
+2026-03-07 10:37:59,387 [INFO] Scraping Live Stats...
+2026-03-07 10:38:11,414 [INFO] --- Sync Cycle Complete ---
+2026-03-07 22:38:07,767 [INFO] Current State: IDLE. Next cycle in 43200 seconds.
+2026-03-07 22:38:08,330 [INFO] --- Starting Sync Cycle ---
+2026-03-07 22:38:08,462 [INFO] Scraping Schedule...
+2026-03-08 01:37:01,254 [INFO] Scraping Live Stats...
+2026-03-08 02:16:27,679 [ERROR] Fatal Error in sync cycle: Timeout 180000ms exceeded.
+Traceback (most recent call last):
+  File "/app/tools/sync_daemon.py", line 99, in run_sync_cycle
+    stat_scraper.login(pw)
+  File "/app/tools/gc_scraper.py", line 169, in login
+    self.browser = playwright.chromium.launch(headless=True)
+  File "/usr/local/lib/python3.10/dist-packages/playwright/sync_api/_generated.py", line 13854, in launch
+    self._sync(
+  File "/usr/local/lib/python3.10/dist-packages/playwright/_impl/_sync_base.py", line 113, in _sync
+    return task.result()
+  File "/usr/local/lib/python3.10/dist-packages/playwright/_impl/_browser_type.py", line 94, in launch
+    Browser, from_channel(await self._channel.send("launch", params))
+  File "/usr/local/lib/python3.10/dist-packages/playwright/_impl/_connection.py", line 59, in send
+    return await self._connection.wrap_api_call(
+  File "/usr/local/lib/python3.10/dist-packages/playwright/_impl/_connection.py", line 509, in wrap_api_call
+    return await cb()
+  File "/usr/local/lib/python3.10/dist-packages/playwright/_impl/_connection.py", line 97, in inner_send
+    result = next(iter(done)).result()
+playwright._impl._errors.TimeoutError: Timeout 180000ms exceeded.
+
+2026-03-08 02:16:29,005 [ERROR] Error reaching n8n webhook: [Errno 12] Cannot allocate memory: '/app/tools'
+2026-03-08 14:16:39,205 [INFO] Current State: IDLE. Next cycle in 43200 seconds.
+2026-03-08 14:16:43,388 [INFO] --- Starting Sync Cycle ---
+2026-03-08 14:16:51,007 [INFO] Scraping Schedule...
+2026-03-08 21:01:52,558 [INFO] Scraping Live Stats...
+2026-03-08 21:06:58,378 [ERROR] Fatal Error in sync cycle: Timeout 180000ms exceeded.
+Traceback (most recent call last):
+  File "/app/tools/sync_daemon.py", line 99, in run_sync_cycle
+    stat_scraper.login(pw)
+  File "/app/tools/gc_scraper.py", line 169, in login
+    self.browser = playwright.chromium.launch(headless=True)
+  File "/usr/local/lib/python3.10/dist-packages/playwright/sync_api/_generated.py", line 13854, in launch
+    self._sync(
+  File "/usr/local/lib/python3.10/dist-packages/playwright/_impl/_sync_base.py", line 113, in _sync
+    return task.result()
+  File "/usr/local/lib/python3.10/dist-packages/playwright/_impl/_browser_type.py", line 94, in launch
+    Browser, from_channel(await self._channel.send("launch", params))
+  File "/usr/local/lib/python3.10/dist-packages/playwright/_impl/_connection.py", line 59, in send
+    return await self._connection.wrap_api_call(
+  File "/usr/local/lib/python3.10/dist-packages/playwright/_impl/_connection.py", line 509, in wrap_api_call
+    return await cb()
+  File "/usr/local/lib/python3.10/dist-packages/playwright/_impl/_connection.py", line 97, in inner_send
+    result = next(iter(done)).result()
+playwright._impl._errors.TimeoutError: Timeout 180000ms exceeded.
+
+2026-03-08 21:07:07,265 [ERROR] Error reaching n8n webhook: HTTPSConnectionPool(host='n8n.joelycannoli.com', port=443): Max retries exceeded with url: /webhook/gc-alert (Caused by NameResolutionError("HTTPSConnection(host='n8n.joelycannoli.com', port=443): Failed to resolve 'n8n.joelycannoli.com' ([Errno -3] Temporary failure in name resolution)"))
+2026-03-09 09:08:57,999 [INFO] Current State: IDLE. Next cycle in 43200 seconds.
+2026-03-09 09:10:20,223 [INFO] --- Starting Sync Cycle ---
+2026-03-09 09:11:12,805 [INFO] Scraping Schedule...
+2026-03-09 21:58:04,875 [INFO] ======================================
+2026-03-09 21:58:04,876 [INFO]  SHARKS REAL-TIME SYNC DAEMON STARTED 
+2026-03-09 21:58:04,876 [INFO] ======================================
+2026-03-09 21:58:04,899 [INFO] Current State: IDLE. Next cycle in 43200 seconds.
+2026-03-09 21:58:04,899 [INFO] --- Starting Sync Cycle ---
+2026-03-09 21:58:04,899 [INFO] Scraping Schedule...
+2026-03-09 21:58:41,704 [INFO] Scraping Live Stats...
+2026-03-09 21:58:54,508 [INFO] --- Sync Cycle Complete ---
+2026-03-09 22:19:33,950 [INFO] ======================================
+2026-03-09 22:19:33,950 [INFO]  SHARKS REAL-TIME SYNC DAEMON STARTED 
+2026-03-09 22:19:33,950 [INFO] ======================================
+2026-03-09 22:19:33,963 [INFO] Current State: IDLE. Next cycle in 43200 seconds.
+2026-03-09 22:19:33,964 [INFO] --- Starting Sync Cycle ---
+2026-03-09 22:19:33,964 [INFO] Scraping Schedule...
+2026-03-09 22:20:11,676 [INFO] Scraping Live Stats...
+2026-03-09 22:20:25,343 [INFO] --- Sync Cycle Complete ---
+2026-03-10 01:41:05,605 [INFO] ======================================
+2026-03-10 01:41:05,606 [INFO]  SHARKS REAL-TIME SYNC DAEMON STARTED 
+2026-03-10 01:41:05,606 [INFO] ======================================
+2026-03-10 01:41:05,607 [INFO] Starting API server on port 5000...
+2026-03-10 01:41:05,615 [INFO] Current State: IDLE. Next cycle in 43200 seconds.
+2026-03-10 01:41:05,616 [INFO] --- Starting Sync Cycle ---
+2026-03-10 01:41:05,616 [INFO] Scraping Schedule...
+2026-03-10 01:41:05,624 [INFO] [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://172.20.0.3:5000
+2026-03-10 01:41:05,625 [INFO] [33mPress CTRL+C to quit[0m
+2026-03-10 01:41:42,521 [INFO] Scraping Live Stats...
+2026-03-10 01:41:54,560 [INFO] --- Sync Cycle Complete ---

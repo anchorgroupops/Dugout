@@ -318,6 +318,23 @@ def run_sharks_analysis() -> dict | None:
         print(f"[SWOT] No team data found at {SHARKS_DIR / 'team.json'}")
         print("[SWOT] Run the GC scraper first to populate data.")
         return None
+
+    # ── Availability Filter ────────────────────────────────────────────────
+    availability_file = SHARKS_DIR / "availability.json"
+    if availability_file.exists():
+        with open(availability_file, "r") as f:
+            availability = json.load(f)
+        
+        original_roster = team.get("roster", [])
+        active_roster = []
+        for p in original_roster:
+            name = f"{p.get('first', '')} {p.get('last', '')}".strip()
+            if availability.get(name, True): # Default to active if not in file
+                active_roster.append(p)
+        
+        print(f"[SWOT] Filtered roster: {len(active_roster)}/{len(original_roster)} players active.")
+        team["roster"] = active_roster
+
     result = analyze_team(team)
     output_file = SHARKS_DIR / "swot_analysis.json"
     with open(output_file, "w") as f:

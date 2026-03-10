@@ -107,14 +107,71 @@ def run_sync_cycle():
          send_alert(f"Sync Daemon encountered a critical crash: {str(e)}")
          return False
 
+# ---------------------------------------------------------
+# API SERVER (Flask)
+# ---------------------------------------------------------
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+import threading
+
+app = Flask(__name__)
+CORS(app)
+
+@app.route('/api/availability', methods=['GET'])
+def get_availability():
+    availability_file = SHARKS_DIR / "availability.json"
+    if not availability_file.exists():
+        # Default to all active
+        team_file = SHARKS_DIR / "team.json"
+        if not team_file.exists():
+            return jsonify({})
+        with open(team_file, "r") as f:
+            team_data = json.load(f)
+            return jsonify({f"{p.get('first', '')} {p.get('last', '')}".strip(): True for p in team_data.get("roster", [])})
+    
+    with open(availability_file, "r") as f:
+        return jsonify(json.load(f))
+
+@app.route('/api/availability', methods=['POST'])
+def update_availability():
+    data = request.json
+    availability_file = SHARKS_DIR / "availability.json"
+    with open(availability_file, "w") as f:
+        json.dump(data, f, indent=2)
+    
+    # Trigger a quick re-run of lineup/swot tools if they were already run
+    logging.info("Availability updated via API. Re-running analytics tools...")
+    try:
+        from lineup_optimizer import run as run_lineup
+        from swot_analyzer import run_sharks_analysis
+        run_lineup()
+        run_sharks_analysis()
+    except Exception as e:
+        logging.error(f"Error re-running tools after update: {e}")
+        
+    return jsonify({"status": "success"})
+
+def run_api():
+    logging.info("Starting API server on port 5000...")
+    app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
+
+# ---------------------------------------------------------
+# DAEMON LOGIC
+# ---------------------------------------------------------
+# ... (rest of the file stays same, but main starts the thread)
 def main():
     logging.info("======================================")
     logging.info(" SHARKS REAL-TIME SYNC DAEMON STARTED ")
     logging.info("======================================")
     
+    # Start API server in a separate thread
+    api_thread = threading.Thread(target=run_api, daemon=True)
+    api_thread.start()
+    
     consecutive_errors = 0
     
     while True:
+        # ... (rest of loop)
         try:
             # Determine Polling State
             is_live_forced = check_live_override()

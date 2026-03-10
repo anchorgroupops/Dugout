@@ -188,9 +188,11 @@ def generate_lineup(
     if not roster:
         return {"error": "No roster data found"}
 
-    # Score and sort
+    # Score, sort and ensure names
     for player in roster:
         player["_batting_score"] = compute_batting_score(player, strategy)
+        if "name" not in player:
+            player["name"] = f"{player.get('first', '')} {player.get('last', '')}".strip()
 
     sorted_players = sorted(roster, key=lambda p: p["_batting_score"], reverse=True)
 
@@ -233,6 +235,22 @@ def run():
     with open(team_file, "r") as f:
         team_data = json.load(f)
 
+    # ── Availability Filter ────────────────────────────────────────────────
+    availability_file = SHARKS_DIR / "availability.json"
+    if availability_file.exists():
+        with open(availability_file, "r") as f:
+            availability = json.load(f)
+        
+        original_roster = team_data.get("roster", [])
+        active_roster = []
+        for p in original_roster:
+            name = f"{p.get('first', '')} {p.get('last', '')}".strip()
+            if availability.get(name, True): # Default to active if not in file
+                active_roster.append(p)
+        
+        print(f"[LINEUP] Filtered roster: {len(active_roster)}/{len(original_roster)} players active.")
+        team_data["roster"] = active_roster
+
     results = generate_all_lineups(team_data)
 
     output_file = SHARKS_DIR / "lineups.json"
@@ -246,7 +264,9 @@ def run():
         print(f"  Compliant: {'[PASS]' if data['compliant'] else '[FAIL]'}")
         print(f"{'='*50}")
         for entry in data["lineup"]:
-            print(f"  {entry['slot']:>2}. #{entry.get('number', '?'):>2} {entry.get('name', '—'):<20} ({entry['role']})")
+            num = entry.get('number') or '?'
+            name = entry.get('name') or '—'
+            print(f"  {entry['slot']:>2}. #{num:>2} {name:<20} ({entry['role']})")
         if data["violations"]:
             print(f"\n  ⚠️  VIOLATIONS:")
             for v in data["violations"]:

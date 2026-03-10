@@ -18,6 +18,7 @@ function App() {
     team: null,
     swot: null,
     lineups: null,
+    availability: null,
     loading: true,
     error: null
   });
@@ -25,10 +26,11 @@ function App() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [teamRes, swotRes, lineupsRes] = await Promise.all([
+        const [teamRes, swotRes, lineupsRes, availRes] = await Promise.all([
           fetch('/data/sharks/team.json'),
           fetch('/data/sharks/swot_analysis.json'),
-          fetch('/data/sharks/lineups.json')
+          fetch('/data/sharks/lineups.json'),
+          fetch('/api/availability')
         ]);
         
         if (!teamRes.ok) throw new Error('Failed to load team data');
@@ -36,8 +38,9 @@ function App() {
         const team = await teamRes.json();
         const swot = swotRes.ok ? await swotRes.json() : null;
         const lineups = lineupsRes.ok ? await lineupsRes.json() : null;
+        const availability = availRes.ok ? await availRes.json() : {};
         
-        setData({ team, swot, lineups, loading: false, error: null });
+        setData({ team, swot, lineups, availability, loading: false, error: null });
       } catch (err) {
         console.error("Data fetch error", err);
         setData(prev => ({ ...prev, loading: false, error: err.message }));
@@ -71,11 +74,23 @@ function App() {
     );
 
     switch(currentView) {
-      case 'roster': return <Roster team={data.team} />;
+      case 'roster': return (
+        <Roster 
+          team={data.team} 
+          availability={data.availability} 
+          onAvailabilityChange={(newAvail) => setData(prev => ({ ...prev, availability: newAvail }))}
+        />
+      );
       case 'swot': return <Swot swotData={data.swot} roster={data.team?.roster} />;
       case 'lineups': return <Lineup lineupsData={data.lineups} />;
       case 'schedule': return <Schedule />;
-      default: return <Roster team={data.team} />;
+      default: return (
+        <Roster 
+          team={data.team} 
+          availability={data.availability} 
+          onAvailabilityChange={(newAvail) => setData(prev => ({ ...prev, availability: newAvail }))}
+        />
+      );
     }
   };
 

@@ -146,11 +146,38 @@ const ExpandedStats = ({ player }) => {
   );
 };
 
-const Roster = ({ team }) => {
+const Roster = ({ team, availability, onAvailabilityChange }) => {
   const [expandedPlayer, setExpandedPlayer] = useState(null);
   const [showAll, setShowAll] = useState(false);
+  const [updating, setUpdating] = useState(null); // name of player being updated
 
-  if (!team || !team.roster) return <p>Loading roster...</p>;
+  if (!team || !team.roster) return <div className="loader"></div>;
+
+  const handleToggleActive = async (e, player) => {
+    e.stopPropagation(); // Don't expand the card
+    const name = `${player.first} ${player.last}`.strip ? `${player.first} ${player.last}`.trim() : `${player.first} ${player.last}`;
+    const newStatus = !availability[name];
+    const newAvailability = { ...availability, [name]: newStatus };
+    
+    setUpdating(name);
+    try {
+      const res = await fetch('/api/availability', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newAvailability)
+      });
+      
+      if (res.ok) {
+        onAvailabilityChange(newAvailability);
+      } else {
+        console.error("Failed to update availability");
+      }
+    } catch (err) {
+      console.error("Error updating availability", err);
+    } finally {
+      setUpdating(null);
+    }
+  };
 
   // Filter by core flag, then sort alphabetically by first name
   const filteredRoster = showAll ? team.roster : team.roster.filter(p => p.core !== false);
@@ -183,18 +210,30 @@ const Roster = ({ team }) => {
       
       <div style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+        gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))',
         gap: '1.5rem'
       }}>
         {sortedRoster.map(player => {
+          const name = `${player.first} ${player.last}`.trim();
           const isExpanded = expandedPlayer === `${player.number}-${player.last}`;
+          const isActive = availability && availability[name] !== false;
+          const isUpdating = updating === name;
           const b = player.batting || {};
           
           return (
             <div
               key={`${player.number}-${player.last}`}
-              className="glass-panel"
-              style={{ padding: '1.5rem', position: 'relative', overflow: 'hidden', cursor: 'pointer', transition: 'transform 0.15s ease' }}
+              className={`glass-panel ${isActive ? '' : 'inactive-player'}`}
+              style={{ 
+                padding: '1.5rem', 
+                position: 'relative', 
+                overflow: 'hidden', 
+                cursor: 'pointer', 
+                transition: 'all 0.3s ease',
+                opacity: isActive ? 1 : 0.6,
+                filter: isActive ? 'none' : 'grayscale(0.5)',
+                borderLeft: isActive ? '4px solid var(--primary-color)' : '4px solid #666'
+              }}
               onClick={() => setExpandedPlayer(isExpanded ? null : `${player.number}-${player.last}`)}
             >
               <div style={{
@@ -209,28 +248,49 @@ const Roster = ({ team }) => {
                 {player.number}
               </div>
               
-              {!player.core && (
-                <div style={{
-                  position: 'absolute', top: '10px', right: '10px',
-                  background: 'rgba(255, 165, 0, 0.2)', color: '#ffa500',
-                  padding: '2px 8px', borderRadius: '4px', fontSize: '0.65rem',
-                  fontWeight: 'bold', letterSpacing: '1px', border: '1px solid rgba(255,165,0,0.3)'
-                }}>SUB</div>
-              )}
+              <div style={{ position: 'absolute', top: '10px', right: '10px', display: 'flex', gap: '5px' }}>
+                {!player.core && (
+                  <div style={{
+                    background: 'rgba(255, 165, 0, 0.2)', color: '#ffa500',
+                    padding: '2px 8px', borderRadius: '4px', fontSize: '0.65rem',
+                    fontWeight: 'bold', letterSpacing: '1px', border: '1px solid rgba(255,165,0,0.3)'
+                  }}>SUB</div>
+                )}
+                
+                <button
+                  onClick={(e) => handleToggleActive(e, player)}
+                  disabled={isUpdating}
+                  style={{
+                    background: isActive ? 'var(--primary-color)' : 'rgba(255,255,255,0.1)',
+                    color: isActive ? '#fff' : 'var(--text-muted)',
+                    border: 'none',
+                    padding: '4px 10px',
+                    borderRadius: '4px',
+                    fontSize: '0.65rem',
+                    fontWeight: 'bold',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease',
+                    opacity: isUpdating ? 0.5 : 1
+                  }}
+                >
+                  {isUpdating ? '...' : (isActive ? 'ACTIVE' : 'INACTIVE')}
+                </button>
+              </div>
               
               <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1.25rem' }}>
                 <div style={{
                   width: '45px',
                   height: '45px',
                   borderRadius: '50%',
-                  background: 'linear-gradient(135deg, var(--primary-color), var(--secondary-color))',
+                  background: isActive ? 'linear-gradient(135deg, var(--primary-color), var(--secondary-color))' : '#444',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   fontSize: '1.2rem',
                   fontWeight: 'bold',
                   color: '#fff',
-                  flexShrink: 0
+                  flexShrink: 0,
+                  transition: 'all 0.3s ease'
                 }}>
                   {player.number}
                 </div>
