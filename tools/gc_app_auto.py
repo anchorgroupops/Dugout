@@ -30,6 +30,17 @@ BATTING_ADV_COLS  = ["gp", "pa", "ab", "qab", "qab_pct", "pa_per_bb", "bb_per_k"
 PITCHING_STD_COLS = ["ip", "gp", "gs", "bf", "pitches", "w", "l", "sv", "svo", "bs", "era", "whip", "k", "bb", "h", "r", "er", "hr"]
 FIELDING_STD_COLS = ["tc", "a", "po", "fpct", "e", "dp", "tp"]
 
+OPPONENTS_DIR = ROOT_DIR / "data" / "opponents"
+
+# Known opponents: display name fragment (lowercase) -> slug
+OPPONENT_SLUGS = {
+    "ravens":     "ravens",
+    "peppers":    "peppers",
+    "riptide":    "riptide_rebels",
+    "nwvll":      "nwvll",
+    "stihler":    "nwvll",
+}
+
 
 def connect():
     import uiautomator2 as u2
@@ -73,6 +84,16 @@ DAYS_OF_WEEK = {"sun","mon","tue","wed","thu","fri","sat"}
 TIME_RE = re.compile(r'^\d{1,2}:\d{2}\s*(AM|PM)$', re.I)
 RESULT_RE = re.compile(r'^[WLT]\s+\d+[-–]\d+$', re.I)
 SCORE_ONLY_RE = re.compile(r'^\d+[-–]\d+$')
+
+def _slug_for_opponent(name: str) -> str:
+    """Map a schedule opponent name to a filesystem slug."""
+    nl = name.lower()
+    for fragment, slug in OPPONENT_SLUGS.items():
+        if fragment in nl:
+            return slug
+    # Fallback: lowercase, no spaces
+    return re.sub(r'[^a-z0-9]+', '_', nl).strip('_')[:30]
+
 
 def _navigate_to_sharks_team(d):
     """From anywhere in the app, navigate to the Sharks team page."""
@@ -398,6 +419,142 @@ def scrape_stats(d):
 
 
 # ---------------------------------------------------------------------------
+# OPPONENT SCRAPING
+# ---------------------------------------------------------------------------
+def _navigate_to_opponent_from_schedule(d, opponent_keyword: str) -> bool:
+    """
+    From the Sharks Schedule tab, find the first upcoming game vs opponent_keyword,
+    tap it to open the game detail, then tap the opponent team name to open their page.
+    Returns True if successfully landed on the opponent team page (Stats tab visible).
+    """
+    _navigate_to_sharks_team(d)
+    d(text="Schedule").click()
+    time.sleep(2)
+
+    # Scroll down looking for the opponent entry
+    found = False
+    for _ in range(15):
+        texts = gc_texts(d)
+        for t in texts:
+            if opponent_keyword.lower() in t.lower():
+                print(f"  [Opponent] Found '{t}' — tapping...")
+                d(text=t, packageName="com.gc.teammanager").click()
+                time.sleep(3)
+                found = True
+                break
+        if found:
+            break
+        scroll_down(d)
+
+    if not found:
+        print(f"  [Opponent] Could not find '{opponent_keyword}' in schedule")
+        return False
+
+    # Now on game detail page — look for tappable opponent team name/link
+    # GC shows opponent as a tappable row on game detail
+    time.sleep(1)
+    texts_after = gc_texts(d)
+    for t in texts_after:
+        if opponent_keyword.lower() in t.lower() and t.strip() != "":
+            print(f"  [Opponent] Tapping opponent team link: '{t}'")
+            d(text=t, packageName="com.gc.teammanager").click()
+            time.sleep(4)
+            break
+
+    # Confirm we're on the opponent's team page
+    if d(text="Stats").exists(timeout=5):
+        print(f"  [Opponent] Landed on team page with Stats tab.")
+        return True
+    print(f"  [Opponent] Stats tab not found after navigation — may not be on team page.")
+    return False
+
+
+def scrape_opponent_stats(d, opponent_name: str) -> dict | None:
+    """Navigate to an opponent's team page and scrape their batting + pitching stats."""
+    slug = _slug_for_opponent(opponent_name)
+    print(f"[GC App] Scraping opponent '{opponent_name}' (slug={slug})...")
+
+    # Try to navigate via schedule game link
+    keyword = opponent_name.split()[0] if " " in opponent_name else opponent_name
+    ok = _navigate_to_opponent_from_schedule(d, keyword)
+    if not ok:
+        return None
+
+    # Scrape batting
+    d(text="Stats").click()
+    time.sleep(2)
+    if d(text="Batting").exists(timeout=3):
+        d(text="Batting").click()
+        time.sleep(1.5)
+    batting = _scroll_and_collect_table(d, BATTING_STD_COLS)
+    print(f"  -> {len(batting)} batters")
+
+    # Scrape pitching
+    if d(text="Pitching").exists(timeout=3):
+        d(text="Pitching").click()
+        time.sleep(1.5)
+        pitching = _scroll_and_collect_table(d, PITCHING_STD_COLS)
+        print(f"  -> {len(pitching)} pitchers")
+    else:
+        pitching = []
+
+    # Scrape fielding
+    if d(text="Fielding").exists(timeout=3):
+        d(text="Fielding").click()
+        time.sleep(1.5)
+        fielding = _scroll_and_collect_table(d, FIELDING_STD_COLS)
+        print(f"  -> {len(fielding)} fielders")
+    else:
+        fielding = []
+
+    return {
+        "slug": slug,
+        "team_name": opponent_name,
+        "batting": batting,
+        "pitching": pitching,
+        "fielding": fielding,
+    }
+
+
+def scrape_all_opponents(d) -> dict:
+    """Scrape stats for all known opponents from the schedule."""
+    schedule_file = DATA_DIR / "schedule_manual.json"
+    if not schedule_file.exists():
+        print("[GC App] No schedule_manual.json found — run --schedule first.")
+        return {}
+
+    with open(schedule_file) as f:
+        sched = json.load(f)
+
+    # Collect unique opponent names from upcoming + past
+    seen_slugs = set()
+    opponents_to_scrape = []
+    for game in sched.get("upcoming", []) + sched.get("past", []):
+        opp = game.get("opponent", "").replace("@ ", "").replace("vs. ", "").strip()
+        if not opp or opp.startswith("TBD"):
+            continue
+        slug = _slug_for_opponent(opp)
+        if slug not in seen_slugs:
+            seen_slugs.add(slug)
+            opponents_to_scrape.append(opp)
+
+    results = {}
+    for opp_name in opponents_to_scrape:
+        try:
+            data = scrape_opponent_stats(d, opp_name)
+            if data:
+                results[data["slug"]] = data
+                save_opponent_stats(data)
+        except Exception as e:
+            print(f"  [Opponent] Error scraping '{opp_name}': {e}")
+        # Always return to Sharks team page before next opponent
+        _navigate_to_sharks_team(d)
+        time.sleep(2)
+
+    return results
+
+
+# ---------------------------------------------------------------------------
 # WRITE OUTPUT
 # ---------------------------------------------------------------------------
 def save_schedule(schedule):
@@ -415,6 +572,57 @@ def save_schedule(schedule):
     print(f"  Upcoming: {len(schedule['upcoming'])} games, Past: {len(schedule['past'])} games")
     for g in schedule["upcoming"]:
         print(f"  {g['date']} {g['dow']} {g['opponent']} {g['time']}")
+
+
+def save_opponent_stats(data: dict):
+    """Save opponent stats to data/opponents/<slug>/team.json, merging with any existing PDF data."""
+    slug = data["slug"]
+    opp_dir = OPPONENTS_DIR / slug
+    opp_dir.mkdir(parents=True, exist_ok=True)
+
+    team_file = opp_dir / "team.json"
+
+    # Build roster from batting rows (use existing PDF roster as base if present)
+    existing = {}
+    if team_file.exists():
+        try:
+            ex = json.load(open(team_file))
+            for p in ex.get("roster", []):
+                existing[p.get("number", p.get("name", ""))] = p
+        except Exception:
+            pass
+
+    roster = []
+    for p in data["batting"]:
+        num = p.get("number", "")
+        name = p.get("name", "")
+        key = num or name
+        base = existing.get(key, {"number": num, "name": name})
+        # Build clean batting dict from app columns
+        batting = {
+            "gp": p.get("gp", ""), "pa": p.get("pa", ""), "ab": p.get("ab", ""),
+            "avg": p.get("avg", ""), "obp": p.get("obp", ""), "ops": p.get("ops", ""),
+            "slg": p.get("slg", ""), "h": p.get("h", ""), "2b": p.get("2b", ""),
+            "3b": p.get("3b", ""), "hr": p.get("hr", ""), "rbi": p.get("rbi", ""),
+            "bb": p.get("bb", ""), "hbp": p.get("hbp", ""), "so": p.get("so", ""),
+            "sb": p.get("sb", ""),
+        }
+        roster.append({**base, "batting": batting})
+
+    out = {
+        "team_name": data["team_name"],
+        "slug": slug,
+        "last_updated": datetime.now(ET_TZ).isoformat(),
+        "source": "gc_app",
+        "batting_stats": data["batting"],
+        "pitching_stats": data["pitching"],
+        "fielding_stats": data["fielding"],
+        "roster": roster,
+    }
+
+    with open(team_file, "w") as f:
+        json.dump(out, f, indent=2)
+    print(f"[GC App] Opponent saved -> {team_file}  ({len(roster)} players)")
 
 
 def save_stats(stats):
@@ -438,8 +646,9 @@ def save_stats(stats):
 # ---------------------------------------------------------------------------
 def main():
     args = set(sys.argv[1:])
-    do_schedule = "--stats" not in args
-    do_stats = "--schedule" not in args
+    do_schedule  = "--stats" not in args and "--opponents" not in args
+    do_stats     = "--schedule" not in args and "--opponents" not in args
+    do_opponents = "--opponents" in args or (not {"--schedule", "--stats"} & args)
 
     d = connect()
 
@@ -450,6 +659,9 @@ def main():
     if do_stats:
         stats = scrape_stats(d)
         save_stats(stats)
+
+    if do_opponents:
+        scrape_all_opponents(d)
 
     print("[GC App] Done.")
 
