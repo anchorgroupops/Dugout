@@ -401,7 +401,12 @@ def run_sharks_analysis() -> dict | None:
 
 
 def _team_aggregates(team_data: dict) -> dict:
-    """Compute team-level aggregate stats for matchup comparison."""
+    """Compute team-level aggregate stats for matchup comparison.
+    Handles three data formats:
+      1. Sharks team_merged.json: roster[].batting with numeric values
+      2. GC app opponent: roster[].batting with string values + top-level batting_stats[]
+      3. PDF-derived: roster[].batting with numeric values, no top-level stats
+    """
     roster = team_data.get("roster", [])
     totals = team_data.get("team_totals", {})
     bt = totals.get("batting", totals) if totals else {}
@@ -428,24 +433,43 @@ def _team_aggregates(team_data: dict) -> dict:
             hbp += _parse_number(batting.get("hbp", 0))
             so += _parse_number(batting.get("so", batting.get("k", 0)))
             hr += _parse_number(batting.get("hr", 0))
-            doubles += _parse_number(batting.get("doubles", 0))
-            triples += _parse_number(batting.get("triples", 0))
+            doubles += _parse_number(batting.get("doubles", batting.get("2b", 0)))
+            triples += _parse_number(batting.get("triples", batting.get("3b", 0)))
             sb += _parse_number(batting.get("sb", 0))
             r += _parse_number(batting.get("r", 0))
             rbi += _parse_number(batting.get("rbi", 0))
+
+    # Fallback: try top-level batting_stats[] (GC app / web format)
+    if ab == 0:
+        for p in team_data.get("batting_stats", []):
+            ab += _parse_number(p.get("ab", 0))
+            h += _parse_number(p.get("h", 0))
+            bb += _parse_number(p.get("bb", 0))
+            hbp += _parse_number(p.get("hbp", 0))
+            so += _parse_number(p.get("so", p.get("k", 0)))
+            hr += _parse_number(p.get("hr", 0))
+            doubles += _parse_number(p.get("2b", p.get("doubles", 0)))
+            triples += _parse_number(p.get("3b", p.get("triples", 0)))
+            sb += _parse_number(p.get("sb", 0))
+            r += _parse_number(p.get("r", 0))
+            rbi += _parse_number(p.get("rbi", 0))
 
     pa = ab + bb + hbp
     singles = max(0, h - doubles - triples - hr)
     tb = singles + 2*doubles + 3*triples + 4*hr
 
-    # Pitching aggregates
+    # Pitching aggregates — check per-player pitching, then top-level pitching_stats[]
     total_ip = 0.0
     total_er = 0.0
     total_p_bb = 0.0
     total_p_h = 0.0
     total_p_so = 0.0
-    for p in roster:
-        pitching = p.get("pitching", {})
+
+    pitching_sources = [p.get("pitching", {}) for p in roster if p.get("pitching")]
+    if not pitching_sources:
+        pitching_sources = team_data.get("pitching_stats", [])
+
+    for pitching in pitching_sources:
         ip = _innings_to_float(pitching.get("ip", 0))
         total_ip += ip
         total_er += _parse_number(pitching.get("er", 0))
@@ -453,12 +477,16 @@ def _team_aggregates(team_data: dict) -> dict:
         total_p_h += _parse_number(pitching.get("h", 0))
         total_p_so += _parse_number(pitching.get("so", pitching.get("k", 0)))
 
-    # Fielding
+    # Fielding — check per-player, then top-level fielding_stats[]
     total_po = 0.0
     total_a = 0.0
     total_e = 0.0
-    for p in roster:
-        fielding = p.get("fielding", {})
+
+    fielding_sources = [p.get("fielding", {}) for p in roster if p.get("fielding")]
+    if not fielding_sources:
+        fielding_sources = team_data.get("fielding_stats", [])
+
+    for fielding in fielding_sources:
         total_po += _parse_number(fielding.get("po", 0))
         total_a += _parse_number(fielding.get("a", 0))
         total_e += _parse_number(fielding.get("e", 0))

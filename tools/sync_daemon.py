@@ -569,6 +569,15 @@ def _scrape_borrowed_player_stats(gc_team_id: str):
         logging.error(f"Error scraping borrowed player stats: {e}")
 
 
+def _clean_opponent_name(name: str) -> str:
+    """Strip GC schedule prefixes (@ / vs. / vs ) from opponent display names."""
+    name = name.strip()
+    for prefix in ("@ ", "vs. ", "vs "):
+        if name.startswith(prefix):
+            name = name[len(prefix):]
+    return name.strip()
+
+
 @app.route('/api/schedule', methods=['GET'])
 def handle_schedule():
     """Return upcoming and past games from schedule_manual.json."""
@@ -576,7 +585,14 @@ def handle_schedule():
     if not schedule_file.exists():
         return jsonify({"upcoming": [], "past": []})
     with open(schedule_file) as f:
-        return jsonify(json.load(f))
+        data = json.load(f)
+    # Clean opponent names for display
+    for section in ("upcoming", "past"):
+        for game in data.get(section, []):
+            raw = game.get("opponent", "")
+            game["opponent_raw"] = raw
+            game["opponent"] = _clean_opponent_name(raw)
+    return jsonify(data)
 
 
 @app.route('/api/regenerate-lineups', methods=['POST'])

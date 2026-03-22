@@ -193,7 +193,7 @@ def generate_lineup(
     """Generate an optimized batting lineup for The Sharks."""
     roster = team_data.get("roster", team_data.get("players", []))
     if not roster:
-        return {"error": "No roster data found"}
+        return {"strategy": strategy, "lineup": [], "violations": ["No roster data found"], "compliant": False}
 
     # Score, sort and ensure names
     for player in roster:
@@ -270,6 +270,9 @@ def run():
     for strategy, data in results.items():
         print(f"\n{'='*50}")
         print(f"  STRATEGY: {strategy.upper()}")
+        if "compliant" not in data:
+            print(f"  ERROR: {data.get('error', 'unknown')}")
+            continue
         print(f"  Compliant: {'[PASS]' if data['compliant'] else '[FAIL]'}")
         print(f"{'='*50}")
         for entry in data["lineup"]:
@@ -277,9 +280,9 @@ def run():
             name = entry.get('name') or '—'
             print(f"  {entry['slot']:>2}. #{num:>2} {name:<20} ({entry['role']})")
         if data["violations"]:
-            print(f"\n  ⚠️  VIOLATIONS:")
+            print(f"\n  VIOLATIONS:")
             for v in data["violations"]:
-                print(f"     • {v}")
+                print(f"     - {v}")
 
     return results
 
