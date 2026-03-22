@@ -369,6 +369,96 @@ def handle_matchup(opponent_slug):
     return jsonify(result)
 
 
+def _aggregate_stats_from_games():
+    """Aggregate batting stats per player across all parsed game files. Returns dict keyed by jersey number."""
+    games_dir = SHARKS_DIR / "games"
+    if not games_dir.exists():
+        return {}
+
+    player_stats = {}
+
+    for game_file in sorted(games_dir.glob("*.json")):
+        if game_file.name == "index.json":
+            continue
+        try:
+            with open(game_file) as f:
+                game = json.load(f)
+            for player in game.get("sharks_batting", []):
+                num = str(player.get("number", "")).strip()
+                b = player.get("batting", {})
+                if not b or not num:
+                    continue
+
+                if num not in player_stats:
+                    player_stats[num] = {
+                        "number": num,
+                        "name": player.get("name", ""),
+                        "batting": {"pa": 0, "ab": 0, "h": 0, "singles": 0, "doubles": 0,
+                                    "triples": 0, "hr": 0, "bb": 0, "hbp": 0, "so": 0,
+                                    "sac": 0, "r": 0, "rbi": 0, "sb": 0},
+                        "games_played": 0
+                    }
+
+                acc = player_stats[num]["batting"]
+                for stat in ["pa", "ab", "h", "singles", "doubles", "triples", "hr",
+                             "bb", "hbp", "so", "sac", "r", "rbi", "sb"]:
+                    acc[stat] = acc.get(stat, 0) + b.get(stat, 0)
+                player_stats[num]["games_played"] += 1
+        except Exception as e:
+            logging.warning(f"Error aggregating game {game_file.name}: {e}")
+
+    # Compute derived stats
+    for ps in player_stats.values():
+        b = ps["batting"]
+        ab = b.get("ab", 0)
+        h = b.get("h", 0)
+        bb = b.get("bb", 0)
+        hbp = b.get("hbp", 0)
+        sac = b.get("sac", 0)
+        singles = b.get("singles", 0)
+        doubles = b.get("doubles", 0)
+        triples = b.get("triples", 0)
+        hr = b.get("hr", 0)
+
+        b["avg"] = round(h / ab, 3) if ab > 0 else 0.0
+        ob_den = ab + bb + hbp + sac
+        b["obp"] = round((h + bb + hbp) / ob_den, 3) if ob_den > 0 else 0.0
+        tb = singles + 2 * doubles + 3 * triples + 4 * hr
+        b["slg"] = round(tb / ab, 3) if ab > 0 else 0.0
+        b["ops"] = round(b["obp"] + b["slg"], 3)
+
+    return player_stats
+
+
+@app.route('/api/team', methods=['GET'])
+def handle_team():
+    """Return team data, enriching roster batting stats from PDF game files when GC stats are empty."""
+    team_file = SHARKS_DIR / "team_merged.json"
+    if not team_file.exists():
+        team_file = SHARKS_DIR / "team.json"
+    if not team_file.exists():
+        return jsonify({"error": "No team data found"}), 404
+
+    with open(team_file) as f:
+        team = json.load(f)
+
+    # Aggregate stats from game files
+    pdf_stats = _aggregate_stats_from_games()
+
+    if pdf_stats:
+        for player in team.get("roster", []):
+            num = str(player.get("number", "")).strip()
+            existing = player.get("batting", {})
+            # Only enrich if current stats are empty (no plate appearances)
+            if existing.get("pa", 0) > 0:
+                continue
+            if num and num in pdf_stats:
+                player["batting"] = pdf_stats[num]["batting"]
+                player["games_played"] = pdf_stats[num]["games_played"]
+
+    return jsonify(team)
+
+
 @app.route('/api/borrowed-player', methods=['POST'])
 def handle_borrowed_player():
     """Add a borrowed player to roster_manifest.json, optionally trigger stat scrape."""
@@ -433,6 +523,16 @@ def _scrape_borrowed_player_stats(gc_team_id: str):
         logging.info(f"Borrowed player stats scraped for team {gc_team_id}")
     except Exception as e:
         logging.error(f"Error scraping borrowed player stats: {e}")
+
+
+@app.route('/api/schedule', methods=['GET'])
+def handle_schedule():
+    """Return upcoming and past games from schedule_manual.json."""
+    schedule_file = SHARKS_DIR / "schedule_manual.json"
+    if not schedule_file.exists():
+        return jsonify({"upcoming": [], "past": []})
+    with open(schedule_file) as f:
+        return jsonify(json.load(f))
 
 
 @app.route('/api/regenerate-lineups', methods=['POST'])

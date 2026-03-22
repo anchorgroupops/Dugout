@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, ChevronDown, ChevronUp, Home, Plane } from 'lucide-react';
+import { Calendar, ChevronDown, ChevronUp, Home, Plane, Clock } from 'lucide-react';
 
 const StatCell = ({ label, value }) => (
   <div style={{ textAlign: 'center', minWidth: '40px' }}>
@@ -105,7 +105,52 @@ const GameCard = ({ game, onExpand, isExpanded, detail }) => {
   );
 };
 
-const Games = ({ gamesData }) => {
+const UpcomingGameBanner = ({ schedule }) => {
+  if (!schedule?.upcoming?.length) return null;
+  const today = new Date().toISOString().slice(0, 10);
+  const next = schedule.upcoming
+    .filter(g => g.date >= today)
+    .sort((a, b) => a.date.localeCompare(b.date))[0];
+  if (!next) return null;
+
+  const dateStr = new Date(next.date + 'T12:00:00').toLocaleDateString('en-US', {
+    timeZone: 'America/New_York', weekday: 'short', month: 'short', day: 'numeric'
+  });
+  const isHome = next.home_away === 'home';
+
+  return (
+    <div className="glass-panel" style={{
+      padding: '1rem 1.5rem', marginBottom: '1.5rem',
+      borderColor: 'rgba(0,210,255,0.3)',
+      background: 'rgba(0,210,255,0.04)'
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+        <Clock size={18} color="var(--primary-color)" />
+        <span style={{ fontSize: '0.7rem', color: 'var(--primary-color)', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: '700' }}>
+          Next Game
+        </span>
+        <span style={{
+          display: 'inline-flex', alignItems: 'center', gap: '0.25rem',
+          background: isHome ? 'rgba(35,134,54,0.15)' : 'rgba(100,160,220,0.15)',
+          color: isHome ? 'var(--success)' : '#4a9ede',
+          padding: '2px 8px', borderRadius: '12px', fontSize: '0.7rem', fontWeight: '700'
+        }}>
+          {isHome ? <Home size={10} /> : <Plane size={10} />}
+          {isHome ? 'HOME' : 'AWAY'}
+        </span>
+        <span style={{ fontWeight: '700', fontSize: '1rem' }}>vs. {next.opponent}</span>
+        <span style={{ color: 'var(--text-muted)', fontSize: '0.88rem' }}>
+          {dateStr}{next.time ? ` · ${next.time}` : ''}
+        </span>
+        {next.location && next.location !== 'TBD' && (
+          <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>@ {next.location}</span>
+        )}
+      </div>
+    </div>
+  );
+};
+
+const Games = ({ gamesData, schedule }) => {
   const [expanded, setExpanded] = useState(null);
   const [details, setDetails] = useState({});
 
@@ -137,6 +182,7 @@ const Games = ({ gamesData }) => {
         <h2 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <Calendar size={24} color="var(--primary-color)" /> Games
         </h2>
+        <UpcomingGameBanner schedule={schedule} />
         <div className="glass-panel" style={{ padding: '2rem', textAlign: 'center' }}>
           <p style={{ color: 'var(--text-muted)' }}>No game data available. Run the scorebook parser to import games.</p>
         </div>
@@ -154,6 +200,8 @@ const Games = ({ gamesData }) => {
           ({gamesData.length} games)
         </span>
       </h2>
+
+      <UpcomingGameBanner schedule={schedule} />
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
         {sorted.map(game => (

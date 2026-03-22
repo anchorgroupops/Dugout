@@ -16,6 +16,7 @@ function App() {
     lineups: null,
     availability: null,
     games: null,
+    schedule: null,
     loading: true,
     error: null
   });
@@ -23,25 +24,25 @@ function App() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [teamMergedRes, teamRes, swotRes, lineupsRes, availRes, gamesRes] = await Promise.all([
-          fetch('/data/sharks/team_merged.json'),
-          fetch('/data/sharks/team.json'),
+        const [teamRes, swotRes, lineupsRes, availRes, gamesRes, scheduleRes] = await Promise.all([
+          fetch('/api/team'),
           fetch('/data/sharks/swot_analysis.json'),
           fetch('/data/sharks/lineups.json'),
           fetch('/api/availability'),
-          fetch('/api/games')
+          fetch('/api/games'),
+          fetch('/api/schedule')
         ]);
 
-        const teamSourceRes = teamMergedRes.ok ? teamMergedRes : teamRes;
-        if (!teamSourceRes.ok) throw new Error('Failed to load team data');
+        if (!teamRes.ok) throw new Error('Failed to load team data');
 
-        const team = await teamSourceRes.json();
+        const team = await teamRes.json();
         const swot = swotRes.ok ? await swotRes.json() : null;
         const lineups = lineupsRes.ok ? await lineupsRes.json() : null;
         const availability = availRes.ok ? await availRes.json() : {};
         const games = gamesRes.ok ? await gamesRes.json() : null;
+        const schedule = scheduleRes.ok ? await scheduleRes.json() : null;
 
-        setData({ team, swot, lineups, availability, games, loading: false, error: null });
+        setData({ team, swot, lineups, availability, games, schedule, loading: false, error: null });
       } catch (err) {
         console.error("Data fetch error", err);
         setData(prev => ({ ...prev, loading: false, error: err.message }));
@@ -83,7 +84,7 @@ function App() {
           onAvailabilityChange={(newAvail) => setData(prev => ({ ...prev, availability: newAvail }))}
         />
       );
-      case 'swot': return <Swot swotData={data.swot} roster={data.team?.roster} />;
+      case 'swot': return <Swot swotData={data.swot} roster={data.team?.roster} schedule={data.schedule} />;
       case 'lineups': return (
         <Lineup
           lineupsData={data.lineups}
@@ -91,7 +92,7 @@ function App() {
           onRegenerate={(newLineups) => setData(prev => ({ ...prev, lineups: newLineups }))}
         />
       );
-      case 'games': return <Games gamesData={data.games} />;
+      case 'games': return <Games gamesData={data.games} schedule={data.schedule} />;
       case 'manage': return (
         <RosterManager
           team={data.team}
@@ -114,7 +115,7 @@ function App() {
     <>
       <nav className="navbar">
         <div className="brand">
-          <img src="/sharks-logo.png" alt="Sharks" className="logo-avatar" />
+          <img src="/sharks-logo-round.png" alt="Sharks" className="logo-avatar" />
           The Sharks
         </div>
         <div className="nav-links">
