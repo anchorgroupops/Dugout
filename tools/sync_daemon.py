@@ -269,22 +269,66 @@ def handle_availability():
 
 @app.route('/api/games', methods=['GET'])
 def handle_games():
-    """Return list of parsed scorebook games (index + optional detail)."""
+    """Return parsed scorebook games enriched with W/L from schedule."""
+    import re as _re
     games_dir = SHARKS_DIR / "games"
     index_path = games_dir / "index.json"
-    if not index_path.exists():
-        return jsonify([])
-    with open(index_path) as f:
-        index = json.load(f)
+    schedule_file = SHARKS_DIR / "schedule_manual.json"
+
+    pdf_games = []
+    if index_path.exists():
+        with open(index_path) as f:
+            pdf_games = json.load(f)
+
+    # Load schedule W/L results
+    sched_results = []
+    if schedule_file.exists():
+        with open(schedule_file) as f:
+            sched_data = json.load(f)
+        for g in sched_data.get("past", []):
+            if g.get("result"):
+                sched_results.append(g)
+
+    def _slug(name: str) -> str:
+        return _re.sub(r'[^a-z0-9]', '', (name or '').lower())
+
+    # Enrich PDF games with schedule result by fuzzy opponent match
+    for game in pdf_games:
+        opp_slug = _slug(game.get("opponent", ""))
+        for sg in sched_results:
+            sg_opp = _clean_opponent_name(sg.get("opponent", ""))
+            if _slug(sg_opp) and (_slug(sg_opp) in opp_slug or opp_slug in _slug(sg_opp)):
+                game["result"] = sg.get("result", "")
+                game["score"] = sg.get("score", "")
+                break
+
     # If ?detail=1, attach full player batting data
     if request.args.get("detail") == "1":
-        for entry in index:
+        for entry in pdf_games:
             game_file = games_dir / f"{entry['game_id']}.json"
             if game_file.exists():
                 with open(game_file) as gf:
                     full = json.load(gf)
                 entry["sharks_batting"] = full.get("sharks_batting", [])
-    return jsonify(index)
+
+    # Also surface schedule games with results that have no PDF (schedule-only)
+    pdf_opps = {_slug(g.get("opponent", "")) for g in pdf_games}
+    for sg in sched_results:
+        sg_opp = _clean_opponent_name(sg.get("opponent", ""))
+        sg_slug = _slug(sg_opp)
+        if not any(sg_slug and (sg_slug in po or po in sg_slug) for po in pdf_opps if po):
+            pdf_games.append({
+                "game_id": f"sched_{sg.get('date','')[:10]}_{sg_slug[:20]}",
+                "date": sg.get("date", ""),
+                "opponent": sg_opp,
+                "sharks_side": sg.get("home_away", ""),
+                "result": sg.get("result", ""),
+                "score": sg.get("score", ""),
+                "sharks_totals": None,
+            })
+
+    pdf_games.sort(key=lambda x: x.get("date", ""), reverse=True)
+    return jsonify(pdf_games)
 
 @app.route('/api/league-players', methods=['GET'])
 def handle_league_players():
@@ -389,6 +433,16 @@ def handle_opponents():
     return jsonify(teams)
 
 
+@app.route('/api/opponents/<slug>', methods=['GET'])
+def handle_opponent_detail(slug):
+    """Return full data for a single opponent team."""
+    team_file = DATA_DIR / "opponents" / slug / "team.json"
+    if not team_file.exists():
+        return jsonify({"error": "Not found"}), 404
+    with open(team_file) as f:
+        return jsonify(json.load(f))
+
+
 @app.route('/api/matchup/<opponent_slug>', methods=['GET'])
 def handle_matchup(opponent_slug):
     """Run matchup analysis: Sharks vs a specific opponent."""
@@ -422,8 +476,20 @@ def handle_matchup(opponent_slug):
     opp_dir = DATA_DIR / "opponents" / opponent_slug
     opp_team = load_team(opp_dir)
     if not opp_team:
-        return jsonify({"error": f"Opponent '{opponent_slug}' not found"}), 404
+        # Try loading directly from team.json
+        team_file = DATA_DIR / "opponents" / opponent_slug / "team.json"
+        if team_file.exists():
+            with open(team_file) as f:
+                opp_team = json.load(f)
+        else:
+            return jsonify({"error": f"Opponent '{opponent_slug}' not found"}), 404
     result = analyze_matchup(our_team, opp_team)
+    # Attach opponent roster for display
+    result["their_roster"] = [
+        {"name": p.get("name", f"{p.get('first','')} {p.get('last','')}".strip()),
+         "number": p.get("number", "")}
+        for p in opp_team.get("roster", [])
+    ]
     return jsonify(result)
 
 

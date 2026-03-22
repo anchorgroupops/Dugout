@@ -46,6 +46,26 @@ const PlayerBattingRow = ({ player }) => {
   );
 };
 
+const ResultBadge = ({ result, score }) => {
+  if (!result) return null;
+  const isWin = result === 'W';
+  const parts = (score || '').split('-');
+  const sharksScore = isWin ? Math.max(...parts.map(Number)) : Math.min(...parts.map(Number));
+  const oppScore = isWin ? Math.min(...parts.map(Number)) : Math.max(...parts.map(Number));
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+      <span style={{
+        padding: '3px 10px', borderRadius: '20px', fontSize: '0.75rem', fontWeight: '800',
+        background: isWin ? 'rgba(35,134,54,0.2)' : 'rgba(220,70,70,0.2)',
+        color: isWin ? 'var(--success)' : 'var(--danger)',
+        border: `1px solid ${isWin ? 'rgba(35,134,54,0.4)' : 'rgba(220,70,70,0.4)'}`,
+        letterSpacing: '0.5px'
+      }}>{result}</span>
+      {score && <span style={{ fontSize: '0.88rem', fontWeight: '600', color: 'var(--text-muted)' }}>{sharksScore}–{oppScore}</span>}
+    </div>
+  );
+};
+
 const GameCard = ({ game, onExpand, isExpanded, detail }) => {
   const t = game.sharks_totals || {};
   const isHome = game.sharks_side === 'home';
@@ -56,8 +76,8 @@ const GameCard = ({ game, onExpand, isExpanded, detail }) => {
   return (
     <div className="glass-panel" style={{ padding: '1.25rem', cursor: 'pointer' }} onClick={onExpand}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem' }}>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem', flexWrap: 'wrap' }}>
             <span style={{
               display: 'inline-flex', alignItems: 'center', gap: '0.25rem',
               background: isHome ? 'rgba(35,134,54,0.15)' : 'rgba(100,160,220,0.15)',
@@ -68,14 +88,15 @@ const GameCard = ({ game, onExpand, isExpanded, detail }) => {
               {isHome ? 'HOME' : 'AWAY'}
             </span>
             <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{dateStr}</span>
+            <ResultBadge result={game.result} score={game.score} />
           </div>
           <h3 style={{ fontSize: '1.1rem', margin: 0 }}>vs. {game.opponent}</h3>
         </div>
-        {isExpanded ? <ChevronUp size={18} color="var(--text-muted)" /> : <ChevronDown size={18} color="var(--text-muted)" />}
+        {game.sharks_totals && (isExpanded ? <ChevronUp size={18} color="var(--text-muted)" /> : <ChevronDown size={18} color="var(--text-muted)" />)}
       </div>
 
-      {/* Batting totals */}
-      <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+      {/* Batting totals — only shown when PDF data exists */}
+      {game.sharks_totals && <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
         <StatCell label="PA" value={t.pa} />
         <StatCell label="AB" value={t.ab} />
         <StatCell label="H" value={t.h} />
@@ -85,7 +106,7 @@ const GameCard = ({ game, onExpand, isExpanded, detail }) => {
         <StatCell label="HBP" value={t.hbp} />
         <StatCell label="SO" value={t.so} />
         <StatCell label="AVG" value={t.avg != null ? t.avg.toFixed(3) : null} />
-      </div>
+      </div>}
 
       {/* Per-player breakdown */}
       {isExpanded && detail && (
@@ -150,6 +171,39 @@ const UpcomingGameBanner = ({ schedule }) => {
   );
 };
 
+const ScheduleRow = ({ game }) => {
+  const isHome = game.home_away === 'home';
+  const dateStr = game.date
+    ? new Date(game.date + 'T12:00:00').toLocaleDateString('en-US', { timeZone: 'America/New_York', weekday: 'short', month: 'short', day: 'numeric' })
+    : '—';
+  const isNext = game._isNext;
+
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.6rem 0.75rem',
+      borderRadius: '8px', flexWrap: 'wrap',
+      background: isNext ? 'rgba(0,210,255,0.06)' : 'rgba(0,0,0,0.15)',
+      border: isNext ? '1px solid rgba(0,210,255,0.2)' : '1px solid transparent',
+    }}>
+      <span style={{ minWidth: '110px', fontSize: '0.85rem', color: 'var(--text-muted)' }}>{dateStr}</span>
+      <span style={{
+        display: 'inline-flex', alignItems: 'center', gap: '0.2rem',
+        background: isHome ? 'rgba(35,134,54,0.15)' : 'rgba(100,160,220,0.15)',
+        color: isHome ? 'var(--success)' : '#4a9ede',
+        padding: '1px 7px', borderRadius: '10px', fontSize: '0.68rem', fontWeight: '700'
+      }}>
+        {isHome ? <Home size={9} /> : <Plane size={9} />}
+        {isHome ? 'H' : 'A'}
+      </span>
+      <span style={{ flex: 1, fontWeight: isNext ? '700' : '500', fontSize: '0.9rem' }}>
+        {isNext && <span style={{ color: 'var(--primary-color)', marginRight: '0.4rem', fontSize: '0.7rem', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.5px' }}>NEXT ▶</span>}
+        vs. {game.opponent}
+      </span>
+      {game.time && <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{game.time}</span>}
+    </div>
+  );
+};
+
 const Games = ({ gamesData, schedule }) => {
   const [expanded, setExpanded] = useState(null);
   const [details, setDetails] = useState({});
@@ -176,44 +230,56 @@ const Games = ({ gamesData, schedule }) => {
     }
   };
 
-  if (!gamesData || gamesData.length === 0) {
-    return (
-      <div>
-        <h2 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <Calendar size={24} color="var(--primary-color)" /> Games
-        </h2>
-        <UpcomingGameBanner schedule={schedule} />
-        <div className="glass-panel" style={{ padding: '2rem', textAlign: 'center' }}>
-          <p style={{ color: 'var(--text-muted)' }}>No game data available. Run the scorebook parser to import games.</p>
-        </div>
-      </div>
-    );
-  }
+  // Build upcoming schedule list
+  const today = new Date().toISOString().slice(0, 10);
+  const upcoming = (schedule?.upcoming || [])
+    .filter(g => g.date >= today)
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map((g, i) => ({ ...g, _isNext: i === 0 }));
 
-  const sorted = [...gamesData].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  const sorted = [...(gamesData || [])].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
 
   return (
     <div>
       <h2 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
         <Calendar size={24} color="var(--primary-color)" /> Games
-        <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)', fontWeight: 'normal', marginLeft: '0.5rem' }}>
-          ({gamesData.length} games)
-        </span>
       </h2>
 
-      <UpcomingGameBanner schedule={schedule} />
+      {/* Upcoming schedule */}
+      {upcoming.length > 0 && (
+        <div className="glass-panel" style={{ padding: '1.25rem', marginBottom: '2rem' }}>
+          <div style={{ fontSize: '0.7rem', color: 'var(--primary-color)', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: '700', marginBottom: '0.75rem' }}>
+            Upcoming Schedule ({upcoming.length} games)
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+            {upcoming.map((g, i) => <ScheduleRow key={i} game={g} />)}
+          </div>
+        </div>
+      )}
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-        {sorted.map(game => (
-          <GameCard
-            key={game.game_id}
-            game={game}
-            isExpanded={expanded === game.game_id}
-            detail={details[game.game_id]}
-            onExpand={() => handleExpand(game.game_id)}
-          />
-        ))}
-      </div>
+      {/* Past game results */}
+      {sorted.length > 0 ? (
+        <>
+          <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: '700', marginBottom: '0.75rem' }}>
+            Past Games ({sorted.length})
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            {sorted.map(game => (
+              <GameCard
+                key={game.game_id}
+                game={game}
+                isExpanded={expanded === game.game_id}
+                detail={details[game.game_id]}
+                onExpand={() => game.sharks_totals && handleExpand(game.game_id)}
+              />
+            ))}
+          </div>
+        </>
+      ) : (
+        <div className="glass-panel" style={{ padding: '2rem', textAlign: 'center' }}>
+          <p style={{ color: 'var(--text-muted)' }}>No past game data yet.</p>
+        </div>
+      )}
     </div>
   );
 };

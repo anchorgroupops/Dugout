@@ -158,6 +158,26 @@ const MatchupPanel = () => {
               </ul>
             </div>
           )}
+
+          {/* Opponent roster */}
+          {matchup.their_roster?.length > 0 && (
+            <div style={{ marginTop: '1rem', paddingTop: '0.75rem', borderTop: '1px solid var(--surface-border)' }}>
+              <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.5rem', fontWeight: '700' }}>
+                {matchup.opponent} Roster ({matchup.their_roster.length})
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
+                {matchup.their_roster.map((p, i) => (
+                  <span key={i} style={{
+                    background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)',
+                    borderRadius: '6px', padding: '3px 8px', fontSize: '0.8rem', color: 'var(--text-muted)'
+                  }}>
+                    {p.number ? <span style={{ color: 'var(--primary-color)', fontWeight: '700', marginRight: '4px' }}>#{p.number}</span> : null}
+                    {p.name || `${p.first || ''} ${p.last || ''}`.trim()}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
