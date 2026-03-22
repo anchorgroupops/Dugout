@@ -432,7 +432,7 @@ def _aggregate_stats_from_games():
 
 @app.route('/api/team', methods=['GET'])
 def handle_team():
-    """Return team data, enriching roster batting stats from PDF game files when GC stats are empty."""
+    """Return team data, enriching roster stats from app_stats.json or PDF game files."""
     team_file = SHARKS_DIR / "team_merged.json"
     if not team_file.exists():
         team_file = SHARKS_DIR / "team.json"
@@ -442,21 +442,65 @@ def handle_team():
     with open(team_file) as f:
         team = json.load(f)
 
-    # Aggregate stats from game files
-    pdf_stats = _aggregate_stats_from_games()
+    # Prefer app-scraped stats (richer, from BlueStacks GC app)
+    app_stats_file = SHARKS_DIR / "app_stats.json"
+    app_batting = {}
+    if app_stats_file.exists():
+        try:
+            with open(app_stats_file) as f:
+                app_data = json.load(f)
+            for p in app_data.get("batting", []):
+                num = str(p.get("number", "")).strip()
+                if num:
+                    app_batting[num] = p
+        except Exception as e:
+            logging.warning(f"Could not load app_stats.json: {e}")
 
-    if pdf_stats:
-        for player in team.get("roster", []):
-            num = str(player.get("number", "")).strip()
-            existing = player.get("batting", {})
-            # Only enrich if current stats are empty (no plate appearances)
-            if existing.get("pa", 0) > 0:
-                continue
-            if num and num in pdf_stats:
-                player["batting"] = pdf_stats[num]["batting"]
-                player["games_played"] = pdf_stats[num]["games_played"]
+    # Fall back to PDF-aggregated stats
+    pdf_stats = _aggregate_stats_from_games() if not app_batting else {}
+
+    for player in team.get("roster", []):
+        num = str(player.get("number", "")).strip()
+        existing = player.get("batting", {})
+        if existing.get("pa", 0) > 0:
+            continue  # GC-scraped stats already present
+        if num and num in app_batting:
+            ap = app_batting[num]
+            player["batting"] = {
+                "gp": _safe_int(ap.get("gp")),
+                "pa": _safe_int(ap.get("pa")),
+                "ab": _safe_int(ap.get("ab")),
+                "avg": _safe_float(ap.get("avg")),
+                "obp": _safe_float(ap.get("obp")),
+                "ops": _safe_float(ap.get("ops")),
+                "slg": _safe_float(ap.get("slg")),
+                "h": _safe_int(ap.get("h")),
+                "hr": _safe_int(ap.get("hr")),
+                "rbi": _safe_int(ap.get("rbi")),
+                "bb": _safe_int(ap.get("bb")),
+                "so": _safe_int(ap.get("so")),
+                "sb": _safe_int(ap.get("sb")),
+            }
+            player["games_played"] = _safe_int(ap.get("gp"))
+        elif num and num in pdf_stats:
+            player["batting"] = pdf_stats[num]["batting"]
+            player["games_played"] = pdf_stats[num]["games_played"]
 
     return jsonify(team)
+
+
+def _safe_int(v):
+    try:
+        return int(str(v).replace(",",""))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _safe_float(v):
+    try:
+        return float(str(v).replace(",",""))
+    except (TypeError, ValueError):
+        return 0.0
 
 
 @app.route('/api/borrowed-player', methods=['POST'])
