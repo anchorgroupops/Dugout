@@ -15,7 +15,7 @@
     },
     {
       "parameters": {
-        "url": "http://localhost:5000/api/schedule",
+        "url": "http://192.168.7.222:3000/api/schedule",
         "options": { "timeout": 10000 }
       },
       "id": "fetch-schedule",
@@ -56,7 +56,7 @@
     },
     {
       "parameters": {
-        "url": "http://localhost:5000/api/team",
+        "url": "http://192.168.7.222:3000/api/team",
         "options": { "timeout": 10000 }
       },
       "id": "fetch-team",

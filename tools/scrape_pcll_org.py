@@ -57,6 +57,7 @@ def _slug(name: str) -> str:
     if 'pepper' in s:  return 'peppers'
     if 'raven' in s:   return 'ravens'
     if 'nwvll' in s or 'stihler' in s or '5 star' in s or '5_star' in s: return 'nwvll'
+    if 'wildcat' in s: return 'wildcats'
     if 'shark' in s:   return 'sharks'
     return s[:40]
 

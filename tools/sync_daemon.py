@@ -329,6 +329,41 @@ def handle_game_detail(game_id):
         return jsonify(json.load(f))
 
 
+@app.route('/api/standings', methods=['GET'])
+def handle_standings():
+    """Return PCLL league standings."""
+    standings_file = DATA_DIR / "pcll_standings.json"
+    if standings_file.exists():
+        with open(standings_file) as f:
+            return jsonify(json.load(f))
+    # Fallback: build from opponent team.json records
+    opponents_dir = DATA_DIR / "opponents"
+    standings = []
+    if opponents_dir.exists():
+        for team_dir in opponents_dir.iterdir():
+            if team_dir.is_dir():
+                team_file = team_dir / "team.json"
+                if team_file.exists():
+                    try:
+                        with open(team_file) as f:
+                            td = json.load(f)
+                        record = td.get("record", "0-0")
+                        import re
+                        m = re.match(r'(\d+)-(\d+)', record or "0-0")
+                        w, l = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+                        standings.append({
+                            "slug": team_dir.name,
+                            "team_name": td.get("team_name", team_dir.name),
+                            "record": record,
+                            "w": w, "l": l,
+                            "pct": round(w / (w + l), 3) if (w + l) > 0 else 0.0,
+                        })
+                    except Exception:
+                        pass
+    standings.sort(key=lambda x: (-x["w"], x["l"]))
+    return jsonify({"league": "PCLL Spring '26 Majors Softball", "standings": standings})
+
+
 @app.route('/api/opponents', methods=['GET'])
 def handle_opponents():
     """List all scraped opponent teams."""

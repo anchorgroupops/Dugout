@@ -39,6 +39,7 @@ OPPONENT_SLUGS = {
     "riptide":    "riptide_rebels",
     "nwvll":      "nwvll",
     "stihler":    "nwvll",
+    "wildcat":    "wildcats",
 }
 
 
@@ -450,22 +451,43 @@ def _navigate_to_opponent_from_schedule(d, opponent_keyword: str) -> bool:
         print(f"  [Opponent] Could not find '{opponent_keyword}' in schedule")
         return False
 
-    # Now on game detail page — look for tappable opponent team name/link
-    # GC shows opponent as a tappable row on game detail
-    time.sleep(1)
+    # Now on game detail page — look for the opponent team name as a short, tappable link.
+    # Avoid re-tapping the full schedule entry (which contains "Sharks @" or "vs.").
+    # GC shows each team as a separate tappable row on the game detail page.
+    time.sleep(2)
     texts_after = gc_texts(d)
+    print(f"  [Opponent] Game detail texts: {texts_after[:20]}")
+
+    tapped = False
+    # First pass: prefer a short string that has the keyword but NOT "Sharks" or "@ " or "vs."
     for t in texts_after:
-        if opponent_keyword.lower() in t.lower() and t.strip() != "":
-            print(f"  [Opponent] Tapping opponent team link: '{t}'")
+        tl = t.lower()
+        if (opponent_keyword.lower() in tl
+                and "sharks" not in tl
+                and not tl.startswith("@ ")
+                and not tl.startswith("vs.")):
+            print(f"  [Opponent] Tapping short team link: '{t}'")
             d(text=t, packageName="com.gc.teammanager").click()
             time.sleep(4)
+            tapped = True
             break
+
+    # Second pass: any text with keyword (fallback)
+    if not tapped:
+        for t in texts_after:
+            if opponent_keyword.lower() in t.lower() and t.strip() != "":
+                print(f"  [Opponent] Tapping fallback link: '{t}'")
+                d(text=t, packageName="com.gc.teammanager").click()
+                time.sleep(4)
+                break
 
     # Confirm we're on the opponent's team page
     if d(text="Stats").exists(timeout=5):
         print(f"  [Opponent] Landed on team page with Stats tab.")
         return True
-    print(f"  [Opponent] Stats tab not found after navigation — may not be on team page.")
+    # Dump visible texts for debugging
+    debug_texts = gc_texts(d)
+    print(f"  [Opponent] Stats tab not found. Visible: {debug_texts[:15]}")
     return False
 
 
