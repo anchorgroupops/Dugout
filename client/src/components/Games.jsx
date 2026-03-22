@@ -50,7 +50,7 @@ const GameCard = ({ game, onExpand, isExpanded, detail }) => {
   const t = game.sharks_totals || {};
   const isHome = game.sharks_side === 'home';
   const dateStr = game.date
-    ? new Date(game.date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+    ? new Date(game.date + 'T12:00:00').toLocaleDateString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric', year: 'numeric' })
     : 'Unknown Date';
 
   return (

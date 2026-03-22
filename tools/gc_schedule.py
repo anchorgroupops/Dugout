@@ -1,7 +1,10 @@
 import json
 from pathlib import Path
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from gc_scraper import GameChangerScraper
+
+ET = ZoneInfo("America/New_York")
 
 try:
     from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
@@ -16,7 +19,7 @@ class ScheduleScraper(GameChangerScraper):
     def scrape_schedule(self):
         """Scrapes past games, scrimmages, and future schedule from the DOM."""
         schedule_data = {
-            "last_updated": datetime.now().isoformat(),
+            "last_updated": datetime.now(ET).isoformat(),
             "games": []
         }
         

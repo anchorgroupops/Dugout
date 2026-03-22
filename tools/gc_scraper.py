@@ -17,6 +17,9 @@ import os
 import re
 from pathlib import Path
 from datetime import datetime
+from zoneinfo import ZoneInfo
+
+ET = ZoneInfo("America/New_York")
 
 try:
     from playwright.sync_api import sync_playwright
@@ -431,7 +434,7 @@ class GameChangerScraper:
                     "source_url": link,
                     "meta": meta,
                     "batting": box_players,
-                    "scraped_at": datetime.now().isoformat(),
+                    "scraped_at": datetime.now(ET).isoformat(),
                 }
 
                 out_file = games_dir / f"{url_slug}.json"
@@ -628,7 +631,7 @@ class GameChangerScraper:
             "gc_team_url": self.stats_url,
             "gc_team_id": self.team_id,
             "gc_season_slug": self.season_slug,
-            "last_updated": datetime.now().isoformat(),
+            "last_updated": datetime.now(ET).isoformat(),
             "record": record,
             "roster": roster,
             "team_totals": team_totals,

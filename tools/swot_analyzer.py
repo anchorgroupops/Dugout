@@ -400,6 +400,181 @@ def run_sharks_analysis() -> dict | None:
     return result
 
 
+def _team_aggregates(team_data: dict) -> dict:
+    """Compute team-level aggregate stats for matchup comparison."""
+    roster = team_data.get("roster", [])
+    totals = team_data.get("team_totals", {})
+    bt = totals.get("batting", totals) if totals else {}
+
+    # Try team_totals first, otherwise aggregate from roster
+    ab = _parse_number(bt.get("ab", 0))
+    h = _parse_number(bt.get("h", 0))
+    bb = _parse_number(bt.get("bb", 0))
+    hbp = _parse_number(bt.get("hbp", 0))
+    so = _parse_number(bt.get("so", bt.get("k", 0)))
+    hr = _parse_number(bt.get("hr", 0))
+    doubles = _parse_number(bt.get("doubles", bt.get("2b", 0)))
+    triples = _parse_number(bt.get("triples", bt.get("3b", 0)))
+    sb = _parse_number(bt.get("sb", 0))
+    r = _parse_number(bt.get("r", 0))
+    rbi = _parse_number(bt.get("rbi", 0))
+
+    if ab == 0 and roster:
+        for p in roster:
+            batting = p.get("batting", {})
+            ab += _parse_number(batting.get("ab", 0))
+            h += _parse_number(batting.get("h", 0))
+            bb += _parse_number(batting.get("bb", 0))
+            hbp += _parse_number(batting.get("hbp", 0))
+            so += _parse_number(batting.get("so", batting.get("k", 0)))
+            hr += _parse_number(batting.get("hr", 0))
+            doubles += _parse_number(batting.get("doubles", 0))
+            triples += _parse_number(batting.get("triples", 0))
+            sb += _parse_number(batting.get("sb", 0))
+            r += _parse_number(batting.get("r", 0))
+            rbi += _parse_number(batting.get("rbi", 0))
+
+    pa = ab + bb + hbp
+    singles = max(0, h - doubles - triples - hr)
+    tb = singles + 2*doubles + 3*triples + 4*hr
+
+    # Pitching aggregates
+    total_ip = 0.0
+    total_er = 0.0
+    total_p_bb = 0.0
+    total_p_h = 0.0
+    total_p_so = 0.0
+    for p in roster:
+        pitching = p.get("pitching", {})
+        ip = _innings_to_float(pitching.get("ip", 0))
+        total_ip += ip
+        total_er += _parse_number(pitching.get("er", 0))
+        total_p_bb += _parse_number(pitching.get("bb", 0))
+        total_p_h += _parse_number(pitching.get("h", 0))
+        total_p_so += _parse_number(pitching.get("so", pitching.get("k", 0)))
+
+    # Fielding
+    total_po = 0.0
+    total_a = 0.0
+    total_e = 0.0
+    for p in roster:
+        fielding = p.get("fielding", {})
+        total_po += _parse_number(fielding.get("po", 0))
+        total_a += _parse_number(fielding.get("a", 0))
+        total_e += _parse_number(fielding.get("e", 0))
+
+    return {
+        "batting": {
+            "avg": round(_safe_div(h, ab), 3),
+            "obp": round(_safe_div(h + bb + hbp, pa), 3),
+            "slg": round(_safe_div(tb, ab), 3),
+            "ops": round(_safe_div(h + bb + hbp, pa) + _safe_div(tb, ab), 3),
+            "k_rate": round(_safe_div(so, pa), 3),
+            "bb_rate": round(_safe_div(bb, pa), 3),
+            "hr": int(hr), "sb": int(sb), "r": int(r), "rbi": int(rbi),
+            "ab": int(ab), "h": int(h), "pa": int(pa),
+        },
+        "pitching": {
+            "era": round(_safe_div(total_er * 7, total_ip), 2),
+            "whip": round(_safe_div(total_p_bb + total_p_h, total_ip), 2),
+            "k_per_ip": round(_safe_div(total_p_so, total_ip), 2),
+            "bb_per_ip": round(_safe_div(total_p_bb, total_ip), 2),
+            "ip": round(total_ip, 1),
+        },
+        "fielding": {
+            "fpct": round(_safe_div(total_po + total_a, total_po + total_a + total_e), 3),
+            "errors": int(total_e),
+        },
+        "roster_size": len(roster),
+    }
+
+
+def analyze_matchup(our_team: dict, opponent_team: dict) -> dict:
+    """Compare two teams and generate matchup insights."""
+    us = _team_aggregates(our_team)
+    them = _team_aggregates(opponent_team)
+
+    our_advantages = []
+    their_advantages = []
+    key_matchups = []
+
+    # Batting comparison
+    if us["batting"]["avg"] > them["batting"]["avg"] + 0.030:
+        our_advantages.append(f"Higher team batting average ({us['batting']['avg']} vs {them['batting']['avg']})")
+    elif them["batting"]["avg"] > us["batting"]["avg"] + 0.030:
+        their_advantages.append(f"Higher team batting average ({them['batting']['avg']} vs {us['batting']['avg']})")
+
+    if us["batting"]["obp"] > them["batting"]["obp"] + 0.030:
+        our_advantages.append(f"Better on-base percentage ({us['batting']['obp']} vs {them['batting']['obp']})")
+    elif them["batting"]["obp"] > us["batting"]["obp"] + 0.030:
+        their_advantages.append(f"Better on-base percentage ({them['batting']['obp']} vs {us['batting']['obp']})")
+
+    if us["batting"]["ops"] > them["batting"]["ops"] + 0.050:
+        our_advantages.append(f"Stronger overall hitting (OPS: {us['batting']['ops']} vs {them['batting']['ops']})")
+    elif them["batting"]["ops"] > us["batting"]["ops"] + 0.050:
+        their_advantages.append(f"Stronger overall hitting (OPS: {them['batting']['ops']} vs {us['batting']['ops']})")
+
+    # K rate comparison (lower is better for batting team)
+    if us["batting"]["k_rate"] < them["batting"]["k_rate"] - 0.05:
+        our_advantages.append(f"Better contact rate (K%: {us['batting']['k_rate']} vs {them['batting']['k_rate']})")
+    elif them["batting"]["k_rate"] < us["batting"]["k_rate"] - 0.05:
+        their_advantages.append(f"Better contact rate (K%: {them['batting']['k_rate']} vs {us['batting']['k_rate']})")
+
+    # Pitching comparison
+    if us["pitching"]["ip"] >= 3 and them["pitching"]["ip"] >= 3:
+        if us["pitching"]["era"] < them["pitching"]["era"] - 1.0:
+            our_advantages.append(f"Superior pitching (ERA: {us['pitching']['era']} vs {them['pitching']['era']})")
+        elif them["pitching"]["era"] < us["pitching"]["era"] - 1.0:
+            their_advantages.append(f"Superior pitching (ERA: {them['pitching']['era']} vs {us['pitching']['era']})")
+
+        if us["pitching"]["whip"] < them["pitching"]["whip"] - 0.2:
+            our_advantages.append(f"Better pitch control (WHIP: {us['pitching']['whip']} vs {them['pitching']['whip']})")
+        elif them["pitching"]["whip"] < us["pitching"]["whip"] - 0.2:
+            their_advantages.append(f"Better pitch control (WHIP: {them['pitching']['whip']} vs {us['pitching']['whip']})")
+
+    # Fielding
+    if us["fielding"]["fpct"] > them["fielding"]["fpct"] + 0.02:
+        our_advantages.append(f"Cleaner defense (FPCT: {us['fielding']['fpct']} vs {them['fielding']['fpct']})")
+    elif them["fielding"]["fpct"] > us["fielding"]["fpct"] + 0.02:
+        their_advantages.append(f"Cleaner defense (FPCT: {them['fielding']['fpct']} vs {us['fielding']['fpct']})")
+
+    # Cross-matchups: our batting vs their pitching and vice versa
+    if us["batting"]["ops"] > 0.700 and them["pitching"]["era"] > 5.0:
+        key_matchups.append("Our offense should exploit their pitching struggles")
+    if them["batting"]["ops"] > 0.700 and us["pitching"]["era"] > 5.0:
+        key_matchups.append("Their offense could exploit our pitching - keep pitch count low")
+    if us["batting"]["k_rate"] > 0.35 and them["pitching"]["k_per_ip"] > 0.8:
+        key_matchups.append("Warning: our high K-rate meets their strikeout pitcher - focus on contact approach")
+    if them["batting"]["k_rate"] > 0.35 and us["pitching"]["k_per_ip"] > 0.8:
+        key_matchups.append("Opportunity: their team strikes out a lot and our pitchers can rack up Ks")
+    if us["batting"]["sb"] > them["batting"]["sb"] + 3:
+        key_matchups.append("Speed advantage - aggressive baserunning recommended")
+
+    # Recommendation
+    recs = []
+    if their_advantages and not our_advantages:
+        recs.append("Tough matchup. Focus on disciplined at-bats and minimizing errors.")
+    elif our_advantages and not their_advantages:
+        recs.append("Favorable matchup. Play aggressive and apply pressure early.")
+    elif len(our_advantages) > len(their_advantages):
+        recs.append("Slight edge for us. Execute fundamentals and capitalize on matchup advantages.")
+    elif len(their_advantages) > len(our_advantages):
+        recs.append("They have an edge on paper. Need strong defense and clutch hitting to win.")
+    else:
+        recs.append("Evenly matched. The team that makes fewer mistakes will win.")
+
+    return {
+        "our_team": our_team.get("team_name", "Sharks"),
+        "opponent": opponent_team.get("team_name", "Opponent"),
+        "our_stats": us,
+        "their_stats": them,
+        "our_advantages": our_advantages or ["No clear statistical advantages (need more data)"],
+        "their_advantages": their_advantages or ["No clear statistical advantages (need more data)"],
+        "key_matchups": key_matchups or ["Not enough data for cross-matchup analysis"],
+        "recommendation": recs[0],
+    }
+
+
 def run_opponent_analysis(opponent_name: str) -> dict | None:
     """Run SWOT analysis on a specific opponent."""
     opp_dir = OPPONENTS_DIR / opponent_name.lower().replace(" ", "_")

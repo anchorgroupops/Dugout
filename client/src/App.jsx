@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Users, Activity, ListOrdered, Settings2, Calendar } from 'lucide-react';
+import { formatDateTime } from './utils/formatDate';
 import Roster from './components/Roster';
 import Swot from './components/Swot';
 import Lineup from './components/Lineup';
@@ -113,7 +114,7 @@ function App() {
     <>
       <nav className="navbar">
         <div className="brand">
-          <img src="/sharks-logo.png" alt="Sharks" style={{ width: '32px', height: '32px', objectFit: 'contain' }} />
+          <img src="/sharks-logo.png" alt="Sharks" className="logo-avatar" />
           The Sharks
         </div>
         <div className="nav-links">
@@ -134,7 +135,7 @@ function App() {
         <div style={{ marginBottom: '2rem' }}>
           <h1 style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>{data.team ? data.team.team_name : 'The Sharks'}</h1>
           <p style={{ color: 'var(--text-muted)', fontSize: '1.1rem' }}>
-            {data.team ? `${data.team.league} • Last Updated: ${new Date(data.team.last_updated).toLocaleString()}` : 'Loading...'}
+            {data.team ? `${data.team.league} • Last Updated: ${formatDateTime(data.team.last_updated)}` : 'Loading...'}
           </p>
         </div>
         

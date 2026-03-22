@@ -204,7 +204,7 @@ const Roster = ({ team, availability, onAvailabilityChange }) => {
             transition: 'all 0.2s ease'
           }}
         >
-          {showAll ? `Showing All (${totalCount})` : `Core Only (${coreCount})`}
+          {showAll ? `All Players (${totalCount})` : `Sharks Only (${coreCount})`}
         </button>
       </h2>
       
@@ -218,21 +218,23 @@ const Roster = ({ team, availability, onAvailabilityChange }) => {
           const isExpanded = expandedPlayer === `${player.number}-${player.last}`;
           const isActive = availability && availability[name] !== false;
           const isUpdating = updating === name;
+          const isSub = !player.core;
           const b = player.batting || {};
-          
+
           return (
             <div
               key={`${player.number}-${player.last}`}
               className={`glass-panel ${isActive ? '' : 'inactive-player'}`}
-              style={{ 
-                padding: '1.5rem', 
-                position: 'relative', 
-                overflow: 'hidden', 
-                cursor: 'pointer', 
+              style={{
+                padding: '1.5rem',
+                position: 'relative',
+                overflow: 'hidden',
+                cursor: 'pointer',
                 transition: 'all 0.3s ease',
                 opacity: isActive ? 1 : 0.6,
                 filter: isActive ? 'none' : 'grayscale(0.5)',
-                borderLeft: isActive ? '4px solid var(--primary-color)' : '4px solid #666'
+                borderLeft: !isActive ? '4px solid #666' : isSub ? '4px solid rgba(255,165,0,0.5)' : '4px solid var(--primary-color)',
+                background: isSub && isActive ? 'rgba(255,165,0,0.03)' : undefined
               }}
               onClick={() => setExpandedPlayer(isExpanded ? null : `${player.number}-${player.last}`)}
             >

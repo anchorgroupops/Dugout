@@ -132,6 +132,20 @@ main {
   box-shadow: 0 0 15px var(--primary-glow);
 }
 
+/* Logo Avatar */
+.logo-avatar {
+  width: 40px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: 50%;
+  border: 2px solid var(--primary-color);
+  box-shadow: 0 0 12px var(--primary-glow);
+  transition: box-shadow var(--transition-fast);
+}
+.logo-avatar:hover {
+  box-shadow: 0 0 20px var(--primary-glow);
+}
+
 /* Animations */
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(10px); }

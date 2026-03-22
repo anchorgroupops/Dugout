@@ -3,7 +3,10 @@ import json
 import logging
 import traceback
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
+ET = ZoneInfo("America/New_York")
 from pathlib import Path
 from gc_scraper import GameChangerScraper
 from gc_schedule import ScheduleScraper
@@ -45,7 +48,7 @@ def send_alert(message: str, level: str = "ERROR"):
         "source": "sync_daemon",
         "level": level,
         "message": message,
-        "timestamp": datetime.now().isoformat()
+        "timestamp": datetime.now(ET).isoformat()
     }
     try:
         response = requests.post(N8N_WEBHOOK_URL, json=payload, timeout=5)
@@ -119,15 +122,128 @@ import threading
 app = Flask(__name__)
 CORS(app)
 
+
+# ---------------------------------------------------------
+# SUB AUTO-DEACTIVATION HELPERS
+# ---------------------------------------------------------
+def _load_roster_manifest():
+    """Load core player names from roster_manifest.json."""
+    mf = SHARKS_DIR / "roster_manifest.json"
+    if not mf.exists():
+        return []
+    with open(mf) as f:
+        data = json.load(f)
+    return [n.strip().lower() for n in data.get("core_players", [])]
+
+
+def _load_sub_tracker():
+    """Load sub activation tracker (timestamps)."""
+    tracker_file = SHARKS_DIR / "sub_tracker.json"
+    if not tracker_file.exists():
+        return {}
+    with open(tracker_file) as f:
+        return json.load(f)
+
+
+def _save_sub_tracker(tracker):
+    SHARKS_DIR.mkdir(parents=True, exist_ok=True)
+    with open(SHARKS_DIR / "sub_tracker.json", "w") as f:
+        json.dump(tracker, f, indent=2)
+
+
+def _is_core_player(name):
+    core = _load_roster_manifest()
+    return name.strip().lower() in core
+
+
+def auto_deactivate_subs():
+    """After a game day, deactivate all non-core players and record in sub_tracker."""
+    games_dir = SHARKS_DIR / "games"
+    index_file = games_dir / "index.json"
+    availability_file = SHARKS_DIR / "availability.json"
+
+    if not index_file.exists() or not availability_file.exists():
+        return
+
+    with open(index_file) as f:
+        games = json.load(f)
+    with open(availability_file) as f:
+        avail = json.load(f)
+
+    # Check if any game was yesterday
+    yesterday = (datetime.now(ET) - timedelta(days=1)).strftime("%Y-%m-%d")
+    game_yesterday = any(g.get("date") == yesterday for g in games)
+
+    if not game_yesterday:
+        return
+
+    tracker = _load_sub_tracker()
+    changed = False
+
+    for name, status in list(avail.items()):
+        if _is_core_player(name):
+            continue
+        if status is True or (isinstance(status, dict) and status.get("available")):
+            # Deactivate this sub
+            avail[name] = False
+            tracker[name] = {
+                "last_active": datetime.now(ET).isoformat(),
+                "auto_deactivated": True,
+                "deactivated_after_game": yesterday
+            }
+            logging.info(f"Auto-deactivated sub: {name} (game on {yesterday})")
+            changed = True
+
+    if changed:
+        with open(availability_file, "w") as f:
+            json.dump(avail, f, indent=2)
+        _save_sub_tracker(tracker)
+
+@app.route('/api/recent-subs', methods=['GET'])
+def handle_recent_subs():
+    """Return recently auto-deactivated subs (within last 14 days)."""
+    tracker = _load_sub_tracker()
+    cutoff = (datetime.now(ET) - timedelta(days=14)).isoformat()
+    recent = []
+    for name, info in tracker.items():
+        if isinstance(info, dict) and info.get("last_active", "") >= cutoff:
+            recent.append({"name": name, **info})
+    recent.sort(key=lambda x: x.get("last_active", ""), reverse=True)
+    return jsonify(recent)
+
+
 @app.route('/api/availability', methods=['GET', 'POST'])
 def handle_availability():
     availability_file = SHARKS_DIR / "availability.json"
-    
+
     if request.method == 'POST':
         data = request.json
+
+        # Track sub activations in sub_tracker
+        old_avail = {}
+        if availability_file.exists():
+            with open(availability_file) as f:
+                old_avail = json.load(f)
+
+        tracker = _load_sub_tracker()
+        tracker_changed = False
+        for name, new_status in data.items():
+            if _is_core_player(name):
+                continue
+            old_status = old_avail.get(name, False)
+            # Sub was just turned ON
+            if new_status is True and old_status is not True:
+                tracker[name] = {
+                    "last_active": datetime.now(ET).isoformat(),
+                    "auto_deactivated": False
+                }
+                tracker_changed = True
+        if tracker_changed:
+            _save_sub_tracker(tracker)
+
         with open(availability_file, "w") as f:
             json.dump(data, f, indent=2)
-        
+
         logging.info("Availability updated via API. Re-running analytics tools...")
         try:
             from lineup_optimizer import run as run_lineup
@@ -146,7 +262,7 @@ def handle_availability():
             return jsonify({})
         with open(team_file, "r") as f:
             team_data = json.load(f)
-            return jsonify({f"{p.get('first', '')} {p.get('last', '')}".strip(): True for p in team_data.get("roster", [])})
+            return jsonify({f"{p.get('first', '')} {p.get('last', '')}".strip(): p.get("core", True) for p in team_data.get("roster", [])})
     
     with open(availability_file, "r") as f:
         return jsonify(json.load(f))
@@ -170,6 +286,38 @@ def handle_games():
                 entry["sharks_batting"] = full.get("sharks_batting", [])
     return jsonify(index)
 
+@app.route('/api/league-players', methods=['GET'])
+def handle_league_players():
+    """Return an aggregated list of all players from scraped PCLL teams."""
+    opponents_dir = DATA_DIR / "opponents"
+    league_players = []
+    
+    if opponents_dir.exists():
+        for team_dir in opponents_dir.iterdir():
+            if team_dir.is_dir():
+                team_file = team_dir / "team.json"
+                if team_file.exists():
+                    try:
+                        with open(team_file, "r") as f:
+                            team_data = json.load(f)
+                            team_name = team_data.get("team_name", team_dir.name)
+                            gc_team_id = team_data.get("gc_team_id", "")
+                            
+                            for p in team_data.get("roster", []):
+                                league_players.append({
+                                    "first": p.get("first", ""),
+                                    "last": p.get("last", ""),
+                                    "number": p.get("number", ""),
+                                    "team_name": team_name,
+                                    "gc_team_id": gc_team_id
+                                })
+                    except Exception as e:
+                        logging.error(f"Error reading {team_file}: {e}")
+    
+    # Sort alphabetically by name
+    league_players.sort(key=lambda p: (p["first"].lower(), p["last"].lower()))
+    return jsonify(league_players)
+
 
 @app.route('/api/games/<game_id>', methods=['GET'])
 def handle_game_detail(game_id):
@@ -179,6 +327,46 @@ def handle_game_detail(game_id):
         return jsonify({"error": "Not found"}), 404
     with open(game_file) as f:
         return jsonify(json.load(f))
+
+
+@app.route('/api/opponents', methods=['GET'])
+def handle_opponents():
+    """List all scraped opponent teams."""
+    opponents_dir = DATA_DIR / "opponents"
+    teams = []
+    if opponents_dir.exists():
+        for team_dir in opponents_dir.iterdir():
+            if team_dir.is_dir():
+                team_file = team_dir / "team.json"
+                if team_file.exists():
+                    try:
+                        with open(team_file) as f:
+                            td = json.load(f)
+                        teams.append({
+                            "slug": team_dir.name,
+                            "team_name": td.get("team_name", team_dir.name),
+                            "record": td.get("record", {}),
+                            "roster_size": len(td.get("roster", [])),
+                        })
+                    except Exception as e:
+                        logging.error(f"Error reading opponent {team_dir.name}: {e}")
+    teams.sort(key=lambda t: t["team_name"].lower())
+    return jsonify(teams)
+
+
+@app.route('/api/matchup/<opponent_slug>', methods=['GET'])
+def handle_matchup(opponent_slug):
+    """Run matchup analysis: Sharks vs a specific opponent."""
+    from swot_analyzer import analyze_matchup, load_team
+    our_team = load_team(SHARKS_DIR, prefer_merged=True)
+    if not our_team:
+        return jsonify({"error": "Sharks team data not found"}), 404
+    opp_dir = DATA_DIR / "opponents" / opponent_slug
+    opp_team = load_team(opp_dir)
+    if not opp_team:
+        return jsonify({"error": f"Opponent '{opponent_slug}' not found"}), 404
+    result = analyze_matchup(our_team, opp_team)
+    return jsonify(result)
 
 
 @app.route('/api/borrowed-player', methods=['POST'])
@@ -287,6 +475,12 @@ def main():
         parse_pdfs()
     except Exception as e:
         logging.warning(f"Scorebook PDF parse skipped: {e}")
+
+    # Auto-deactivate subs from yesterday's game
+    try:
+        auto_deactivate_subs()
+    except Exception as e:
+        logging.warning(f"Sub auto-deactivation skipped: {e}")
 
     # Start API server in a separate thread
     api_thread = threading.Thread(target=run_api, daemon=True)
