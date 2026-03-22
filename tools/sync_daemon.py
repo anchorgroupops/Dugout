@@ -361,6 +361,29 @@ def handle_matchup(opponent_slug):
     our_team = load_team(SHARKS_DIR, prefer_merged=True)
     if not our_team:
         return jsonify({"error": "Sharks team data not found"}), 404
+
+    # Enrich Sharks roster with app_stats so matchup uses real season stats
+    app_stats_file = SHARKS_DIR / "app_stats.json"
+    if app_stats_file.exists():
+        try:
+            with open(app_stats_file) as f:
+                app_data = json.load(f)
+            app_batting = {str(p.get("number", "")).strip(): p for p in app_data.get("batting", []) if p.get("number")}
+            for player in our_team.get("roster", []):
+                num = str(player.get("number", "")).strip()
+                if num and num in app_batting:
+                    ap = app_batting[num]
+                    player["batting"] = {
+                        "pa": _safe_int(ap.get("pa")), "ab": _safe_int(ap.get("ab")),
+                        "h": _safe_int(ap.get("h")), "bb": _safe_int(ap.get("bb")),
+                        "hbp": _safe_int(ap.get("hbp")), "so": _safe_int(ap.get("so")),
+                        "hr": _safe_int(ap.get("hr")), "rbi": _safe_int(ap.get("rbi")),
+                        "sb": _safe_int(ap.get("sb")), "r": _safe_int(ap.get("r", 0)),
+                        "doubles": _safe_int(ap.get("2b")), "triples": _safe_int(ap.get("3b")),
+                    }
+        except Exception as e:
+            logging.warning(f"Matchup app_stats enrichment failed: {e}")
+
     opp_dir = DATA_DIR / "opponents" / opponent_slug
     opp_team = load_team(opp_dir)
     if not opp_team:
