@@ -1,16 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Users, Activity, ListOrdered, Calendar } from 'lucide-react';
+import { Users, Activity, ListOrdered, Settings2, Calendar } from 'lucide-react';
 import Roster from './components/Roster';
 import Swot from './components/Swot';
 import Lineup from './components/Lineup';
+import Games from './components/Games';
+import RosterManager from './components/RosterManager';
 
-// Placeholder for Schedule
-const Schedule = () => (
-  <div className="glass-panel" style={{ padding: '2rem', textAlign: 'center' }}>
-    <h2 style={{ marginBottom: '1rem', color: 'var(--primary-color)' }}>Upcoming Schedule</h2>
-    <p style={{ color: 'var(--text-muted)' }}>Schedule and Box Score integrations coming soon...</p>
-  </div>
-);
 
 function App() {
   const [currentView, setCurrentView] = useState('roster');
@@ -19,6 +14,7 @@ function App() {
     swot: null,
     lineups: null,
     availability: null,
+    games: null,
     loading: true,
     error: null
   });
@@ -26,21 +22,25 @@ function App() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [teamRes, swotRes, lineupsRes, availRes] = await Promise.all([
+        const [teamMergedRes, teamRes, swotRes, lineupsRes, availRes, gamesRes] = await Promise.all([
+          fetch('/data/sharks/team_merged.json'),
           fetch('/data/sharks/team.json'),
           fetch('/data/sharks/swot_analysis.json'),
           fetch('/data/sharks/lineups.json'),
-          fetch('/api/availability')
+          fetch('/api/availability'),
+          fetch('/api/games')
         ]);
-        
-        if (!teamRes.ok) throw new Error('Failed to load team data');
-        
-        const team = await teamRes.json();
+
+        const teamSourceRes = teamMergedRes.ok ? teamMergedRes : teamRes;
+        if (!teamSourceRes.ok) throw new Error('Failed to load team data');
+
+        const team = await teamSourceRes.json();
         const swot = swotRes.ok ? await swotRes.json() : null;
         const lineups = lineupsRes.ok ? await lineupsRes.json() : null;
         const availability = availRes.ok ? await availRes.json() : {};
-        
-        setData({ team, swot, lineups, availability, loading: false, error: null });
+        const games = gamesRes.ok ? await gamesRes.json() : null;
+
+        setData({ team, swot, lineups, availability, games, loading: false, error: null });
       } catch (err) {
         console.error("Data fetch error", err);
         setData(prev => ({ ...prev, loading: false, error: err.message }));
@@ -56,9 +56,10 @@ function App() {
 
   const navItems = [
     { id: 'roster', label: 'Roster', icon: <Users size={18} /> },
-    { id: 'swot', label: 'SWOT Analysis', icon: <Activity size={18} /> },
+    { id: 'swot', label: 'SWOT', icon: <Activity size={18} /> },
     { id: 'lineups', label: 'Lineups', icon: <ListOrdered size={18} /> },
-    { id: 'schedule', label: 'Schedule', icon: <Calendar size={18} /> }
+    { id: 'games', label: 'Games', icon: <Calendar size={18} /> },
+    { id: 'manage', label: 'Manage', icon: <Settings2 size={18} /> }
   ];
 
   const renderContent = () => {
@@ -75,19 +76,33 @@ function App() {
 
     switch(currentView) {
       case 'roster': return (
-        <Roster 
-          team={data.team} 
-          availability={data.availability} 
+        <Roster
+          team={data.team}
+          availability={data.availability}
           onAvailabilityChange={(newAvail) => setData(prev => ({ ...prev, availability: newAvail }))}
         />
       );
       case 'swot': return <Swot swotData={data.swot} roster={data.team?.roster} />;
-      case 'lineups': return <Lineup lineupsData={data.lineups} />;
-      case 'schedule': return <Schedule />;
+      case 'lineups': return (
+        <Lineup
+          lineupsData={data.lineups}
+          availability={data.availability}
+          onRegenerate={(newLineups) => setData(prev => ({ ...prev, lineups: newLineups }))}
+        />
+      );
+      case 'games': return <Games gamesData={data.games} />;
+      case 'manage': return (
+        <RosterManager
+          team={data.team}
+          availability={data.availability}
+          onAvailabilityChange={(newAvail) => setData(prev => ({ ...prev, availability: newAvail }))}
+          onTeamChange={(newTeam) => setData(prev => ({ ...prev, team: newTeam }))}
+        />
+      );
       default: return (
-        <Roster 
-          team={data.team} 
-          availability={data.availability} 
+        <Roster
+          team={data.team}
+          availability={data.availability}
           onAvailabilityChange={(newAvail) => setData(prev => ({ ...prev, availability: newAvail }))}
         />
       );
@@ -98,8 +113,8 @@ function App() {
     <>
       <nav className="navbar">
         <div className="brand">
-          <Activity size={24} color="var(--primary-color)" />
-          Softball Strategy
+          <img src="/sharks-logo.png" alt="Sharks" style={{ width: '32px', height: '32px', objectFit: 'contain' }} />
+          The Sharks
         </div>
         <div className="nav-links">
           {navItems.map(item => (

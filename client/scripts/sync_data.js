@@ -17,6 +17,7 @@ if (!fs.existsSync(destDir)) {
 // Files to copy
 const filesToSync = [
   'team.json',
+  'team_merged.json',
   'swot_analysis.json',
   'lineups.json'
 ];

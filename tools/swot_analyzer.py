@@ -47,23 +47,74 @@ def _safe_div(numerator: float, denominator: float, default: float = 0.0) -> flo
     """Safe division avoiding ZeroDivisionError."""
     return numerator / denominator if denominator > 0 else default
 
+def _parse_number(val: Any, default: float = 0.0) -> float:
+    if val is None:
+        return default
+    if isinstance(val, (int, float)):
+        return float(val)
+    if isinstance(val, str):
+        s = val.strip()
+        if s in ("", "-", "—", "N/A"):
+            return default
+        if s.endswith("%"):
+            s = s[:-1]
+        if s.startswith("."):
+            s = "0" + s
+        try:
+            return float(s)
+        except ValueError:
+            return default
+    return default
+
+def _innings_to_float(val: Any) -> float:
+    if val is None:
+        return 0.0
+    if isinstance(val, (int, float)):
+        s = str(val)
+    else:
+        s = str(val).strip()
+    if not s:
+        return 0.0
+    if "." in s:
+        try:
+            whole, frac = s.split(".", 1)
+            outs = int(whole) * 3 + int(frac)
+            return outs / 3.0
+        except Exception:
+            return 0.0
+    try:
+        return float(s)
+    except Exception:
+        return 0.0
+
+def _get_stat(player: dict, category: dict, key: str, fallback: str | None = None) -> float:
+    if key in category:
+        return _parse_number(category.get(key))
+    if fallback and fallback in category:
+        return _parse_number(category.get(fallback))
+    if key in player:
+        return _parse_number(player.get(key))
+    if fallback and fallback in player:
+        return _parse_number(player.get(fallback))
+    return 0.0
+
 
 def compute_derived_stats(player: dict) -> dict:
     """Compute derived statistics from raw counting stats."""
-    hitting = player.get("stats", {}).get("hitting", {})
-    pitching = player.get("stats", {}).get("pitching", {})
-    fielding = player.get("stats", {}).get("fielding", {})
+    hitting = player.get("stats", {}).get("hitting", {}) or player.get("batting", {}) or {}
+    pitching = player.get("stats", {}).get("pitching", {}) or player.get("pitching", {}) or {}
+    fielding = player.get("stats", {}).get("fielding", {}) or player.get("fielding", {}) or {}
 
-    ab = hitting.get("ab", 0)
-    h = hitting.get("h", 0)
-    bb = hitting.get("bb", 0)
-    hbp = hitting.get("hbp", 0)
-    k = hitting.get("k", 0)
-    doubles = hitting.get("doubles", 0)
-    triples = hitting.get("triples", 0)
-    hr = hitting.get("hr", 0)
-    sb = hitting.get("sb", 0)
-    cs = hitting.get("cs", 0)
+    ab = _get_stat(player, hitting, "ab")
+    h = _get_stat(player, hitting, "h")
+    bb = _get_stat(player, hitting, "bb")
+    hbp = _get_stat(player, hitting, "hbp")
+    k = _get_stat(player, hitting, "k", fallback="so")
+    doubles = _get_stat(player, hitting, "doubles", fallback="2b")
+    triples = _get_stat(player, hitting, "triples", fallback="3b")
+    hr = _get_stat(player, hitting, "hr")
+    sb = _get_stat(player, hitting, "sb")
+    cs = _get_stat(player, hitting, "cs")
 
     pa = ab + bb + hbp
     singles = h - doubles - triples - hr
@@ -78,11 +129,11 @@ def compute_derived_stats(player: dict) -> dict:
     bb_rate = _safe_div(bb, pa)
 
     # Pitching
-    ip = pitching.get("ip", 0.0)
-    p_er = pitching.get("er", 0)
-    p_k = pitching.get("k", 0)
-    p_bb = pitching.get("bb", 0)
-    p_h = pitching.get("h", 0)
+    ip = _innings_to_float(pitching.get("ip", 0.0))
+    p_er = _get_stat(player, pitching, "er")
+    p_k = _get_stat(player, pitching, "k", fallback="so")
+    p_bb = _get_stat(player, pitching, "bb")
+    p_h = _get_stat(player, pitching, "h")
 
     era = _safe_div(p_er * 7, ip)  # LL softball = 7 innings
     whip = _safe_div(p_bb + p_h, ip)
@@ -90,9 +141,9 @@ def compute_derived_stats(player: dict) -> dict:
     bb_per_ip = _safe_div(p_bb, ip)
 
     # Fielding
-    po = fielding.get("po", 0)
-    a = fielding.get("a", 0)
-    e = fielding.get("e", 0)
+    po = _get_stat(player, fielding, "po")
+    a = _get_stat(player, fielding, "a")
+    e = _get_stat(player, fielding, "e")
     fielding_pct = _safe_div(po + a, po + a + e)
 
     # Baserunning
@@ -225,7 +276,7 @@ def analyze_player(player: dict) -> dict:
     strengths.extend(h_s)
     weaknesses.extend(h_w)
 
-    raw_ip = player.get("stats", {}).get("pitching", {}).get("ip", 0.0)
+    raw_ip = _innings_to_float(player.get("stats", {}).get("pitching", {}).get("ip", player.get("pitching", {}).get("ip", 0.0)))
     p_s, p_w = classify_pitching(derived, raw_ip=raw_ip)
     strengths.extend(p_s)
     weaknesses.extend(p_w)
@@ -250,9 +301,13 @@ def analyze_player(player: dict) -> dict:
     if derived["fielding"].get("fielding_pct", 1) < 0.900:
         threats.append("Errors could be exploited by aggressive baserunning opponents")
 
+    name = player.get("name")
+    if not name:
+        name = f"{player.get('first', '')} {player.get('last', '')}".strip() or "Unknown"
+
     return {
         "player_id": player.get("id", "unknown"),
-        "name": player.get("name", "Unknown"),
+        "name": name,
         "number": player.get("number", 0),
         "derived_stats": derived,
         "swot": {
@@ -302,9 +357,11 @@ def analyze_team(team_data: dict) -> dict:
     }
 
 
-def load_team(team_dir: Path) -> dict | None:
+def load_team(team_dir: Path, prefer_merged: bool = False) -> dict | None:
     """Load team data from a directory."""
-    team_file = team_dir / "team.json"
+    team_file = team_dir / ("team_merged.json" if prefer_merged else "team.json")
+    if prefer_merged and not team_file.exists():
+        team_file = team_dir / "team.json"
     if not team_file.exists():
         return None
     with open(team_file, "r") as f:
@@ -313,7 +370,7 @@ def load_team(team_dir: Path) -> dict | None:
 
 def run_sharks_analysis() -> dict | None:
     """Run full SWOT analysis on The Sharks."""
-    team = load_team(SHARKS_DIR)
+    team = load_team(SHARKS_DIR, prefer_merged=True)
     if not team:
         print(f"[SWOT] No team data found at {SHARKS_DIR / 'team.json'}")
         print("[SWOT] Run the GC scraper first to populate data.")

@@ -155,7 +155,7 @@ const Roster = ({ team, availability, onAvailabilityChange }) => {
 
   const handleToggleActive = async (e, player) => {
     e.stopPropagation(); // Don't expand the card
-    const name = `${player.first} ${player.last}`.strip ? `${player.first} ${player.last}`.trim() : `${player.first} ${player.last}`;
+    const name = `${player.first} ${player.last}`.trim();
     const newStatus = !availability[name];
     const newAvailability = { ...availability, [name]: newStatus };
     
@@ -300,6 +300,11 @@ const Roster = ({ team, availability, onAvailabilityChange }) => {
                     {b.gp != null ? `${b.gp} GP` : ''}{b.pa != null ? ` • ${b.pa} PA` : ''}
                     {!isExpanded && ' • Click to expand'}
                   </span>
+                  {player.teams && player.teams.length > 0 && (
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                      Teams: {player.teams.join(', ')}
+                    </div>
+                  )}
                 </div>
               </div>
 

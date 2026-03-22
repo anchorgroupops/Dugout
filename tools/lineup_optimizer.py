@@ -166,8 +166,15 @@ def validate_mandatory_play(lineup: list[dict], roster: list[dict]) -> list[str]
     Returns a list of violations (empty = compliant).
     """
     violations = []
-    lineup_ids = {p.get("id") for p in lineup}
-    roster_ids = {p.get("id") for p in roster}
+    def _pid(p: dict) -> str:
+        if p.get("id"):
+            return str(p.get("id"))
+        name = f"{p.get('first', '')} {p.get('last', '')}".strip().lower()
+        num = str(p.get("number", "")).strip()
+        return f"{name}|{num}"
+
+    lineup_ids = {_pid(p) for p in lineup}
+    roster_ids = {_pid(p) for p in roster}
 
     missing = roster_ids - lineup_ids
     if missing:
@@ -226,7 +233,9 @@ def generate_all_lineups(team_data: dict) -> dict:
 
 def run():
     """Load Sharks data and generate lineups."""
-    team_file = SHARKS_DIR / "team.json"
+    team_file = SHARKS_DIR / "team_merged.json"
+    if not team_file.exists():
+        team_file = SHARKS_DIR / "team.json"
     if not team_file.exists():
         print(f"[LINEUP] No team data found at {team_file}")
         print("[LINEUP] Run the GC scraper first to populate data.")

@@ -9,14 +9,19 @@ from pathlib import Path
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 SHARKS_DIR = DATA_DIR / "sharks"
-TEAM_FILE = SHARKS_DIR / "team.json"
+TEAM_FILE = SHARKS_DIR / "team_merged.json"
 AVAILABILITY_FILE = SHARKS_DIR / "availability.json"
 
 def load_team():
-    if not TEAM_FILE.exists():
-        print(f"Error: {TEAM_FILE} not found. Run scraper first.")
-        return None
-    with open(TEAM_FILE, "r") as f:
+    team_file = TEAM_FILE
+    if not team_file.exists():
+        fallback = SHARKS_DIR / "team.json"
+        if fallback.exists():
+            team_file = fallback
+        else:
+            print(f"Error: {TEAM_FILE} not found. Run scraper first.")
+            return None
+    with open(team_file, "r") as f:
         return json.load(f)
 
 def load_availability():

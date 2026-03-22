@@ -11,10 +11,9 @@ REQUIRES: pip install playwright && playwright install chromium
 REQUIRES: GC_EMAIL and GC_PASSWORD in .env
 """
 
+import argparse
 import json
 import os
-import csv
-import io
 import re
 from pathlib import Path
 from datetime import datetime
@@ -146,10 +145,24 @@ def _safe_val(val: str):
 class GameChangerScraper:
     """Scrape softball statistics from GameChanger (web.gc.com)."""
 
-    def __init__(self):
+    def __init__(
+        self,
+        team_id: str | None = None,
+        season_slug: str | None = None,
+        team_name: str | None = None,
+        out_dir: Path | None = None,
+        roster_manifest_path: Path | None = None,
+        use_manifest: bool = True,
+    ):
         self.email = os.getenv("GC_EMAIL", "")
         self.password = os.getenv("GC_PASSWORD", "")
-        self.team_name = os.getenv("TEAM_NAME", "The Sharks")
+        self.team_name = team_name or os.getenv("TEAM_NAME", "The Sharks")
+        self.team_id = team_id or os.getenv("GC_TEAM_ID", GC_TEAM_ID)
+        self.season_slug = season_slug or os.getenv("GC_SEASON_SLUG", GC_SEASON_SLUG)
+        self.stats_url = f"{GC_BASE_URL}/teams/{self.team_id}/{self.season_slug}/season-stats"
+        self.out_dir = out_dir or SHARKS_DIR
+        self.roster_manifest_path = roster_manifest_path or (SHARKS_DIR / "roster_manifest.json")
+        self.use_manifest = use_manifest
         self.browser = None
         self.page = None
 
@@ -295,6 +308,148 @@ class GameChangerScraper:
         return False
 
     # ------------------------------------------------------------------ #
+    #  Scrape W-L record from schedule page
+    # ------------------------------------------------------------------ #
+    def scrape_record(self) -> str:
+        """Scrape the team W-L record from the schedule page. Returns e.g. '2-1'."""
+        schedule_url = f"{GC_BASE_URL}/teams/{self.team_id}/{self.season_slug}/schedule"
+        try:
+            self.page.goto(schedule_url, wait_until="domcontentloaded", timeout=60000)
+            self.page.wait_for_timeout(2000)
+            # GC shows record on the schedule page — look for text like "2-1" or "W-L"
+            # Try to find a record element (common patterns: "Record: 2-1", "2-1 (W-L)")
+            record_text = self.page.evaluate("""
+            (() => {
+                // Try to find record in page text
+                const all = document.querySelectorAll('*');
+                for (const el of all) {
+                    if (el.children.length === 0) {
+                        const t = el.textContent.trim();
+                        if (/^\\d+-\\d+$/.test(t) || /Record.*\\d+-\\d+/.test(t)) {
+                            return t.match(/\\d+-\\d+/)?.[0] || null;
+                        }
+                    }
+                }
+                return null;
+            })()
+            """)
+            if record_text and re.match(r'^\d+-\d+', record_text):
+                return record_text
+        except Exception as e:
+            print(f"[GC] Could not scrape record: {e}")
+        return "0-0"
+
+    # ------------------------------------------------------------------ #
+    #  Scrape per-game box scores from the schedule page
+    # ------------------------------------------------------------------ #
+    def scrape_game_box_scores(self) -> list[dict]:
+        """
+        Scrape per-game box scores for all completed games.
+        Returns a list of game dicts; also saves each to data/sharks/games/.
+        """
+        if not self.page:
+            raise RuntimeError("[GC] Not logged in. Call login() first.")
+
+        schedule_url = f"{GC_BASE_URL}/teams/{self.team_id}/{self.season_slug}/schedule"
+        games_dir = self.out_dir / "games"
+        games_dir.mkdir(parents=True, exist_ok=True)
+
+        print(f"[GC] Navigating to schedule: {schedule_url}")
+        self.page.goto(schedule_url, wait_until="domcontentloaded", timeout=60000)
+        self.page.wait_for_timeout(3000)
+
+        # Find all completed game links (links that have a score visible)
+        game_links = self.page.evaluate("""
+        (() => {
+            const links = [];
+            // GC schedule links often include /games/ or /plays in the path
+            document.querySelectorAll('a[href*="/schedule/"]').forEach(a => {
+                const href = a.href;
+                if (!links.includes(href)) links.push(href);
+            });
+            return links;
+        })()
+        """)
+
+        print(f"[GC] Found {len(game_links)} schedule links")
+        games = []
+
+        for link in game_links[:20]:  # cap at 20 to avoid runaway
+            try:
+                # Navigate to the game page
+                self.page.goto(link, wait_until="domcontentloaded", timeout=60000)
+                self.page.wait_for_timeout(2000)
+
+                # Click "Box Score" tab if present
+                has_boxscore = self._click_tab("Box Score")
+                if not has_boxscore:
+                    # Try "Summary" as fallback
+                    self._click_tab("Summary")
+
+                self.page.wait_for_timeout(1500)
+
+                # Extract game metadata from page
+                meta = self.page.evaluate("""
+                (() => {
+                    const title = document.title || '';
+                    // Look for score elements
+                    const scores = Array.from(document.querySelectorAll('[class*="score"], [class*="Score"]'))
+                        .map(el => el.textContent.trim()).filter(t => /^\\d+$/.test(t)).slice(0, 2);
+                    // Look for date
+                    const dateEl = document.querySelector('time, [datetime]');
+                    const date = dateEl ? (dateEl.getAttribute('datetime') || dateEl.textContent.trim()) : '';
+                    // Team names
+                    const teamEls = Array.from(document.querySelectorAll('[class*="team-name"], [class*="teamName"]'))
+                        .map(el => el.textContent.trim()).filter(Boolean).slice(0, 2);
+                    return { title, scores, date, teams: teamEls };
+                })()
+                """)
+
+                rows = self._extract_table()
+
+                if not rows:
+                    continue
+
+                # Parse players from rows
+                box_players = []
+                for row in rows:
+                    raw_name = (row.get("Player") or row.get("player") or row.get("") or "").strip()
+                    if not raw_name or raw_name.lower() in ("team", "totals", "team totals"):
+                        continue
+                    player_stats = {"name": raw_name}
+                    for gc_col, key in BATTING_STD_MAP.items():
+                        if gc_col in row:
+                            player_stats[key] = _safe_val(row[gc_col])
+                    box_players.append(player_stats)
+
+                if not box_players:
+                    continue
+
+                # Derive a filename from the URL
+                url_slug = re.sub(r"[^a-z0-9]+", "_", link.lower().rstrip("/").split("/")[-1])
+                game_data = {
+                    "source_url": link,
+                    "meta": meta,
+                    "batting": box_players,
+                    "scraped_at": datetime.now().isoformat(),
+                }
+
+                out_file = games_dir / f"{url_slug}.json"
+                with open(out_file, "w") as f:
+                    json.dump(game_data, f, indent=2)
+                print(f"[GC] ✓ Saved box score: {out_file.name} ({len(box_players)} players)")
+                games.append(game_data)
+
+                self.page.wait_for_timeout(2000)
+
+            except Exception as e:
+                print(f"[GC] ⚠ Error scraping game {link}: {e}")
+                continue
+
+        print(f"[GC] ✅ Box scores complete: {len(games)} games scraped")
+        return games
+
+    # ------------------------------------------------------------------ #
     #  Main: Scrape all 9 stat views
     # ------------------------------------------------------------------ #
     def scrape_all_stats(self) -> dict | None:
@@ -306,8 +461,8 @@ class GameChangerScraper:
         if not self.page:
             raise RuntimeError("[GC] Not logged in. Call login() first.")
 
-        print(f"[GC] Navigating to stats page: {GC_STATS_URL}")
-        self.page.goto(GC_STATS_URL, wait_until="domcontentloaded", timeout=60000)
+        print(f"[GC] Navigating to stats page: {self.stats_url}")
+        self.page.goto(self.stats_url, wait_until="domcontentloaded", timeout=60000)
         self.page.wait_for_timeout(3000)
 
         # Dismiss any popups (follow team dialog etc.)
@@ -414,22 +569,48 @@ class GameChangerScraper:
                 players[canon][json_key] = stat_obj
 
         # ---- Post-processing ---- #
+        # Scrape actual record from schedule page
+        record = self.scrape_record()
+        print(f"[GC] Team record: {record}")
         print(f"[GC] Raw player count: {len(players)}")
 
         # Load roster manifest for core/non-core tagging
-        manifest_path = SHARKS_DIR / "roster_manifest.json"
-        core_names = []
-        if manifest_path.exists():
-            with open(manifest_path, "r") as mf:
+        manifest = {}
+        if self.use_manifest and self.roster_manifest_path.exists():
+            with open(self.roster_manifest_path, "r") as mf:
                 manifest = json.load(mf)
-                core_names = [n.lower().strip() for n in manifest.get("core_players", [])]
+
+        def _norm_name(name: str) -> str:
+            return re.sub(r"[^a-z]", "", name.lower())
+
+        core_names = {_norm_name(n) for n in manifest.get("core_players", [])}
+        borrowed_names = {_norm_name(n) for n in manifest.get("borrowed_players", [])}
+        alias_map = {_norm_name(k): _norm_name(v) for k, v in manifest.get("aliases", {}).items()}
+        core_numbers = {str(n).lstrip("0") for n in manifest.get("core_numbers", [])}
+
+        def _is_core(pdata: dict) -> bool:
+            full_name = f"{pdata['first']} {pdata['last']}".strip()
+            norm = _norm_name(full_name)
+            if norm in alias_map:
+                norm = alias_map[norm]
+            number = str(pdata.get("number", "")).lstrip("0")
+            if norm in borrowed_names:
+                return False
+            if core_names and norm in core_names:
+                return True
+            if core_numbers and number in core_numbers:
+                return True
+            if core_names:
+                return False
+            return True
 
         # Tag core/non-core and sort (keep ALL players for lineup management)
         roster = []
         for canon, pdata in players.items():
             full_name = f"{pdata['first']} {pdata['last']}".strip()
-            pdata["core"] = (not core_names) or (full_name.lower() in core_names)
-            if not pdata["core"]:
+            pdata["core"] = _is_core(pdata)
+            pdata["borrowed"] = not pdata["core"]
+            if pdata["borrowed"]:
                 print(f"[GC] Non-core player tagged: {full_name}")
             roster.append(pdata)
 
@@ -444,17 +625,18 @@ class GameChangerScraper:
             "team_name": self.team_name,
             "league": "PCLL Majors",
             "season": "Spring 2026",
-            "gc_team_url": GC_STATS_URL,
-            "gc_team_id": GC_TEAM_ID,
+            "gc_team_url": self.stats_url,
+            "gc_team_id": self.team_id,
+            "gc_season_slug": self.season_slug,
             "last_updated": datetime.now().isoformat(),
-            "record": "0-2",
+            "record": record,
             "roster": roster,
             "team_totals": team_totals,
         }
 
         # Save
-        SHARKS_DIR.mkdir(parents=True, exist_ok=True)
-        output = SHARKS_DIR / "team.json"
+        self.out_dir.mkdir(parents=True, exist_ok=True)
+        output = self.out_dir / "team.json"
         with open(output, "w") as f:
             json.dump(team, f, indent=2)
         print(f"[GC] ✅ Team data saved to {output} ({len(roster)} players, {len(STAT_VIEWS)} stat categories)")
@@ -480,7 +662,23 @@ def run():
         print("[GC] Run: pip install playwright && playwright install chromium")
         return
 
-    scraper = GameChangerScraper()
+    parser = argparse.ArgumentParser(description="GameChanger stats scraper")
+    parser.add_argument("--team-id", dest="team_id", default=None, help="GC Team ID")
+    parser.add_argument("--season-slug", dest="season_slug", default=None, help="GC season slug (e.g. 2026-spring-sharks)")
+    parser.add_argument("--team-name", dest="team_name", default=None, help="Team display name")
+    parser.add_argument("--out-dir", dest="out_dir", default=None, help="Output directory for team.json")
+    parser.add_argument("--no-manifest", dest="no_manifest", action="store_true", help="Disable roster manifest core tagging")
+    parser.add_argument("--box-scores", dest="box_scores", action="store_true", help="Also scrape per-game box scores")
+    args = parser.parse_args()
+
+    out_dir = Path(args.out_dir) if args.out_dir else None
+    scraper = GameChangerScraper(
+        team_id=args.team_id,
+        season_slug=args.season_slug,
+        team_name=args.team_name,
+        out_dir=out_dir,
+        use_manifest=not args.no_manifest,
+    )
 
     with sync_playwright() as pw:
         try:
@@ -488,6 +686,9 @@ def run():
             team = scraper.scrape_all_stats()
             if team:
                 print(f"[GC] Successfully scraped {len(team.get('roster', []))} players")
+            if args.box_scores:
+                print("[GC] Scraping per-game box scores...")
+                scraper.scrape_game_box_scores()
         except Exception as e:
             print(f"[GC] Error: {e}")
             import traceback

@@ -3,7 +3,7 @@ import json
 import logging
 import traceback
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from gc_scraper import GameChangerScraper
 from gc_schedule import ScheduleScraper
@@ -64,13 +64,8 @@ def get_next_game_time():
         
     try:
         with open(schedule_file, "r") as f:
-            data = json.load(f)
-            # A robust daemon attempts to parse standard formats or relies on fallback logic
-            # Since HTML DOM parsing is unstructured, we look for structured dates if we had them.
-            # For now, without structured dates in `schedule.json`, we fall back to manual IDLE polling 
-            # unless a manual live override file is created.
-            
-            # FUTURE HARDENING: parse `data.get("games", [])` properly here.
+            json.load(f)
+            # FUTURE HARDENING: parse structured game dates from schedule.json here.
             pass
     except Exception as e:
          logging.error(f"Error reading schedule.json: {e}")
@@ -98,6 +93,13 @@ def run_sync_cycle():
             stat_scraper = GameChangerScraper()
             stat_scraper.login(pw)
             stat_scraper.scrape_team_stats()
+
+        # Merge multi-team stats if available
+        try:
+            from aggregate_team_stats import main as run_merge
+            run_merge()
+        except Exception as e:
+            logging.warning(f"Aggregate merge skipped: {e}")
             
         logging.info("--- Sync Cycle Complete ---")
         return True
@@ -117,11 +119,28 @@ import threading
 app = Flask(__name__)
 CORS(app)
 
-@app.route('/api/availability', methods=['GET'])
-def get_availability():
+@app.route('/api/availability', methods=['GET', 'POST'])
+def handle_availability():
     availability_file = SHARKS_DIR / "availability.json"
+    
+    if request.method == 'POST':
+        data = request.json
+        with open(availability_file, "w") as f:
+            json.dump(data, f, indent=2)
+        
+        logging.info("Availability updated via API. Re-running analytics tools...")
+        try:
+            from lineup_optimizer import run as run_lineup
+            from swot_analyzer import run_sharks_analysis
+            run_lineup()
+            run_sharks_analysis()
+        except Exception as e:
+            logging.error(f"Error re-running tools after update: {e}")
+            
+        return jsonify({"status": "success"})
+    
+    # GET logic
     if not availability_file.exists():
-        # Default to all active
         team_file = SHARKS_DIR / "team.json"
         if not team_file.exists():
             return jsonify({})
@@ -132,24 +151,122 @@ def get_availability():
     with open(availability_file, "r") as f:
         return jsonify(json.load(f))
 
-@app.route('/api/availability', methods=['POST'])
-def update_availability():
-    data = request.json
-    availability_file = SHARKS_DIR / "availability.json"
-    with open(availability_file, "w") as f:
-        json.dump(data, f, indent=2)
-    
-    # Trigger a quick re-run of lineup/swot tools if they were already run
-    logging.info("Availability updated via API. Re-running analytics tools...")
+@app.route('/api/games', methods=['GET'])
+def handle_games():
+    """Return list of parsed scorebook games (index + optional detail)."""
+    games_dir = SHARKS_DIR / "games"
+    index_path = games_dir / "index.json"
+    if not index_path.exists():
+        return jsonify([])
+    with open(index_path) as f:
+        index = json.load(f)
+    # If ?detail=1, attach full player batting data
+    if request.args.get("detail") == "1":
+        for entry in index:
+            game_file = games_dir / f"{entry['game_id']}.json"
+            if game_file.exists():
+                with open(game_file) as gf:
+                    full = json.load(gf)
+                entry["sharks_batting"] = full.get("sharks_batting", [])
+    return jsonify(index)
+
+
+@app.route('/api/games/<game_id>', methods=['GET'])
+def handle_game_detail(game_id):
+    """Return full detail for a single game."""
+    game_file = SHARKS_DIR / "games" / f"{game_id}.json"
+    if not game_file.exists():
+        return jsonify({"error": "Not found"}), 404
+    with open(game_file) as f:
+        return jsonify(json.load(f))
+
+
+@app.route('/api/borrowed-player', methods=['POST'])
+def handle_borrowed_player():
+    """Add a borrowed player to roster_manifest.json, optionally trigger stat scrape."""
+    data = request.json or {}
+    first = (data.get("first") or "").strip()
+    last = (data.get("last") or "").strip()
+    number = str(data.get("number") or "").strip()
+    gc_team_id = (data.get("gc_team_id") or "").strip()
+
+    if not first:
+        return jsonify({"error": "first name required"}), 400
+
+    manifest_file = SHARKS_DIR / "roster_manifest.json"
+    manifest = {}
+    if manifest_file.exists():
+        with open(manifest_file) as f:
+            manifest = json.load(f)
+    if "borrowed_players" not in manifest:
+        manifest["borrowed_players"] = []
+
+    # Avoid duplicates
+    existing = [p for p in manifest["borrowed_players"]
+                if p.get("first", "").lower() == first.lower()
+                and p.get("last", "").lower() == last.lower()]
+    if not existing:
+        entry = {"first": first, "last": last, "number": number, "gc_team_id": gc_team_id}
+        manifest["borrowed_players"].append(entry)
+        with open(manifest_file, "w") as f:
+            json.dump(manifest, f, indent=2)
+        logging.info(f"Added borrowed player: {first} {last} #{number}")
+
+    # Optionally scrape stats from their home team
+    if gc_team_id:
+        try:
+            threading.Thread(
+                target=_scrape_borrowed_player_stats,
+                args=(gc_team_id,),
+                daemon=True
+            ).start()
+        except Exception as e:
+            logging.warning(f"Could not start borrowed player scrape: {e}")
+
+    return jsonify({"status": "added", "player": f"{first} {last}"})
+
+
+def _scrape_borrowed_player_stats(gc_team_id: str):
+    """Background task: scrape a borrowed player's home team stats."""
     try:
+        from playwright.sync_api import sync_playwright
+        from gc_scraper import GameChangerScraper
+        from aggregate_team_stats import main as run_merge
+        with sync_playwright() as pw:
+            scraper = GameChangerScraper(team_id=gc_team_id)
+            scraper.login(pw)
+            scraper.scrape_all_stats()
+            scraper.close()
+        run_merge()
         from lineup_optimizer import run as run_lineup
         from swot_analyzer import run_sharks_analysis
         run_lineup()
         run_sharks_analysis()
+        logging.info(f"Borrowed player stats scraped for team {gc_team_id}")
     except Exception as e:
-        logging.error(f"Error re-running tools after update: {e}")
-        
-    return jsonify({"status": "success"})
+        logging.error(f"Error scraping borrowed player stats: {e}")
+
+
+@app.route('/api/regenerate-lineups', methods=['POST'])
+def handle_regenerate_lineups():
+    """Regenerate lineups (and optionally SWOT) on demand."""
+    try:
+        from lineup_optimizer import run as run_lineup
+        run_lineup()
+        lineups_file = SHARKS_DIR / "lineups.json"
+        lineups = {}
+        if lineups_file.exists():
+            with open(lineups_file) as f:
+                lineups = json.load(f)
+        # Optionally regenerate SWOT too
+        if request.json and request.json.get("swot"):
+            from swot_analyzer import run_sharks_analysis
+            run_sharks_analysis()
+        return jsonify({"status": "ok", "lineups": lineups})
+    except Exception as e:
+        logging.error(f"Regenerate lineups error: {e}")
+        return jsonify({"error": str(e)}), 500
+
 
 def run_api():
     logging.info("Starting API server on port 5000...")
@@ -164,6 +281,13 @@ def main():
     logging.info(" SHARKS REAL-TIME SYNC DAEMON STARTED ")
     logging.info("======================================")
     
+    # Parse any scorebook PDFs on startup
+    try:
+        from parse_scorebook_pdf import run as parse_pdfs
+        parse_pdfs()
+    except Exception as e:
+        logging.warning(f"Scorebook PDF parse skipped: {e}")
+
     # Start API server in a separate thread
     api_thread = threading.Thread(target=run_api, daemon=True)
     api_thread.start()
@@ -171,7 +295,6 @@ def main():
     consecutive_errors = 0
     
     while True:
-        # ... (rest of loop)
         try:
             # Determine Polling State
             is_live_forced = check_live_override()

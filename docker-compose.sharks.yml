@@ -38,6 +38,7 @@ services:
       - ./logs:/app/logs
       - ./.env:/app/.env:ro
       - ./tools:/app/tools:ro
+      - ./Scorebooks:/app/Scorebooks:ro
     networks:
       - sharks_net
 
