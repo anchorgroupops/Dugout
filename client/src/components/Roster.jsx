@@ -219,7 +219,7 @@ const Roster = ({ team, availability, onAvailabilityChange }) => {
                 opacity: isActive ? 1 : 0.6,
                 filter: isActive ? 'none' : 'grayscale(0.5)',
                 borderLeft: !isActive ? '4px solid #666' : isSub ? '4px solid rgba(63, 143, 136, 0.42)' : '4px solid var(--primary-color)',
-                background: isSub && isActive ? 'rgba(255,165,0,0.03)' : undefined
+                background: isSub && isActive ? 'rgba(63, 143, 136, 0.06)' : undefined
               }}
               onClick={() => setExpandedPlayer(isExpanded ? null : `${player.number}-${player.last}`)}
             >
