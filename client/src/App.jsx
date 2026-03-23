@@ -11,6 +11,9 @@ import Practice from './components/Practice';
 
 function App() {
   const [currentView, setCurrentView] = useState('roster');
+  const [isMobile, setIsMobile] = useState(
+    typeof window !== 'undefined' ? window.innerWidth <= 768 : false
+  );
   const [voiceLoading, setVoiceLoading] = useState(false);
   const [voiceError, setVoiceError] = useState('');
   const [data, setData] = useState({
@@ -61,6 +64,12 @@ function App() {
     
     return () => clearInterval(intervalId);
   }, [fetchData]);
+
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth <= 768);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -137,33 +146,37 @@ function App() {
         <Roster
           team={data.team}
           availability={data.availability}
+          isMobile={isMobile}
           onAvailabilityChange={(newAvail) => setData(prev => ({ ...prev, availability: newAvail }))}
         />
       );
-      case 'swot': return <Swot swotData={data.swot} roster={data.team?.roster} schedule={data.schedule} />;
+      case 'swot': return <Swot swotData={data.swot} roster={data.team?.roster} schedule={data.schedule} isMobile={isMobile} />;
       case 'lineups': return (
         <Lineup
           team={data.team}
           lineupsData={data.lineups}
           availability={data.availability}
           schedule={data.schedule}
+          isMobile={isMobile}
           onAvailabilityChange={(newAvail) => setData(prev => ({ ...prev, availability: newAvail }))}
           onDataRefresh={fetchData}
           onRegenerate={(newLineups) => setData(prev => ({ ...prev, lineups: newLineups }))}
         />
       );
-      case 'games': return <Games gamesData={data.games} schedule={data.schedule} />;
-      case 'league': return <League />;
+      case 'games': return <Games gamesData={data.games} schedule={data.schedule} isMobile={isMobile} />;
+      case 'league': return <League isMobile={isMobile} />;
       case 'practice': return (
         <Practice
           team={data.team}
           schedule={data.schedule}
+          isMobile={isMobile}
         />
       );
       default: return (
         <Roster
           team={data.team}
           availability={data.availability}
+          isMobile={isMobile}
           onAvailabilityChange={(newAvail) => setData(prev => ({ ...prev, availability: newAvail }))}
         />
       );
@@ -178,31 +191,53 @@ function App() {
 
   return (
     <>
-      <nav className="navbar">
+      <nav className={`navbar ${isMobile ? 'navbar-mobile' : ''}`}>
         <div className="brand">
           <img src="/sharks-logo-round.png" alt="Sharks" className="logo-avatar" />
           The Sharks
         </div>
-        <div className="nav-links">
-          {navItems.map(item => (
-            <button 
-              key={item.id}
-              className={`nav-btn ${currentView === item.id ? 'active' : ''}`}
-              onClick={() => setCurrentView(item.id)}
+        {!isMobile ? (
+          <div className="nav-links">
+            {navItems.map(item => (
+              <button
+                key={item.id}
+                className={`nav-btn ${currentView === item.id ? 'active' : ''}`}
+                onClick={() => setCurrentView(item.id)}
+              >
+                {item.icon}
+                {item.label}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="mobile-tab-select-wrap">
+            <label htmlFor="mobile-tab-select" className="mobile-tab-label">View</label>
+            <select
+              id="mobile-tab-select"
+              className="mobile-tab-select"
+              value={currentView}
+              onChange={(e) => setCurrentView(e.target.value)}
             >
-              {item.icon}
-              {item.label}
-            </button>
-          ))}
-        </div>
+              {navItems.map(item => (
+                <option key={item.id} value={item.id}>{item.label}</option>
+              ))}
+            </select>
+          </div>
+        )}
       </nav>
       
       <main className="animate-fade-in">
-        <div style={{ marginBottom: '2rem' }}>
-          <h1 style={{ fontSize: 'clamp(1.6rem, 5.5vw, 2.5rem)', marginBottom: '0.5rem', lineHeight: 1.1 }}>{displayTeamName}</h1>
+        <div style={{ marginBottom: isMobile ? '1rem' : '2rem' }}>
+          <h1 style={{ fontSize: isMobile ? '1.45rem' : 'clamp(1.6rem, 5.5vw, 2.5rem)', marginBottom: '0.4rem', lineHeight: 1.1 }}>
+            {displayTeamName}
+          </h1>
           <div className="hero-meta-row">
-            <p style={{ color: 'var(--text-muted)', fontSize: '1.1rem' }}>
-              {data.team ? `${data.team.league} • Last Updated: ${formatDateTime(data.team.last_updated)}` : 'Loading...'}
+            <p style={{ color: 'var(--text-muted)', fontSize: isMobile ? '0.86rem' : '1.1rem' }}>
+              {data.team
+                ? (isMobile
+                  ? `Updated ${formatDateTime(data.team.last_updated)}`
+                  : `${data.team.league} • Last Updated: ${formatDateTime(data.team.last_updated)}`)
+                : 'Loading...'}
             </p>
             <button
               className="voice-btn"
