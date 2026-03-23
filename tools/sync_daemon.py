@@ -689,8 +689,11 @@ def run_sync_cycle():
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import threading
+from werkzeug.exceptions import BadRequest, RequestEntityTooLarge, HTTPException
 
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = MAX_JSON_BODY_BYTES
+app.config["JSONIFY_PRETTYPRINT_REGULAR"] = False
 CORS(app, origins=CORS_ORIGINS)
 _MUTATE_RATE_LOCK = threading.Lock()
 
@@ -775,8 +778,28 @@ def _security_after_request(response):
     for key, value in _API_SECURITY_HEADERS.items():
         response.headers.setdefault(key, value)
     if request.path.startswith("/api/"):
+        response.headers.setdefault("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'")
         response.headers.setdefault("Cache-Control", "no-store")
+    response.headers.pop("Server", None)
     return response
+
+
+@app.errorhandler(RequestEntityTooLarge)
+def _handle_too_large(_exc):
+    return jsonify({"error": "payload_too_large", "max_bytes": MAX_JSON_BODY_BYTES}), 413
+
+
+@app.errorhandler(BadRequest)
+def _handle_bad_request(_exc):
+    return jsonify({"error": "bad_request"}), 400
+
+
+@app.errorhandler(Exception)
+def _handle_unexpected_error(exc):
+    if isinstance(exc, HTTPException):
+        return exc
+    logging.exception("[API] Unhandled exception: %s", exc)
+    return jsonify({"error": "internal_error"}), 500
 
 
 # ---------------------------------------------------------
@@ -892,7 +915,9 @@ def handle_availability():
         blocked = _guard_mutating_request()
         if blocked:
             return blocked
-        data = request.json
+        data = request.get_json(silent=True) or {}
+        if not isinstance(data, dict):
+            return jsonify({"error": "invalid_json_object"}), 400
 
         # Track sub activations in sub_tracker
         old_avail = {}
@@ -1369,7 +1394,9 @@ def handle_borrowed_player():
     blocked = _guard_mutating_request()
     if blocked:
         return blocked
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "invalid_json_object"}), 400
     first = (data.get("first") or "").strip()
     last = (data.get("last") or "").strip()
     number = str(data.get("number") or "").strip()
@@ -1474,6 +1501,9 @@ def handle_regenerate_lineups():
         blocked = _guard_mutating_request()
         if blocked:
             return blocked
+        data = request.get_json(silent=True) or {}
+        if not isinstance(data, dict):
+            return jsonify({"error": "invalid_json_object"}), 400
         from lineup_optimizer import run as run_lineup
         run_lineup()
         lineups_file = SHARKS_DIR / "lineups.json"
@@ -1482,7 +1512,7 @@ def handle_regenerate_lineups():
             with open(lineups_file) as f:
                 lineups = json.load(f)
         # Optionally regenerate SWOT too
-        if request.json and request.json.get("swot"):
+        if data.get("swot"):
             from swot_analyzer import run_sharks_analysis
             run_sharks_analysis()
         return jsonify({"status": "ok", "lineups": lineups})

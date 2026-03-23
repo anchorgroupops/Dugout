@@ -45,6 +45,9 @@ def run_opcheck(base_url: str, include_burst: bool = True) -> dict:
     l = sum(1 for g in games if str(g.get("result", "")).upper() == "L")
     sharks_wl = f"{w}-{l}"
 
+    avail_r, avail = _req_json(s, f"{base}/api/availability")
+    add("api_availability_status", avail_r.status_code == 200 and isinstance(avail, dict), f"status={avail_r.status_code}")
+
     standings_r, standings = _req_json(s, f"{base}/api/standings")
     add("api_standings_status", standings_r.status_code == 200, f"status={standings_r.status_code}")
     sharks_row = None
@@ -110,6 +113,7 @@ def run_opcheck(base_url: str, include_burst: bool = True) -> dict:
         "cross-origin-resource-policy",
         "cross-origin-opener-policy",
         "x-permitted-cross-domain-policies",
+        "strict-transport-security",
     ]
     missing = [h for h in required_headers if h not in headers]
     add("security_headers", len(missing) == 0, f"missing={missing}")
