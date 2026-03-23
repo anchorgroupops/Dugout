@@ -800,6 +800,33 @@ _API_SECURITY_HEADERS = {
     "X-Permitted-Cross-Domain-Policies": "none",
 }
 
+PRACTICE_NEED_DRILLS = {
+    "plate_discipline": [
+        {"name": "Two-Strike Battle Rounds", "duration_min": 15, "goal": "Reduce chase + strikeout rate under pressure."},
+        {"name": "Zone Recognition Front Toss", "duration_min": 12, "goal": "Improve swing decisions and walk quality."},
+    ],
+    "contact_on_base": [
+        {"name": "Short-Bat Contact Circuit", "duration_min": 15, "goal": "Increase barrel control and line-drive contact."},
+        {"name": "QAB Challenge (team)", "duration_min": 12, "goal": "Raise quality-at-bat rate and OBP."},
+    ],
+    "slugging_power": [
+        {"name": "Gap-to-Gap Tee Progression", "duration_min": 15, "goal": "Build extra-base contact mechanics."},
+        {"name": "Launch-Point Soft Toss", "duration_min": 12, "goal": "Improve damage on hittable pitches."},
+    ],
+    "defense_reliability": [
+        {"name": "Rapid Fire Ground Ball Transfer", "duration_min": 15, "goal": "Reduce clean-handling and throw errors."},
+        {"name": "Communication Fly Ball Grid", "duration_min": 12, "goal": "Improve first-step reads and calls."},
+    ],
+    "pitch_command": [
+        {"name": "3-Spot Command Ladder", "duration_min": 15, "goal": "Lower BB/IP and improve first-pitch strike quality."},
+        {"name": "Pressure Count Bullpen", "duration_min": 12, "goal": "Execute in hitter counts and two-strike counts."},
+    ],
+    "baserunning_iq": [
+        {"name": "Jump + Read Leads", "duration_min": 12, "goal": "Improve first-step timing and steal decisions."},
+        {"name": "First-to-Third Decisions", "duration_min": 12, "goal": "Better round-and-read choices at game speed."},
+    ],
+}
+
 
 def _normalized_request_host() -> str:
     host = (request.headers.get("X-Forwarded-Host") or request.host or "").split(",")[0].strip().lower()
@@ -1555,6 +1582,152 @@ def _clean_opponent_name(name: str) -> str:
     return name.strip()
 
 
+def _all_roster_names(team: dict) -> list[str]:
+    names = []
+    for p in team.get("roster", []):
+        name = (p.get("name") or f"{p.get('first','')} {p.get('last','')}").strip()
+        if name:
+            names.append(name)
+    return names
+
+
+def _load_practice_rsvp_defaults(team: dict) -> tuple[list[str], str, dict]:
+    """Find default selected practice players.
+    Priority: practice_rsvp.json -> availability.json -> full roster."""
+    roster_names = _all_roster_names(team)
+    roster_set = {n.lower(): n for n in roster_names}
+    practice_meta = {"date": None, "title": None}
+
+    rsvp_file = SHARKS_DIR / "practice_rsvp.json"
+    if rsvp_file.exists():
+        data = _read_json_file(rsvp_file, default={}) or {}
+        candidates = []
+        if isinstance(data.get("next"), dict):
+            nxt = data.get("next", {})
+            practice_meta["date"] = nxt.get("date")
+            practice_meta["title"] = nxt.get("title")
+            candidates = nxt.get("attending", []) or []
+            if not candidates and isinstance(nxt.get("rsvps"), dict):
+                candidates = [n for n, v in nxt.get("rsvps", {}).items() if bool(v)]
+        elif isinstance(data.get("practices"), list) and data.get("practices"):
+            upcoming = sorted(
+                [p for p in data.get("practices", []) if isinstance(p, dict)],
+                key=lambda x: str(x.get("date", "")),
+            )
+            now = datetime.now(ET).strftime("%Y-%m-%d")
+            pick = next((p for p in upcoming if str(p.get("date", "")) >= now), upcoming[-1] if upcoming else {})
+            practice_meta["date"] = pick.get("date")
+            practice_meta["title"] = pick.get("title")
+            candidates = pick.get("attending", []) or []
+            if not candidates and isinstance(pick.get("rsvps"), dict):
+                candidates = [n for n, v in pick.get("rsvps", {}).items() if bool(v)]
+
+        selected = []
+        for raw in candidates:
+            key = str(raw).strip().lower()
+            if key in roster_set:
+                selected.append(roster_set[key])
+        if selected:
+            return sorted(set(selected)), "practice_rsvp", practice_meta
+
+    availability_file = SHARKS_DIR / "availability.json"
+    availability = _read_json_file(availability_file, default={}) or {}
+    if isinstance(availability, dict) and availability:
+        selected = []
+        for name, state in availability.items():
+            if bool(state):
+                key = str(name).strip().lower()
+                if key in roster_set:
+                    selected.append(roster_set[key])
+        if selected:
+            return sorted(set(selected)), "availability", practice_meta
+
+    return sorted(roster_names), "roster_default", practice_meta
+
+
+def _calc_player_practice_profile(player: dict) -> dict:
+    batting = normalize_batting_row(player.get("batting", player))
+    pitching = normalize_pitching_row(player.get("pitching", player))
+    fielding = normalize_fielding_row(player.get("fielding", player))
+    ab = batting.get("ab", 0)
+    pa = batting.get("pa", 0)
+    h = batting.get("h", 0)
+    bb = batting.get("bb", 0)
+    hbp = batting.get("hbp", 0)
+    so = batting.get("so", 0)
+    sb = batting.get("sb", 0)
+    r = batting.get("r", 0)
+    obp = batting.get("obp", 0.0)
+    slg = batting.get("slg", 0.0)
+    k_rate = (so / pa) if pa > 0 else 0.0
+    bb_rate = (bb / pa) if pa > 0 else 0.0
+    contact_rate = (h / ab) if ab > 0 else 0.0
+    ip = pitching.get("ip", 0.0)
+    bb_per_ip = (pitching.get("bb", 0) / ip) if ip > 0 else 0.0
+    err = fielding.get("e", 0)
+    fpct = fielding.get("fpct", 0.0)
+    return {
+        "pa": pa, "ab": ab, "h": h, "bb": bb, "hbp": hbp, "so": so, "sb": sb, "r": r,
+        "obp": obp, "slg": slg, "k_rate": k_rate, "bb_rate": bb_rate, "contact_rate": contact_rate,
+        "ip": ip, "bb_per_ip": bb_per_ip, "errors": err, "fpct": fpct,
+    }
+
+
+def _build_practice_needs(team: dict, selected_names: list[str]) -> list[dict]:
+    selected_set = {n.lower() for n in selected_names}
+    players = []
+    for p in team.get("roster", []):
+        name = (p.get("name") or f"{p.get('first','')} {p.get('last','')}").strip()
+        if not name:
+            continue
+        if selected_set and name.lower() not in selected_set:
+            continue
+        prof = _calc_player_practice_profile(p)
+        players.append({"name": name, "number": p.get("number", ""), "profile": prof})
+
+    if not players:
+        return []
+
+    def _top(items):
+        return [f"#{p['number']} {p['name']}".strip() for p in items[:5]]
+
+    needs = []
+    plate = sorted([p for p in players if p["profile"]["pa"] >= 4 and p["profile"]["k_rate"] >= 0.33], key=lambda x: x["profile"]["k_rate"], reverse=True)
+    if plate:
+        score = round(sum((p["profile"]["k_rate"] - 0.33) * 100 for p in plate), 1)
+        needs.append({"key": "plate_discipline", "title": "Plate Discipline & Two-Strike Plan", "score": score, "focus_players": _top(plate), "why": "Strikeout pressure is limiting run creation.", "drills": PRACTICE_NEED_DRILLS["plate_discipline"]})
+
+    contact = sorted([p for p in players if p["profile"]["pa"] >= 4 and p["profile"]["obp"] < 0.34], key=lambda x: x["profile"]["obp"])
+    if contact:
+        score = round(sum((0.34 - p["profile"]["obp"]) * 100 for p in contact), 1)
+        needs.append({"key": "contact_on_base", "title": "On-Base Contact Quality", "score": score, "focus_players": _top(contact), "why": "Low OBP group needs more quality at-bats.", "drills": PRACTICE_NEED_DRILLS["contact_on_base"]})
+
+    power = sorted([p for p in players if p["profile"]["pa"] >= 4 and p["profile"]["slg"] < 0.30], key=lambda x: x["profile"]["slg"])
+    if power:
+        score = round(sum((0.30 - p["profile"]["slg"]) * 100 for p in power), 1)
+        needs.append({"key": "slugging_power", "title": "Gap Power Development", "score": score, "focus_players": _top(power), "why": "Need more extra-base impact from hittable pitches.", "drills": PRACTICE_NEED_DRILLS["slugging_power"]})
+
+    defense = sorted([p for p in players if p["profile"]["errors"] > 0 or (p["profile"]["fpct"] > 0 and p["profile"]["fpct"] < 0.90)], key=lambda x: (x["profile"]["errors"], 1 - x["profile"]["fpct"]), reverse=True)
+    if defense:
+        score = round(sum((p["profile"]["errors"] * 8) + (max(0.0, 0.90 - p["profile"]["fpct"]) * 100) for p in defense), 1)
+        needs.append({"key": "defense_reliability", "title": "Defensive Reliability", "score": score, "focus_players": _top(defense), "why": "Errors and conversion consistency are costing outs.", "drills": PRACTICE_NEED_DRILLS["defense_reliability"]})
+
+    pitchers = sorted([p for p in players if p["profile"]["ip"] >= 0.7 and p["profile"]["bb_per_ip"] >= 1.0], key=lambda x: x["profile"]["bb_per_ip"], reverse=True)
+    if pitchers:
+        score = round(sum((p["profile"]["bb_per_ip"] - 1.0) * 25 for p in pitchers), 1)
+        needs.append({"key": "pitch_command", "title": "Pitch Command", "score": score, "focus_players": _top(pitchers), "why": "Walk rate is elevating pitch count and traffic.", "drills": PRACTICE_NEED_DRILLS["pitch_command"]})
+
+    baserun = sorted([p for p in players if p["profile"]["pa"] >= 4 and p["profile"]["sb"] == 0 and p["profile"]["obp"] >= 0.33], key=lambda x: x["profile"]["obp"], reverse=True)
+    if baserun:
+        score = round(sum((p["profile"]["obp"] - 0.33) * 60 for p in baserun), 1)
+        needs.append({"key": "baserunning_iq", "title": "Baserunning Decision Speed", "score": score, "focus_players": _top(baserun), "why": "On-base runners can convert more pressure with better reads.", "drills": PRACTICE_NEED_DRILLS["baserunning_iq"]})
+
+    needs.sort(key=lambda x: x["score"], reverse=True)
+    for idx, item in enumerate(needs, start=1):
+        item["priority"] = idx
+    return needs
+
+
 @app.route('/api/schedule', methods=['GET'])
 def handle_schedule():
     """Return upcoming and past games from schedule_manual.json."""
@@ -1579,6 +1752,72 @@ def handle_opponent_discovery():
         return jsonify({"generated_at": None, "teams": [], "missing_schedule_opponents": []})
     data = _read_json_file(artifact_file, default={}) or {}
     return jsonify(data)
+
+
+@app.route('/api/practice-insights', methods=['GET', 'POST'])
+def handle_practice_insights():
+    """Build tailored practice priorities from current team stats."""
+    team_file = SHARKS_DIR / "team_enriched.json"
+    if not team_file.exists():
+        team_file = SHARKS_DIR / ("team_merged.json" if (SHARKS_DIR / "team_merged.json").exists() else "team.json")
+    team = _read_json_file(team_file, default={}) or {}
+    if not isinstance(team, dict):
+        return jsonify({"error": "team_data_unavailable"}), 503
+
+    _enrich_team_with_app_stats(team)
+    _merge_team_with_scorebook_stats(team)
+    team["team_name"] = _canonical_team_name(team.get("team_name", "The Sharks"), "sharks")
+
+    default_players, default_source, practice_meta = _load_practice_rsvp_defaults(team)
+
+    selected_names = []
+    if request.method == "POST":
+        body = request.get_json(silent=True) or {}
+        selected_names = [str(n).strip() for n in (body.get("players") or []) if str(n).strip()]
+    else:
+        csv = (request.args.get("players") or "").strip()
+        if csv:
+            selected_names = [p.strip() for p in csv.split(",") if p.strip()]
+
+    if not selected_names:
+        selected_names = default_players
+
+    needs = _build_practice_needs(team, selected_names)
+    if not needs:
+        needs = [{
+            "key": "general_fundamentals",
+            "title": "General Fundamentals",
+            "priority": 1,
+            "score": 1.0,
+            "focus_players": selected_names[:5],
+            "why": "Not enough player sample for stat-targeted specialization yet.",
+            "drills": [
+                {"name": "Throw-Catch-Footwork Circuit", "duration_min": 15, "goal": "Improve transfer speed and receiving mechanics."},
+                {"name": "Contact + Baserun Combo", "duration_min": 15, "goal": "Build consistent bat-to-ball and first-step aggression."},
+            ],
+        }]
+
+    recommended_plan = []
+    for need in needs[:3]:
+        for drill in need.get("drills", [])[:2]:
+            recommended_plan.append({
+                "need": need["title"],
+                "drill": drill["name"],
+                "duration_min": drill["duration_min"],
+                "goal": drill["goal"],
+                "focus_players": need.get("focus_players", []),
+            })
+
+    return jsonify({
+        "generated_at": datetime.now(ET).isoformat(),
+        "team_name": team.get("team_name", "The Sharks"),
+        "default_player_source": default_source,
+        "practice_meta": practice_meta,
+        "selected_players": selected_names,
+        "available_players": _all_roster_names(team),
+        "needs": needs,
+        "recommended_plan": recommended_plan,
+    })
 
 
 @app.route('/api/stats-db/status', methods=['GET'])

@@ -157,6 +157,19 @@ def run_opcheck(base_url: str, include_burst: bool = True) -> dict:
         f"status={db_r.status_code} snapshots={None if not isinstance(db, dict) else db.get('snapshot_count')} latest={None if not isinstance(db, dict) else db.get('latest')}",
     )
 
+    practice_r, practice = _req_json(s, f"{base}/api/practice-insights")
+    practice_ok = (
+        practice_r.status_code == 200
+        and isinstance(practice, dict)
+        and isinstance(practice.get("needs"), list)
+        and isinstance(practice.get("selected_players"), list)
+    )
+    add(
+        "practice_insights",
+        practice_ok,
+        f"status={practice_r.status_code} needs={len(practice.get('needs', [])) if isinstance(practice, dict) else 'n/a'} selected={len(practice.get('selected_players', [])) if isinstance(practice, dict) else 'n/a'} source={practice.get('default_player_source') if isinstance(practice, dict) else 'n/a'}",
+    )
+
     # Security headers and method controls
     hdr_r = s.get(f"{base}/api/team", timeout=30)
     headers = {k.lower(): v for k, v in hdr_r.headers.items()}

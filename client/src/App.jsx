@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Users, Activity, ListOrdered, Settings2, Calendar, Trophy } from 'lucide-react';
+import { Users, Activity, ListOrdered, Settings2, Calendar, Trophy, Dumbbell } from 'lucide-react';
 import { formatDateTime } from './utils/formatDate';
 import Roster from './components/Roster';
 import Swot from './components/Swot';
@@ -7,6 +7,7 @@ import Lineup from './components/Lineup';
 import Games from './components/Games';
 import RosterManager from './components/RosterManager';
 import League from './components/League';
+import Practice from './components/Practice';
 
 
 function App() {
@@ -63,6 +64,7 @@ function App() {
     { id: 'lineups', label: 'Lineups', icon: <ListOrdered size={18} /> },
     { id: 'games', label: 'Games', icon: <Calendar size={18} /> },
     { id: 'league', label: 'League', icon: <Trophy size={18} /> },
+    { id: 'practice', label: 'Practice', icon: <Dumbbell size={18} /> },
     { id: 'manage', label: 'Manage', icon: <Settings2 size={18} /> }
   ];
 
@@ -97,6 +99,12 @@ function App() {
       );
       case 'games': return <Games gamesData={data.games} schedule={data.schedule} />;
       case 'league': return <League />;
+      case 'practice': return (
+        <Practice
+          team={data.team}
+          schedule={data.schedule}
+        />
+      );
       case 'manage': return (
         <RosterManager
           team={data.team}
