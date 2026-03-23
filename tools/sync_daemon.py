@@ -157,7 +157,7 @@ def _is_core_player(name):
 
 
 def auto_deactivate_subs():
-    \"\"\"After a game day, deactivate all non-core players and record in sub_tracker.\"\"\"
+    """After a game day, deactivate all non-core players and record in sub_tracker."""
     schedule_file = SHARKS_DIR / "schedule_manual.json"
     availability_file = SHARKS_DIR / "availability.json"
 
