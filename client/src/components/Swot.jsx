@@ -107,10 +107,14 @@ const MatchupPanel = ({ defaultOpponent }) => {
         <div>
           {/* Recommendation banner */}
           <div style={{
-            padding: '0.75rem 1rem', borderRadius: '8px', marginBottom: '1rem',
-            background: 'rgba(0,210,255,0.06)', border: '1px solid rgba(0,210,255,0.15)',
-            fontSize: '0.9rem', fontWeight: '600', color: 'var(--primary-color)'
+            padding: '0.75rem 1rem', borderRadius: '8px', marginBottom: matchup.empty ? '0' : '1rem',
+            background: matchup.empty ? 'rgba(4,101,104,0.18)' : 'rgba(0,210,255,0.06)',
+            border: `1px solid ${matchup.empty ? 'rgba(130,203,195,0.5)' : 'rgba(0,210,255,0.15)'}`,
+            fontSize: '0.9rem', fontWeight: '600',
+            color: matchup.empty ? '#82CBC3' : 'var(--primary-color)',
+            display: 'flex', alignItems: 'center', gap: '0.6rem'
           }}>
+            {matchup.empty && <AlertTriangle size={16} color="#82CBC3" style={{ flexShrink: 0 }} />}
             {matchup.recommendation}
           </div>
 
@@ -179,9 +183,15 @@ const MatchupPanel = ({ defaultOpponent }) => {
                   </div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
                     {[...matchup.their_roster].sort((a,b) => {
-                      const nameA = (a.name || `${a.first || ''} ${a.last || ''}`).trim().toLowerCase();
-                      const nameB = (b.name || `${b.first || ''} ${b.last || ''}`).trim().toLowerCase();
-                      return nameA.localeCompare(nameB);
+                      const sortKey = (p) => {
+                        if (p.last) return `${p.last} ${p.first || ''}`.trim();
+                        const n = (p.name || '').trim();
+                        const parts = n.split(' ');
+                        return parts.length > 1
+                          ? `${parts[parts.length - 1]} ${parts.slice(0, -1).join(' ')}`
+                          : n;
+                      };
+                      return sortKey(a).toLowerCase().localeCompare(sortKey(b).toLowerCase());
                     }).map((p, i) => (
                       <span key={i} style={{
                         background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)',
