@@ -22,6 +22,14 @@ const League = () => {
   opponents.forEach(o => { rosterMap[o.slug] = o; });
 
   const standingRows = standings?.standings || [];
+  const formatTeamName = (team) => {
+    const slug = String(team?.slug || '').toLowerCase();
+    const raw = String(team?.team_name || '').trim();
+    if (slug === 'sharks' || raw.toLowerCase() === 'sharks' || raw.toLowerCase() === 'the sharks') {
+      return 'The Sharks';
+    }
+    return raw || 'Unknown Team';
+  };
   const sharksRow = standingRows.find(s => s.slug === 'sharks');
   const others = standingRows.filter(s => s.slug !== 'sharks');
 
@@ -70,7 +78,7 @@ const League = () => {
               marginBottom: '0.25rem'
             }}>
               <span style={{ fontWeight: isSharks ? '700' : '500', color: isSharks ? 'var(--primary-color)' : 'var(--text-main)', fontSize: '0.9rem' }}>
-                {isSharks ? '🦈 ' : `${i + 1}. `}{team.team_name}
+                {isSharks ? 'SHARKS ' : `${i + 1}. `}{formatTeamName(team)}
               </span>
               <span style={{ textAlign: 'center', fontWeight: '600', fontSize: '0.9rem' }}>{team.w}-{team.l}</span>
               <span style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>

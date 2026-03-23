@@ -4,8 +4,10 @@ import os
 import logging
 import traceback
 import requests
+import ipaddress
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+from urllib.parse import urlparse
 
 ET = ZoneInfo("America/New_York")
 from pathlib import Path
@@ -61,6 +63,15 @@ CORS_ORIGINS = [
 if not CORS_ORIGINS:
     CORS_ORIGINS = DEFAULT_CORS_ORIGINS
 
+DEFAULT_WRITE_ORIGINS = list(DEFAULT_CORS_ORIGINS)
+WRITE_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv("WRITE_ORIGINS", ",".join(DEFAULT_WRITE_ORIGINS)).split(",")
+    if origin.strip() and origin.strip() != "*"
+]
+if not WRITE_ORIGINS:
+    WRITE_ORIGINS = DEFAULT_WRITE_ORIGINS
+
 # ---------------------------------------------------------
 # LOGGING SETUP (Maximal Hardening)
 # ---------------------------------------------------------
@@ -92,6 +103,75 @@ def send_alert(message: str, level: str = "ERROR"):
             logging.warning(f"Failed to alert n8n. Status: {response.status_code}")
     except Exception as e:
         logging.error(f"Error reaching n8n webhook: {e}")
+
+
+def _canonical_team_name(name: str, slug: str = "") -> str:
+    raw = (name or "").strip()
+    slug_l = (slug or "").strip().lower()
+    if slug_l == "sharks" or raw.lower() in ("sharks", "the sharks"):
+        return "The Sharks"
+    if raw:
+        return raw
+    if slug_l:
+        return slug_l.replace("_", " ").title()
+    return "Unknown"
+
+
+def _parse_record_parts(record: str) -> tuple[int, int, int]:
+    import re
+    m = re.match(r"^\s*(\d+)\s*-\s*(\d+)(?:\s*-\s*(\d+))?\s*$", str(record or "0-0"))
+    if not m:
+        return 0, 0, 0
+    w = int(m.group(1))
+    l = int(m.group(2))
+    t = int(m.group(3) or 0)
+    return w, l, t
+
+
+def _request_origin() -> str:
+    origin = (request.headers.get("Origin") or "").strip()
+    if origin:
+        return origin
+    referer = (request.headers.get("Referer") or "").strip()
+    if referer:
+        parsed = urlparse(referer)
+        if parsed.scheme and parsed.netloc:
+            return f"{parsed.scheme}://{parsed.netloc}"
+    return ""
+
+
+def _client_ip() -> str:
+    xff = (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+    return xff or (request.remote_addr or "")
+
+
+def _is_private_or_loopback(ip_str: str) -> bool:
+    try:
+        ip_obj = ipaddress.ip_address(ip_str)
+        return ip_obj.is_private or ip_obj.is_loopback
+    except Exception:
+        return False
+
+
+def _guard_mutating_request():
+    """Strict origin/content checks for write endpoints.
+    Returns (response, status) tuple on rejection, else None."""
+    if not request.is_json:
+        return jsonify({"error": "json_required"}), 415
+
+    req_origin = _request_origin()
+    if req_origin:
+        if req_origin not in WRITE_ORIGINS:
+            logging.warning(f"[Security] Blocked mutating request from disallowed origin: {req_origin}")
+            return jsonify({"error": "forbidden_origin"}), 403
+        return None
+
+    # Requests without origin/referer are only allowed from private/loopback addresses.
+    ip = _client_ip()
+    if not _is_private_or_loopback(ip):
+        logging.warning(f"[Security] Blocked mutating request with no origin from non-private IP: {ip}")
+        return jsonify({"error": "forbidden"}), 403
+    return None
 
 def _enrich_team_with_app_stats(team_data: dict) -> dict:
     """Apply app_stats.json stats to Sharks roster (batting, pitching, fielding).
@@ -614,6 +694,9 @@ def handle_availability():
     availability_file = SHARKS_DIR / "availability.json"
 
     if request.method == 'POST':
+        blocked = _guard_mutating_request()
+        if blocked:
+            return blocked
         data = request.json
 
         # Track sub activations in sub_tracker
@@ -664,9 +747,9 @@ def handle_availability():
     with open(availability_file, "r") as f:
         return jsonify(json.load(f))
 
-@app.route('/api/games', methods=['GET'])
-def handle_games():
-    """Return parsed scorebook games enriched with W/L from schedule."""
+def _build_games_feed(include_detail: bool = False) -> list[dict]:
+    """Return parsed scorebook games enriched with W/L from schedule.
+    Optionally includes per-player batting detail from game JSON files."""
     import re as _re
     games_dir = SHARKS_DIR / "games"
     index_path = games_dir / "index.json"
@@ -699,8 +782,8 @@ def handle_games():
                 game["score"] = sg.get("score", "")
                 break
 
-    # If ?detail=1, attach full player batting data
-    if request.args.get("detail") == "1":
+    # Optional detail: attach full player batting data
+    if include_detail:
         for entry in pdf_games:
             game_file = games_dir / f"{entry['game_id']}.json"
             if game_file.exists():
@@ -725,6 +808,14 @@ def handle_games():
             })
 
     pdf_games.sort(key=lambda x: x.get("date", ""), reverse=True)
+    return pdf_games
+
+
+@app.route('/api/games', methods=['GET'])
+def handle_games():
+    """Return parsed scorebook games enriched with W/L from schedule."""
+    include_detail = request.args.get("detail") == "1"
+    pdf_games = _build_games_feed(include_detail=include_detail)
     return jsonify(pdf_games)
 
 @app.route('/api/league-players', methods=['GET'])
@@ -773,36 +864,98 @@ def handle_game_detail(game_id):
 @app.route('/api/standings', methods=['GET'])
 def handle_standings():
     """Return PCLL league standings."""
+    league_name = "PCLL Spring '26 Majors Softball"
+    standings: list[dict] = []
+
     standings_file = DATA_DIR / "pcll_standings.json"
     if standings_file.exists():
-        with open(standings_file) as f:
-            return jsonify(json.load(f))
-    # Fallback: build from opponent team.json records
-    opponents_dir = DATA_DIR / "opponents"
-    standings = []
-    if opponents_dir.exists():
-        for team_dir in opponents_dir.iterdir():
-            if team_dir.is_dir():
-                team_file = team_dir / "team.json"
-                if team_file.exists():
-                    try:
-                        with open(team_file) as f:
-                            td = json.load(f)
-                        record = td.get("record", "0-0")
-                        import re
-                        m = re.match(r'(\d+)-(\d+)', record or "0-0")
-                        w, l = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
-                        standings.append({
-                            "slug": team_dir.name,
-                            "team_name": td.get("team_name", team_dir.name),
-                            "record": record,
-                            "w": w, "l": l,
-                            "pct": round(w / (w + l), 3) if (w + l) > 0 else 0.0,
-                        })
-                    except Exception:
-                        pass
+        try:
+            with open(standings_file) as f:
+                payload = json.load(f)
+            league_name = payload.get("league") or league_name
+            for row in payload.get("standings", []):
+                slug = str(row.get("slug", "")).strip().lower()
+                record = str(row.get("record", "")).strip()
+                w = row.get("w")
+                l = row.get("l")
+                t = row.get("t", 0)
+                if w is None or l is None:
+                    rw, rl, rt = _parse_record_parts(record)
+                    w = rw
+                    l = rl
+                    t = rt
+                try:
+                    w = int(w)
+                    l = int(l)
+                    t = int(t)
+                except Exception:
+                    w, l, t = _parse_record_parts(record)
+                gp = w + l + t
+                pct = round(w / gp, 3) if gp > 0 else 0.0
+                standings.append({
+                    "slug": slug or "unknown",
+                    "team_name": _canonical_team_name(row.get("team_name", slug), slug),
+                    "record": f"{w}-{l}" if t == 0 else f"{w}-{l}-{t}",
+                    "w": w,
+                    "l": l,
+                    "t": t,
+                    "pct": pct,
+                })
+        except Exception as e:
+            logging.warning(f"Could not parse standings file: {e}")
+
+    # Fallback: build from opponent team.json records when standings file is absent or empty.
+    if not standings:
+        opponents_dir = DATA_DIR / "opponents"
+        if opponents_dir.exists():
+            for team_dir in opponents_dir.iterdir():
+                if team_dir.is_dir():
+                    team_file = team_dir / "team.json"
+                    if team_file.exists():
+                        try:
+                            with open(team_file) as f:
+                                td = json.load(f)
+                            record = td.get("record", "0-0")
+                            w, l, t = _parse_record_parts(record)
+                            gp = w + l + t
+                            standings.append({
+                                "slug": team_dir.name,
+                                "team_name": _canonical_team_name(td.get("team_name", team_dir.name), team_dir.name),
+                                "record": f"{w}-{l}" if t == 0 else f"{w}-{l}-{t}",
+                                "w": w,
+                                "l": l,
+                                "t": t,
+                                "pct": round(w / gp, 3) if gp > 0 else 0.0,
+                            })
+                        except Exception:
+                            pass
+
+    # Force Sharks row to match Games tab source of truth (same parsed + enriched games feed).
+    sharks_w = sharks_l = sharks_t = 0
+    for g in _build_games_feed(include_detail=False):
+        result = str(g.get("result", "")).strip().upper()
+        if result == "W":
+            sharks_w += 1
+        elif result == "L":
+            sharks_l += 1
+        elif result == "T":
+            sharks_t += 1
+    sharks_gp = sharks_w + sharks_l + sharks_t
+    sharks_pct = round(sharks_w / sharks_gp, 3) if sharks_gp > 0 else 0.0
+    sharks_row = {
+        "slug": "sharks",
+        "team_name": "The Sharks",
+        "record": f"{sharks_w}-{sharks_l}" if sharks_t == 0 else f"{sharks_w}-{sharks_l}-{sharks_t}",
+        "w": sharks_w,
+        "l": sharks_l,
+        "t": sharks_t,
+        "pct": sharks_pct,
+    }
+    standings = [s for s in standings if str(s.get("slug", "")).lower() != "sharks"]
+    standings.append(sharks_row)
+
     standings.sort(key=lambda x: (-x["w"], x["l"]))
-    return jsonify({"league": "PCLL Spring '26 Majors Softball", "standings": standings})
+    return jsonify({"league": league_name, "standings": standings})
 
 
 @app.route('/api/opponents', methods=['GET'])
@@ -820,7 +973,7 @@ def handle_opponents():
                             td = json.load(f)
                         teams.append({
                             "slug": team_dir.name,
-                            "team_name": td.get("team_name", team_dir.name),
+                            "team_name": _canonical_team_name(td.get("team_name", team_dir.name), team_dir.name),
                             "record": td.get("record", {}),
                             "roster_size": len(td.get("roster", [])),
                         })
@@ -837,7 +990,9 @@ def handle_opponent_detail(slug):
     if not team_file.exists():
         return jsonify({"error": "Not found"}), 404
     with open(team_file) as f:
-        return jsonify(json.load(f))
+        team = json.load(f)
+    team["team_name"] = _canonical_team_name(team.get("team_name", slug), slug)
+    return jsonify(team)
 
 
 @app.route('/api/matchup/<opponent_slug>', methods=['GET'])
@@ -850,6 +1005,7 @@ def handle_matchup(opponent_slug):
 
     # Enrich Sharks roster with app_stats so matchup uses current season stats
     _enrich_team_with_app_stats(our_team)
+    our_team["team_name"] = _canonical_team_name(our_team.get("team_name", "The Sharks"), "sharks")
 
     opp_dir = DATA_DIR / "opponents" / opponent_slug
     opp_team = load_team(opp_dir)
@@ -861,6 +1017,7 @@ def handle_matchup(opponent_slug):
                 opp_team = json.load(f)
         else:
             return jsonify({"error": f"Opponent '{opponent_slug}' not found"}), 404
+    opp_team["team_name"] = _canonical_team_name(opp_team.get("team_name", opponent_slug), opponent_slug)
 
     # Determine what data source matchup analysis can use for the opponent.
     # Precedence: opponent team feed -> parsed game history -> none.
@@ -974,6 +1131,7 @@ def handle_team():
 
     # Enrich roster with current app_stats.json (always most up-to-date)
     _enrich_team_with_app_stats(team)
+    team["team_name"] = _canonical_team_name(team.get("team_name", "The Sharks"), "sharks")
 
     # Fall back to PDF-aggregated stats for players still missing data
     pdf_stats = {}
@@ -992,6 +1150,9 @@ def handle_team():
 @app.route('/api/borrowed-player', methods=['POST'])
 def handle_borrowed_player():
     """Add a borrowed player to roster_manifest.json, optionally trigger stat scrape."""
+    blocked = _guard_mutating_request()
+    if blocked:
+        return blocked
     data = request.json or {}
     first = (data.get("first") or "").strip()
     last = (data.get("last") or "").strip()
@@ -1085,6 +1246,9 @@ def handle_schedule():
 def handle_regenerate_lineups():
     """Regenerate lineups (and optionally SWOT) on demand."""
     try:
+        blocked = _guard_mutating_request()
+        if blocked:
+            return blocked
         from lineup_optimizer import run as run_lineup
         run_lineup()
         lineups_file = SHARKS_DIR / "lineups.json"

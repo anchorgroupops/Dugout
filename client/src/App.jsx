@@ -115,6 +115,12 @@ function App() {
     }
   };
 
+  const displayTeamName = (() => {
+    const raw = String(data.team?.team_name || 'The Sharks').trim();
+    if (raw.toLowerCase() === 'sharks' || raw.toLowerCase() === 'the sharks') return 'The Sharks';
+    return raw;
+  })();
+
   return (
     <>
       <nav className="navbar">
@@ -138,7 +144,7 @@ function App() {
       
       <main className="animate-fade-in">
         <div style={{ marginBottom: '2rem' }}>
-          <h1 style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>{data.team ? data.team.team_name : 'The Sharks'}</h1>
+          <h1 style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>{displayTeamName}</h1>
           <p style={{ color: 'var(--text-muted)', fontSize: '1.1rem' }}>
             {data.team ? `${data.team.league} • Last Updated: ${formatDateTime(data.team.last_updated)}` : 'Loading...'}
           </p>

@@ -17,6 +17,23 @@ const SwotQuadrant = ({ title, items, color, icon }) => (
   </div>
 );
 
+const PlayerStatChip = ({ label, value }) => (
+  <span style={{
+    display: 'inline-flex',
+    gap: '0.3rem',
+    alignItems: 'center',
+    fontSize: '0.72rem',
+    color: 'var(--text-muted)',
+    border: '1px solid rgba(255,255,255,0.12)',
+    borderRadius: '999px',
+    padding: '2px 8px',
+    background: 'rgba(255,255,255,0.04)'
+  }}>
+    <span style={{ color: 'rgba(255,255,255,0.55)', textTransform: 'uppercase', letterSpacing: '0.35px' }}>{label}</span>
+    <span style={{ color: 'var(--text-main)', fontWeight: '700' }}>{value}</span>
+  </span>
+);
+
 const StatCompare = ({ label, ours, theirs, lowerIsBetter }) => {
   const diff = lowerIsBetter ? theirs - ours : ours - theirs;
   const color = diff > 0 ? 'var(--success)' : diff < 0 ? 'var(--danger)' : 'var(--text-muted)';
@@ -274,7 +291,11 @@ const Swot = ({ swotData, roster, schedule }) => {
       (e.name && e.name.toLowerCase() === `${player.first} ${player.last}`.trim().toLowerCase()) ||
       (e.name && e.name.toLowerCase() === String(player.first || '').toLowerCase())
     );
-    return { ...player, swot: evaluation?.swot || evaluation };
+    return {
+      ...player,
+      swot: evaluation?.swot || evaluation,
+      derivedStats: evaluation?.derived_stats || null
+    };
   }).filter(p => p.swot && p.core !== false)
     .sort((a, b) => {
       const textA = `${a.last || ''} ${a.first || ''}`.trim().toLowerCase();
@@ -328,6 +349,13 @@ const Swot = ({ swotData, roster, schedule }) => {
         {playersWithSwot.map(player => {
           const key = `${player.number}-${player.last}`;
           const isExpanded = expandedPlayer === key;
+          const hitting = player.derivedStats?.hitting || {};
+          const pa = Number(hitting.pa || 0);
+          const avg = Number(hitting.ba || 0).toFixed(3).replace(/^0/, '');
+          const obp = Number(hitting.obp || 0).toFixed(3).replace(/^0/, '');
+          const ops = Number(hitting.ops || 0).toFixed(3).replace(/^0/, '');
+          const kRate = `${Math.round(Number(hitting.k_rate || 0) * 100)}%`;
+          const bbRate = `${Math.round(Number(hitting.bb_rate || 0) * 100)}%`;
           return (
             <div
               key={key}
@@ -340,6 +368,21 @@ const Swot = ({ swotData, roster, schedule }) => {
                   {player.number ? `#${player.number} ` : ''}{player.first} {player.last}
                 </h3>
                 {isExpanded ? <ChevronUp size={18} color="var(--text-muted)" /> : <ChevronDown size={18} color="var(--text-muted)" />}
+              </div>
+
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', marginBottom: '0.9rem' }}>
+                {pa > 0 ? (
+                  <>
+                    <PlayerStatChip label="PA" value={pa} />
+                    <PlayerStatChip label="AVG" value={avg} />
+                    <PlayerStatChip label="OBP" value={obp} />
+                    <PlayerStatChip label="OPS" value={ops} />
+                    <PlayerStatChip label="K%" value={kRate} />
+                    <PlayerStatChip label="BB%" value={bbRate} />
+                  </>
+                ) : (
+                  <PlayerStatChip label="Stats" value="No plate appearances yet" />
+                )}
               </div>
 
               {/* Always show strengths/weaknesses summary */}
