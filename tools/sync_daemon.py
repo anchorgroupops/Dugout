@@ -639,6 +639,19 @@ def _write_pipeline_health_artifact():
     return out
 
 
+def _record_stats_db_snapshot(team_data: dict, source: str = "sync_cycle", notes: str = ""):
+    """Persist a time-series snapshot to the running SQLite stats database."""
+    try:
+        from stats_db import record_sharks_snapshot
+
+        snapshot_id = record_sharks_snapshot(team_data, source=source, notes=notes)
+        logging.info("[DB] Recorded stats snapshot id=%s source=%s", snapshot_id, source)
+        return snapshot_id
+    except Exception as e:
+        logging.warning(f"[DB] Snapshot write skipped: {e}")
+        return None
+
+
 def get_next_game_time():
     """Parse schedule_manual.json to find the nearest upcoming game. Returns datetime or None."""
     schedule_file = SHARKS_DIR / "schedule_manual.json"
@@ -711,6 +724,8 @@ def run_sync_cycle():
         except Exception as e:
             logging.warning(f"Aggregate merge skipped: {e}")
 
+        enriched_team_data = None
+
         # Write team_enriched.json (team_merged + app_stats + scorebook reconciliation)
         try:
             team_file = SHARKS_DIR / ("team_merged.json" if (SHARKS_DIR / "team_merged.json").exists() else "team.json")
@@ -718,6 +733,7 @@ def run_sync_cycle():
                 team_data = json.load(f)
             _enrich_team_with_app_stats(team_data)
             _, reconcile_meta = _merge_team_with_scorebook_stats(team_data)
+            enriched_team_data = team_data
             enriched_file = SHARKS_DIR / "team_enriched.json"
             with open(enriched_file, "w") as f:
                 json.dump(team_data, f, indent=2)
@@ -748,6 +764,10 @@ def run_sync_cycle():
             _write_pipeline_health_artifact()
         except Exception as e:
             logging.warning(f"[Health] pipeline artifact write skipped: {e}")
+
+        # Persist running historical snapshot DB.
+        if isinstance(enriched_team_data, dict):
+            _record_stats_db_snapshot(enriched_team_data, source="sync_cycle")
 
         logging.info("--- Sync Cycle Complete ---")
         return True
@@ -1561,6 +1581,18 @@ def handle_opponent_discovery():
     return jsonify(data)
 
 
+@app.route('/api/stats-db/status', methods=['GET'])
+def handle_stats_db_status():
+    """Return snapshot DB status for operational visibility."""
+    try:
+        from stats_db import get_db_status
+
+        return jsonify(get_db_status())
+    except Exception as e:
+        logging.error(f"[DB] status read failed: {e}")
+        return jsonify({"error": "stats_db_unavailable"}), 503
+
+
 @app.route('/api/regenerate-lineups', methods=['POST'])
 def handle_regenerate_lineups():
     """Regenerate lineups (and optionally SWOT) on demand."""
@@ -1641,6 +1673,20 @@ def main():
         api_thread.start()
     else:
         logging.info("RUN_API_SERVER=0 -> Flask dev API thread disabled (expect Gunicorn service).")
+
+    # Bootstrap a DB snapshot from current enriched/team data on startup.
+    try:
+        bootstrap_file = SHARKS_DIR / "team_enriched.json"
+        if not bootstrap_file.exists():
+            bootstrap_file = SHARKS_DIR / ("team_merged.json" if (SHARKS_DIR / "team_merged.json").exists() else "team.json")
+        if bootstrap_file.exists():
+            with open(bootstrap_file) as f:
+                bootstrap_team = json.load(f)
+            _enrich_team_with_app_stats(bootstrap_team)
+            _merge_team_with_scorebook_stats(bootstrap_team)
+            _record_stats_db_snapshot(bootstrap_team, source="startup_bootstrap")
+    except Exception as e:
+        logging.warning(f"[DB] startup bootstrap snapshot skipped: {e}")
     
     consecutive_errors = 0
     _last_state = "IDLE"
