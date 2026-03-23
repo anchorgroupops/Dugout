@@ -12,8 +12,6 @@ import json
 from pathlib import Path
 from typing import Any, Dict, Iterable
 
-from memory_engine import MemoryEngine
-
 ROOT_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT_DIR / "data"
 SHARKS_DIR = DATA_DIR / "sharks"
@@ -67,6 +65,8 @@ def run(index_name: str, namespace: str, batch_size: int, dry_run: bool = False)
     if dry_run:
         print(f"[INDEX] Dry run: {len(docs)} documents discovered.")
         return len(docs)
+
+    from memory_engine import MemoryEngine
 
     engine = MemoryEngine(index_name=index_name, namespace=namespace)
     total = engine.batch_upsert_documents(docs, batch_size=batch_size)

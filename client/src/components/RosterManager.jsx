@@ -327,7 +327,7 @@ const RosterManager = ({
 
         {/* Sub players */}
         {(subRoster.filter(p => isAvailable(p)).length > 0 || subRoster.filter(p => !isAvailable(p)).length > 0) && (
-          <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid rgba(255,165,0,0.15)' }}>
+          <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid rgba(63, 143, 136, 0.2)' }}>
             
             {/* Active Subs */}
             {subRoster.filter(p => isAvailable(p)).length > 0 && (

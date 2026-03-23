@@ -215,7 +215,7 @@ const Lineup = ({
             return (
               <div key={`${player.number}-${idx}`} style={{
                 display: 'flex', alignItems: 'center', padding: '0.85rem 1rem',
-                background: !avail ? 'rgba(200,50,50,0.08)' : player.borrowed ? 'rgba(255,165,0,0.04)' : 'rgba(0,0,0,0.2)',
+                background: !avail ? 'rgba(200,50,50,0.08)' : player.borrowed ? 'rgba(63, 143, 136, 0.08)' : 'rgba(0,0,0,0.2)',
                 borderRadius: '8px',
                 borderLeft: `4px solid ${!avail ? 'var(--danger)' : player.borrowed ? 'rgba(63, 143, 136, 0.42)' : idx < 4 ? 'var(--primary-color)' : 'var(--surface-border)'}`,
                 opacity: avail ? 1 : 0.65,

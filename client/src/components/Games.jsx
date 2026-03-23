@@ -184,7 +184,7 @@ const ScheduleRow = ({ game }) => {
       display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.6rem 0.75rem',
       borderRadius: '8px', flexWrap: 'wrap',
       background: isNext ? 'rgba(4, 101, 104, 0.08)' : 'rgba(0,0,0,0.15)',
-      border: isNext ? '1px solid rgba(0,210,255,0.2)' : '1px solid transparent',
+      border: isNext ? '1px solid rgba(4, 101, 104, 0.2)' : '1px solid transparent',
     }}>
       <span style={{ minWidth: '110px', fontSize: '0.85rem', color: 'var(--text-muted)' }}>{dateStr}</span>
       <span style={{
