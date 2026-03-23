@@ -35,6 +35,7 @@ def run_opcheck(base_url: str, include_burst: bool = True) -> dict:
     team_r, team = _req_json(s, f"{base}/api/team")
     add("api_team_status", team_r.status_code == 200, f"status={team_r.status_code}")
     roster = (team or {}).get("roster", []) if isinstance(team, dict) else []
+    roster_count = len(roster)
     pa_nonzero = sum(1 for p in roster if (p.get("batting") or {}).get("pa", 0) > 0)
     add("team_batting_nonzero", pa_nonzero > 0, f"roster={len(roster)} pa>0={pa_nonzero}")
 
@@ -84,7 +85,12 @@ def run_opcheck(base_url: str, include_burst: bool = True) -> dict:
     # SWOT + lineups artifacts
     swot_r, swot = _req_json(s, f"{base}/data/sharks/swot_analysis.json")
     analyses = (swot or {}).get("player_analyses", []) if isinstance(swot, dict) else []
-    add("swot_artifact", swot_r.status_code == 200 and len(analyses) > 0, f"status={swot_r.status_code} player_analyses={len(analyses)}")
+    min_expected = max(1, roster_count - 1)
+    add(
+        "swot_artifact",
+        swot_r.status_code == 200 and len(analyses) >= min_expected,
+        f"status={swot_r.status_code} player_analyses={len(analyses)} expected>={min_expected}",
+    )
 
     line_r, lineups = _req_json(s, f"{base}/data/sharks/lineups.json")
     balanced = (((lineups or {}).get("balanced") or {}).get("lineup") or []) if isinstance(lineups, dict) else []

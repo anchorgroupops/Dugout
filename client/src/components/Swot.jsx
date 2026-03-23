@@ -298,7 +298,7 @@ const Swot = ({ swotData, roster, schedule }) => {
       swot: evaluation?.swot || evaluation,
       derivedStats: evaluation?.derived_stats || null
     };
-  }).filter(p => p.swot && p.core !== false)
+  }).filter(p => p.swot)
     .sort((a, b) => {
       const textA = `${a.last || ''} ${a.first || ''}`.trim().toLowerCase();
       const textB = `${b.last || ''} ${b.first || ''}`.trim().toLowerCase();
