@@ -173,6 +173,20 @@ def _guard_mutating_request():
         return jsonify({"error": "forbidden"}), 403
     return None
 
+
+def _read_json_file(path: Path, default=None, retries: int = 3, retry_delay: float = 0.08):
+    """Read JSON with small retries to tolerate concurrent writer truncation windows."""
+    for attempt in range(retries):
+        try:
+            with open(path) as f:
+                return json.load(f)
+        except Exception as e:
+            if attempt == retries - 1:
+                logging.warning(f"JSON read failed for {path}: {e}")
+                return default
+            time.sleep(retry_delay * (attempt + 1))
+    return default
+
 def _enrich_team_with_app_stats(team_data: dict) -> dict:
     """Apply app_stats.json stats to Sharks roster (batting, pitching, fielding).
     Keyed by jersey number. Mutates team_data in place and returns it."""
@@ -757,14 +771,12 @@ def _build_games_feed(include_detail: bool = False) -> list[dict]:
 
     pdf_games = []
     if index_path.exists():
-        with open(index_path) as f:
-            pdf_games = json.load(f)
+        pdf_games = _read_json_file(index_path, default=[]) or []
 
     # Load schedule W/L results
     sched_results = []
     if schedule_file.exists():
-        with open(schedule_file) as f:
-            sched_data = json.load(f)
+        sched_data = _read_json_file(schedule_file, default={}) or {}
         for g in sched_data.get("past", []):
             if g.get("result"):
                 sched_results.append(g)
@@ -787,8 +799,7 @@ def _build_games_feed(include_detail: bool = False) -> list[dict]:
         for entry in pdf_games:
             game_file = games_dir / f"{entry['game_id']}.json"
             if game_file.exists():
-                with open(game_file) as gf:
-                    full = json.load(gf)
+                full = _read_json_file(game_file, default={}) or {}
                 entry["sharks_batting"] = full.get("sharks_batting", [])
 
     # Also surface schedule games with results that have no PDF (schedule-only)
@@ -870,8 +881,7 @@ def handle_standings():
     standings_file = DATA_DIR / "pcll_standings.json"
     if standings_file.exists():
         try:
-            with open(standings_file) as f:
-                payload = json.load(f)
+            payload = _read_json_file(standings_file, default={}) or {}
             league_name = payload.get("league") or league_name
             for row in payload.get("standings", []):
                 slug = str(row.get("slug", "")).strip().lower()
@@ -1126,8 +1136,9 @@ def handle_team():
     if not team_file.exists():
         return jsonify({"error": "No team data found"}), 404
 
-    with open(team_file) as f:
-        team = json.load(f)
+    team = _read_json_file(team_file, default=None)
+    if not isinstance(team, dict):
+        return jsonify({"error": "team_data_unavailable"}), 503
 
     # Enrich roster with current app_stats.json (always most up-to-date)
     _enrich_team_with_app_stats(team)
@@ -1231,8 +1242,7 @@ def handle_schedule():
     schedule_file = SHARKS_DIR / "schedule_manual.json"
     if not schedule_file.exists():
         return jsonify({"upcoming": [], "past": []})
-    with open(schedule_file) as f:
-        data = json.load(f)
+    data = _read_json_file(schedule_file, default={"upcoming": [], "past": []}) or {"upcoming": [], "past": []}
     # Clean opponent names for display
     for section in ("upcoming", "past"):
         for game in data.get(section, []):
