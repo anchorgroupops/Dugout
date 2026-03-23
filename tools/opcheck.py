@@ -144,6 +144,19 @@ def run_opcheck(base_url: str, include_burst: bool = True) -> dict:
         f"status={discovery_r.status_code} teams={len((discovery or {}).get('teams', [])) if isinstance(discovery, dict) else 'n/a'}",
     )
 
+    db_r, db = _req_json(s, f"{base}/api/stats-db/status")
+    db_ok = (
+        db_r.status_code == 200
+        and isinstance(db, dict)
+        and isinstance(db.get("snapshot_count"), int)
+        and db.get("snapshot_count", 0) >= 1
+    )
+    add(
+        "stats_db_status",
+        db_ok,
+        f"status={db_r.status_code} snapshots={None if not isinstance(db, dict) else db.get('snapshot_count')} latest={None if not isinstance(db, dict) else db.get('latest')}",
+    )
+
     # Security headers and method controls
     hdr_r = s.get(f"{base}/api/team", timeout=30)
     headers = {k.lower(): v for k, v in hdr_r.headers.items()}
