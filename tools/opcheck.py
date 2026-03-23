@@ -105,12 +105,35 @@ def run_opcheck(base_url: str, include_burst: bool = True) -> dict:
         "content-security-policy",
         "cross-origin-resource-policy",
         "cross-origin-opener-policy",
+        "x-permitted-cross-domain-policies",
     ]
     missing = [h for h in required_headers if h not in headers]
     add("security_headers", len(missing) == 0, f"missing={missing}")
+    add(
+        "api_cache_control_no_store",
+        "no-store" in (headers.get("cache-control", "").lower()),
+        f"cache_control={headers.get('cache-control', '')}",
+    )
 
     get_mutate = s.get(f"{base}/api/regenerate-lineups", timeout=30)
     add("mutate_method_guard", get_mutate.status_code in (403, 405), f"status={get_mutate.status_code}")
+
+    bad_ct = s.post(
+        f"{base}/api/regenerate-lineups",
+        headers={"Content-Type": "text/plain", "Origin": base},
+        data="{}",
+        timeout=30,
+    )
+    add("mutate_content_type_guard", bad_ct.status_code in (415, 400), f"status={bad_ct.status_code}")
+
+    oversized_payload = {"blob": "x" * 150000}
+    too_large = s.post(
+        f"{base}/api/regenerate-lineups",
+        headers={"Content-Type": "application/json", "Origin": base},
+        json=oversized_payload,
+        timeout=30,
+    )
+    add("mutate_payload_size_guard", too_large.status_code == 413, f"status={too_large.status_code}")
 
     bad_origin = s.post(
         f"{base}/api/regenerate-lineups",

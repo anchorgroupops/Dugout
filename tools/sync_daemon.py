@@ -72,6 +72,40 @@ WRITE_ORIGINS = [
 if not WRITE_ORIGINS:
     WRITE_ORIGINS = DEFAULT_WRITE_ORIGINS
 
+
+def _origin_hostname(origin: str) -> str:
+    try:
+        parsed = urlparse(origin)
+        return (parsed.hostname or "").strip().lower()
+    except Exception:
+        return ""
+
+DEFAULT_ALLOWED_HOSTS = [
+    "sharks.joelycannoli.com",
+    "localhost",
+    "127.0.0.1",
+    "sharks_api",
+    "sharks_dashboard",
+]
+_derived_allowed_hosts = set()
+for _origin in CORS_ORIGINS + WRITE_ORIGINS:
+    _host = _origin_hostname(_origin)
+    if _host:
+        _derived_allowed_hosts.add(_host)
+ALLOWED_HOSTS = {
+    h.strip().lower()
+    for h in os.getenv(
+        "ALLOWED_HOSTS",
+        ",".join(sorted(set(DEFAULT_ALLOWED_HOSTS).union(_derived_allowed_hosts))),
+    ).split(",")
+    if h.strip()
+}
+MAX_JSON_BODY_BYTES = int(os.getenv("MAX_JSON_BODY_BYTES", "131072"))
+MUTATE_RATE_WINDOW_SEC = int(os.getenv("MUTATE_RATE_WINDOW_SEC", "60"))
+MUTATE_RATE_MAX = int(os.getenv("MUTATE_RATE_MAX", "12"))
+_MUTATE_RATE_BUCKETS: dict[str, list[float]] = {}
+MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
 # ---------------------------------------------------------
 # LOGGING SETUP (Maximal Hardening)
 # ---------------------------------------------------------
@@ -658,6 +692,91 @@ import threading
 
 app = Flask(__name__)
 CORS(app, origins=CORS_ORIGINS)
+_MUTATE_RATE_LOCK = threading.Lock()
+
+_API_SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+    "Cross-Origin-Resource-Policy": "same-origin",
+    "Cross-Origin-Opener-Policy": "same-origin",
+    "X-Permitted-Cross-Domain-Policies": "none",
+}
+
+
+def _normalized_request_host() -> str:
+    host = (request.headers.get("X-Forwarded-Host") or request.host or "").split(",")[0].strip().lower()
+    if not host:
+        return ""
+    if host.startswith("["):
+        # IPv6 host format: [::1]:5000
+        closing = host.find("]")
+        return host[1:closing] if closing > 0 else host
+    return host.split(":")[0].strip()
+
+
+def _is_mutating_api_request() -> bool:
+    return request.path.startswith("/api/") and request.method.upper() in MUTATING_METHODS
+
+
+def _guard_mutating_rate_limit():
+    """In-app write throttle as defense-in-depth if edge limits are bypassed.
+    Returns (response, status) tuple when blocked, else None."""
+    if not _is_mutating_api_request():
+        return None
+
+    now_ts = time.time()
+    key = f"{_client_ip()}:{request.path}"
+    window_floor = now_ts - MUTATE_RATE_WINDOW_SEC
+
+    with _MUTATE_RATE_LOCK:
+        bucket = _MUTATE_RATE_BUCKETS.get(key, [])
+        bucket = [ts for ts in bucket if ts >= window_floor]
+        if len(bucket) >= MUTATE_RATE_MAX:
+            retry_after = max(1, int(MUTATE_RATE_WINDOW_SEC - (now_ts - bucket[0])))
+            resp = jsonify({
+                "error": "rate_limited",
+                "scope": "mutating",
+                "window_seconds": MUTATE_RATE_WINDOW_SEC,
+                "max_requests": MUTATE_RATE_MAX,
+            })
+            resp.headers["Retry-After"] = str(retry_after)
+            return resp, 429
+        bucket.append(now_ts)
+        _MUTATE_RATE_BUCKETS[key] = bucket
+
+        # Opportunistic cleanup of stale keys.
+        if len(_MUTATE_RATE_BUCKETS) > 2000:
+            stale_before = now_ts - (MUTATE_RATE_WINDOW_SEC * 2)
+            stale_keys = [k for k, v in _MUTATE_RATE_BUCKETS.items() if not v or v[-1] < stale_before]
+            for stale_key in stale_keys[:500]:
+                _MUTATE_RATE_BUCKETS.pop(stale_key, None)
+    return None
+
+
+@app.before_request
+def _security_before_request():
+    host = _normalized_request_host()
+    if host and ALLOWED_HOSTS and host not in ALLOWED_HOSTS:
+        logging.warning(f"[Security] Blocked request with disallowed host header: {host}")
+        return jsonify({"error": "invalid_host"}), 400
+
+    content_length = request.content_length
+    if content_length is not None and content_length > MAX_JSON_BODY_BYTES:
+        return jsonify({"error": "payload_too_large", "max_bytes": MAX_JSON_BODY_BYTES}), 413
+
+    if _is_mutating_api_request():
+        return _guard_mutating_rate_limit()
+    return None
+
+
+@app.after_request
+def _security_after_request(response):
+    for key, value in _API_SECURITY_HEADERS.items():
+        response.headers.setdefault(key, value)
+    if request.path.startswith("/api/"):
+        response.headers.setdefault("Cache-Control", "no-store")
+    return response
 
 
 # ---------------------------------------------------------

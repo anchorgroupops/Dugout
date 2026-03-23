@@ -21,6 +21,14 @@ services:
       # Port 3000 ONLY. n8n is on 5678, Postgres on 5432.
       # Map Cloudflare Zero Trust: sharks.joelycannoli.com -> http://192.168.7.222:3000
       - "3000:80"
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
     networks:
       - sharks_net
     healthcheck:
@@ -39,6 +47,10 @@ services:
       - RUN_API_SERVER=0
       - CORS_ORIGINS=https://sharks.joelycannoli.com,http://localhost:3000,http://localhost:5173
       - WRITE_ORIGINS=https://sharks.joelycannoli.com,http://localhost:3000,http://localhost:5173
+      - ALLOWED_HOSTS=sharks.joelycannoli.com,localhost,127.0.0.1,sharks_api,sharks_dashboard
+      - MAX_JSON_BODY_BYTES=131072
+      - MUTATE_RATE_WINDOW_SEC=60
+      - MUTATE_RATE_MAX=12
       - GC_ORG_IDS=7ZUyPJwky5DG
     volumes:
       - ./data:/app/data
@@ -48,6 +60,9 @@ services:
       - ./Scorebooks:/app/Scorebooks:ro
     networks:
       - sharks_net
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 512
 
   sharks_api:
     build:
@@ -67,10 +82,30 @@ services:
       - "4"
       - --timeout
       - "90"
+      - --graceful-timeout
+      - "30"
+      - --keep-alive
+      - "5"
+      - --worker-tmp-dir
+      - /dev/shm
+      - --max-requests
+      - "1000"
+      - --max-requests-jitter
+      - "100"
+      - --limit-request-line
+      - "4094"
+      - --limit-request-fields
+      - "40"
+      - --limit-request-field_size
+      - "8190"
       - sync_daemon:app
     environment:
       - CORS_ORIGINS=https://sharks.joelycannoli.com,http://localhost:3000,http://localhost:5173
       - WRITE_ORIGINS=https://sharks.joelycannoli.com,http://localhost:3000,http://localhost:5173
+      - ALLOWED_HOSTS=sharks.joelycannoli.com,localhost,127.0.0.1,sharks_api,sharks_dashboard
+      - MAX_JSON_BODY_BYTES=131072
+      - MUTATE_RATE_WINDOW_SEC=60
+      - MUTATE_RATE_MAX=12
       - GC_ORG_IDS=7ZUyPJwky5DG
     volumes:
       - ./data:/app/data
@@ -80,6 +115,11 @@ services:
       - ./Scorebooks:/app/Scorebooks:ro
     networks:
       - sharks_net
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 512
 
 
 networks:
