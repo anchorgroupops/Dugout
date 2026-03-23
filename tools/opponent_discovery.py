@@ -17,6 +17,7 @@ except ImportError:
 ET = ZoneInfo("America/New_York")
 GC_PUBLIC_API = "https://api.team-manager.gc.com/public"
 DEFAULT_ORG_IDS = ["7ZUyPJwky5DG"]  # Palm Coast Little League
+PUBLIC_LINE_SCORE_GAME_LIMIT = int(os.getenv("GC_PUBLIC_LINE_SCORE_GAME_LIMIT", "12"))
 
 SLUG_OVERRIDES = {
     "riptide": "riptide_rebels",
@@ -57,6 +58,18 @@ def _safe_get_json(url: str, timeout: int = 15):
         return None
 
 
+def _safe_int(value, default=0):
+    try:
+        if value is None or value == "":
+            return default
+        return int(value)
+    except Exception:
+        try:
+            return int(float(value))
+        except Exception:
+            return default
+
+
 def _record_to_string(rec: dict) -> str:
     if not isinstance(rec, dict):
         return "0-0"
@@ -72,12 +85,25 @@ def _parse_org_ids() -> list[str]:
     return ids or list(DEFAULT_ORG_IDS)
 
 
+def _extract_line_score_side(side: dict) -> tuple[int | None, int | None, int | None, list[int]]:
+    if not isinstance(side, dict):
+        return None, None, None, []
+    totals = side.get("totals") if isinstance(side.get("totals"), list) else []
+    scores = side.get("scores") if isinstance(side.get("scores"), list) else []
+    runs = _safe_int(totals[0], 0) if len(totals) > 0 else None
+    hits = _safe_int(totals[1], 0) if len(totals) > 1 else None
+    errors = _safe_int(totals[2], 0) if len(totals) > 2 else None
+    inning_scores = [_safe_int(x, 0) for x in scores]
+    return runs, hits, errors, inning_scores
+
+
 def _fetch_public_game_metrics(team_id: str) -> dict:
     games = _safe_get_json(f"{GC_PUBLIC_API}/teams/{team_id}/games") or []
     completed = 0
     wins = losses = ties = 0
     runs_scored = 0
     runs_allowed = 0
+    completed_records = []
     for g in games:
         score = (g or {}).get("score") or {}
         if not isinstance(score, dict):
@@ -98,6 +124,67 @@ def _fetch_public_game_metrics(team_id: str) -> dict:
             losses += 1
         else:
             ties += 1
+        completed_records.append(
+            {
+                "id": (g or {}).get("id"),
+                "start_ts": (g or {}).get("start_ts") or "",
+                "runs_scored": our,
+                "runs_allowed": opp,
+            }
+        )
+
+    # Deeper public opponent intel from line score details (runs by inning + total hits/errors).
+    line_score_games = 0
+    hits_scored = 0
+    hits_allowed = 0
+    errors_committed = 0
+    errors_forced = 0
+    first_inning_runs = 0
+    first_inning_allowed = 0
+    big_inning_games = 0
+    big_inning_allowed_games = 0
+    shutout_for = 0
+    shutout_against = 0
+
+    # Process only recent completed games for latency safety.
+    recent_completed = sorted(completed_records, key=lambda x: x.get("start_ts", ""), reverse=True)[:PUBLIC_LINE_SCORE_GAME_LIMIT]
+    for rec in recent_completed:
+        gid = rec.get("id")
+        if not gid:
+            continue
+        detail = _safe_get_json(f"{GC_PUBLIC_API}/game-stream-processing/{gid}/details?include=line_scores", timeout=10) or {}
+        line_score = detail.get("line_score") or detail.get("line_scores")
+        if not isinstance(line_score, dict):
+            continue
+        team_runs, team_hits, team_err, team_scores = _extract_line_score_side(line_score.get("team"))
+        opp_runs, opp_hits, opp_err, opp_scores = _extract_line_score_side(line_score.get("opponent_team"))
+
+        line_score_games += 1
+        if team_hits is not None:
+            hits_scored += team_hits
+        if opp_hits is not None:
+            hits_allowed += opp_hits
+        if team_err is not None:
+            errors_committed += team_err
+        if opp_err is not None:
+            errors_forced += opp_err
+        if team_scores:
+            first_inning_runs += team_scores[0]
+            if any(s >= 5 for s in team_scores):
+                big_inning_games += 1
+        if opp_scores:
+            first_inning_allowed += opp_scores[0]
+            if any(s >= 5 for s in opp_scores):
+                big_inning_allowed_games += 1
+        if opp_runs == 0:
+            shutout_for += 1
+        if team_runs == 0:
+            shutout_against += 1
+
+    last5 = recent_completed[:5]
+    last5_completed = len(last5)
+    last5_rs = sum(x.get("runs_scored", 0) for x in last5)
+    last5_ra = sum(x.get("runs_allowed", 0) for x in last5)
 
     return {
         "games_total": len(games),
@@ -109,6 +196,24 @@ def _fetch_public_game_metrics(team_id: str) -> dict:
         "runs_allowed": runs_allowed,
         "runs_scored_per_game": round(runs_scored / completed, 2) if completed else 0.0,
         "runs_allowed_per_game": round(runs_allowed / completed, 2) if completed else 0.0,
+        "line_score_games": line_score_games,
+        "hits_scored": hits_scored,
+        "hits_allowed": hits_allowed,
+        "hits_scored_per_game": round(hits_scored / line_score_games, 2) if line_score_games else 0.0,
+        "hits_allowed_per_game": round(hits_allowed / line_score_games, 2) if line_score_games else 0.0,
+        "errors_committed": errors_committed,
+        "errors_forced": errors_forced,
+        "errors_committed_per_game": round(errors_committed / line_score_games, 2) if line_score_games else 0.0,
+        "errors_forced_per_game": round(errors_forced / line_score_games, 2) if line_score_games else 0.0,
+        "first_inning_runs_avg": round(first_inning_runs / line_score_games, 2) if line_score_games else 0.0,
+        "first_inning_allowed_avg": round(first_inning_allowed / line_score_games, 2) if line_score_games else 0.0,
+        "big_inning_rate": round(big_inning_games / line_score_games, 3) if line_score_games else 0.0,
+        "big_inning_allowed_rate": round(big_inning_allowed_games / line_score_games, 3) if line_score_games else 0.0,
+        "shutout_for": shutout_for,
+        "shutout_against": shutout_against,
+        "last5_completed_games": last5_completed,
+        "last5_runs_scored_per_game": round(last5_rs / last5_completed, 2) if last5_completed else 0.0,
+        "last5_runs_allowed_per_game": round(last5_ra / last5_completed, 2) if last5_completed else 0.0,
     }
 
 

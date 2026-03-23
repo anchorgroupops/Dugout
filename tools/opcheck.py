@@ -72,6 +72,10 @@ def run_opcheck(base_url: str, include_burst: bool = True) -> dict:
             else:
                 ok = ok and (reason is not None or not empty)
             detail += f" empty={empty} data_source={data_source} reason={reason}"
+            if slug == "ravens" and isinstance(md.get("opponent_public_metrics"), dict):
+                lsg = int(md["opponent_public_metrics"].get("line_score_games", 0) or 0)
+                ok = ok and lsg >= 1
+                detail += f" line_score_games={lsg}"
         add(f"matchup_{slug}", ok, detail)
 
     # SWOT + lineups artifacts

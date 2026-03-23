@@ -1250,9 +1250,14 @@ def handle_matchup(opponent_slug):
             completed = int(m.get("completed_games", 0) or 0)
             rs = m.get("runs_scored_per_game", 0)
             ra = m.get("runs_allowed_per_game", 0)
+            hits = m.get("hits_scored_per_game", 0)
+            errs = m.get("errors_committed_per_game", 0)
+            fir = m.get("first_inning_runs_avg", 0)
+            big = m.get("big_inning_rate", 0)
             result["recommendation"] = (
                 f"{result.get('recommendation', 'Limited player-level data.')}"
-                f" Opponent season profile: {completed} completed games, {rs} RS/G, {ra} RA/G."
+                f" Opponent season profile: {completed} completed games, {rs} RS/G, {ra} RA/G,"
+                f" {hits} hits/G, {errs} errors/G, {fir} first-inning runs/G, {round(float(big)*100, 1)}% big-inning rate."
             ).strip()
         elif not result.get("reason"):
             result["reason"] = "insufficient_data"

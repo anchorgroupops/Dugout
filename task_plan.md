@@ -4,7 +4,8 @@
 
 - [x] Initial Task Breakdown
 - [x] Register Spoke in `hub-spokes-map.md`
-- [/] Re-Discovery: Planning, Strategy & Training
+- [x] Re-Discovery: Planning, Strategy & Training
+- [x] Operational Check (Opcheck) - 2026-03-23
 - [ ] Final Confirmation from User
 
 ## Phase 1: B - Blueprint
