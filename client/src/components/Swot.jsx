@@ -281,8 +281,9 @@ const UpcomingGameBanner = ({ next }) => {
   );
 };
 
-const Swot = ({ swotData, roster, schedule }) => {
+const Swot = ({ swotData, roster, schedule, isMobile = false }) => {
   const [expandedPlayer, setExpandedPlayer] = useState(null);
+  const [showMatchup, setShowMatchup] = useState(!isMobile);
   if (!swotData) return <p>Loading SWOT Analysis...</p>;
 
   // Combine player objects with their SWOT evaluations
@@ -314,39 +315,77 @@ const Swot = ({ swotData, roster, schedule }) => {
 
   return (
     <div>
-      <h2 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-        <Target size={24} color="var(--primary-color)" /> SWOT Analysis
-        <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)', fontWeight: 'normal', marginLeft: '0.5rem' }}>
+      <h2 style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+        <Target size={isMobile ? 20 : 24} color="var(--primary-color)" /> SWOT Analysis
+        <span style={{ fontSize: isMobile ? '0.78rem' : '0.9rem', color: 'var(--text-muted)', fontWeight: 'normal', marginLeft: '0.5rem' }}>
           ({playersWithSwot.length} players)
         </span>
       </h2>
 
       {/* 1. Next Game & Matchups Combined Group */}
-      <div style={{ marginBottom: '2rem' }}>
+      <div style={{ marginBottom: isMobile ? '1rem' : '2rem' }}>
         <UpcomingGameBanner next={nextGame} />
-        <MatchupPanel defaultOpponent={nextGame?.opponent} />
+        {isMobile ? (
+          <div className="glass-panel" style={{ padding: '0.85rem 1rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem' }}>
+              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                Matchup details are optional on mobile.
+              </span>
+              <button
+                onClick={() => setShowMatchup(prev => !prev)}
+                style={{
+                  background: 'var(--primary-glow)',
+                  color: 'var(--primary-color)',
+                  border: '1px solid rgba(4, 101, 104, 0.24)',
+                  borderRadius: '8px',
+                  padding: '0.32rem 0.65rem',
+                  fontSize: '0.76rem',
+                  fontWeight: '700',
+                  cursor: 'pointer'
+                }}
+              >
+                {showMatchup ? 'Hide Matchup' : 'Show Matchup'}
+              </button>
+            </div>
+            {showMatchup && <div style={{ marginTop: '0.75rem' }}><MatchupPanel defaultOpponent={nextGame?.opponent} /></div>}
+          </div>
+        ) : (
+          <MatchupPanel defaultOpponent={nextGame?.opponent} />
+        )}
       </div>
 
       {/* 2. Team-level SWOT */}
       {teamSwot && (
-        <div className="glass-panel" style={{ marginBottom: '2rem', padding: '1.5rem', borderColor: 'var(--primary-glow)' }}>
-          <h3 style={{ marginBottom: '1.25rem', color: 'var(--primary-color)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <ShieldAlert size={20} /> Team Analysis
-          </h3>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '1.25rem' }}>
-            <SwotQuadrant title="Strengths" items={teamSwot.strengths} color="var(--success)" icon={<TrendingUp size={14} />} />
-            <SwotQuadrant title="Areas for Growth" items={teamSwot.weaknesses} color="var(--danger)" icon={<AlertTriangle size={14} />} />
-            <SwotQuadrant title="Opportunities" items={teamSwot.opportunities} color="#3b9ede" icon={<Target size={14} />} />
-            <SwotQuadrant title="Threats" items={teamSwot.threats} color="var(--warning)" icon={<ShieldAlert size={14} />} />
+        isMobile ? (
+          <details className="glass-panel" style={{ marginBottom: '1rem', padding: '0.9rem 1rem', borderColor: 'var(--primary-glow)' }}>
+            <summary style={{ cursor: 'pointer', color: 'var(--primary-color)', fontWeight: 700 }}>Team Analysis</summary>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '0.85rem', marginTop: '0.75rem' }}>
+              <SwotQuadrant title="Strengths" items={(teamSwot.strengths || []).slice(0, 4)} color="var(--success)" icon={<TrendingUp size={14} />} />
+              <SwotQuadrant title="Areas for Growth" items={(teamSwot.weaknesses || []).slice(0, 4)} color="var(--danger)" icon={<AlertTriangle size={14} />} />
+              <SwotQuadrant title="Opportunities" items={(teamSwot.opportunities || []).slice(0, 4)} color="#3b9ede" icon={<Target size={14} />} />
+              <SwotQuadrant title="Threats" items={(teamSwot.threats || []).slice(0, 4)} color="var(--warning)" icon={<ShieldAlert size={14} />} />
+            </div>
+          </details>
+        ) : (
+          <div className="glass-panel" style={{ marginBottom: '2rem', padding: '1.5rem', borderColor: 'var(--primary-glow)' }}>
+            <h3 style={{ marginBottom: '1.25rem', color: 'var(--primary-color)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <ShieldAlert size={20} /> Team Analysis
+            </h3>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '1.25rem' }}>
+              <SwotQuadrant title="Strengths" items={teamSwot.strengths} color="var(--success)" icon={<TrendingUp size={14} />} />
+              <SwotQuadrant title="Areas for Growth" items={teamSwot.weaknesses} color="var(--danger)" icon={<AlertTriangle size={14} />} />
+              <SwotQuadrant title="Opportunities" items={teamSwot.opportunities} color="#3b9ede" icon={<Target size={14} />} />
+              <SwotQuadrant title="Threats" items={teamSwot.threats} color="var(--warning)" icon={<ShieldAlert size={14} />} />
+            </div>
           </div>
-        </div>
+        )
       )}
 
       {/* Player cards */}
       <div style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
-        gap: '1.5rem'
+        gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(260px, 1fr))',
+        gap: isMobile ? '0.85rem' : '1.5rem'
       }}>
         {playersWithSwot.map(player => {
           const key = `${player.number}-${player.last}`;
@@ -362,11 +401,11 @@ const Swot = ({ swotData, roster, schedule }) => {
             <div
               key={key}
               className="glass-panel"
-              style={{ padding: '1.5rem', cursor: 'pointer' }}
+              style={{ padding: isMobile ? '0.95rem' : '1.5rem', cursor: 'pointer' }}
               onClick={() => setExpandedPlayer(isExpanded ? null : key)}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', paddingBottom: '0.5rem', borderBottom: '1px solid var(--surface-border)' }}>
-                <h3 style={{ fontSize: '1.1rem', margin: 0 }}>
+                <h3 style={{ fontSize: isMobile ? '1rem' : '1.1rem', margin: 0 }}>
                   {player.number ? `#${player.number} ` : ''}{player.first} {player.last}
                 </h3>
                 {isExpanded ? <ChevronUp size={18} color="var(--text-muted)" /> : <ChevronDown size={18} color="var(--text-muted)" />}
@@ -379,8 +418,8 @@ const Swot = ({ swotData, roster, schedule }) => {
                     <PlayerStatChip label="AVG" value={avg} />
                     <PlayerStatChip label="OBP" value={obp} />
                     <PlayerStatChip label="OPS" value={ops} />
-                    <PlayerStatChip label="K%" value={kRate} />
-                    <PlayerStatChip label="BB%" value={bbRate} />
+                    {!isMobile && <PlayerStatChip label="K%" value={kRate} />}
+                    {!isMobile && <PlayerStatChip label="BB%" value={bbRate} />}
                   </>
                 ) : (
                   <PlayerStatChip label="Stats" value="No plate appearances yet" />
@@ -389,8 +428,8 @@ const Swot = ({ swotData, roster, schedule }) => {
 
               {/* Always show strengths/weaknesses summary */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                <SwotQuadrant title="Strengths" items={player.swot?.strengths} color="var(--success)" icon={<TrendingUp size={13} />} />
-                <SwotQuadrant title="Areas for Growth" items={player.swot?.weaknesses} color="var(--danger)" icon={<AlertTriangle size={13} />} />
+                <SwotQuadrant title="Strengths" items={isMobile ? (player.swot?.strengths || []).slice(0, 2) : player.swot?.strengths} color="var(--success)" icon={<TrendingUp size={13} />} />
+                <SwotQuadrant title="Areas for Growth" items={isMobile ? (player.swot?.weaknesses || []).slice(0, 2) : player.swot?.weaknesses} color="var(--danger)" icon={<AlertTriangle size={13} />} />
                 {isExpanded && (
                   <>
                     <SwotQuadrant title="Opportunities" items={player.swot?.opportunities} color="#3b9ede" icon={<Target size={13} />} />

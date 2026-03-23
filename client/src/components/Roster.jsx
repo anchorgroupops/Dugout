@@ -146,7 +146,7 @@ const ExpandedStats = ({ player }) => {
   );
 };
 
-const Roster = ({ team, availability, onAvailabilityChange }) => {
+const Roster = ({ team, availability, onAvailabilityChange, isMobile = false }) => {
   const [expandedPlayer, setExpandedPlayer] = useState(null);
   const [updating, setUpdating] = useState(null); // name of player being updated
 
@@ -195,8 +195,8 @@ const Roster = ({ team, availability, onAvailabilityChange }) => {
       
       <div style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
-        gap: '1.5rem'
+        gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(260px, 1fr))',
+        gap: isMobile ? '0.85rem' : '1.5rem'
       }}>
         {sortedRoster.map(player => {
           const name = `${player.first} ${player.last}`.trim();
@@ -211,29 +211,33 @@ const Roster = ({ team, availability, onAvailabilityChange }) => {
               key={`${player.number}-${player.last}`}
               className={`glass-panel ${isActive ? '' : 'inactive-player'}`}
               style={{
-                padding: '1.5rem',
+                padding: isMobile ? '0.95rem' : '1.5rem',
                 position: 'relative',
                 overflow: 'hidden',
-                cursor: 'pointer',
+                cursor: isMobile ? 'default' : 'pointer',
                 transition: 'all 0.3s ease',
                 opacity: isActive ? 1 : 0.6,
                 filter: isActive ? 'none' : 'grayscale(0.5)',
                 borderLeft: !isActive ? '4px solid #666' : isSub ? '4px solid rgba(63, 143, 136, 0.42)' : '4px solid var(--primary-color)',
                 background: isSub && isActive ? 'rgba(63, 143, 136, 0.06)' : undefined
               }}
-              onClick={() => setExpandedPlayer(isExpanded ? null : `${player.number}-${player.last}`)}
+              onClick={() => {
+                if (!isMobile) setExpandedPlayer(isExpanded ? null : `${player.number}-${player.last}`);
+              }}
             >
-              <div style={{
-                position: 'absolute',
-                top: '-15px',
-                right: '-10px',
-                fontSize: '4rem',
-                fontWeight: '900',
-                opacity: '0.05',
-                fontFamily: 'var(--font-heading)'
-              }}>
-                {player.number}
-              </div>
+              {!isMobile && (
+                <div style={{
+                  position: 'absolute',
+                  top: '-15px',
+                  right: '-10px',
+                  fontSize: '4rem',
+                  fontWeight: '900',
+                  opacity: '0.05',
+                  fontFamily: 'var(--font-heading)'
+                }}>
+                  {player.number}
+                </div>
+              )}
               
               <div style={{ position: 'absolute', top: '10px', right: '10px', display: 'flex', gap: '5px' }}>
                 {!player.core && (
@@ -251,15 +255,15 @@ const Roster = ({ team, availability, onAvailabilityChange }) => {
                     background: isActive ? 'var(--primary-color)' : 'rgba(255,255,255,0.1)',
                     color: isActive ? '#fff' : 'var(--text-muted)',
                     border: 'none',
-                    padding: '8px 14px',
+                    padding: isMobile ? '6px 10px' : '8px 14px',
                     borderRadius: '8px',
-                    fontSize: '0.8rem',
+                    fontSize: isMobile ? '0.72rem' : '0.8rem',
                     fontWeight: 'bold',
                     cursor: 'pointer',
                     transition: 'all 0.2s ease',
                     opacity: isUpdating ? 0.5 : 1,
-                    minWidth: '88px',
-                    minHeight: '36px',
+                    minWidth: isMobile ? '76px' : '88px',
+                    minHeight: isMobile ? '30px' : '36px',
                     letterSpacing: '0.4px'
                   }}
                 >
@@ -267,16 +271,16 @@ const Roster = ({ team, availability, onAvailabilityChange }) => {
                 </button>
               </div>
               
-              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1.25rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '0.75rem' : '1rem', marginBottom: isMobile ? '0.85rem' : '1.25rem' }}>
                 <div style={{
-                  width: '45px',
-                  height: '45px',
+                  width: isMobile ? '40px' : '45px',
+                  height: isMobile ? '40px' : '45px',
                   borderRadius: '50%',
                   background: isActive ? 'linear-gradient(135deg, var(--primary-color), var(--secondary-color))' : '#444',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  fontSize: '1.2rem',
+                  fontSize: isMobile ? '1rem' : '1.2rem',
                   fontWeight: 'bold',
                   color: '#fff',
                   flexShrink: 0,
@@ -285,13 +289,13 @@ const Roster = ({ team, availability, onAvailabilityChange }) => {
                   {player.number}
                 </div>
                 <div>
-                  <h3 style={{ fontSize: '1.2rem', marginBottom: '2px' }}>{player.first} {player.last}</h3>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                  <h3 style={{ fontSize: isMobile ? '1.02rem' : '1.2rem', marginBottom: '2px' }}>{player.first} {player.last}</h3>
+                  <span style={{ fontSize: isMobile ? '0.7rem' : '0.75rem', color: 'var(--text-muted)' }}>
                     {b.gp != null ? `${b.gp} GP` : ''}{b.pa != null ? ` • ${b.pa} PA` : ''}
-                    {!isExpanded && ' • Click to expand'}
+                    {!isExpanded && !isMobile && ' • Click to expand'}
                   </span>
                   {player.teams && player.teams.length > 0 && (
-                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                    <div style={{ fontSize: isMobile ? '0.66rem' : '0.7rem', color: 'var(--text-muted)', marginTop: '2px' }}>
                       Teams: {player.teams.join(', ')}
                     </div>
                   )}
@@ -304,14 +308,16 @@ const Roster = ({ team, availability, onAvailabilityChange }) => {
                 <StatBadge label="OBP" value={fmt(b.obp ?? player.obp)} />
                 <StatBadge label="OPS" value={fmt(b.ops ?? player.ops)} />
               </div>
-              <div style={{ display: 'flex', gap: '0.5rem' }}>
-                <StatBadge label="H" value={fmt(b.h ?? player.h)} />
-                <StatBadge label="RBI" value={fmt(b.rbi ?? player.rbi)} />
-                <StatBadge label="R" value={fmt(b.r ?? player.r)} />
-                <StatBadge label="SB" value={fmt(b.sb ?? player.sb)} />
-              </div>
+              {!isMobile && (
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <StatBadge label="H" value={fmt(b.h ?? player.h)} />
+                  <StatBadge label="RBI" value={fmt(b.rbi ?? player.rbi)} />
+                  <StatBadge label="R" value={fmt(b.r ?? player.r)} />
+                  <StatBadge label="SB" value={fmt(b.sb ?? player.sb)} />
+                </div>
+              )}
 
-              {isExpanded && <ExpandedStats player={player} />}
+              {!isMobile && isExpanded && <ExpandedStats player={player} />}
             </div>
           );
         })}
