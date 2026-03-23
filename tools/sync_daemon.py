@@ -411,6 +411,75 @@ def _aggregate_opponent_stats_from_games(opponent_slug: str) -> list:
     return result
 
 
+def _merge_batting_with_scorebook(current_batting: dict, scorebook_batting: dict) -> tuple[dict, bool]:
+    """Merge two batting rows, preserving the richer counting stats.
+    Rule: use max() per counting field so partial app/web rows cannot zero-out scorebook signal."""
+    cur = normalize_batting_row(current_batting or {})
+    sb = normalize_batting_row(scorebook_batting or {})
+
+    count_fields = ["pa", "ab", "h", "1b", "2b", "3b", "hr", "bb", "hbp", "so", "rbi", "sb", "r", "sac"]
+    merged = {field: max(int(cur.get(field, 0)), int(sb.get(field, 0))) for field in count_fields}
+
+    # Keep singles internally consistent with H/2B/3B/HR.
+    merged["1b"] = max(merged["1b"], merged["h"] - merged["2b"] - merged["3b"] - merged["hr"], 0)
+    min_pa = merged["ab"] + merged["bb"] + merged["hbp"] + merged["sac"]
+    merged["pa"] = max(merged["pa"], min_pa)
+
+    ab = merged["ab"]
+    h = merged["h"]
+    bb = merged["bb"]
+    hbp = merged["hbp"]
+    pa = merged["pa"]
+    tb = merged["1b"] + 2 * merged["2b"] + 3 * merged["3b"] + 4 * merged["hr"]
+
+    merged["avg"] = round(h / ab, 3) if ab > 0 else 0.0
+    merged["obp"] = round((h + bb + hbp) / pa, 3) if pa > 0 else 0.0
+    merged["slg"] = round(tb / ab, 3) if ab > 0 else 0.0
+    merged["ops"] = round(merged["obp"] + merged["slg"], 3)
+
+    # Compatibility aliases
+    merged["singles"] = merged["1b"]
+    merged["doubles"] = merged["2b"]
+    merged["triples"] = merged["3b"]
+
+    changed = any(int(cur.get(field, 0)) != int(merged.get(field, 0)) for field in count_fields)
+    changed = changed or any(round(float(cur.get(k, 0.0)), 3) != round(float(merged.get(k, 0.0)), 3) for k in ("avg", "obp", "slg", "ops"))
+    return merged, changed
+
+
+def _merge_team_with_scorebook_stats(team_data: dict) -> tuple[dict, dict]:
+    """Merge aggregated scorebook batting into team roster after app/web enrichment."""
+    game_stats = _aggregate_stats_from_games()
+    if not game_stats:
+        return team_data, {"players_matched": 0, "players_updated": 0, "source_players": 0}
+
+    matched = 0
+    updated = 0
+    for player in team_data.get("roster", []):
+        num = str(player.get("number", "")).strip()
+        if not num or num not in game_stats:
+            continue
+        matched += 1
+        scorebook_batting = game_stats[num].get("batting", {})
+        merged_batting, changed = _merge_batting_with_scorebook(player.get("batting", {}), scorebook_batting)
+        if changed:
+            updated += 1
+        player["batting"] = merged_batting
+        player["games_played"] = max(
+            int(_safe_int(player.get("games_played", 0))),
+            int(_safe_int(game_stats[num].get("games_played", 0))),
+        )
+
+    meta = {"players_matched": matched, "players_updated": updated, "source_players": len(game_stats)}
+    logging.info(
+        "[Reconcile] scorebook merge complete: matched=%s updated=%s source_players=%s",
+        matched,
+        updated,
+        len(game_stats),
+    )
+    return team_data, meta
+
+
 def _collect_pipeline_health() -> dict:
     """Build pipeline health coverage metrics across app/web/game feeds."""
     app_stats_file = SHARKS_DIR / "app_stats.json"
@@ -642,16 +711,21 @@ def run_sync_cycle():
         except Exception as e:
             logging.warning(f"Aggregate merge skipped: {e}")
 
-        # Write team_enriched.json (team_merged + app_stats) for downstream tools
+        # Write team_enriched.json (team_merged + app_stats + scorebook reconciliation)
         try:
             team_file = SHARKS_DIR / ("team_merged.json" if (SHARKS_DIR / "team_merged.json").exists() else "team.json")
             with open(team_file) as f:
                 team_data = json.load(f)
             _enrich_team_with_app_stats(team_data)
+            _, reconcile_meta = _merge_team_with_scorebook_stats(team_data)
             enriched_file = SHARKS_DIR / "team_enriched.json"
             with open(enriched_file, "w") as f:
-                json.dump(team_data, f)
-            logging.info("[Sync] team_enriched.json written.")
+                json.dump(team_data, f, indent=2)
+            logging.info(
+                "[Sync] team_enriched.json written (scorebook matched=%s updated=%s).",
+                reconcile_meta.get("players_matched", 0),
+                reconcile_meta.get("players_updated", 0),
+            )
         except Exception as e:
             logging.warning(f"team_enriched.json write skipped: {e}")
 
@@ -1224,8 +1298,9 @@ def handle_matchup(opponent_slug):
     if not our_team:
         return jsonify({"error": "Sharks team data not found"}), 404
 
-    # Enrich Sharks roster with app_stats so matchup uses current season stats
+    # Enrich and reconcile Sharks roster so matchup uses complete season stats.
     _enrich_team_with_app_stats(our_team)
+    _merge_team_with_scorebook_stats(our_team)
     our_team["team_name"] = _canonical_team_name(our_team.get("team_name", "The Sharks"), "sharks")
 
     opp_dir = DATA_DIR / "opponents" / opponent_slug
@@ -1359,8 +1434,10 @@ def _aggregate_stats_from_games():
 
 @app.route('/api/team', methods=['GET'])
 def handle_team():
-    """Return team data, enriching roster stats from app_stats.json or PDF game files."""
-    team_file = SHARKS_DIR / "team_merged.json"
+    """Return team data, enriched from app_stats and reconciled with scorebook totals."""
+    team_file = SHARKS_DIR / "team_enriched.json"
+    if not team_file.exists():
+        team_file = SHARKS_DIR / "team_merged.json"
     if not team_file.exists():
         team_file = SHARKS_DIR / "team.json"
     if not team_file.exists():
@@ -1372,18 +1449,8 @@ def handle_team():
 
     # Enrich roster with current app_stats.json (always most up-to-date)
     _enrich_team_with_app_stats(team)
+    _merge_team_with_scorebook_stats(team)
     team["team_name"] = _canonical_team_name(team.get("team_name", "The Sharks"), "sharks")
-
-    # Fall back to PDF-aggregated stats for players still missing data
-    pdf_stats = {}
-    for player in team.get("roster", []):
-        if player.get("batting", {}).get("pa", 0) == 0:
-            if not pdf_stats:
-                pdf_stats = _aggregate_stats_from_games()
-            num = str(player.get("number", "")).strip()
-            if num and num in pdf_stats:
-                player["batting"] = pdf_stats[num]["batting"]
-                player["games_played"] = pdf_stats[num]["games_played"]
 
     return jsonify(team)
 

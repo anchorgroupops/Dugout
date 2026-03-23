@@ -97,6 +97,42 @@ def run_opcheck(base_url: str, include_burst: bool = True) -> dict:
     lineup_nonzero = sum(1 for p in balanced[:9] if (p.get("pa", 0) or 0) > 0)
     add("lineups_artifact", line_r.status_code == 200 and len(balanced) >= 9 and lineup_nonzero > 0, f"status={line_r.status_code} first9_pa>0={lineup_nonzero}")
 
+    # Reconcile team batting totals vs parsed scorebooks (team should never undercount).
+    gd_r, games_detail = _req_json(s, f"{base}/api/games?detail=1")
+    deficits = []
+    if gd_r.status_code == 200 and isinstance(games_detail, list):
+        from collections import defaultdict
+
+        agg = defaultdict(lambda: defaultdict(int))
+        for g in games_detail:
+            for row in g.get("sharks_batting", []) or []:
+                num = str(row.get("number", "")).strip()
+                if not num:
+                    continue
+                batting = row.get("batting", row) if isinstance(row, dict) else {}
+                for stat in ("pa", "ab", "h", "bb", "hbp", "so", "rbi", "sb", "r"):
+                    agg[num][stat] += int(round(float((batting or {}).get(stat, 0) or 0)))
+
+        team_by_num = {}
+        for p in roster:
+            num = str((p or {}).get("number", "")).strip()
+            if num:
+                team_by_num[num] = (p or {}).get("batting", {}) or {}
+
+        for num, s_totals in agg.items():
+            t = team_by_num.get(num)
+            if not t:
+                continue
+            for stat, sb_val in s_totals.items():
+                tv = int(round(float((t or {}).get(stat, 0) or 0)))
+                if tv < sb_val:
+                    deficits.append(f"#{num}:{stat} team={tv}<scorebook={sb_val}")
+    add(
+        "scorebook_reconciliation",
+        gd_r.status_code == 200 and len(deficits) == 0,
+        f"status={gd_r.status_code} deficits={len(deficits)} sample={deficits[:5]}",
+    )
+
     health_r, health = _req_json(s, f"{base}/data/sharks/pipeline_health.json")
     has_required = isinstance(health, dict) and "required_field_coverage" in health
     add("pipeline_health_artifact", health_r.status_code == 200 and has_required, f"status={health_r.status_code}")
