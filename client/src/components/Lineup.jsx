@@ -120,12 +120,18 @@ const Lineup = ({
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: isMobile ? 'stretch' : 'flex-end', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+      <div style={{ marginBottom: '1rem' }}>
         <h2 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: 0 }}>
           <Settings size={isMobile ? 20 : 24} color="var(--primary-color)" /> Optimized Lineups
         </h2>
+      </div>
 
-        <div style={{ display: 'flex', gap: '0.55rem', alignItems: 'center', flexWrap: 'wrap', width: isMobile ? '100%' : 'auto' }}>
+      <div
+        className="glass-panel"
+        data-testid="batting-order-block"
+        style={{ padding: isMobile ? '1rem' : '2rem' }}
+      >
+        <div style={{ display: 'flex', gap: '0.55rem', alignItems: 'center', flexWrap: 'wrap', width: '100%', marginBottom: isMobile ? '0.85rem' : '1rem' }}>
           <div style={{ display: 'flex', gap: '0.4rem', background: 'var(--surface-base)', padding: '0.22rem', borderRadius: '8px', border: '1px solid var(--surface-border)', width: isMobile ? '100%' : 'auto', overflowX: 'auto' }}>
             {strategies.map(s => (
               <button
@@ -163,11 +169,7 @@ const Lineup = ({
             {regenerating ? 'Regenerating...' : 'Regenerate'}
           </button>
         </div>
-      </div>
 
-      <NextGameBanner schedule={schedule} />
-
-      <div className="glass-panel" style={{ padding: isMobile ? '1rem' : '2rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: isMobile ? 'flex-start' : 'center', flexDirection: isMobile ? 'column' : 'row', marginBottom: isMobile ? '1rem' : '2rem', paddingBottom: '1rem', borderBottom: '1px solid var(--surface-border)', gap: isMobile ? '0.55rem' : 0 }}>
           <div>
             <h3 style={{ fontSize: isMobile ? '1.08rem' : '1.5rem', color: 'var(--text-main)', textTransform: 'capitalize' }}>
@@ -253,7 +255,13 @@ const Lineup = ({
         </div>
       </div>
 
-      <div className="glass-panel" style={{ padding: isMobile ? '0.9rem' : '1.2rem', marginTop: '1.25rem' }}>
+      <NextGameBanner schedule={schedule} />
+
+      <div
+        className="glass-panel"
+        data-testid="availability-block"
+        style={{ padding: isMobile ? '0.9rem' : '1.2rem', marginTop: '1.25rem' }}
+      >
         <div style={{ marginBottom: '0.75rem' }}>
           <h3 style={{ margin: 0, fontSize: '1rem', color: 'var(--primary-color)' }}>
             Game-Day Availability & Borrowed Players

@@ -10,7 +10,7 @@ import Practice from './components/Practice';
 
 
 function App() {
-  const [currentView, setCurrentView] = useState('roster');
+  const [currentView, setCurrentView] = useState('swot');
   const [isMobile, setIsMobile] = useState(
     typeof window !== 'undefined' ? window.innerWidth <= 768 : false
   );
@@ -121,8 +121,8 @@ function App() {
   }, []);
 
   const navItems = [
-    { id: 'roster', label: 'Roster', icon: <Users size={18} /> },
     { id: 'swot', label: 'SWOT', icon: <Activity size={18} /> },
+    { id: 'roster', label: 'Roster', icon: <Users size={18} /> },
     { id: 'lineups', label: 'Lineups', icon: <ListOrdered size={18} /> },
     { id: 'games', label: 'Games', icon: <Calendar size={18} /> },
     { id: 'league', label: 'League', icon: <Trophy size={18} /> },
@@ -147,7 +147,6 @@ function App() {
           team={data.team}
           availability={data.availability}
           isMobile={isMobile}
-          onAvailabilityChange={(newAvail) => setData(prev => ({ ...prev, availability: newAvail }))}
         />
       );
       case 'swot': return <Swot swotData={data.swot} roster={data.team?.roster} schedule={data.schedule} isMobile={isMobile} />;
@@ -177,7 +176,6 @@ function App() {
           team={data.team}
           availability={data.availability}
           isMobile={isMobile}
-          onAvailabilityChange={(newAvail) => setData(prev => ({ ...prev, availability: newAvail }))}
         />
       );
     }
