@@ -8,6 +8,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from stats_normalizer import normalize_batting_row
+
 DATA_DIR = Path(__file__).parent.parent / "data"
 SHARKS_DIR = DATA_DIR / "sharks"
 OPPONENTS_DIR = DATA_DIR / "opponents"
@@ -445,20 +447,21 @@ def _team_aggregates(team_data: dict) -> dict:
             r += _parse_number(batting.get("r", 0))
             rbi += _parse_number(batting.get("rbi", 0))
 
-    # Fallback: try top-level batting_stats[] (GC app / web format)
+    # Fallback: try top-level batting_stats[] (GC app / web format or flattened game history)
     if ab == 0:
         for p in team_data.get("batting_stats", []):
-            ab += _parse_number(p.get("ab", 0))
-            h += _parse_number(p.get("h", 0))
-            bb += _parse_number(p.get("bb", 0))
-            hbp += _parse_number(p.get("hbp", 0))
-            so += _parse_number(p.get("so", p.get("k", 0)))
-            hr += _parse_number(p.get("hr", 0))
-            doubles += _parse_number(p.get("2b", p.get("doubles", 0)))
-            triples += _parse_number(p.get("3b", p.get("triples", 0)))
-            sb += _parse_number(p.get("sb", 0))
-            r += _parse_number(p.get("r", 0))
-            rbi += _parse_number(p.get("rbi", 0))
+            b = normalize_batting_row(p)
+            ab += _parse_number(b.get("ab", 0))
+            h += _parse_number(b.get("h", 0))
+            bb += _parse_number(b.get("bb", 0))
+            hbp += _parse_number(b.get("hbp", 0))
+            so += _parse_number(b.get("so", 0))
+            hr += _parse_number(b.get("hr", 0))
+            doubles += _parse_number(b.get("2b", b.get("doubles", 0)))
+            triples += _parse_number(b.get("3b", b.get("triples", 0)))
+            sb += _parse_number(b.get("sb", 0))
+            r += _parse_number(b.get("r", 0))
+            rbi += _parse_number(b.get("rbi", 0))
 
     pa = ab + bb + hbp
     singles = max(0, h - doubles - triples - hr)
@@ -534,6 +537,7 @@ def analyze_matchup(our_team: dict, opponent_team: dict) -> dict:
             "our_team": our_team.get("team_name", "Sharks"),
             "opponent": opponent_team.get("team_name", "Opponent"),
             "empty": True,
+            "reason": "insufficient_data",
             "our_stats": us,
             "their_stats": them,
             "our_advantages": [],
@@ -614,6 +618,8 @@ def analyze_matchup(our_team: dict, opponent_team: dict) -> dict:
     return {
         "our_team": our_team.get("team_name", "Sharks"),
         "opponent": opponent_team.get("team_name", "Opponent"),
+        "empty": False,
+        "reason": None,
         "our_stats": us,
         "their_stats": them,
         "our_advantages": our_advantages or ["No clear statistical advantages (need more data)"],
