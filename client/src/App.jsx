@@ -1,11 +1,10 @@
-import React, { useState, useEffect } from 'react';
-import { Users, Activity, ListOrdered, Settings2, Calendar, Trophy, Dumbbell } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Users, Activity, ListOrdered, Calendar, Trophy, Dumbbell } from 'lucide-react';
 import { formatDateTime } from './utils/formatDate';
 import Roster from './components/Roster';
 import Swot from './components/Swot';
 import Lineup from './components/Lineup';
 import Games from './components/Games';
-import RosterManager from './components/RosterManager';
 import League from './components/League';
 import Practice from './components/Practice';
 
@@ -23,40 +22,41 @@ function App() {
     error: null
   });
 
+  const fetchData = useCallback(async () => {
+    try {
+      const [teamRes, swotRes, lineupsRes, availRes, gamesRes, scheduleRes] = await Promise.all([
+        fetch('/api/team'),
+        fetch('/data/sharks/swot_analysis.json'),
+        fetch('/data/sharks/lineups.json'),
+        fetch('/api/availability'),
+        fetch('/api/games'),
+        fetch('/api/schedule')
+      ]);
+
+      if (!teamRes.ok) throw new Error('Failed to load team data');
+
+      const team = await teamRes.json();
+      const swot = swotRes.ok ? await swotRes.json() : null;
+      const lineups = lineupsRes.ok ? await lineupsRes.json() : null;
+      const availability = availRes.ok ? await availRes.json() : {};
+      const games = gamesRes.ok ? await gamesRes.json() : null;
+      const schedule = scheduleRes.ok ? await scheduleRes.json() : null;
+
+      setData({ team, swot, lineups, availability, games, schedule, loading: false, error: null });
+    } catch (err) {
+      console.error("Data fetch error", err);
+      setData(prev => ({ ...prev, loading: false, error: err.message }));
+    }
+  }, []);
+
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const [teamRes, swotRes, lineupsRes, availRes, gamesRes, scheduleRes] = await Promise.all([
-          fetch('/api/team'),
-          fetch('/data/sharks/swot_analysis.json'),
-          fetch('/data/sharks/lineups.json'),
-          fetch('/api/availability'),
-          fetch('/api/games'),
-          fetch('/api/schedule')
-        ]);
-
-        if (!teamRes.ok) throw new Error('Failed to load team data');
-
-        const team = await teamRes.json();
-        const swot = swotRes.ok ? await swotRes.json() : null;
-        const lineups = lineupsRes.ok ? await lineupsRes.json() : null;
-        const availability = availRes.ok ? await availRes.json() : {};
-        const games = gamesRes.ok ? await gamesRes.json() : null;
-        const schedule = scheduleRes.ok ? await scheduleRes.json() : null;
-
-        setData({ team, swot, lineups, availability, games, schedule, loading: false, error: null });
-      } catch (err) {
-        console.error("Data fetch error", err);
-        setData(prev => ({ ...prev, loading: false, error: err.message }));
-      }
-    };
     fetchData(); // Initial fetch
     
     // Set up real-time polling every 30 seconds
     const intervalId = setInterval(fetchData, 30000);
     
     return () => clearInterval(intervalId);
-  }, []);
+  }, [fetchData]);
 
   const navItems = [
     { id: 'roster', label: 'Roster', icon: <Users size={18} /> },
@@ -64,8 +64,7 @@ function App() {
     { id: 'lineups', label: 'Lineups', icon: <ListOrdered size={18} /> },
     { id: 'games', label: 'Games', icon: <Calendar size={18} /> },
     { id: 'league', label: 'League', icon: <Trophy size={18} /> },
-    { id: 'practice', label: 'Practice', icon: <Dumbbell size={18} /> },
-    { id: 'manage', label: 'Manage', icon: <Settings2 size={18} /> }
+    { id: 'practice', label: 'Practice', icon: <Dumbbell size={18} /> }
   ];
 
   const renderContent = () => {
@@ -91,9 +90,12 @@ function App() {
       case 'swot': return <Swot swotData={data.swot} roster={data.team?.roster} schedule={data.schedule} />;
       case 'lineups': return (
         <Lineup
+          team={data.team}
           lineupsData={data.lineups}
           availability={data.availability}
           schedule={data.schedule}
+          onAvailabilityChange={(newAvail) => setData(prev => ({ ...prev, availability: newAvail }))}
+          onDataRefresh={fetchData}
           onRegenerate={(newLineups) => setData(prev => ({ ...prev, lineups: newLineups }))}
         />
       );
@@ -103,14 +105,6 @@ function App() {
         <Practice
           team={data.team}
           schedule={data.schedule}
-        />
-      );
-      case 'manage': return (
-        <RosterManager
-          team={data.team}
-          availability={data.availability}
-          onAvailabilityChange={(newAvail) => setData(prev => ({ ...prev, availability: newAvail }))}
-          onTeamChange={(newTeam) => setData(prev => ({ ...prev, team: newTeam }))}
         />
       );
       default: return (

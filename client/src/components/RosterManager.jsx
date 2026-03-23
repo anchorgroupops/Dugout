@@ -135,7 +135,14 @@ const PlayerCombobox = ({ players, onSelect, placeholder }) => {
   );
 };
 
-const RosterManager = ({ team, availability, onAvailabilityChange, onTeamChange }) => {
+const RosterManager = ({
+  team,
+  availability,
+  onAvailabilityChange,
+  onRosterMutated,
+  title = 'Manage Roster',
+  showTitle = true
+}) => {
   const [updatingPlayer, setUpdatingPlayer] = useState(null);
   const [showBorrowForm, setShowBorrowForm] = useState(false);
   const [borrowForm, setBorrowForm] = useState({ first: '', last: '', number: '', gc_team_id: '' });
@@ -170,7 +177,10 @@ const RosterManager = ({ team, availability, onAvailabilityChange, onTeamChange 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newAvailability)
       });
-      if (res.ok) onAvailabilityChange(newAvailability);
+      if (res.ok) {
+        onAvailabilityChange(newAvailability);
+        if (onRosterMutated) await onRosterMutated();
+      }
     } catch (e) {
       console.error('Toggle failed', e);
     } finally {
@@ -190,7 +200,10 @@ const RosterManager = ({ team, availability, onAvailabilityChange, onTeamChange 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newAvailability)
       });
-      if (res.ok) onAvailabilityChange(newAvailability);
+      if (res.ok) {
+        onAvailabilityChange(newAvailability);
+        if (onRosterMutated) await onRosterMutated();
+      }
     } catch (e) {
       console.error('Set all failed', e);
     }
@@ -208,7 +221,10 @@ const RosterManager = ({ team, availability, onAvailabilityChange, onTeamChange 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newAvailability)
       });
-      if (res.ok) onAvailabilityChange(newAvailability);
+      if (res.ok) {
+        onAvailabilityChange(newAvailability);
+        if (onRosterMutated) await onRosterMutated();
+      }
     } catch (e) {
       console.error('Sharks only failed', e);
     }
@@ -238,6 +254,7 @@ const RosterManager = ({ team, availability, onAvailabilityChange, onTeamChange 
       if (res.ok) {
         setBorrowStatus('success');
         setBorrowForm({ first: '', last: '', number: '', gc_team_id: '' });
+        if (onRosterMutated) await onRosterMutated();
         setTimeout(() => {
           setShowBorrowForm(false);
           setBorrowStatus(null);
@@ -246,7 +263,7 @@ const RosterManager = ({ team, availability, onAvailabilityChange, onTeamChange 
       } else {
         setBorrowStatus('error');
       }
-    } catch (e) {
+    } catch {
       setBorrowStatus('error');
     }
   };
@@ -257,12 +274,14 @@ const RosterManager = ({ team, availability, onAvailabilityChange, onTeamChange 
 
   return (
     <div>
-      <h2 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-        <Settings2 size={24} color="var(--primary-color)" /> Manage Roster
-        <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)', fontWeight: 'normal', marginLeft: '0.5rem' }}>
-          ({activeCount} / {roster.length} available)
-        </span>
-      </h2>
+      {showTitle && (
+        <h2 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <Settings2 size={24} color="var(--primary-color)" /> {title}
+          <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)', fontWeight: 'normal', marginLeft: '0.5rem' }}>
+            ({activeCount} / {roster.length} available)
+          </span>
+        </h2>
+      )}
 
       {/* Availability section */}
       <div className="glass-panel" style={{ padding: '1.5rem', marginBottom: '1.5rem' }}>
