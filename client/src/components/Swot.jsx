@@ -125,8 +125,8 @@ const MatchupPanel = ({ defaultOpponent }) => {
           {/* Recommendation banner */}
           <div style={{
             padding: '0.75rem 1rem', borderRadius: '8px', marginBottom: matchup.empty ? '0' : '1rem',
-            background: matchup.empty ? 'rgba(4,101,104,0.18)' : 'rgba(0,210,255,0.06)',
-            border: `1px solid ${matchup.empty ? 'rgba(130,203,195,0.5)' : 'rgba(0,210,255,0.15)'}`,
+            background: matchup.empty ? 'rgba(4,101,104,0.18)' : 'rgba(4, 101, 104, 0.08)',
+            border: `1px solid ${matchup.empty ? 'rgba(130,203,195,0.5)' : 'rgba(4, 101, 104, 0.2)'}`,
             fontSize: '0.9rem', fontWeight: '600',
             color: matchup.empty ? '#82CBC3' : 'var(--primary-color)',
             display: 'flex', alignItems: 'center', gap: '0.6rem'
@@ -196,7 +196,7 @@ const MatchupPanel = ({ defaultOpponent }) => {
           {/* Key matchups */}
           {matchup.key_matchups.length > 0 && (
             <div style={{ marginTop: '1rem', paddingTop: '0.75rem', borderTop: '1px solid var(--surface-border)' }}>
-              <div style={{ fontSize: '0.7rem', color: '#e8a838', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.4rem', fontWeight: '700' }}>
+              <div style={{ fontSize: '0.7rem', color: 'var(--warning)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.4rem', fontWeight: '700' }}>
                 Key Matchups
               </div>
               <ul style={{ paddingLeft: '1.2rem', fontSize: '0.85rem', color: 'var(--text-muted)', margin: 0 }}>
@@ -253,7 +253,7 @@ const UpcomingGameBanner = ({ next }) => {
   return (
     <div className="glass-panel" style={{
       padding: '1rem 1.5rem', marginBottom: '0.75rem',
-      borderColor: 'rgba(0,210,255,0.3)', background: 'rgba(0,210,255,0.04)'
+      borderColor: 'rgba(4, 101, 104, 0.32)', background: 'rgba(4, 101, 104, 0.06)'
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
         <Clock size={18} color="var(--primary-color)" />
@@ -262,8 +262,8 @@ const UpcomingGameBanner = ({ next }) => {
         </span>
         <span style={{
           display: 'inline-flex', alignItems: 'center', gap: '0.25rem',
-          background: isHome ? 'rgba(35,134,54,0.15)' : 'rgba(100,160,220,0.15)',
-          color: isHome ? 'var(--success)' : '#4a9ede',
+          background: isHome ? 'rgba(35,134,54,0.15)' : 'rgba(42, 143, 147, 0.16)',
+          color: isHome ? 'var(--success)' : 'var(--accent-away)',
           padding: '2px 8px', borderRadius: '12px', fontSize: '0.7rem', fontWeight: '700'
         }}>
           {isHome ? <Home size={10} /> : <Plane size={10} />}
@@ -337,7 +337,7 @@ const Swot = ({ swotData, roster, schedule }) => {
             <SwotQuadrant title="Strengths" items={teamSwot.strengths} color="var(--success)" icon={<TrendingUp size={14} />} />
             <SwotQuadrant title="Areas for Growth" items={teamSwot.weaknesses} color="var(--danger)" icon={<AlertTriangle size={14} />} />
             <SwotQuadrant title="Opportunities" items={teamSwot.opportunities} color="#3b9ede" icon={<Target size={14} />} />
-            <SwotQuadrant title="Threats" items={teamSwot.threats} color="#e8a838" icon={<ShieldAlert size={14} />} />
+            <SwotQuadrant title="Threats" items={teamSwot.threats} color="var(--warning)" icon={<ShieldAlert size={14} />} />
           </div>
         </div>
       )}
@@ -394,7 +394,7 @@ const Swot = ({ swotData, roster, schedule }) => {
                 {isExpanded && (
                   <>
                     <SwotQuadrant title="Opportunities" items={player.swot?.opportunities} color="#3b9ede" icon={<Target size={13} />} />
-                    <SwotQuadrant title="Threats" items={player.swot?.threats} color="#e8a838" icon={<ShieldAlert size={13} />} />
+                    <SwotQuadrant title="Threats" items={player.swot?.threats} color="var(--warning)" icon={<ShieldAlert size={13} />} />
                   </>
                 )}
               </div>

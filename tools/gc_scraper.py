@@ -167,6 +167,7 @@ class GameChangerScraper:
         self.roster_manifest_path = roster_manifest_path or (SHARKS_DIR / "roster_manifest.json")
         self.use_manifest = use_manifest
         self.browser = None
+        self.context = None
         self.page = None
 
     def _validate_credentials(self):
@@ -180,24 +181,38 @@ class GameChangerScraper:
         """Log in to GameChanger via browser automation using persistent sessions."""
         self._validate_credentials()
 
-        auth_file = DATA_DIR / "auth.json"
+        auth_file_env = os.getenv("GC_AUTH_FILE", "").strip()
+        auth_file = Path(auth_file_env) if auth_file_env else (DATA_DIR / "auth.json")
+        auth_file.parent.mkdir(parents=True, exist_ok=True)
 
-        self.browser = playwright.chromium.launch(headless=True)
-        
-        # Load existing session if available
-        if auth_file.exists():
-            print(f"[GC] Loading existing session from {auth_file}")
-            context = self.browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                storage_state=str(auth_file)
+        context_dir = os.getenv("GC_PLAYWRIGHT_CONTEXT_DIR", "").strip()
+        user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+
+        if context_dir:
+            context_path = Path(context_dir)
+            context_path.mkdir(parents=True, exist_ok=True)
+            print(f"[GC] Using persistent Playwright context dir: {context_path}")
+            self.context = playwright.chromium.launch_persistent_context(
+                user_data_dir=str(context_path),
+                headless=True,
+                user_agent=user_agent,
             )
+            self.browser = self.context
         else:
-            print("[GC] No existing session found. Creating new context.")
-            context = self.browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-            )
-            
-        self.page = context.new_page()
+            self.browser = playwright.chromium.launch(headless=True)
+
+            # Load existing session if available
+            if auth_file.exists():
+                print(f"[GC] Loading existing session from {auth_file}")
+                self.context = self.browser.new_context(
+                    user_agent=user_agent,
+                    storage_state=str(auth_file),
+                )
+            else:
+                print("[GC] No existing session found. Creating new context.")
+                self.context = self.browser.new_context(user_agent=user_agent)
+
+        self.page = self.context.pages[0] if self.context.pages else self.context.new_page()
 
         print(f"[GC] Navigating to {GC_BASE_URL}...")
         self.page.goto(GC_BASE_URL, wait_until="domcontentloaded", timeout=60000)
@@ -229,7 +244,7 @@ class GameChangerScraper:
         
         # Save session state
         print(f"[GC] Saving authenticated session state to {auth_file}...")
-        context.storage_state(path=str(auth_file))
+        self.context.storage_state(path=str(auth_file))
 
         return self.page
 
@@ -653,9 +668,14 @@ class GameChangerScraper:
 
     def close(self):
         """Close the browser."""
-        if self.browser:
+        if self.context:
+            self.context.close()
+            print("[GC] Browser context closed.")
+        if self.browser and self.browser is not self.context:
             self.browser.close()
             print("[GC] Browser closed.")
+        self.context = None
+        self.browser = None
 
 
 def run():

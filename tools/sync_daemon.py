@@ -5,6 +5,7 @@ import logging
 import traceback
 import requests
 import ipaddress
+import sqlite3
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from urllib.parse import urlparse
@@ -29,6 +30,9 @@ from stats_normalizer import (
     normalize_innings_played_row,
     normalize_pitching_advanced_row,
     normalize_pitching_row,
+    build_player_metric_profile,
+    player_identity_key,
+    validate_team_outlier_stats,
     safe_float as _safe_float,
     safe_int as _safe_int,
 )
@@ -652,6 +656,129 @@ def _record_stats_db_snapshot(team_data: dict, source: str = "sync_cycle", notes
         return None
 
 
+def _load_recent_metric_profiles(limit: int = 30) -> dict[str, list[dict[str, float]]]:
+    """
+    Load recent historical player metric profiles from stats_history.db.
+    Returns: {player_identity_key: [metric_profile, ...]}
+    """
+    try:
+        from stats_db import DB_PATH
+    except Exception:
+        return {}
+
+    db_path = Path(DB_PATH)
+    if not db_path.exists():
+        return {}
+
+    conn = sqlite3.connect(str(db_path))
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM snapshots ORDER BY id DESC LIMIT ?", (int(limit),))
+        snapshot_ids = [int(r[0]) for r in cur.fetchall() if r and r[0] is not None]
+        if not snapshot_ids:
+            return {}
+
+        placeholders = ",".join("?" for _ in snapshot_ids)
+        query = f"""
+            SELECT
+                p.number, p.first_name, p.last_name, p.display_name,
+                bs.pa, bs.bb, bs.so, bs.avg, bs.obp, bs.slg, bs.ops,
+                ps.ip, ps.bb, ps.so, ps.era, ps.whip,
+                fs.fpct, fs.e
+            FROM batting_snapshots bs
+            JOIN players p ON p.player_key = bs.player_key
+            JOIN pitching_snapshots ps ON ps.player_key = bs.player_key AND ps.snapshot_id = bs.snapshot_id
+            JOIN fielding_snapshots fs ON fs.player_key = bs.player_key AND fs.snapshot_id = bs.snapshot_id
+            WHERE bs.snapshot_id IN ({placeholders})
+        """
+        cur.execute(query, snapshot_ids)
+
+        history: dict[str, list[dict[str, float]]] = {}
+        for row in cur.fetchall():
+            faux_player = {
+                "number": row[0],
+                "first": row[1] or "",
+                "last": row[2] or "",
+                "name": row[3] or "",
+                "batting": {
+                    "pa": row[4] or 0,
+                    "bb": row[5] or 0,
+                    "so": row[6] or 0,
+                    "avg": row[7] or 0.0,
+                    "obp": row[8] or 0.0,
+                    "slg": row[9] or 0.0,
+                    "ops": row[10] or 0.0,
+                },
+                "pitching": {
+                    "ip": row[11] or 0.0,
+                    "bb": row[12] or 0,
+                    "so": row[13] or 0,
+                    "era": row[14] or 0.0,
+                    "whip": row[15] or 0.0,
+                },
+                "fielding": {
+                    "fpct": row[16] or 0.0,
+                    "e": row[17] or 0,
+                },
+            }
+            key = player_identity_key(faux_player)
+            history.setdefault(key, []).append(build_player_metric_profile(faux_player))
+        return history
+    except Exception as e:
+        logging.warning(f"[Validate] Historical profile load failed: {e}")
+        return {}
+    finally:
+        conn.close()
+
+
+def _validate_and_write_stat_anomalies(team_data: dict) -> list[dict]:
+    """
+    Flag outlier stats (>3 SD by default) before writing team_enriched.json.
+    """
+    z_threshold = float(os.getenv("STATS_OUTLIER_Z_THRESHOLD", "3.0"))
+    min_samples = int(os.getenv("STATS_OUTLIER_MIN_SAMPLES", "5"))
+    history_limit = int(os.getenv("STATS_OUTLIER_HISTORY_LIMIT", "30"))
+
+    history = _load_recent_metric_profiles(limit=history_limit)
+    findings = validate_team_outlier_stats(
+        team_data=team_data,
+        historical_profiles_by_player=history,
+        z_threshold=z_threshold,
+        min_history_samples=min_samples,
+    )
+
+    out = {
+        "generated_at": datetime.now(ET).isoformat(),
+        "z_threshold": z_threshold,
+        "min_history_samples": min_samples,
+        "history_snapshot_limit": history_limit,
+        "anomaly_count": len(findings),
+        "anomalies": findings,
+    }
+    out_file = SHARKS_DIR / "stats_anomalies.json"
+    with open(out_file, "w") as f:
+        json.dump(out, f, indent=2)
+
+    if findings:
+        for player_finding in findings:
+            player = player_finding.get("player", {})
+            for metric in player_finding.get("outliers", []):
+                logging.warning(
+                    "[Validate] Outlier flagged for %s (%s): %s current=%s mean=%s std=%s z=%s",
+                    player.get("name", "Unknown"),
+                    player.get("number", "?"),
+                    metric.get("metric"),
+                    metric.get("current"),
+                    metric.get("mean"),
+                    metric.get("stddev"),
+                    metric.get("z_score"),
+                )
+    else:
+        logging.info("[Validate] No outlier stats detected before team save.")
+
+    return findings
+
+
 def get_next_game_time():
     """Parse schedule_manual.json to find the nearest upcoming game. Returns datetime or None."""
     schedule_file = SHARKS_DIR / "schedule_manual.json"
@@ -733,14 +860,16 @@ def run_sync_cycle():
                 team_data = json.load(f)
             _enrich_team_with_app_stats(team_data)
             _, reconcile_meta = _merge_team_with_scorebook_stats(team_data)
+            anomaly_findings = _validate_and_write_stat_anomalies(team_data)
             enriched_team_data = team_data
             enriched_file = SHARKS_DIR / "team_enriched.json"
             with open(enriched_file, "w") as f:
                 json.dump(team_data, f, indent=2)
             logging.info(
-                "[Sync] team_enriched.json written (scorebook matched=%s updated=%s).",
+                "[Sync] team_enriched.json written (scorebook matched=%s updated=%s, anomalies=%s).",
                 reconcile_meta.get("players_matched", 0),
                 reconcile_meta.get("players_updated", 0),
+                len(anomaly_findings),
             )
         except Exception as e:
             logging.warning(f"team_enriched.json write skipped: {e}")
@@ -780,7 +909,7 @@ def run_sync_cycle():
 # ---------------------------------------------------------
 # API SERVER (Flask)
 # ---------------------------------------------------------
-from flask import Flask, request, jsonify
+from flask import Flask, Response, jsonify, request
 from flask_cors import CORS
 import threading
 from werkzeug.exceptions import BadRequest, RequestEntityTooLarge, HTTPException
@@ -1737,6 +1866,140 @@ def _build_practice_needs(team: dict, selected_names: list[str]) -> list[dict]:
     for idx, item in enumerate(needs, start=1):
         item["priority"] = idx
     return needs
+
+
+def _load_voice_context() -> dict:
+    team_file = SHARKS_DIR / "team_enriched.json"
+    if not team_file.exists():
+        team_file = SHARKS_DIR / ("team_merged.json" if (SHARKS_DIR / "team_merged.json").exists() else "team.json")
+
+    team = _read_json_file(team_file, default={}) or {}
+    if isinstance(team, dict):
+        _enrich_team_with_app_stats(team)
+        _merge_team_with_scorebook_stats(team)
+        team["team_name"] = _canonical_team_name(team.get("team_name", "The Sharks"), "sharks")
+
+    swot = _read_json_file(SHARKS_DIR / "swot_analysis.json", default={}) or {}
+    lineups = _read_json_file(SHARKS_DIR / "lineups.json", default={}) or {}
+    schedule = _read_json_file(SHARKS_DIR / "schedule_manual.json", default={"upcoming": [], "past": []}) or {"upcoming": [], "past": []}
+    return {"team": team, "swot": swot, "lineups": lineups, "schedule": schedule}
+
+
+def _build_voice_overview_text(ctx: dict) -> str:
+    team = ctx.get("team", {}) if isinstance(ctx, dict) else {}
+    swot = ctx.get("swot", {}) if isinstance(ctx, dict) else {}
+    lineups = ctx.get("lineups", {}) if isinstance(ctx, dict) else {}
+    schedule = ctx.get("schedule", {}) if isinstance(ctx, dict) else {}
+
+    team_name = team.get("team_name", "The Sharks")
+    record = str(team.get("record", "0-0"))
+    roster = [p for p in team.get("roster", []) if isinstance(p, dict) and p.get("core", True) is not False]
+
+    def _player_name(p: dict) -> str:
+        return str(p.get("name") or f"{p.get('first', '')} {p.get('last', '')}").strip() or "Unknown"
+
+    top_hitters = sorted(
+        roster,
+        key=lambda p: (
+            float(normalize_batting_row(p).get("obp", 0.0)),
+            float(normalize_batting_row(p).get("ops", 0.0)),
+            str(p.get("last", "")),
+        ),
+        reverse=True,
+    )[:3]
+    hitter_text = ", ".join(
+        f"{_player_name(p)} on-base {normalize_batting_row(p).get('obp', 0.0):.3f}"
+        for p in top_hitters
+    ) or "no clear hitting leaders yet"
+
+    strengths = ((swot.get("team_swot") or {}).get("strengths") or [])
+    weaknesses = ((swot.get("team_swot") or {}).get("weaknesses") or [])
+    strengths_text = strengths[0] if strengths else "team strengths still stabilizing"
+    weaknesses_text = weaknesses[0] if weaknesses else "no major weakness trend yet"
+
+    balanced = (lineups.get("balanced") or {}).get("lineup") or []
+    top_order = ", ".join(
+        f"#{p.get('number', '?')} {_player_name(p)}"
+        for p in balanced[:3]
+    ) or "lineup not generated"
+
+    today = datetime.now(ET).strftime("%Y-%m-%d")
+    next_game = sorted(
+        [g for g in (schedule.get("upcoming") or []) if str(g.get("date", "")) >= today],
+        key=lambda x: str(x.get("date", "")),
+    )
+    next_game_text = "No upcoming game on file."
+    if next_game:
+        game = next_game[0]
+        opp = _clean_opponent_name(str(game.get("opponent", "Opponent")))
+        next_game_text = f"Next game is {game.get('date', 'TBD')} against {opp}."
+
+    return (
+        f"{team_name} status update. Current record is {record}. "
+        f"Top on-base contributors: {hitter_text}. "
+        f"Primary strength: {strengths_text}. "
+        f"Primary focus area: {weaknesses_text}. "
+        f"Balanced top order currently projects as {top_order}. "
+        f"{next_game_text}"
+    )
+
+
+def _synthesize_voice_update(text: str) -> bytes:
+    api_key = os.getenv("ELEVENLABS_API_KEY", "").strip()
+    voice_id = os.getenv("ELEVENLABS_VOICE_ID", "").strip() or os.getenv("ELEVENLABS_DEFAULT_VOICE_ID", "").strip()
+    model_id = os.getenv("ELEVENLABS_MODEL_ID", "eleven_turbo_v2_5")
+
+    if not api_key:
+        raise RuntimeError("Missing ELEVENLABS_API_KEY.")
+    if not voice_id:
+        raise RuntimeError("Missing ELEVENLABS_VOICE_ID.")
+
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+    payload = {
+        "text": text,
+        "model_id": model_id,
+        "voice_settings": {
+            "stability": 0.35,
+            "similarity_boost": 0.75,
+        },
+    }
+    headers = {
+        "Accept": "audio/mpeg",
+        "Content-Type": "application/json",
+        "xi-api-key": api_key,
+    }
+
+    resp = requests.post(url, json=payload, headers=headers, timeout=60)
+    if resp.status_code != 200:
+        raise RuntimeError(f"ElevenLabs returned {resp.status_code}: {resp.text[:300]}")
+    return resp.content
+
+
+@app.route('/api/voice-update', methods=['GET'])
+def handle_voice_update():
+    """
+    Generate and return a short spoken team status update as MP3.
+    """
+    try:
+        ctx = _load_voice_context()
+        text = _build_voice_overview_text(ctx)
+        audio = _synthesize_voice_update(text)
+
+        now_iso = datetime.now(ET).isoformat()
+        mp3_file = SHARKS_DIR / "voice_overview_latest.mp3"
+        meta_file = SHARKS_DIR / "voice_overview_latest.json"
+        with open(mp3_file, "wb") as f:
+            f.write(audio)
+        with open(meta_file, "w") as f:
+            json.dump({"generated_at": now_iso, "script": text}, f, indent=2)
+
+        response = Response(audio, mimetype="audio/mpeg")
+        response.headers["Content-Disposition"] = 'inline; filename="voice_overview_latest.mp3"'
+        response.headers["X-Voice-Generated-At"] = now_iso
+        return response
+    except Exception as e:
+        logging.error(f"[Voice] Voice update generation failed: {e}")
+        return jsonify({"error": "voice_update_failed", "detail": str(e)}), 503
 
 
 @app.route('/api/schedule', methods=['GET'])

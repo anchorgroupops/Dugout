@@ -4,6 +4,14 @@
 
 Use GameChanger statistics to build a comprehensive softball analyzer and training aid for **The Sharks** (PCLL). Perform SWOT analysis per player and team, optimize batting orders, develop targeted training regimens, and maximize improvement and win probability.
 
+## B.L.A.S.T. Strategy (Blueprint, Link, Architect, Stylize, Trigger)
+
+1. **Blueprint**: This `gemini.md` file defines the North Star, schemas, and guardrails.
+2. **Link**: Data pipelines connect GameChanger (Playwright) to NotebookLM and Pinecone.
+3. **Architect**: A.N.T. structure (Architecture/Navigation/Tools).
+4. **Stylize**: UI adheres to Anchor Team brand guidelines (Clear Water, Sandy Shore, Pearl Aqua).
+5. **Trigger**: Workflows are triggered by Modal schedules or user requests.
+
 ## Data Schemas
 
 ### Player Schema
@@ -96,7 +104,13 @@ Use GameChanger statistics to build a comprehensive softball analyzer and traini
 6. **Deterministic Analysis**: SWOT analysis and lineup recommendations must be formula-driven, not guessed.
 7. **Training Alignment**: Recommended training areas must directly map to identified weaknesses.
 
-## Architecture
+## Architecture: A.N.T. (3 Layers)
+
+1.  **Architecture**: SOPs and strategy documented in `architecture/` and `gemini.md`.
+2.  **Navigation**: Agentic orchestration to process data and generate insights.
+3.  **Tools**: Atomic Python scripts in `tools/` (scrapers, memory, optimizers).
+
+## Directory Structure
 
 ```text
 h:/Repos/Personal/Softball/

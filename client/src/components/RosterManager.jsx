@@ -12,14 +12,14 @@ const ToggleRow = ({ player, available, onToggle, updating }) => {
       background: available
         ? (isSub ? 'rgba(255, 165, 0, 0.04)' : 'rgba(0,0,0,0.2)')
         : 'rgba(200,50,50,0.08)',
-      borderLeft: `3px solid ${!available ? 'var(--danger)' : isSub ? 'rgba(255,165,0,0.5)' : 'var(--primary-color)'}`,
+      borderLeft: `3px solid ${!available ? 'var(--danger)' : isSub ? 'rgba(63, 143, 136, 0.42)' : 'var(--primary-color)'}`,
       opacity: available ? 1 : 0.65,
       transition: 'all 0.2s ease'
     }}>
       <div style={{
         width: '36px', height: '36px', borderRadius: '50%', flexShrink: 0,
         background: available
-          ? (isSub ? 'linear-gradient(135deg, #ffa500, #cc8400)' : 'linear-gradient(135deg, var(--primary-color), var(--secondary-color))')
+          ? (isSub ? 'linear-gradient(135deg, var(--accent-sub), #cc8400)' : 'linear-gradient(135deg, var(--primary-color), var(--secondary-color))')
           : '#444',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         fontSize: '0.85rem', fontWeight: 'bold', color: '#fff', transition: 'all 0.2s ease'
@@ -31,7 +31,7 @@ const ToggleRow = ({ player, available, onToggle, updating }) => {
         <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
           {b.gp != null ? `${b.gp} GP` : ''}
           {b.avg != null ? ` · .${String(Math.round((b.avg || 0) * 1000)).padStart(3, '0')} AVG` : ''}
-          {isSub && <span style={{ color: '#ffa500', marginLeft: '0.4rem', fontWeight: '600' }}>SUB</span>}
+          {isSub && <span style={{ color: 'var(--accent-sub)', marginLeft: '0.4rem', fontWeight: '600' }}>SUB</span>}
         </div>
       </div>
       <button
@@ -117,7 +117,7 @@ const PlayerCombobox = ({ players, onSelect, placeholder }) => {
                   borderBottom: i < filtered.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none',
                   transition: 'background 0.15s ease'
                 }}
-                onMouseEnter={e => e.currentTarget.style.background = 'rgba(0,210,255,0.08)'}
+                onMouseEnter={e => e.currentTarget.style.background = 'rgba(4, 101, 104, 0.11)'}
                 onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
               >
                 <div style={{ fontWeight: '600', fontSize: '0.9rem' }}>
@@ -290,7 +290,7 @@ const RosterManager = ({
           <div style={{ display: 'flex', gap: '0.5rem' }}>
             <button
               onClick={handleSharksOnly}
-              style={{ padding: '0.3rem 0.75rem', borderRadius: '6px', border: '1px solid rgba(0,210,255,0.3)', background: 'rgba(0,210,255,0.1)', color: 'var(--primary-color)', cursor: 'pointer', fontSize: '0.8rem', fontWeight: '600' }}
+              style={{ padding: '0.3rem 0.75rem', borderRadius: '6px', border: '1px solid rgba(4, 101, 104, 0.32)', background: 'rgba(4, 101, 104, 0.13)', color: 'var(--primary-color)', cursor: 'pointer', fontSize: '0.8rem', fontWeight: '600' }}
             >
               Sharks Only
             </button>
@@ -332,7 +332,7 @@ const RosterManager = ({
             {/* Active Subs */}
             {subRoster.filter(p => isAvailable(p)).length > 0 && (
               <div style={{ marginBottom: subRoster.filter(p => !isAvailable(p)).length > 0 ? '1rem' : 0 }}>
-                <div style={{ fontSize: '0.7rem', color: '#ffa500', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.5rem', fontWeight: '700' }}>
+                <div style={{ fontSize: '0.7rem', color: 'var(--accent-sub)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.5rem', fontWeight: '700' }}>
                   Active Borrowed Players
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
@@ -425,7 +425,7 @@ const RosterManager = ({
                 {borrowForm.first && !manualMode && (
                   <div style={{
                     padding: '0.6rem 0.75rem', borderRadius: '6px',
-                    background: 'rgba(0,210,255,0.06)', border: '1px solid rgba(0,210,255,0.15)',
+                    background: 'rgba(4, 101, 104, 0.08)', border: '1px solid rgba(4, 101, 104, 0.2)',
                     fontSize: '0.85rem', color: 'var(--primary-color)', fontWeight: '600'
                   }}>
                     Selected: #{borrowForm.number} {borrowForm.first} {borrowForm.last}

@@ -7,6 +7,7 @@ matchup, SWOT, lineup optimization, and pipeline health checks.
 
 from __future__ import annotations
 
+import statistics
 from typing import Any, Callable
 
 
@@ -373,6 +374,118 @@ def normalize_player_batting_advanced(player: dict) -> dict:
         return normalize_batting_advanced_row(hitting_adv)
 
     return normalize_batting_advanced_row(player)
+
+
+def player_identity_key(player: dict) -> str:
+    number = str(player.get("number", "")).strip()
+    first = str(player.get("first", "")).strip().lower()
+    last = str(player.get("last", "")).strip().lower()
+    name = str(player.get("name", "")).strip().lower()
+    if number:
+        return f"#{number}"
+    if first or last:
+        return f"{first}|{last}".strip("|")
+    return name or "unknown"
+
+
+def build_player_metric_profile(player: dict) -> dict[str, float]:
+    batting = normalize_player_batting(player)
+    pitching = normalize_pitching_row(player)
+    fielding = normalize_fielding_row(player)
+
+    pa = float(batting.get("pa", 0))
+    so = float(batting.get("so", 0))
+    bb = float(batting.get("bb", 0))
+    ip = float(pitching.get("ip", 0))
+
+    return {
+        "batting_avg": float(batting.get("avg", 0.0)),
+        "batting_obp": float(batting.get("obp", 0.0)),
+        "batting_slg": float(batting.get("slg", 0.0)),
+        "batting_ops": float(batting.get("ops", 0.0)),
+        "batting_k_rate": (so / pa) if pa > 0 else 0.0,
+        "batting_bb_rate": (bb / pa) if pa > 0 else 0.0,
+        "pitching_era": float(pitching.get("era", 0.0)),
+        "pitching_whip": float(pitching.get("whip", 0.0)),
+        "pitching_bb_per_ip": (float(pitching.get("bb", 0.0)) / ip) if ip > 0 else 0.0,
+        "pitching_k_per_ip": (float(pitching.get("so", 0.0)) / ip) if ip > 0 else 0.0,
+        "fielding_fpct": float(fielding.get("fpct", 0.0)),
+        "fielding_errors": float(fielding.get("e", 0)),
+    }
+
+
+def detect_player_outlier_stats(
+    player: dict,
+    history_profiles: list[dict[str, float]],
+    z_threshold: float = 3.0,
+    min_history_samples: int = 5,
+) -> list[dict[str, float | str]]:
+    """
+    Flag current player stats that are > z_threshold SD away from historical mean.
+    Returns anomaly records with metric/current/mean/stddev/z_score.
+    """
+    current = build_player_metric_profile(player)
+    outliers: list[dict[str, float | str]] = []
+
+    for metric, current_val in current.items():
+        values = [float(h.get(metric, 0.0)) for h in history_profiles if metric in h]
+        if len(values) < min_history_samples:
+            continue
+
+        mean_val = statistics.fmean(values)
+        stdev = statistics.pstdev(values)
+        if stdev <= 1e-9:
+            continue
+
+        z_score = abs((current_val - mean_val) / stdev)
+        if z_score > z_threshold:
+            outliers.append(
+                {
+                    "metric": metric,
+                    "current": round(current_val, 4),
+                    "mean": round(mean_val, 4),
+                    "stddev": round(stdev, 4),
+                    "z_score": round(z_score, 4),
+                }
+            )
+
+    return outliers
+
+
+def validate_team_outlier_stats(
+    team_data: dict,
+    historical_profiles_by_player: dict[str, list[dict[str, float]]],
+    z_threshold: float = 3.0,
+    min_history_samples: int = 5,
+) -> list[dict[str, Any]]:
+    """
+    Validate full roster and return detected anomalies.
+    historical_profiles_by_player should be keyed by player_identity_key().
+    """
+    findings: list[dict[str, Any]] = []
+    for player in team_data.get("roster", []):
+        identity = player_identity_key(player)
+        history = historical_profiles_by_player.get(identity, [])
+        if not history:
+            continue
+        outliers = detect_player_outlier_stats(
+            player,
+            history_profiles=history,
+            z_threshold=z_threshold,
+            min_history_samples=min_history_samples,
+        )
+        if outliers:
+            findings.append(
+                {
+                    "player": {
+                        "number": player.get("number"),
+                        "name": (player.get("name") or f"{player.get('first', '')} {player.get('last', '')}").strip(),
+                        "identity": identity,
+                    },
+                    "outliers": outliers,
+                }
+            )
+    return findings
 
 
 def count_populated_fields(rows: list[dict], fields: list[str], normalizer: Callable[[dict], dict]) -> dict:

@@ -81,8 +81,8 @@ const GameCard = ({ game, onExpand, isExpanded, detail }) => {
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem', flexWrap: 'wrap' }}>
             <span style={{
               display: 'inline-flex', alignItems: 'center', gap: '0.25rem',
-              background: isHome ? 'rgba(35,134,54,0.15)' : 'rgba(100,160,220,0.15)',
-              color: isHome ? 'var(--success)' : '#4a9ede',
+              background: isHome ? 'rgba(35,134,54,0.15)' : 'rgba(42, 143, 147, 0.16)',
+              color: isHome ? 'var(--success)' : 'var(--accent-away)',
               padding: '2px 8px', borderRadius: '12px', fontSize: '0.7rem', fontWeight: '700'
             }}>
               {isHome ? <Home size={10} /> : <Plane size={10} />}
@@ -143,8 +143,8 @@ const UpcomingGameBanner = ({ schedule }) => {
   return (
     <div className="glass-panel" style={{
       padding: '1rem 1.5rem', marginBottom: '1.5rem',
-      borderColor: 'rgba(0,210,255,0.3)',
-      background: 'rgba(0,210,255,0.04)'
+      borderColor: 'rgba(4, 101, 104, 0.32)',
+      background: 'rgba(4, 101, 104, 0.06)'
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
         <Clock size={18} color="var(--primary-color)" />
@@ -153,8 +153,8 @@ const UpcomingGameBanner = ({ schedule }) => {
         </span>
         <span style={{
           display: 'inline-flex', alignItems: 'center', gap: '0.25rem',
-          background: isHome ? 'rgba(35,134,54,0.15)' : 'rgba(100,160,220,0.15)',
-          color: isHome ? 'var(--success)' : '#4a9ede',
+          background: isHome ? 'rgba(35,134,54,0.15)' : 'rgba(42, 143, 147, 0.16)',
+          color: isHome ? 'var(--success)' : 'var(--accent-away)',
           padding: '2px 8px', borderRadius: '12px', fontSize: '0.7rem', fontWeight: '700'
         }}>
           {isHome ? <Home size={10} /> : <Plane size={10} />}
@@ -183,14 +183,14 @@ const ScheduleRow = ({ game }) => {
     <div style={{
       display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.6rem 0.75rem',
       borderRadius: '8px', flexWrap: 'wrap',
-      background: isNext ? 'rgba(0,210,255,0.06)' : 'rgba(0,0,0,0.15)',
+      background: isNext ? 'rgba(4, 101, 104, 0.08)' : 'rgba(0,0,0,0.15)',
       border: isNext ? '1px solid rgba(0,210,255,0.2)' : '1px solid transparent',
     }}>
       <span style={{ minWidth: '110px', fontSize: '0.85rem', color: 'var(--text-muted)' }}>{dateStr}</span>
       <span style={{
         display: 'inline-flex', alignItems: 'center', gap: '0.2rem',
-        background: isHome ? 'rgba(35,134,54,0.15)' : 'rgba(100,160,220,0.15)',
-        color: isHome ? 'var(--success)' : '#4a9ede',
+        background: isHome ? 'rgba(35,134,54,0.15)' : 'rgba(42, 143, 147, 0.16)',
+        color: isHome ? 'var(--success)' : 'var(--accent-away)',
         padding: '1px 7px', borderRadius: '10px', fontSize: '0.68rem', fontWeight: '700'
       }}>
         {isHome ? <Home size={9} /> : <Plane size={9} />}
