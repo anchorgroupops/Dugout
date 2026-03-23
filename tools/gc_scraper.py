@@ -680,10 +680,12 @@ class GameChangerScraper:
 
 def run():
     """Main entry point for the GC scraper."""
+    import sys
+
     if sync_playwright is None:
         print("[GC] ERROR: Playwright not installed.")
         print("[GC] Run: pip install playwright && playwright install chromium")
-        return
+        sys.exit(1)
 
     parser = argparse.ArgumentParser(description="GameChanger stats scraper")
     parser.add_argument("--team-id", dest="team_id", default=None, help="GC Team ID")
@@ -703,6 +705,7 @@ def run():
         use_manifest=not args.no_manifest,
     )
 
+    had_error = False
     with sync_playwright() as pw:
         try:
             scraper.login(pw)
@@ -716,8 +719,12 @@ def run():
             print(f"[GC] Error: {e}")
             import traceback
             traceback.print_exc()
+            had_error = True
         finally:
             scraper.close()
+
+    if had_error:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

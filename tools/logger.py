@@ -22,19 +22,19 @@ def log_decision(category: str, input_data: Dict[str, Any], output_data: Dict[st
 
     try:
         if os.path.exists(LOG_FILE):
-            with open(LOG_FILE, "r") as f:
+            with open(LOG_FILE, "r", encoding="utf-8") as f:
                 history = json.load(f)
         else:
             history = []
         
         history.append(entry)
         
-        with open(LOG_FILE, "w") as f:
+        with open(LOG_FILE, "w", encoding="utf-8") as f:
             json.dump(history, f, indent=2)
             
-        print(f"✅ Decision logged to {LOG_FILE}")
+        print(f"[AUDIT] Decision logged to {LOG_FILE}")
     except Exception as e:
-        print(f"❌ Failed to log decision: {e}")
+        print(f"[AUDIT] Failed to log decision: {e}")
 
 if __name__ == "__main__":
     # Test entry

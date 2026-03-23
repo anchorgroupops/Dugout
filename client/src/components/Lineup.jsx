@@ -165,25 +165,6 @@ const Lineup = ({
 
       <NextGameBanner schedule={schedule} />
 
-      <div className="glass-panel" style={{ padding: '1.2rem', marginBottom: '1.25rem' }}>
-        <div style={{ marginBottom: '0.75rem' }}>
-          <h3 style={{ margin: 0, fontSize: '1rem', color: 'var(--primary-color)' }}>
-            Game-Day Availability & Borrowed Players
-          </h3>
-          <p style={{ margin: '0.35rem 0 0', fontSize: '0.84rem', color: 'var(--text-muted)' }}>
-            Toggle who is in tonight, add subs if needed, and lineups will auto-refresh from live stats.
-          </p>
-        </div>
-        <RosterManager
-          team={team}
-          availability={availability}
-          onAvailabilityChange={onAvailabilityChange}
-          onRosterMutated={onDataRefresh}
-          title="Game-Day Availability"
-          showTitle={false}
-        />
-      </div>
-
       <div className="glass-panel" style={{ padding: '2rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem', paddingBottom: '1rem', borderBottom: '1px solid var(--surface-border)' }}>
           <div>
@@ -260,6 +241,25 @@ const Lineup = ({
             );
           })}
         </div>
+      </div>
+
+      <div className="glass-panel" style={{ padding: '1.2rem', marginTop: '1.25rem' }}>
+        <div style={{ marginBottom: '0.75rem' }}>
+          <h3 style={{ margin: 0, fontSize: '1rem', color: 'var(--primary-color)' }}>
+            Game-Day Availability & Borrowed Players
+          </h3>
+          <p style={{ margin: '0.35rem 0 0', fontSize: '0.84rem', color: 'var(--text-muted)' }}>
+            Toggle who is in tonight, add subs if needed, and lineups will auto-refresh from live stats.
+          </p>
+        </div>
+        <RosterManager
+          team={team}
+          availability={availability}
+          onAvailabilityChange={onAvailabilityChange}
+          onRosterMutated={onDataRefresh}
+          title="Game-Day Availability"
+          showTitle={false}
+        />
       </div>
     </div>
   );

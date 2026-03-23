@@ -1,0 +1,256 @@
+[
+  {
+    "timestamp": "2026-03-23T14:34:16.260983",
+    "category": "swot_analysis",
+    "input": {
+      "team_name": "The Sharks",
+      "players_analyzed": 13
+    },
+    "output": {
+      "team_swot": {
+        "strengths": [
+          "Gets on base frequently (9 players)",
+          "Low strikeout rate as batter (8 players)",
+          "Good plate discipline (7 players)"
+        ],
+        "weaknesses": [
+          "Low batting average (10 players)",
+          "Limited power (10 players)",
+          "Below-average production (3 players)"
+        ],
+        "opportunities": [
+          "11 players with multiple areas for growth",
+          "Targeted practice plans can address common weaknesses"
+        ],
+        "threats": [
+          "2 players vulnerable to strikeout pitchers"
+        ]
+      }
+    },
+    "rationale": "Top offensive signals: Amelia OPS 2.0, Leila VanDeusen OPS 1.5, Ember Hourahan OPS 1.467. Strikeout pressure drivers: Emma Williams K% 0.5, Addy A K% 0.5, Juliette Moros K% 0.2. Defensive risk markers: Addy A FPCT 0.0, Chloe Johnson FPCT 0.0."
+  },
+  {
+    "timestamp": "2026-03-23T14:34:16.280336",
+    "category": "lineup_optimizer",
+    "input": {
+      "active_roster_size": 12
+    },
+    "output": {
+      "balanced": {
+        "compliant": true,
+        "top_3": [
+          {
+            "slot": 1,
+            "number": "",
+            "name": "Amelia",
+            "obp": 1.0,
+            "slg": 1.0,
+            "pa": 3
+          },
+          {
+            "slot": 2,
+            "number": "8",
+            "name": "Sephina Santiago",
+            "obp": 0.333,
+            "slg": 0.2,
+            "pa": 6
+          },
+          {
+            "slot": 3,
+            "number": "13",
+            "name": "Leila VanDeusen",
+            "obp": 0.833,
+            "slg": 0.667,
+            "pa": 6
+          }
+        ]
+      },
+      "aggressive": {
+        "compliant": true,
+        "top_3": [
+          {
+            "slot": 1,
+            "number": "",
+            "name": "Amelia",
+            "obp": 1.0,
+            "slg": 1.0,
+            "pa": 3
+          },
+          {
+            "slot": 2,
+            "number": "8",
+            "name": "Sephina Santiago",
+            "obp": 0.333,
+            "slg": 0.2,
+            "pa": 6
+          },
+          {
+            "slot": 3,
+            "number": "13",
+            "name": "Leila VanDeusen",
+            "obp": 0.833,
+            "slg": 0.667,
+            "pa": 6
+          }
+        ]
+      },
+      "development": {
+        "compliant": true,
+        "top_3": [
+          {
+            "slot": 1,
+            "number": "",
+            "name": "Amelia",
+            "obp": 1.0,
+            "slg": 1.0,
+            "pa": 3
+          },
+          {
+            "slot": 2,
+            "number": "8",
+            "name": "Sephina Santiago",
+            "obp": 0.333,
+            "slg": 0.2,
+            "pa": 6
+          },
+          {
+            "slot": 3,
+            "number": "13",
+            "name": "Leila VanDeusen",
+            "obp": 0.833,
+            "slg": 0.667,
+            "pa": 6
+          }
+        ]
+      }
+    },
+    "rationale": "Top-order placements were driven by batting production metrics. balanced: # Amelia (OBP 1.0, SLG 1.0, PA 3), #8 Sephina Santiago (OBP 0.333, SLG 0.2, PA 6), #13 Leila VanDeusen (OBP 0.833, SLG 0.667, PA 6) | aggressive: # Amelia (OBP 1.0, SLG 1.0, PA 3), #8 Sephina Santiago (OBP 0.333, SLG 0.2, PA 6), #13 Leila VanDeusen (OBP 0.833, SLG 0.667, PA 6) | development: # Amelia (OBP 1.0, SLG 1.0, PA 3), #8 Sephina Santiago (OBP 0.333, SLG 0.2, PA 6), #13 Leila VanDeusen (OBP 0.833, SLG 0.667, PA 6)"
+  },
+  {
+    "timestamp": "2026-03-23T14:36:49.644157",
+    "category": "lineup_optimizer",
+    "input": {
+      "active_roster_size": 12
+    },
+    "output": {
+      "balanced": {
+        "compliant": true,
+        "top_3": [
+          {
+            "slot": 1,
+            "number": "",
+            "name": "Amelia",
+            "obp": 1.0,
+            "slg": 1.0,
+            "pa": 3
+          },
+          {
+            "slot": 2,
+            "number": "8",
+            "name": "Sephina Santiago",
+            "obp": 0.333,
+            "slg": 0.2,
+            "pa": 6
+          },
+          {
+            "slot": 3,
+            "number": "13",
+            "name": "Leila VanDeusen",
+            "obp": 0.833,
+            "slg": 0.667,
+            "pa": 6
+          }
+        ]
+      },
+      "aggressive": {
+        "compliant": true,
+        "top_3": [
+          {
+            "slot": 1,
+            "number": "",
+            "name": "Amelia",
+            "obp": 1.0,
+            "slg": 1.0,
+            "pa": 3
+          },
+          {
+            "slot": 2,
+            "number": "8",
+            "name": "Sephina Santiago",
+            "obp": 0.333,
+            "slg": 0.2,
+            "pa": 6
+          },
+          {
+            "slot": 3,
+            "number": "13",
+            "name": "Leila VanDeusen",
+            "obp": 0.833,
+            "slg": 0.667,
+            "pa": 6
+          }
+        ]
+      },
+      "development": {
+        "compliant": true,
+        "top_3": [
+          {
+            "slot": 1,
+            "number": "",
+            "name": "Amelia",
+            "obp": 1.0,
+            "slg": 1.0,
+            "pa": 3
+          },
+          {
+            "slot": 2,
+            "number": "8",
+            "name": "Sephina Santiago",
+            "obp": 0.333,
+            "slg": 0.2,
+            "pa": 6
+          },
+          {
+            "slot": 3,
+            "number": "13",
+            "name": "Leila VanDeusen",
+            "obp": 0.833,
+            "slg": 0.667,
+            "pa": 6
+          }
+        ]
+      }
+    },
+    "rationale": "Top-order placements were driven by batting production metrics. balanced: # Amelia (OBP 1.0, SLG 1.0, PA 3), #8 Sephina Santiago (OBP 0.333, SLG 0.2, PA 6), #13 Leila VanDeusen (OBP 0.833, SLG 0.667, PA 6) | aggressive: # Amelia (OBP 1.0, SLG 1.0, PA 3), #8 Sephina Santiago (OBP 0.333, SLG 0.2, PA 6), #13 Leila VanDeusen (OBP 0.833, SLG 0.667, PA 6) | development: # Amelia (OBP 1.0, SLG 1.0, PA 3), #8 Sephina Santiago (OBP 0.333, SLG 0.2, PA 6), #13 Leila VanDeusen (OBP 0.833, SLG 0.667, PA 6)"
+  },
+  {
+    "timestamp": "2026-03-23T14:36:54.306113",
+    "category": "swot_analysis",
+    "input": {
+      "team_name": "The Sharks",
+      "players_analyzed": 13
+    },
+    "output": {
+      "team_swot": {
+        "strengths": [
+          "Gets on base frequently (9 players)",
+          "Low strikeout rate as batter (8 players)",
+          "Good plate discipline (7 players)"
+        ],
+        "weaknesses": [
+          "Low batting average (10 players)",
+          "Limited power (10 players)",
+          "Below-average production (3 players)"
+        ],
+        "opportunities": [
+          "11 players with multiple areas for growth",
+          "Targeted practice plans can address common weaknesses"
+        ],
+        "threats": [
+          "2 players vulnerable to strikeout pitchers"
+        ]
+      }
+    },
+    "rationale": "Top offensive signals: Amelia OPS 2.0, Leila VanDeusen OPS 1.5, Ember Hourahan OPS 1.467. Strikeout pressure drivers: Emma Williams K% 0.5, Addy A K% 0.5, Juliette Moros K% 0.2. Defensive risk markers: Addy A FPCT 0.0, Chloe Johnson FPCT 0.0."
+  }
+]
