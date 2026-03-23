@@ -56,7 +56,7 @@ const NeedCard = ({ need }) => (
   </div>
 );
 
-const Practice = ({ team, schedule }) => {
+const Practice = ({ team, schedule, isMobile = false }) => {
   const [insights, setInsights] = useState(null);
   const [selected, setSelected] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -116,10 +116,10 @@ const Practice = ({ team, schedule }) => {
   return (
     <div>
       <h2 style={{ marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-        <Dumbbell size={24} color="var(--primary-color)" /> Practice Priorities
+        <Dumbbell size={isMobile ? 20 : 24} color="var(--primary-color)" /> Practice Priorities
       </h2>
 
-      <div className="glass-panel" style={{ padding: '1rem 1.25rem', marginBottom: '1rem' }}>
+      <div className="glass-panel" style={{ padding: isMobile ? '0.85rem 0.95rem' : '1rem 1.25rem', marginBottom: '1rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
           <div>
             <div style={{ fontSize: '0.7rem', color: 'var(--primary-color)', textTransform: 'uppercase', letterSpacing: '0.8px', fontWeight: '700' }}>
@@ -146,7 +146,7 @@ const Practice = ({ team, schedule }) => {
         </div>
       </div>
 
-      <div className="glass-panel" style={{ padding: '1rem 1.25rem', marginBottom: '1rem' }}>
+      <div className="glass-panel" style={{ padding: isMobile ? '0.85rem 0.95rem' : '1rem 1.25rem', marginBottom: '1rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
             <Users size={16} color="var(--primary-color)" />
@@ -160,7 +160,7 @@ const Practice = ({ team, schedule }) => {
           </div>
         </div>
 
-        <div style={{ marginTop: '0.75rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))', gap: '0.4rem' }}>
+        <div style={{ marginTop: '0.75rem', display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(190px, 1fr))', gap: '0.4rem' }}>
           {availablePlayers.map(name => (
             <label key={name} style={{
               display: 'flex', alignItems: 'center', gap: '0.5rem', background: selected.includes(name) ? 'rgba(4, 101, 104, 0.11)' : 'rgba(255,255,255,0.03)',
@@ -185,22 +185,40 @@ const Practice = ({ team, schedule }) => {
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '0.85rem', marginBottom: '1rem' }}>
-            {(insights.needs || []).map(need => <NeedCard key={need.key} need={need} />)}
+            {(insights.needs || []).slice(0, isMobile ? 3 : undefined).map(need => <NeedCard key={need.key} need={need} />)}
           </div>
 
-          <div className="glass-panel" style={{ padding: '1rem 1.25rem' }}>
-            <div style={{ fontSize: '0.7rem', color: 'var(--primary-color)', textTransform: 'uppercase', letterSpacing: '0.8px', fontWeight: '700', marginBottom: '0.6rem' }}>
-              Session Build (Top 3 Needs)
+          {!isMobile && (
+            <div className="glass-panel" style={{ padding: '1rem 1.25rem' }}>
+              <div style={{ fontSize: '0.7rem', color: 'var(--primary-color)', textTransform: 'uppercase', letterSpacing: '0.8px', fontWeight: '700', marginBottom: '0.6rem' }}>
+                Session Build (Top 3 Needs)
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
+                {(insights.recommended_plan || []).map((item, i) => (
+                  <div key={`${item.drill}-${i}`} style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '7px', padding: '0.55rem 0.65rem' }}>
+                    <div style={{ fontWeight: '700', fontSize: '0.9rem' }}>{i + 1}. {item.drill} <span style={{ color: 'var(--text-muted)', fontWeight: '500' }}>({item.duration_min} min)</span></div>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{item.need} · {item.goal}</div>
+                  </div>
+                ))}
+              </div>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
-              {(insights.recommended_plan || []).map((item, i) => (
-                <div key={`${item.drill}-${i}`} style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '7px', padding: '0.55rem 0.65rem' }}>
-                  <div style={{ fontWeight: '700', fontSize: '0.9rem' }}>{i + 1}. {item.drill} <span style={{ color: 'var(--text-muted)', fontWeight: '500' }}>({item.duration_min} min)</span></div>
-                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{item.need} · {item.goal}</div>
-                </div>
-              ))}
-            </div>
-          </div>
+          )}
+
+          {isMobile && (
+            <details className="glass-panel" style={{ padding: '0.8rem 0.9rem' }}>
+              <summary style={{ cursor: 'pointer', color: 'var(--primary-color)', fontWeight: 700, fontSize: '0.84rem' }}>
+                Session Build (Top 3 Needs)
+              </summary>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem', marginTop: '0.55rem' }}>
+                {(insights.recommended_plan || []).map((item, i) => (
+                  <div key={`${item.drill}-${i}`} style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '7px', padding: '0.55rem 0.65rem' }}>
+                    <div style={{ fontWeight: '700', fontSize: '0.85rem' }}>{i + 1}. {item.drill} <span style={{ color: 'var(--text-muted)', fontWeight: '500' }}>({item.duration_min} min)</span></div>
+                    <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>{item.need} · {item.goal}</div>
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
         </>
       )}
 

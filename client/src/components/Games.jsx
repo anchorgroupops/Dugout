@@ -67,7 +67,7 @@ const ResultBadge = ({ result, score }) => {
   );
 };
 
-const GameCard = ({ game, onExpand, isExpanded, detail }) => {
+const GameCard = ({ game, onExpand, isExpanded, detail, isMobile = false }) => {
   const t = game.sharks_totals || {};
   const isHome = game.sharks_side === 'home';
   const dateStr = game.date
@@ -75,7 +75,7 @@ const GameCard = ({ game, onExpand, isExpanded, detail }) => {
     : 'Unknown Date';
 
   return (
-    <div className="glass-panel" style={{ padding: '1.25rem', cursor: 'pointer' }} onClick={onExpand}>
+    <div className="glass-panel" style={{ padding: isMobile ? '0.95rem' : '1.25rem', cursor: isMobile ? 'default' : 'pointer' }} onClick={onExpand}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem' }}>
         <div style={{ flex: 1 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem', flexWrap: 'wrap' }}>
@@ -91,26 +91,26 @@ const GameCard = ({ game, onExpand, isExpanded, detail }) => {
             <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{dateStr}</span>
             <ResultBadge result={game.result} score={game.score} />
           </div>
-          <h3 style={{ fontSize: '1.1rem', margin: 0 }}>vs. {game.opponent}</h3>
+          <h3 style={{ fontSize: isMobile ? '1rem' : '1.1rem', margin: 0 }}>vs. {game.opponent}</h3>
         </div>
-        {game.sharks_totals && (isExpanded ? <ChevronUp size={18} color="var(--text-muted)" /> : <ChevronDown size={18} color="var(--text-muted)" />)}
+        {!isMobile && game.sharks_totals && (isExpanded ? <ChevronUp size={18} color="var(--text-muted)" /> : <ChevronDown size={18} color="var(--text-muted)" />)}
       </div>
 
       {/* Batting totals — only shown when PDF data exists */}
       {game.sharks_totals && <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
         <StatCell label="PA" value={t.pa} />
-        <StatCell label="AB" value={t.ab} />
         <StatCell label="H" value={t.h} />
-        <StatCell label="2B" value={t.doubles || 0} />
-        <StatCell label="HR" value={t.hr || 0} />
-        <StatCell label="BB" value={t.bb} />
-        <StatCell label="HBP" value={t.hbp} />
-        <StatCell label="SO" value={t.so} />
+        {!isMobile && <StatCell label="AB" value={t.ab} />}
+        {!isMobile && <StatCell label="2B" value={t.doubles || 0} />}
+        {!isMobile && <StatCell label="HR" value={t.hr || 0} />}
+        {!isMobile && <StatCell label="BB" value={t.bb} />}
+        {!isMobile && <StatCell label="HBP" value={t.hbp} />}
+        {!isMobile && <StatCell label="SO" value={t.so} />}
         <StatCell label="AVG" value={t.avg != null ? t.avg.toFixed(3) : null} />
       </div>}
 
       {/* Per-player breakdown */}
-      {isExpanded && detail && (
+      {!isMobile && isExpanded && detail && (
         <div style={{ marginTop: '1rem', borderTop: '1px solid var(--surface-border)', paddingTop: '1rem' }}>
           <div style={{ fontSize: '0.7rem', color: 'var(--primary-color)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.5rem', fontWeight: '700' }}>
             Sharks Batting
@@ -205,7 +205,7 @@ const ScheduleRow = ({ game }) => {
   );
 };
 
-const Games = ({ gamesData, schedule }) => {
+const Games = ({ gamesData, schedule, isMobile = false }) => {
   const [expanded, setExpanded] = useState(null);
   const [details, setDetails] = useState({});
 
@@ -236,6 +236,7 @@ const Games = ({ gamesData, schedule }) => {
   const upcoming = (schedule?.upcoming || [])
     .filter(g => g.date >= today)
     .sort((a, b) => a.date.localeCompare(b.date))
+    .slice(0, isMobile ? 4 : 10)
     .map((g, i) => ({ ...g, _isNext: i === 0 }));
 
   const sorted = [...(gamesData || [])].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
@@ -243,12 +244,12 @@ const Games = ({ gamesData, schedule }) => {
   return (
     <div>
       <h2 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-        <Calendar size={24} color="var(--primary-color)" /> Games
+        <Calendar size={isMobile ? 20 : 24} color="var(--primary-color)" /> Games
       </h2>
 
       {/* Upcoming schedule */}
       {upcoming.length > 0 && (
-        <div className="glass-panel" style={{ padding: '1.25rem', marginBottom: '2rem' }}>
+        <div className="glass-panel" style={{ padding: isMobile ? '0.95rem' : '1.25rem', marginBottom: isMobile ? '1rem' : '2rem' }}>
           <div style={{ fontSize: '0.7rem', color: 'var(--primary-color)', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: '700', marginBottom: '0.75rem' }}>
             Upcoming Schedule ({upcoming.length} games)
           </div>
@@ -271,7 +272,10 @@ const Games = ({ gamesData, schedule }) => {
                 game={game}
                 isExpanded={expanded === game.game_id}
                 detail={details[game.game_id]}
-                onExpand={() => game.sharks_totals && handleExpand(game.game_id)}
+                isMobile={isMobile}
+                onExpand={() => {
+                  if (!isMobile && game.sharks_totals) handleExpand(game.game_id);
+                }}
               />
             ))}
           </div>

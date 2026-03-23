@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Trophy, Users, ChevronDown, ChevronUp } from 'lucide-react';
 
-const League = () => {
+const League = ({ isMobile = false }) => {
   const [standings, setStandings] = useState(null);
   const [opponents, setOpponents] = useState([]);
   const [expanded, setExpanded] = useState(null);
@@ -36,7 +36,7 @@ const League = () => {
   return (
     <div>
       <h2 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-        <Trophy size={24} color="var(--primary-color)" /> League
+        <Trophy size={isMobile ? 20 : 24} color="var(--primary-color)" /> League
         {standings?.league && (
           <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 'normal', marginLeft: '0.5rem' }}>
             {standings.league}
@@ -50,24 +50,43 @@ const League = () => {
           Standings
         </div>
 
-        {/* Header */}
-        <div style={{
-          display: 'grid', gridTemplateColumns: '1fr 60px 60px 70px',
-          gap: '0.5rem', padding: '0.3rem 0.5rem',
-          fontSize: '0.68rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: '700'
-        }}>
-          <span>Team</span>
-          <span style={{ textAlign: 'center' }}>W-L</span>
-          <span style={{ textAlign: 'center' }}>PCT</span>
-          <span style={{ textAlign: 'center' }}>Record</span>
-        </div>
-
         {standingRows.length === 0 && (
           <div style={{ color: 'var(--text-muted)', fontSize: '0.88rem', padding: '0.5rem' }}>Loading standings...</div>
         )}
 
+        {!isMobile && (
+          <div style={{
+            display: 'grid', gridTemplateColumns: '1fr 60px 60px 70px',
+            gap: '0.5rem', padding: '0.3rem 0.5rem',
+            fontSize: '0.68rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: '700'
+          }}>
+            <span>Team</span>
+            <span style={{ textAlign: 'center' }}>W-L</span>
+            <span style={{ textAlign: 'center' }}>PCT</span>
+            <span style={{ textAlign: 'center' }}>Record</span>
+          </div>
+        )}
+
         {standingRows.map((team, i) => {
           const isSharks = team.slug === 'sharks';
+          if (isMobile) {
+            return (
+              <div key={team.slug} style={{
+                padding: '0.6rem 0.7rem',
+                borderRadius: '8px',
+                background: isSharks ? 'rgba(4, 101, 104, 0.08)' : 'rgba(255,255,255,0.03)',
+                border: isSharks ? '1px solid rgba(4, 101, 104, 0.2)' : '1px solid rgba(255,255,255,0.06)',
+                marginBottom: '0.4rem'
+              }}>
+                <div style={{ fontWeight: isSharks ? '700' : '600', color: isSharks ? 'var(--primary-color)' : 'var(--text-main)', fontSize: '0.92rem' }}>
+                  {isSharks ? 'SHARKS' : `${i + 1}.`} {formatTeamName(team)}
+                </div>
+                <div style={{ marginTop: '0.2rem', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                  {team.w}-{team.l} · {team.record} · {team.pct != null ? (team.pct === 1 ? '1.000' : team.pct.toFixed(3)) : '—'}
+                </div>
+              </div>
+            );
+          }
           return (
             <div key={team.slug} style={{
               display: 'grid', gridTemplateColumns: '1fr 60px 60px 70px',
@@ -96,7 +115,7 @@ const League = () => {
           <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: '700', marginBottom: '0.75rem' }}>
             Opponent Scouting ({opponents.length} teams)
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '1rem' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(260px, 1fr))', gap: '1rem' }}>
             {opponents.map(opp => {
               const isExpanded = expanded === opp.slug;
               const standRow = standingRows.find(s => s.slug === opp.slug);
