@@ -17,7 +17,7 @@ const NeedCard = ({ need }) => (
         <h3 style={{ margin: '0.2rem 0 0', fontSize: '1.02rem' }}>{need.title}</h3>
       </div>
       <span style={{
-        background: 'rgba(0,210,255,0.09)', border: '1px solid rgba(0,210,255,0.25)',
+        background: 'rgba(4, 101, 104, 0.12)', border: '1px solid rgba(4, 101, 104, 0.27)',
         color: 'var(--primary-color)', borderRadius: '999px', padding: '2px 10px', fontSize: '0.8rem', fontWeight: '700'
       }}>
         Score {need.score}
@@ -136,7 +136,7 @@ const Practice = ({ team, schedule }) => {
             disabled={loading}
             style={{
               display: 'inline-flex', alignItems: 'center', gap: '0.4rem',
-              background: 'var(--primary-glow)', color: 'var(--primary-color)', border: '1px solid rgba(0,210,255,0.25)',
+              background: 'var(--primary-glow)', color: 'var(--primary-color)', border: '1px solid rgba(4, 101, 104, 0.27)',
               padding: '0.45rem 0.85rem', borderRadius: '8px', cursor: loading ? 'not-allowed' : 'pointer', fontWeight: '600'
             }}
           >
@@ -163,8 +163,8 @@ const Practice = ({ team, schedule }) => {
         <div style={{ marginTop: '0.75rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))', gap: '0.4rem' }}>
           {availablePlayers.map(name => (
             <label key={name} style={{
-              display: 'flex', alignItems: 'center', gap: '0.5rem', background: selected.includes(name) ? 'rgba(0,210,255,0.08)' : 'rgba(255,255,255,0.03)',
-              border: selected.includes(name) ? '1px solid rgba(0,210,255,0.3)' : '1px solid rgba(255,255,255,0.08)', borderRadius: '7px', padding: '0.35rem 0.5rem', cursor: 'pointer'
+              display: 'flex', alignItems: 'center', gap: '0.5rem', background: selected.includes(name) ? 'rgba(4, 101, 104, 0.11)' : 'rgba(255,255,255,0.03)',
+              border: selected.includes(name) ? '1px solid rgba(4, 101, 104, 0.32)' : '1px solid rgba(255,255,255,0.08)', borderRadius: '7px', padding: '0.35rem 0.5rem', cursor: 'pointer'
             }}>
               <input type="checkbox" checked={selected.includes(name)} onChange={() => toggle(name)} />
               <span style={{ fontSize: '0.84rem' }}>{name}</span>

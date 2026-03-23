@@ -7,6 +7,7 @@ Enforces mandatory play requirements (1 AB + 6 defensive outs per player).
 import json
 from pathlib import Path
 
+from logger import log_decision
 from stats_normalizer import normalize_player_batting, normalize_player_batting_advanced
 
 DATA_DIR = Path(__file__).parent.parent / "data"
@@ -306,6 +307,23 @@ def generate_all_lineups(team_data: dict) -> dict:
     return results
 
 
+def _build_lineup_rationale(results: dict) -> str:
+    parts = []
+    for strategy in ["balanced", "aggressive", "development"]:
+        lineup = (results.get(strategy) or {}).get("lineup", [])
+        top = lineup[:3]
+        if not top:
+            continue
+        top_text = ", ".join(
+            f"#{p.get('number', '?')} {p.get('name', 'Unknown')} (OBP {p.get('obp', 0)}, SLG {p.get('slg', 0)}, PA {p.get('pa', 0)})"
+            for p in top
+        )
+        parts.append(f"{strategy}: {top_text}")
+    if not parts:
+        return "No lineup rationale available because no lineup entries were generated."
+    return "Top-order placements were driven by batting production metrics. " + " | ".join(parts)
+
+
 def run():
     """Load Sharks data and generate lineups."""
     # Prefer enriched file (app_stats applied) for most current stats
@@ -344,6 +362,33 @@ def run():
     with open(output_file, "w") as f:
         json.dump(results, f, indent=2)
     print(f"[LINEUP] Lineups saved to {output_file}")
+
+    try:
+        rationale = _build_lineup_rationale(results)
+        output_summary = {}
+        for strategy, payload in results.items():
+            output_summary[strategy] = {
+                "compliant": bool(payload.get("compliant", False)),
+                "top_3": [
+                    {
+                        "slot": p.get("slot"),
+                        "number": p.get("number"),
+                        "name": p.get("name"),
+                        "obp": p.get("obp"),
+                        "slg": p.get("slg"),
+                        "pa": p.get("pa"),
+                    }
+                    for p in payload.get("lineup", [])[:3]
+                ],
+            }
+        log_decision(
+            category="lineup_optimizer",
+            input_data={"active_roster_size": len(team_data.get("roster", []))},
+            output_data=output_summary,
+            rationale=rationale,
+        )
+    except Exception as e:
+        print(f"[LINEUP] Audit log skipped: {e}")
 
     for strategy, data in results.items():
         print(f"\n{'='*50}")

@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Users, Activity, ListOrdered, Calendar, Trophy, Dumbbell } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Users, Activity, ListOrdered, Calendar, Trophy, Dumbbell, Volume2 } from 'lucide-react';
 import { formatDateTime } from './utils/formatDate';
 import Roster from './components/Roster';
 import Swot from './components/Swot';
@@ -11,6 +11,8 @@ import Practice from './components/Practice';
 
 function App() {
   const [currentView, setCurrentView] = useState('roster');
+  const [voiceLoading, setVoiceLoading] = useState(false);
+  const [voiceError, setVoiceError] = useState('');
   const [data, setData] = useState({
     team: null,
     swot: null,
@@ -21,6 +23,8 @@ function App() {
     loading: true,
     error: null
   });
+  const audioRef = useRef(null);
+  const audioUrlRef = useRef('');
 
   const fetchData = useCallback(async () => {
     try {
@@ -57,6 +61,55 @@ function App() {
     
     return () => clearInterval(intervalId);
   }, [fetchData]);
+
+  useEffect(() => {
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+      }
+      if (audioUrlRef.current) {
+        URL.revokeObjectURL(audioUrlRef.current);
+      }
+    };
+  }, []);
+
+  const handleVoiceUpdate = useCallback(async () => {
+    setVoiceLoading(true);
+    setVoiceError('');
+    try {
+      if (audioRef.current) {
+        audioRef.current.pause();
+      }
+      if (audioUrlRef.current) {
+        URL.revokeObjectURL(audioUrlRef.current);
+        audioUrlRef.current = '';
+      }
+
+      const res = await fetch('/api/voice-update');
+      if (!res.ok) {
+        let detail = 'Voice update unavailable';
+        try {
+          const body = await res.json();
+          if (body?.detail) detail = body.detail;
+        } catch {
+          // ignored: non-json response
+        }
+        throw new Error(detail);
+      }
+
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      audioUrlRef.current = objectUrl;
+      const audio = new Audio(objectUrl);
+      audioRef.current = audio;
+      await audio.play();
+    } catch (err) {
+      console.error('Voice update playback failed', err);
+      setVoiceError(err?.message || 'Voice update playback failed');
+    } finally {
+      setVoiceLoading(false);
+    }
+  }, []);
 
   const navItems = [
     { id: 'roster', label: 'Roster', icon: <Users size={18} /> },
@@ -147,9 +200,21 @@ function App() {
       <main className="animate-fade-in">
         <div style={{ marginBottom: '2rem' }}>
           <h1 style={{ fontSize: 'clamp(1.6rem, 5.5vw, 2.5rem)', marginBottom: '0.5rem', lineHeight: 1.1 }}>{displayTeamName}</h1>
-          <p style={{ color: 'var(--text-muted)', fontSize: '1.1rem' }}>
-            {data.team ? `${data.team.league} • Last Updated: ${formatDateTime(data.team.last_updated)}` : 'Loading...'}
-          </p>
+          <div className="hero-meta-row">
+            <p style={{ color: 'var(--text-muted)', fontSize: '1.1rem' }}>
+              {data.team ? `${data.team.league} • Last Updated: ${formatDateTime(data.team.last_updated)}` : 'Loading...'}
+            </p>
+            <button
+              className="voice-btn"
+              onClick={handleVoiceUpdate}
+              disabled={voiceLoading}
+              title="Play latest audio overview"
+            >
+              <Volume2 size={16} />
+              {voiceLoading ? 'Preparing...' : 'Voice Update'}
+            </button>
+          </div>
+          {voiceError && <p className="voice-error">{voiceError}</p>}
         </div>
         
         {renderContent()}

@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from logger import log_decision
 from stats_normalizer import normalize_batting_advanced_row, normalize_batting_row
 
 DATA_DIR = Path(__file__).parent.parent / "data"
@@ -375,6 +376,53 @@ def analyze_team(team_data: dict) -> dict:
     }
 
 
+def _swot_rationale_from_team(result: dict) -> str:
+    players = result.get("player_analyses", [])
+    if not players:
+        return "No player analyses available; rationale not generated."
+
+    def _name(p: dict) -> str:
+        return str(p.get("name", "Unknown")).strip() or "Unknown"
+
+    ops_leaders = sorted(
+        players,
+        key=lambda p: (
+            float(((p.get("derived_stats") or {}).get("hitting") or {}).get("ops", 0.0)),
+            _name(p),
+        ),
+        reverse=True,
+    )[:3]
+    k_risks = sorted(
+        players,
+        key=lambda p: (
+            float(((p.get("derived_stats") or {}).get("hitting") or {}).get("k_rate", 0.0)),
+            _name(p),
+        ),
+        reverse=True,
+    )[:3]
+    fielding_risks = sorted(
+        players,
+        key=lambda p: (
+            float(((p.get("derived_stats") or {}).get("fielding") or {}).get("fielding_pct", 1.0)),
+            _name(p),
+        ),
+    )[:2]
+
+    ops_text = ", ".join(
+        f"{_name(p)} OPS {((p.get('derived_stats') or {}).get('hitting') or {}).get('ops', 0.0)}"
+        for p in ops_leaders
+    )
+    k_text = ", ".join(
+        f"{_name(p)} K% {((p.get('derived_stats') or {}).get('hitting') or {}).get('k_rate', 0.0)}"
+        for p in k_risks
+    )
+    f_text = ", ".join(
+        f"{_name(p)} FPCT {((p.get('derived_stats') or {}).get('fielding') or {}).get('fielding_pct', 1.0)}"
+        for p in fielding_risks
+    )
+    return f"Top offensive signals: {ops_text}. Strikeout pressure drivers: {k_text}. Defensive risk markers: {f_text}."
+
+
 def load_team(team_dir: Path, prefer_merged: bool = False) -> dict | None:
     """Load team data from a directory.
     Priority (Sharks): team_enriched.json > team_merged.json > team.json
@@ -410,6 +458,21 @@ def run_sharks_analysis() -> dict | None:
     with open(output_file, "w") as f:
         json.dump(result, f, indent=2)
     print(f"[SWOT] Analysis saved to {output_file}")
+
+    try:
+        rationale = _swot_rationale_from_team(result)
+        log_decision(
+            category="swot_analysis",
+            input_data={
+                "team_name": result.get("team_name", "Unknown"),
+                "players_analyzed": len(result.get("player_analyses", [])),
+            },
+            output_data={"team_swot": result.get("team_swot", {})},
+            rationale=rationale,
+        )
+    except Exception as e:
+        print(f"[SWOT] Audit log skipped: {e}")
+
     return result
 
 
@@ -728,6 +791,21 @@ def run_opponent_analysis(opponent_name: str) -> dict | None:
     with open(output_file, "w") as f:
         json.dump(result, f, indent=2)
     print(f"[SWOT] Opponent analysis saved to {output_file}")
+
+    try:
+        rationale = _swot_rationale_from_team(result)
+        log_decision(
+            category="swot_analysis_opponent",
+            input_data={
+                "team_name": result.get("team_name", opponent_name),
+                "players_analyzed": len(result.get("player_analyses", [])),
+            },
+            output_data={"team_swot": result.get("team_swot", {})},
+            rationale=rationale,
+        )
+    except Exception as e:
+        print(f"[SWOT] Opponent audit log skipped: {e}")
+
     return result
 
 

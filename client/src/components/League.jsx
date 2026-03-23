@@ -73,8 +73,8 @@ const League = () => {
               display: 'grid', gridTemplateColumns: '1fr 60px 60px 70px',
               gap: '0.5rem', padding: '0.5rem 0.5rem',
               borderRadius: '6px', alignItems: 'center',
-              background: isSharks ? 'rgba(0,210,255,0.06)' : i % 2 === 0 ? 'rgba(255,255,255,0.02)' : 'transparent',
-              border: isSharks ? '1px solid rgba(0,210,255,0.15)' : '1px solid transparent',
+              background: isSharks ? 'rgba(4, 101, 104, 0.08)' : i % 2 === 0 ? 'rgba(255,255,255,0.02)' : 'transparent',
+              border: isSharks ? '1px solid rgba(4, 101, 104, 0.2)' : '1px solid transparent',
               marginBottom: '0.25rem'
             }}>
               <span style={{ fontWeight: isSharks ? '700' : '500', color: isSharks ? 'var(--primary-color)' : 'var(--text-main)', fontSize: '0.9rem' }}>

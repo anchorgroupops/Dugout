@@ -5,7 +5,7 @@ import RosterManager from './RosterManager';
 
 const StatBadge = ({ label, value, good, warn }) => {
   const num = typeof value === 'number' ? value : parseFloat(value) || 0;
-  const color = num >= good ? 'var(--success)' : num >= warn ? '#e8a838' : 'var(--text-muted)';
+  const color = num >= good ? 'var(--success)' : num >= warn ? 'var(--warning)' : 'var(--text-muted)';
   const display = num > 0 ? num.toFixed(3).replace(/^0/, '') : '—';
   return (
     <span style={{
@@ -43,7 +43,7 @@ const NextGameBanner = ({ schedule }) => {
   return (
     <div className="glass-panel" style={{
       padding: '0.85rem 1.25rem', marginBottom: '1.25rem',
-      borderColor: 'rgba(0,210,255,0.3)', background: 'rgba(0,210,255,0.04)'
+      borderColor: 'rgba(4, 101, 104, 0.32)', background: 'rgba(4, 101, 104, 0.06)'
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
         <Clock size={16} color="var(--primary-color)" />
@@ -52,8 +52,8 @@ const NextGameBanner = ({ schedule }) => {
         </span>
         <span style={{
           display: 'inline-flex', alignItems: 'center', gap: '0.25rem',
-          background: isHome ? 'rgba(35,134,54,0.15)' : 'rgba(100,160,220,0.15)',
-          color: isHome ? 'var(--success)' : '#4a9ede',
+          background: isHome ? 'rgba(35,134,54,0.15)' : 'rgba(42, 143, 147, 0.16)',
+          color: isHome ? 'var(--success)' : 'var(--accent-away)',
           padding: '2px 8px', borderRadius: '12px', fontSize: '0.68rem', fontWeight: '700'
         }}>
           {isHome ? <Home size={10} /> : <Plane size={10} />}
@@ -217,7 +217,7 @@ const Lineup = ({
                 display: 'flex', alignItems: 'center', padding: '0.85rem 1rem',
                 background: !avail ? 'rgba(200,50,50,0.08)' : player.borrowed ? 'rgba(255,165,0,0.04)' : 'rgba(0,0,0,0.2)',
                 borderRadius: '8px',
-                borderLeft: `4px solid ${!avail ? 'var(--danger)' : player.borrowed ? 'rgba(255,165,0,0.5)' : idx < 4 ? 'var(--primary-color)' : 'var(--surface-border)'}`,
+                borderLeft: `4px solid ${!avail ? 'var(--danger)' : player.borrowed ? 'rgba(63, 143, 136, 0.42)' : idx < 4 ? 'var(--primary-color)' : 'var(--surface-border)'}`,
                 opacity: avail ? 1 : 0.65,
                 gap: '0.75rem', flexWrap: 'wrap'
               }}>
@@ -228,9 +228,9 @@ const Lineup = ({
                   <AvailBadge available={avail} />
                   {player.borrowed && (
                     <span style={{
-                      background: 'rgba(255, 165, 0, 0.2)', color: '#ffa500',
+                      background: 'rgba(63, 143, 136, 0.18)', color: 'var(--accent-sub)',
                       padding: '1px 6px', borderRadius: '4px', fontSize: '0.65rem',
-                      fontWeight: 'bold', letterSpacing: '1px', border: '1px solid rgba(255,165,0,0.3)'
+                      fontWeight: 'bold', letterSpacing: '1px', border: '1px solid rgba(63, 143, 136, 0.28)'
                     }}>SUB</span>
                   )}
                 </div>

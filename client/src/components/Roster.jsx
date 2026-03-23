@@ -218,7 +218,7 @@ const Roster = ({ team, availability, onAvailabilityChange }) => {
                 transition: 'all 0.3s ease',
                 opacity: isActive ? 1 : 0.6,
                 filter: isActive ? 'none' : 'grayscale(0.5)',
-                borderLeft: !isActive ? '4px solid #666' : isSub ? '4px solid rgba(255,165,0,0.5)' : '4px solid var(--primary-color)',
+                borderLeft: !isActive ? '4px solid #666' : isSub ? '4px solid rgba(63, 143, 136, 0.42)' : '4px solid var(--primary-color)',
                 background: isSub && isActive ? 'rgba(255,165,0,0.03)' : undefined
               }}
               onClick={() => setExpandedPlayer(isExpanded ? null : `${player.number}-${player.last}`)}
@@ -238,9 +238,9 @@ const Roster = ({ team, availability, onAvailabilityChange }) => {
               <div style={{ position: 'absolute', top: '10px', right: '10px', display: 'flex', gap: '5px' }}>
                 {!player.core && (
                   <div style={{
-                    background: 'rgba(255, 165, 0, 0.2)', color: '#ffa500',
+                    background: 'rgba(63, 143, 136, 0.18)', color: 'var(--accent-sub)',
                     padding: '2px 8px', borderRadius: '4px', fontSize: '0.65rem',
-                    fontWeight: 'bold', letterSpacing: '1px', border: '1px solid rgba(255,165,0,0.3)'
+                    fontWeight: 'bold', letterSpacing: '1px', border: '1px solid rgba(63, 143, 136, 0.28)'
                   }}>SUB</div>
                 )}
                 
