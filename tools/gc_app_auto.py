@@ -26,7 +26,7 @@ ROOT_DIR = Path(__file__).parent.parent
 DATA_DIR = ROOT_DIR / "data" / "sharks"
 
 BATTING_STD_COLS  = ["gp", "pa", "ab", "avg", "obp", "ops", "slg", "h", "1b", "2b", "3b", "hr", "rbi", "bb", "hbp", "so", "sb", "cs"]
-BATTING_ADV_COLS  = ["gp", "pa", "ab", "qab", "qab_pct", "pa_per_bb", "bb_per_k", "c_pct", "hhb", "ld_pct"]
+BATTING_ADV_COLS  = ["gp", "pa", "ab", "qab", "qab_pct", "pa_per_bb", "bb_per_k", "c_pct", "hhb", "ld_pct", "fb_pct", "gb_pct"]
 PITCHING_STD_COLS = ["ip", "gp", "gs", "bf", "pitches", "w", "l", "sv", "svo", "bs", "era", "whip", "k", "bb", "h", "r", "er", "hr"]
 FIELDING_STD_COLS = ["tc", "a", "po", "fpct", "e", "dp", "tp"]
 

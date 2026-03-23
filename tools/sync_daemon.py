@@ -13,11 +13,19 @@ from gc_scraper import GameChangerScraper
 from gc_schedule import ScheduleScraper
 from stats_normalizer import (
     CANONICAL_BATTING_FIELDS,
+    CANONICAL_BATTING_ADV_FIELDS,
+    CANONICAL_CATCHING_FIELDS,
     CANONICAL_FIELDING_FIELDS,
+    CANONICAL_INNINGS_FIELDS,
     CANONICAL_PITCHING_FIELDS,
+    CANONICAL_PITCHING_ADV_FIELDS,
     count_populated_fields,
+    normalize_batting_advanced_row,
     normalize_batting_row,
+    normalize_catching_row,
     normalize_fielding_row,
+    normalize_innings_played_row,
+    normalize_pitching_advanced_row,
     normalize_pitching_row,
     safe_float as _safe_float,
     safe_int as _safe_int,
@@ -48,8 +56,10 @@ DEFAULT_CORS_ORIGINS = [
 CORS_ORIGINS = [
     origin.strip()
     for origin in os.getenv("CORS_ORIGINS", ",".join(DEFAULT_CORS_ORIGINS)).split(",")
-    if origin.strip()
+    if origin.strip() and origin.strip() != "*"
 ]
+if not CORS_ORIGINS:
+    CORS_ORIGINS = DEFAULT_CORS_ORIGINS
 
 # ---------------------------------------------------------
 # LOGGING SETUP (Maximal Hardening)
@@ -84,7 +94,7 @@ def send_alert(message: str, level: str = "ERROR"):
         logging.error(f"Error reaching n8n webhook: {e}")
 
 def _enrich_team_with_app_stats(team_data: dict) -> dict:
-    """Apply app_stats.json batting stats unconditionally to team roster (most current data).
+    """Apply app_stats.json stats to Sharks roster (batting, pitching, fielding).
     Keyed by jersey number. Mutates team_data in place and returns it."""
     app_stats_file = SHARKS_DIR / "app_stats.json"
     if not app_stats_file.exists():
@@ -97,10 +107,25 @@ def _enrich_team_with_app_stats(team_data: dict) -> dict:
             for p in app_data.get("batting", [])
             if str(p.get("number", "")).strip()
         }
+        app_pitching = {
+            str(p.get("number", "")).strip(): p
+            for p in app_data.get("pitching", [])
+            if str(p.get("number", "")).strip()
+        }
+        app_fielding = {
+            str(p.get("number", "")).strip(): p
+            for p in app_data.get("fielding", [])
+            if str(p.get("number", "")).strip()
+        }
+
+        applied_batting = 0
+        applied_pitching = 0
+        applied_fielding = 0
         for player in team_data.get("roster", []):
             num = str(player.get("number", "")).strip()
             if num and num in app_batting:
-                nb = normalize_batting_row(app_batting[num])
+                app_b = app_batting[num]
+                nb = normalize_batting_row(app_b)
                 player["batting"] = {
                     "pa": nb["pa"],
                     "ab": nb["ab"],
@@ -124,7 +149,73 @@ def _enrich_team_with_app_stats(team_data: dict) -> dict:
                     "slg": nb["slg"],
                     "ops": nb["ops"],
                 }
-        logging.info(f"[Enrich] Applied app_stats to {len(app_batting)} players.")
+                # Preserve advanced percentages in their native % format for UI consistency.
+                existing_adv = player.get("batting_advanced", {}) if isinstance(player.get("batting_advanced"), dict) else {}
+                player["batting_advanced"] = {
+                    **existing_adv,
+                    "gp": _safe_float(app_b.get("gp", existing_adv.get("gp", 0))),
+                    "pa": _safe_float(app_b.get("pa", existing_adv.get("pa", nb["pa"]))),
+                    "ab": _safe_float(app_b.get("ab", existing_adv.get("ab", nb["ab"]))),
+                    "qab": _safe_float(app_b.get("qab", existing_adv.get("qab", 0))),
+                    "qab_pct": _safe_float(app_b.get("qab_pct", existing_adv.get("qab_pct", 0))),
+                    "pa_per_bb": _safe_float(app_b.get("pa_per_bb", existing_adv.get("pa_per_bb", 0))),
+                    "bb_per_k": _safe_float(app_b.get("bb_per_k", existing_adv.get("bb_per_k", 0))),
+                    "c_pct": _safe_float(app_b.get("c_pct", existing_adv.get("c_pct", 0))),
+                    "hhb": _safe_float(app_b.get("hhb", existing_adv.get("hhb", 0))),
+                    "ld_pct": _safe_float(app_b.get("ld_pct", existing_adv.get("ld_pct", 0))),
+                    "fb_pct": _safe_float(app_b.get("fb_pct", existing_adv.get("fb_pct", 0))),
+                    "gb_pct": _safe_float(app_b.get("gb_pct", existing_adv.get("gb_pct", 0))),
+                }
+                applied_batting += 1
+
+            if num and num in app_pitching:
+                app_p = app_pitching[num]
+                np = normalize_pitching_row(app_p)
+                player["pitching"] = {
+                    "ip": app_p.get("ip", np["ip"]),
+                    "gp": _safe_float(app_p.get("gp", 0)),
+                    "gs": _safe_float(app_p.get("gs", 0)),
+                    "bf": _safe_float(app_p.get("bf", 0)),
+                    "np": _safe_float(app_p.get("pitches", app_p.get("np", 0))),
+                    "w": _safe_float(app_p.get("w", 0)),
+                    "l": _safe_float(app_p.get("l", 0)),
+                    "sv": _safe_float(app_p.get("sv", 0)),
+                    "svo": _safe_float(app_p.get("svo", 0)),
+                    "bs": _safe_float(app_p.get("bs", 0)),
+                    "h": np["h"],
+                    "r": _safe_float(app_p.get("r", 0)),
+                    "er": np["er"],
+                    "bb": np["bb"],
+                    "so": np["so"],
+                    "hr": _safe_float(app_p.get("hr", 0)),
+                    "era": np["era"],
+                    "whip": np["whip"],
+                }
+                existing_padv = player.get("pitching_advanced", {}) if isinstance(player.get("pitching_advanced"), dict) else {}
+                norm_padv = normalize_pitching_advanced_row(app_p)
+                player["pitching_advanced"] = {**existing_padv, **norm_padv}
+                applied_pitching += 1
+
+            if num and num in app_fielding:
+                app_f = app_fielding[num]
+                nf = normalize_fielding_row(app_f)
+                player["fielding"] = {
+                    "tc": _safe_float(app_f.get("tc", 0)),
+                    "a": nf["a"],
+                    "po": nf["po"],
+                    "fpct": nf["fpct"],
+                    "e": nf["e"],
+                    "dp": _safe_float(app_f.get("dp", 0)),
+                    "tp": _safe_float(app_f.get("tp", 0)),
+                }
+                applied_fielding += 1
+
+        logging.info(
+            "[Enrich] Applied app_stats: batting=%s pitching=%s fielding=%s",
+            applied_batting,
+            applied_pitching,
+            applied_fielding,
+        )
     except Exception as e:
         logging.warning(f"app_stats enrichment failed: {e}")
     return team_data
@@ -235,22 +326,42 @@ def _collect_pipeline_health() -> dict:
             except Exception as e:
                 logging.warning(f"[Health] Could not read game file {game_file.name}: {e}")
 
+    team_batting_adv_rows = [p.get("batting_advanced", {}) for p in team_roster]
+    team_pitching_adv_rows = [p.get("pitching_advanced", {}) for p in team_roster]
+    team_catching_rows = [p.get("catching", {}) for p in team_roster]
+    team_innings_rows = [p.get("innings_played", {}) for p in team_roster]
+
     return {
         "generated_at": datetime.now(ET).isoformat(),
+        "schema": {
+            "batting": CANONICAL_BATTING_FIELDS,
+            "batting_advanced": CANONICAL_BATTING_ADV_FIELDS,
+            "pitching": CANONICAL_PITCHING_FIELDS,
+            "pitching_advanced": CANONICAL_PITCHING_ADV_FIELDS,
+            "fielding": CANONICAL_FIELDING_FIELDS,
+            "catching": CANONICAL_CATCHING_FIELDS,
+            "innings_played": CANONICAL_INNINGS_FIELDS,
+        },
         "feeds": {
             "app_stats": {
                 "batting_rows": len(app_batting),
                 "pitching_rows": len(app_pitching),
                 "fielding_rows": len(app_fielding),
                 "batting_populated_counts": count_populated_fields(app_batting, CANONICAL_BATTING_FIELDS, normalize_batting_row),
+                "batting_advanced_populated_counts": count_populated_fields(app_batting, CANONICAL_BATTING_ADV_FIELDS, normalize_batting_advanced_row),
                 "pitching_populated_counts": count_populated_fields(app_pitching, CANONICAL_PITCHING_FIELDS, normalize_pitching_row),
+                "pitching_advanced_populated_counts": count_populated_fields(app_pitching, CANONICAL_PITCHING_ADV_FIELDS, normalize_pitching_advanced_row),
                 "fielding_populated_counts": count_populated_fields(app_fielding, CANONICAL_FIELDING_FIELDS, normalize_fielding_row),
             },
             "team_merged": {
                 "roster_rows": len(team_roster),
                 "batting_populated_counts": count_populated_fields([p.get("batting", {}) for p in team_roster], CANONICAL_BATTING_FIELDS, normalize_batting_row),
+                "batting_advanced_populated_counts": count_populated_fields(team_batting_adv_rows, CANONICAL_BATTING_ADV_FIELDS, normalize_batting_advanced_row),
                 "pitching_populated_counts": count_populated_fields([p.get("pitching", {}) for p in team_roster], CANONICAL_PITCHING_FIELDS, normalize_pitching_row),
+                "pitching_advanced_populated_counts": count_populated_fields(team_pitching_adv_rows, CANONICAL_PITCHING_ADV_FIELDS, normalize_pitching_advanced_row),
                 "fielding_populated_counts": count_populated_fields([p.get("fielding", {}) for p in team_roster], CANONICAL_FIELDING_FIELDS, normalize_fielding_row),
+                "catching_populated_counts": count_populated_fields(team_catching_rows, CANONICAL_CATCHING_FIELDS, normalize_catching_row),
+                "innings_played_populated_counts": count_populated_fields(team_innings_rows, CANONICAL_INNINGS_FIELDS, normalize_innings_played_row),
             },
             "games": {
                 "game_files": len(games),
@@ -260,6 +371,11 @@ def _collect_pipeline_health() -> dict:
                 "sharks_batting_populated_counts": count_populated_fields(sharks_rows, CANONICAL_BATTING_FIELDS, normalize_batting_row),
                 "opponent_batting_populated_counts": count_populated_fields(opponent_rows, CANONICAL_BATTING_FIELDS, normalize_batting_row),
             },
+        },
+        "required_field_coverage": {
+            "batting": count_populated_fields(app_batting + [p.get("batting", {}) for p in team_roster] + sharks_rows + opponent_rows, CANONICAL_BATTING_FIELDS, normalize_batting_row),
+            "pitching": count_populated_fields(app_pitching + [p.get("pitching", {}) for p in team_roster], CANONICAL_PITCHING_FIELDS, normalize_pitching_row),
+            "fielding": count_populated_fields(app_fielding + [p.get("fielding", {}) for p in team_roster], CANONICAL_FIELDING_FIELDS, normalize_fielding_row),
         },
     }
 
@@ -747,25 +863,24 @@ def handle_matchup(opponent_slug):
             return jsonify({"error": f"Opponent '{opponent_slug}' not found"}), 404
 
     # Determine what data source matchup analysis can use for the opponent.
+    # Precedence: opponent team feed -> parsed game history -> none.
     data_source = "none"
-
-    # Enrich opponent with stats aggregated from scorebook game files we've played.
-    # This is the highest-priority source because it reflects direct head-to-head history.
-    opp_game_stats = _aggregate_opponent_stats_from_games(opponent_slug)
-    if opp_game_stats:
-        opp_team["batting_stats"] = opp_game_stats
-        data_source = "opponent_game_history"
-    else:
-        # Fallback to whatever stats exist in the opponent JSON feed.
+    team_json_pa = 0
+    if opp_team.get("batting_stats"):
         for row in opp_team.get("batting_stats", []):
-            if normalize_batting_row(row).get("pa", 0) > 0:
-                data_source = "opponent_team_json"
-                break
-        if data_source == "none":
-            for p in opp_team.get("roster", []):
-                if normalize_batting_row(p).get("pa", 0) > 0:
-                    data_source = "opponent_team_json"
-                    break
+            team_json_pa += normalize_batting_row(row).get("pa", 0)
+    elif opp_team.get("roster"):
+        for row in opp_team.get("roster", []):
+            team_json_pa += normalize_batting_row(row).get("pa", 0)
+
+    if team_json_pa >= 5:
+        data_source = "opponent_team_json"
+    else:
+        # Fallback to scorebook history for teams we've already faced.
+        opp_game_stats = _aggregate_opponent_stats_from_games(opponent_slug)
+        if opp_game_stats:
+            opp_team["batting_stats"] = opp_game_stats
+            data_source = "opponent_game_history"
 
     result = analyze_matchup(our_team, opp_team)
     result["data_source"] = data_source

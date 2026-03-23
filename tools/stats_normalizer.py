@@ -11,8 +11,37 @@ from typing import Any, Callable
 
 
 CANONICAL_BATTING_FIELDS = ["pa", "ab", "h", "1b", "2b", "3b", "hr", "bb", "hbp", "so", "rbi", "sb", "r"]
+CANONICAL_BATTING_ADV_FIELDS = [
+    "qab",
+    "qab_pct",
+    "pa_per_bb",
+    "bb_per_k",
+    "c_pct",
+    "hhb",
+    "ld_pct",
+    "fb_pct",
+    "gb_pct",
+    "babip",
+    "ba_risp",
+]
 CANONICAL_PITCHING_FIELDS = ["ip", "er", "bb", "h", "so", "whip", "era"]
+CANONICAL_PITCHING_ADV_FIELDS = [
+    "bf",
+    "np",
+    "k_bf",
+    "k_bb",
+    "bb_inn",
+    "fip",
+    "babip",
+    "ba_risp",
+    "ld_pct",
+    "fb_pct",
+    "gb_pct",
+    "hhb_pct",
+]
 CANONICAL_FIELDING_FIELDS = ["po", "a", "e", "fpct"]
+CANONICAL_CATCHING_FIELDS = ["inn", "sb", "cs", "cs_pct", "pb", "pik", "ci"]
+CANONICAL_INNINGS_FIELDS = ["total", "p", "c", "first_base", "second_base", "third_base", "ss", "lf", "cf", "rf", "sf"]
 
 
 def safe_float(val: Any, default: float = 0.0) -> float:
@@ -38,6 +67,20 @@ def safe_int(val: Any, default: int = 0) -> int:
         return int(round(safe_float(val, float(default))))
     except (TypeError, ValueError):
         return default
+
+
+def safe_pct_ratio(val: Any, default: float = 0.0) -> float:
+    """
+    Normalize percentage-like values to ratio format [0..1+] when possible.
+    Examples:
+      44.44 -> 0.4444
+      "80.0" -> 0.8
+      0.8 -> 0.8
+    """
+    raw = safe_float(val, default)
+    if raw > 1.0:
+        return raw / 100.0
+    return raw
 
 
 def innings_to_float(val: Any) -> float:
@@ -127,6 +170,69 @@ def normalize_batting_row(row: dict) -> dict:
     }
 
 
+def normalize_batting_advanced_row(row: dict) -> dict:
+    src = row or {}
+    if isinstance(src.get("batting_advanced"), dict):
+        src = src["batting_advanced"]
+    elif isinstance(src.get("batting"), dict):
+        batting = src["batting"]
+        adv_keys = {"qab", "qab_pct", "pa_per_bb", "bb_per_k", "c_pct", "hhb", "ld_pct", "fb_pct", "gb_pct"}
+        if any(k in batting for k in adv_keys):
+            src = batting
+
+    qab = safe_int(_pick(src, "qab"))
+    pa = safe_int(_pick(src, "pa"))
+    ab = safe_int(_pick(src, "ab"))
+    bb = safe_int(_pick(src, "bb"))
+    so = safe_int(_pick(src, "so", "k"))
+
+    qab_pct = safe_pct_ratio(_pick(src, "qab_pct", "qab%"))
+    if qab_pct == 0 and qab > 0 and pa > 0:
+        qab_pct = qab / pa
+
+    pa_per_bb = safe_float(_pick(src, "pa_per_bb", "pa/bb"))
+    if pa_per_bb == 0 and pa > 0 and bb > 0:
+        pa_per_bb = pa / bb
+
+    bb_per_k = safe_float(_pick(src, "bb_per_k", "bb_k", "bb/k"))
+    if bb_per_k == 0 and bb > 0 and so > 0:
+        bb_per_k = bb / so
+
+    c_pct = safe_pct_ratio(_pick(src, "c_pct", "c%"))
+    ld_pct = safe_pct_ratio(_pick(src, "ld_pct", "ld%"))
+    fb_pct = safe_pct_ratio(_pick(src, "fb_pct", "fb%"))
+    gb_pct = safe_pct_ratio(_pick(src, "gb_pct", "gb%"))
+
+    return {
+        "pa": pa,
+        "ab": ab,
+        "bb": bb,
+        "so": so,
+        "qab": qab,
+        "qab_pct": round(qab_pct, 4),
+        "pa_per_bb": round(pa_per_bb, 3),
+        "bb_per_k": round(bb_per_k, 3),
+        "c_pct": round(c_pct, 4),
+        "hhb": safe_int(_pick(src, "hhb")),
+        "ld_pct": round(ld_pct, 4),
+        "fb_pct": round(fb_pct, 4),
+        "gb_pct": round(gb_pct, 4),
+        "babip": round(safe_float(_pick(src, "babip")), 3),
+        "ba_risp": round(safe_float(_pick(src, "ba_risp")), 3),
+        "ps": round(safe_float(_pick(src, "ps")), 2),
+        "ps_pa": round(safe_float(_pick(src, "ps_pa", "ps/pa")), 3),
+        "tb": safe_int(_pick(src, "tb")),
+        "xbh": safe_int(_pick(src, "xbh")),
+        "two_out_rbi": safe_int(_pick(src, "two_out_rbi")),
+        "gidp": safe_int(_pick(src, "gidp")),
+        "gitp": safe_int(_pick(src, "gitp")),
+        "six_plus": safe_int(_pick(src, "six_plus")),
+        "six_plus_pct": round(safe_pct_ratio(_pick(src, "six_plus_pct")), 4),
+        "two_s_three": safe_int(_pick(src, "two_s_three")),
+        "two_s_three_pct": round(safe_pct_ratio(_pick(src, "two_s_three_pct")), 4),
+    }
+
+
 def normalize_pitching_row(row: dict) -> dict:
     src = row.get("pitching", row or {})
     ip = innings_to_float(_pick(src, "ip"))
@@ -147,6 +253,49 @@ def normalize_pitching_row(row: dict) -> dict:
     }
 
 
+def normalize_pitching_advanced_row(row: dict) -> dict:
+    src = row or {}
+    if isinstance(src.get("pitching_advanced"), dict):
+        src = src["pitching_advanced"]
+    elif isinstance(src.get("pitching"), dict):
+        pitching = src["pitching"]
+        adv_keys = {"k_bf", "bb_inn", "fip", "babip", "ba_risp", "ld_pct", "fb_pct", "gb_pct", "hhb_pct"}
+        if any(k in pitching for k in adv_keys):
+            src = pitching
+
+    ip = innings_to_float(_pick(src, "ip"))
+    bf = safe_int(_pick(src, "bf"))
+    so = safe_int(_pick(src, "so", "k"))
+    bb = safe_int(_pick(src, "bb"))
+
+    k_bf = safe_float(_pick(src, "k_bf"))
+    if k_bf == 0 and bf > 0 and so > 0:
+        k_bf = so / bf
+
+    k_bb = safe_float(_pick(src, "k_bb"))
+    if k_bb == 0 and bb > 0 and so > 0:
+        k_bb = so / bb
+
+    bb_inn = safe_float(_pick(src, "bb_inn"))
+    if bb_inn == 0 and ip > 0 and bb > 0:
+        bb_inn = bb / ip
+
+    return {
+        "bf": bf,
+        "np": safe_int(_pick(src, "np", "pitches", "#p")),
+        "k_bf": round(k_bf, 4),
+        "k_bb": round(k_bb, 3),
+        "bb_inn": round(bb_inn, 3),
+        "fip": round(safe_float(_pick(src, "fip")), 2),
+        "babip": round(safe_float(_pick(src, "babip")), 3),
+        "ba_risp": round(safe_float(_pick(src, "ba_risp")), 3),
+        "ld_pct": round(safe_pct_ratio(_pick(src, "ld_pct", "ld%")), 4),
+        "fb_pct": round(safe_pct_ratio(_pick(src, "fb_pct", "fb%")), 4),
+        "gb_pct": round(safe_pct_ratio(_pick(src, "gb_pct", "gb%")), 4),
+        "hhb_pct": round(safe_pct_ratio(_pick(src, "hhb_pct", "hhb%")), 4),
+    }
+
+
 def normalize_fielding_row(row: dict) -> dict:
     src = row.get("fielding", row or {})
     po = safe_int(_pick(src, "po"))
@@ -154,6 +303,46 @@ def normalize_fielding_row(row: dict) -> dict:
     e = safe_int(_pick(src, "e"))
     fpct = safe_float(_pick(src, "fpct"), ((po + a) / (po + a + e)) if (po + a + e) > 0 else 0.0)
     return {"po": po, "a": a, "e": e, "fpct": round(fpct, 3)}
+
+
+def normalize_catching_row(row: dict) -> dict:
+    src = row or {}
+    if isinstance(src.get("catching"), dict):
+        src = src["catching"]
+    inn = innings_to_float(_pick(src, "inn"))
+    sb = safe_int(_pick(src, "sb"))
+    cs = safe_int(_pick(src, "cs"))
+    cs_pct = safe_pct_ratio(_pick(src, "cs_pct"))
+    if cs_pct == 0 and (sb + cs) > 0:
+        cs_pct = cs / (sb + cs)
+    return {
+        "inn": round(inn, 2),
+        "sb": sb,
+        "cs": cs,
+        "cs_pct": round(cs_pct, 4),
+        "pb": safe_int(_pick(src, "pb")),
+        "pik": safe_int(_pick(src, "pik")),
+        "ci": safe_int(_pick(src, "ci")),
+    }
+
+
+def normalize_innings_played_row(row: dict) -> dict:
+    src = row or {}
+    if isinstance(src.get("innings_played"), dict):
+        src = src["innings_played"]
+    return {
+        "total": round(innings_to_float(_pick(src, "total", "ip:f")), 2),
+        "p": round(innings_to_float(_pick(src, "p", "ip:p")), 2),
+        "c": round(innings_to_float(_pick(src, "c", "ip:c")), 2),
+        "first_base": round(innings_to_float(_pick(src, "first_base", "ip:1b")), 2),
+        "second_base": round(innings_to_float(_pick(src, "second_base", "ip:2b")), 2),
+        "third_base": round(innings_to_float(_pick(src, "third_base", "ip:3b")), 2),
+        "ss": round(innings_to_float(_pick(src, "ss", "ip:ss")), 2),
+        "lf": round(innings_to_float(_pick(src, "lf", "ip:lf")), 2),
+        "cf": round(innings_to_float(_pick(src, "cf", "ip:cf")), 2),
+        "rf": round(innings_to_float(_pick(src, "rf", "ip:rf")), 2),
+        "sf": round(innings_to_float(_pick(src, "sf", "ip:sf")), 2),
+    }
 
 
 def normalize_player_batting(player: dict) -> dict:
@@ -165,6 +354,25 @@ def normalize_player_batting(player: dict) -> dict:
     if isinstance(hitting, dict) and hitting:
         return normalize_batting_row(hitting)
     return normalize_batting_row(player)
+
+
+def normalize_player_batting_advanced(player: dict) -> dict:
+    """Preferred source order: batting_advanced -> batting (app adv keys) -> legacy flat keys."""
+    batting_adv = player.get("batting_advanced")
+    if isinstance(batting_adv, dict) and batting_adv:
+        return normalize_batting_advanced_row(batting_adv)
+
+    batting = player.get("batting")
+    if isinstance(batting, dict) and batting:
+        adv_keys = {"qab", "qab_pct", "pa_per_bb", "bb_per_k", "c_pct", "hhb", "ld_pct", "fb_pct", "gb_pct"}
+        if any(k in batting for k in adv_keys):
+            return normalize_batting_advanced_row(batting)
+
+    hitting_adv = (player.get("stats") or {}).get("hitting_advanced")
+    if isinstance(hitting_adv, dict) and hitting_adv:
+        return normalize_batting_advanced_row(hitting_adv)
+
+    return normalize_batting_advanced_row(player)
 
 
 def count_populated_fields(rows: list[dict], fields: list[str], normalizer: Callable[[dict], dict]) -> dict:

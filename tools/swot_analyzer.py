@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from stats_normalizer import normalize_batting_row
+from stats_normalizer import normalize_batting_advanced_row, normalize_batting_row
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 SHARKS_DIR = DATA_DIR / "sharks"
@@ -277,6 +277,23 @@ def analyze_player(player: dict) -> dict:
     strengths.extend(h_s)
     weaknesses.extend(h_w)
 
+    # Advanced hitting profile (QAB/contact quality) from web/app feeds.
+    adv = normalize_batting_advanced_row(player)
+    pa = derived["hitting"].get("pa", 0)
+    if pa >= 6:
+        if adv.get("qab_pct", 0) >= 0.55:
+            strengths.append(f"High quality at-bat profile (QAB%: {round(adv['qab_pct'], 3)})")
+        elif adv.get("qab_pct", 0) <= 0.30:
+            weaknesses.append(f"Low quality at-bat profile (QAB%: {round(adv['qab_pct'], 3)})")
+
+        if adv.get("c_pct", 0) >= 0.70:
+            strengths.append(f"Consistent contact quality (C%: {round(adv['c_pct'], 3)})")
+        elif adv.get("c_pct", 0) > 0 and adv.get("c_pct", 0) <= 0.45:
+            weaknesses.append(f"Inconsistent contact quality (C%: {round(adv['c_pct'], 3)})")
+
+        if adv.get("bb_per_k", 0) > 0 and adv.get("bb_per_k", 0) <= 0.25:
+            weaknesses.append(f"Plate-discipline risk (BB/K: {round(adv['bb_per_k'], 3)})")
+
     raw_ip = _innings_to_float(player.get("stats", {}).get("pitching", {}).get("ip", player.get("pitching", {}).get("ip", 0.0)))
     p_s, p_w = classify_pitching(derived, raw_ip=raw_ip)
     strengths.extend(p_s)
@@ -467,6 +484,48 @@ def _team_aggregates(team_data: dict) -> dict:
     singles = max(0, h - doubles - triples - hr)
     tb = singles + 2*doubles + 3*triples + 4*hr
 
+    # Advanced batting aggregates (QAB/contact profile) for matchup edge signals.
+    adv_pa = 0.0
+    adv_qab = 0.0
+    adv_hhb = 0.0
+    adv_bb = 0.0
+    adv_so = 0.0
+    weighted_c = 0.0
+    weighted_ld = 0.0
+    weighted_fb = 0.0
+    weighted_gb = 0.0
+
+    def _acc_adv(row: dict, pa_hint: float = 0.0):
+        nonlocal adv_pa, adv_qab, adv_hhb, adv_bb, adv_so
+        nonlocal weighted_c, weighted_ld, weighted_fb, weighted_gb
+        adv = normalize_batting_advanced_row(row or {})
+        row_pa = _parse_number(adv.get("pa", 0))
+        if row_pa <= 0 and pa_hint > 0:
+            row_pa = pa_hint
+        wt = row_pa if row_pa > 0 else 1.0
+        adv_pa += row_pa
+        adv_qab += _parse_number(adv.get("qab", 0))
+        adv_hhb += _parse_number(adv.get("hhb", 0))
+        adv_bb += _parse_number(adv.get("bb", 0))
+        adv_so += _parse_number(adv.get("so", 0))
+        weighted_c += _parse_number(adv.get("c_pct", 0)) * wt
+        weighted_ld += _parse_number(adv.get("ld_pct", 0)) * wt
+        weighted_fb += _parse_number(adv.get("fb_pct", 0)) * wt
+        weighted_gb += _parse_number(adv.get("gb_pct", 0)) * wt
+
+    for p in roster:
+        batting = p.get("batting", {})
+        pa_hint = _parse_number(batting.get("pa", 0))
+        if pa_hint <= 0:
+            pa_hint = _parse_number(batting.get("ab", 0)) + _parse_number(batting.get("bb", 0)) + _parse_number(batting.get("hbp", 0))
+        _acc_adv(p, pa_hint=pa_hint)
+
+    # Fallback if roster has no advanced signal: use top-level batting_stats rows.
+    if adv_qab == 0 and weighted_c == 0 and weighted_ld == 0 and weighted_fb == 0 and adv_hhb == 0:
+        for p in team_data.get("batting_stats", []):
+            b = normalize_batting_row(p)
+            _acc_adv(p, pa_hint=_parse_number(b.get("pa", 0)))
+
     # Pitching aggregates — check per-player pitching, then top-level pitching_stats[]
     total_ip = 0.0
     total_er = 0.0
@@ -500,6 +559,13 @@ def _team_aggregates(team_data: dict) -> dict:
         total_a += _parse_number(fielding.get("a", 0))
         total_e += _parse_number(fielding.get("e", 0))
 
+    q_pct = _safe_div(adv_qab, adv_pa) if adv_pa > 0 else 0.0
+    c_pct = _safe_div(weighted_c, adv_pa) if adv_pa > 0 else 0.0
+    ld_pct = _safe_div(weighted_ld, adv_pa) if adv_pa > 0 else 0.0
+    fb_pct = _safe_div(weighted_fb, adv_pa) if adv_pa > 0 else 0.0
+    gb_pct = _safe_div(weighted_gb, adv_pa) if adv_pa > 0 else 0.0
+    bb_per_k = _safe_div(adv_bb, adv_so) if adv_so > 0 else 0.0
+
     return {
         "batting": {
             "avg": round(_safe_div(h, ab), 3),
@@ -510,6 +576,16 @@ def _team_aggregates(team_data: dict) -> dict:
             "bb_rate": round(_safe_div(bb, pa), 3),
             "hr": int(hr), "sb": int(sb), "r": int(r), "rbi": int(rbi),
             "ab": int(ab), "h": int(h), "pa": int(pa),
+        },
+        "batting_advanced": {
+            "qab": int(adv_qab),
+            "qab_pct": round(q_pct, 3),
+            "c_pct": round(c_pct, 3),
+            "ld_pct": round(ld_pct, 3),
+            "fb_pct": round(fb_pct, 3),
+            "gb_pct": round(gb_pct, 3),
+            "hhb": int(adv_hhb),
+            "bb_per_k": round(bb_per_k, 3),
         },
         "pitching": {
             "era": round(_safe_div(total_er * 7, total_ip), 2),
@@ -572,6 +648,25 @@ def analyze_matchup(our_team: dict, opponent_team: dict) -> dict:
     elif them["batting"]["k_rate"] < us["batting"]["k_rate"] - 0.05:
         their_advantages.append(f"Better contact rate (K%: {them['batting']['k_rate']} vs {us['batting']['k_rate']})")
 
+    # Advanced batting quality signals
+    if us["batting_advanced"]["qab_pct"] > them["batting_advanced"]["qab_pct"] + 0.08:
+        our_advantages.append(
+            f"Higher quality-at-bat rate (QAB%: {us['batting_advanced']['qab_pct']} vs {them['batting_advanced']['qab_pct']})"
+        )
+    elif them["batting_advanced"]["qab_pct"] > us["batting_advanced"]["qab_pct"] + 0.08:
+        their_advantages.append(
+            f"Higher quality-at-bat rate (QAB%: {them['batting_advanced']['qab_pct']} vs {us['batting_advanced']['qab_pct']})"
+        )
+
+    if us["batting_advanced"]["c_pct"] > them["batting_advanced"]["c_pct"] + 0.07:
+        our_advantages.append(
+            f"Better contact quality (C%: {us['batting_advanced']['c_pct']} vs {them['batting_advanced']['c_pct']})"
+        )
+    elif them["batting_advanced"]["c_pct"] > us["batting_advanced"]["c_pct"] + 0.07:
+        their_advantages.append(
+            f"Better contact quality (C%: {them['batting_advanced']['c_pct']} vs {us['batting_advanced']['c_pct']})"
+        )
+
     # Pitching comparison
     if us["pitching"]["ip"] >= 3 and them["pitching"]["ip"] >= 3:
         if us["pitching"]["era"] < them["pitching"]["era"] - 1.0:
@@ -601,6 +696,10 @@ def analyze_matchup(our_team: dict, opponent_team: dict) -> dict:
         key_matchups.append("Opportunity: their team strikes out a lot and our pitchers can rack up Ks")
     if us["batting"]["sb"] > them["batting"]["sb"] + 3:
         key_matchups.append("Speed advantage - aggressive baserunning recommended")
+    if them["batting_advanced"]["ld_pct"] > 0.30 and us["fielding"]["fpct"] < 0.900:
+        key_matchups.append("They profile as a line-drive offense; tighten infield readiness and first-step defense.")
+    if us["batting_advanced"]["bb_per_k"] > them["batting_advanced"]["bb_per_k"] + 0.25:
+        key_matchups.append("Plate-discipline edge favors us; work deep counts and force pitch volume.")
 
     # Recommendation
     recs = []

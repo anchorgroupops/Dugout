@@ -7,7 +7,7 @@ Enforces mandatory play requirements (1 AB + 6 defensive outs per player).
 import json
 from pathlib import Path
 
-from stats_normalizer import normalize_player_batting
+from stats_normalizer import normalize_player_batting, normalize_player_batting_advanced
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 SHARKS_DIR = DATA_DIR / "sharks"
@@ -35,6 +35,7 @@ def compute_batting_score(player: dict, strategy: str = "balanced") -> float:
     # Preferred source order is enforced inside normalize_player_batting():
     # player.batting -> player.stats.hitting -> player legacy flat fields.
     hitting = normalize_player_batting(player)
+    hitting_adv = normalize_player_batting_advanced(player)
     ab = hitting.get("ab", 0)
     h = hitting.get("h", 0)
     bb = hitting.get("bb", 0)
@@ -56,17 +57,47 @@ def compute_batting_score(player: dict, strategy: str = "balanced") -> float:
     total_bases = singles + (2 * doubles) + (3 * triples) + (4 * hr)
     slg = total_bases / ab if ab > 0 else 0
     k_rate = k / pa
+    q_pct = hitting_adv.get("qab_pct", 0.0)  # quality at-bat ratio
+    contact_quality = hitting_adv.get("c_pct", 0.0)
+    line_drive_rate = hitting_adv.get("ld_pct", 0.0)
+    discipline_ratio = hitting_adv.get("bb_per_k", 0.0)
+    pa_per_bb = hitting_adv.get("pa_per_bb", 0.0)
+    pa_per_bb_bonus = (1 / pa_per_bb) if pa_per_bb > 0 else 0.0
 
     if strategy == "balanced":
         # OBP is king, then SLG, then contact, then speed
-        score = (obp * 40) + (slg * 25) + ((1 - k_rate) * 20) + (sb / max(pa, 1) * 15)
+        score = (
+            (obp * 34)
+            + (slg * 22)
+            + ((1 - k_rate) * 18)
+            + (sb / max(pa, 1) * 10)
+            + (q_pct * 8)
+            + (contact_quality * 5)
+            + (line_drive_rate * 3)
+        )
     elif strategy == "aggressive":
         # Maximize run production: SLG + RBI rate
         rbi_rate = rbi / pa
-        score = (slg * 35) + (obp * 25) + (rbi_rate * 25) + ((1 - k_rate) * 15)
+        score = (
+            (slg * 33)
+            + (obp * 23)
+            + (rbi_rate * 20)
+            + ((1 - k_rate) * 10)
+            + (line_drive_rate * 8)
+            + (contact_quality * 4)
+            + (q_pct * 2)
+        )
     elif strategy == "development":
         # Flatten the curve — give everyone more balanced placement
-        score = (obp * 30) + (ba * 30) + ((1 - k_rate) * 25) + (sb / max(pa, 1) * 15)
+        score = (
+            (obp * 28)
+            + (ba * 22)
+            + ((1 - k_rate) * 16)
+            + (sb / max(pa, 1) * 10)
+            + (q_pct * 14)
+            + (discipline_ratio * 6)
+            + (pa_per_bb_bonus * 4)
+        )
         score = score * 0.7 + 0.3 * 10  # pull toward center
     else:
         score = obp * 50 + slg * 50
@@ -96,6 +127,7 @@ def slot_players(sorted_players: list[dict]) -> list[dict]:
     leadoff_scores = []
     for i, p in enumerate(pool):
         hitting = normalize_player_batting(p)
+        hitting_adv = normalize_player_batting_advanced(p)
         ab = hitting.get("ab", 0)
         h = hitting.get("h", 0)
         bb = hitting.get("bb", 0)
@@ -104,7 +136,8 @@ def slot_players(sorted_players: list[dict]) -> list[dict]:
         pa = ab + bb + hbp
         obp = (h + bb + hbp) / pa if pa > 0 else 0
         speed = sb / max(pa, 1)
-        leadoff_scores.append((i, obp * 0.6 + speed * 0.4))
+        qab_pct = hitting_adv.get("qab_pct", 0.0)
+        leadoff_scores.append((i, obp * 0.55 + speed * 0.30 + qab_pct * 0.15))
 
     leadoff_scores.sort(key=lambda x: x[1], reverse=True)
     leadoff_idx = leadoff_scores[0][0]
@@ -125,6 +158,7 @@ def slot_players(sorted_players: list[dict]) -> list[dict]:
         contact_scores = []
         for i, p in enumerate(pool):
             hitting = normalize_player_batting(p)
+            hitting_adv = normalize_player_batting_advanced(p)
             ab = hitting.get("ab", 0)
             h = hitting.get("h", 0)
             k = hitting.get("so", 0)
@@ -133,7 +167,8 @@ def slot_players(sorted_players: list[dict]) -> list[dict]:
             pa = ab + bb + hbp
             ba = h / ab if ab > 0 else 0
             k_rate = k / pa if pa > 0 else 1
-            contact_scores.append((i, ba * 0.5 + (1 - k_rate) * 0.5))
+            contact_quality = hitting_adv.get("c_pct", 0.0)
+            contact_scores.append((i, ba * 0.4 + (1 - k_rate) * 0.45 + contact_quality * 0.15))
         contact_scores.sort(key=lambda x: x[1], reverse=True)
         contact_idx = contact_scores[0][0]
         second_hitter = pool.pop(contact_idx)
@@ -196,14 +231,37 @@ def generate_lineup(
     if not roster:
         return {"strategy": strategy, "lineup": [], "violations": ["No roster data found"], "compliant": False}
 
+    def _derive_display_rates(hitting: dict) -> tuple[float, float, float, int]:
+        ab = hitting.get("ab", 0)
+        h = hitting.get("h", 0)
+        bb = hitting.get("bb", 0)
+        hbp = hitting.get("hbp", 0)
+        sac = hitting.get("sac", 0)
+        one_b = hitting.get("1b", hitting.get("singles", 0))
+        two_b = hitting.get("2b", hitting.get("doubles", 0))
+        three_b = hitting.get("3b", hitting.get("triples", 0))
+        hr = hitting.get("hr", 0)
+        pa = hitting.get("pa", 0) or (ab + bb + hbp + sac)
+        tb = one_b + 2 * two_b + 3 * three_b + 4 * hr
+        avg = hitting.get("avg")
+        obp = hitting.get("obp")
+        slg = hitting.get("slg")
+        if avg in (None, "", "-", "—"):
+            avg = (h / ab) if ab > 0 else 0.0
+        if obp in (None, "", "-", "—"):
+            obp = ((h + bb + hbp) / pa) if pa > 0 else 0.0
+        if slg in (None, "", "-", "—"):
+            slg = (tb / ab) if ab > 0 else 0.0
+        return round(float(avg), 3), round(float(obp), 3), round(float(slg), 3), int(pa)
+
     # Attach key display stats to each player before scoring (carried into lineup entries)
     for player in roster:
         hitting = normalize_player_batting(player)
-        # Prefer existing rates if provided; otherwise derive from count stats.
-        player["_display_avg"] = hitting.get("avg", 0.0)
-        player["_display_obp"] = hitting.get("obp", 0.0)
-        player["_display_slg"] = hitting.get("slg", 0.0)
-        player["_display_pa"] = hitting.get("pa", 0)
+        avg, obp, slg, pa = _derive_display_rates(hitting)
+        player["_display_avg"] = avg
+        player["_display_obp"] = obp
+        player["_display_slg"] = slg
+        player["_display_pa"] = pa
 
     # Score, sort and ensure names
     for player in roster:

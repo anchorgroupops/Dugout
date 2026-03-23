@@ -117,6 +117,14 @@ const MatchupPanel = ({ defaultOpponent }) => {
             {matchup.empty && <AlertTriangle size={16} color="#82CBC3" style={{ flexShrink: 0 }} />}
             {matchup.recommendation}
           </div>
+          <div style={{ marginTop: '0.45rem', marginBottom: matchup.empty ? '0.85rem' : '1rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+            Data source: {matchup.data_source === 'opponent_game_history'
+              ? 'scorebook game history'
+              : matchup.data_source === 'opponent_team_json'
+                ? 'opponent team feed'
+                : 'none'}
+            {matchup.empty && matchup.reason ? ` · reason: ${matchup.reason}` : ''}
+          </div>
 
           {!matchup.empty && (
             <>
@@ -129,6 +137,9 @@ const MatchupPanel = ({ defaultOpponent }) => {
               <StatCompare label="AVG" ours={matchup.our_stats.batting.avg} theirs={matchup.their_stats.batting.avg} />
               <StatCompare label="OBP" ours={matchup.our_stats.batting.obp} theirs={matchup.their_stats.batting.obp} />
               <StatCompare label="OPS" ours={matchup.our_stats.batting.ops} theirs={matchup.their_stats.batting.ops} />
+              <StatCompare label="QAB%" ours={matchup.our_stats.batting_advanced?.qab_pct ?? 0} theirs={matchup.their_stats.batting_advanced?.qab_pct ?? 0} />
+              <StatCompare label="C%" ours={matchup.our_stats.batting_advanced?.c_pct ?? 0} theirs={matchup.their_stats.batting_advanced?.c_pct ?? 0} />
+              <StatCompare label="LD%" ours={matchup.our_stats.batting_advanced?.ld_pct ?? 0} theirs={matchup.their_stats.batting_advanced?.ld_pct ?? 0} />
               <StatCompare label="K%" ours={matchup.our_stats.batting.k_rate} theirs={matchup.their_stats.batting.k_rate} lowerIsBetter />
               <StatCompare label="BB%" ours={matchup.our_stats.batting.bb_rate} theirs={matchup.their_stats.batting.bb_rate} />
             </div>
