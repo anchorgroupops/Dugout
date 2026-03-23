@@ -307,22 +307,49 @@ const RosterManager = ({ team, availability, onAvailabilityChange, onTeamChange 
         </div>
 
         {/* Sub players */}
-        {subRoster.length > 0 && (
+        {(subRoster.filter(p => isAvailable(p)).length > 0 || subRoster.filter(p => !isAvailable(p)).length > 0) && (
           <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid rgba(255,165,0,0.15)' }}>
-            <div style={{ fontSize: '0.7rem', color: '#ffa500', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.5rem', fontWeight: '700' }}>
-              Borrowed Players
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              {subRoster.map(player => (
-                <ToggleRow
-                  key={`${player.number}-${player.last}`}
-                  player={player}
-                  available={isAvailable(player)}
-                  onToggle={handleToggle}
-                  updating={updatingPlayer === `${player.first} ${player.last}`.trim()}
-                />
-              ))}
-            </div>
+            
+            {/* Active Subs */}
+            {subRoster.filter(p => isAvailable(p)).length > 0 && (
+              <div style={{ marginBottom: subRoster.filter(p => !isAvailable(p)).length > 0 ? '1rem' : 0 }}>
+                <div style={{ fontSize: '0.7rem', color: '#ffa500', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.5rem', fontWeight: '700' }}>
+                  Active Borrowed Players
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  {subRoster.filter(p => isAvailable(p)).map(player => (
+                    <ToggleRow
+                      key={`${player.number}-${player.last}`}
+                      player={player}
+                      available={isAvailable(player)}
+                      onToggle={handleToggle}
+                      updating={updatingPlayer === `${player.first} ${player.last}`.trim()}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Inactive / Recent Subs */}
+            {subRoster.filter(p => !isAvailable(p)).length > 0 && (
+              <div style={{ paddingTop: subRoster.filter(p => isAvailable(p)).length > 0 ? '1rem' : 0, borderTop: subRoster.filter(p => isAvailable(p)).length > 0 ? '1px dashed rgba(255,255,255,0.1)' : 'none' }}>
+                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.5rem', fontWeight: '700' }}>
+                  Recent / Inactive Subs
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  {subRoster.filter(p => !isAvailable(p)).map(player => (
+                    <ToggleRow
+                      key={`${player.number}-${player.last}`}
+                      player={player}
+                      available={isAvailable(player)}
+                      onToggle={handleToggle}
+                      updating={updatingPlayer === `${player.first} ${player.last}`.trim()}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
           </div>
         )}
       </div>

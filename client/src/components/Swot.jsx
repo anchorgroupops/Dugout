@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { AlertTriangle, TrendingUp, ShieldAlert, Target, ChevronDown, ChevronUp, Swords, Clock, Home, Plane } from 'lucide-react';
+import { getTodayEST } from '../utils/formatDate';
 
 const SwotQuadrant = ({ title, items, color, icon }) => (
   <div>
@@ -186,7 +187,7 @@ const MatchupPanel = () => {
 
 const UpcomingGameBanner = ({ schedule }) => {
   if (!schedule?.upcoming?.length) return null;
-  const today = new Date().toISOString().slice(0, 10);
+  const today = getTodayEST();
   const next = schedule.upcoming
     .filter(g => g.date >= today)
     .sort((a, b) => a.date.localeCompare(b.date))[0];

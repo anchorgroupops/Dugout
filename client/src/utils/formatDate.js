@@ -14,3 +14,10 @@ export const formatTime = (dateStr, options = {}) => {
   if (!dateStr) return '';
   return new Date(dateStr).toLocaleTimeString('en-US', { timeZone: TZ, ...options });
 };
+
+export const getTodayEST = () => {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: TZ,
+    year: 'numeric', month: '2-digit', day: '2-digit'
+  }).format(new Date());
+};

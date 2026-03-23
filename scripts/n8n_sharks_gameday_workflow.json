@@ -4,25 +4,38 @@
     {
       "parameters": {
         "rule": {
-          "interval": [{ "field": "hours", "hoursInterval": 1 }]
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1
+            }
+          ]
         }
       },
       "id": "schedule-trigger",
       "name": "Schedule Trigger",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
-      "position": [240, 300]
+      "position": [
+        240,
+        300
+      ]
     },
     {
       "parameters": {
         "url": "http://192.168.7.222:3000/api/schedule",
-        "options": { "timeout": 10000 }
+        "options": {
+          "timeout": 10000
+        }
       },
       "id": "fetch-schedule",
       "name": "Fetch Schedule",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [460, 300]
+      "position": [
+        460,
+        300
+      ]
     },
     {
       "parameters": {
@@ -32,18 +45,26 @@
       "name": "Check Game Timing",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [680, 300]
+      "position": [
+        680,
+        300
+      ]
     },
     {
       "parameters": {
         "conditions": {
-          "options": { "caseSensitive": false },
+          "options": {
+            "caseSensitive": false
+          },
           "conditions": [
             {
               "id": "not-skip",
               "leftValue": "={{ $json.skip }}",
               "rightValue": true,
-              "operator": { "type": "boolean", "operation": "notEquals" }
+              "operator": {
+                "type": "boolean",
+                "operation": "notEquals"
+              }
             }
           ]
         }
@@ -52,28 +73,39 @@
       "name": "Game Alert?",
       "type": "n8n-nodes-base.filter",
       "typeVersion": 2,
-      "position": [900, 300]
+      "position": [
+        900,
+        300
+      ]
     },
     {
       "parameters": {
         "url": "http://192.168.7.222:3000/api/team",
-        "options": { "timeout": 10000 }
+        "options": {
+          "timeout": 10000
+        }
       },
       "id": "fetch-team",
       "name": "Fetch Team Stats",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1120, 300]
+      "position": [
+        1120,
+        300
+      ]
     },
     {
       "parameters": {
-        "jsCode": "const game = $('check-timing').first().json;\nconst team = $input.first().json;\n\nconst roster = team.roster || [];\nconst topBatters = [...roster]\n  .filter(p => (p.batting?.pa || 0) > 0)\n  .sort((a, b) => (b.batting?.ops || 0) - (a.batting?.ops || 0))\n  .slice(0, 3)\n  .map(p => `#${p.number} ${(p.first||'')+' '+(p.last||'')} — OPS: ${p.batting?.ops || '—'}`);\n\nconst ha = game.home_away === 'home' ? 'HOME' : 'AWAY';\nconst msg = [\n  `🦈 SHARKS GAME DAY — ${ha}`,\n  ``,\n  `vs. ${game.opponent}`,\n  `📅 ${game.date}  🕐 ${game.time || 'TBD'}`,\n  ``,\n  `⚡ Top Hitters:`,\n  ...topBatters.map(b => `  ${b}`),\n  ``,\n  `📊 Dashboard: https://sharks.joelycannoli.com`,\n  ``,\n  `⏰ ${game.hoursUntil}h until game time`,\n].join('\\n');\n\nreturn [{ json: { message: msg, game } }];\n"
+        "jsCode": "const game = $('Check Game Timing').first().json;\nconst team = $input.first().json;\n\nconst roster = team.roster || [];\nconst topBatters = [...roster]\n  .filter(p => (p.batting?.pa || 0) > 0)\n  .sort((a, b) => (b.batting?.ops || 0) - (a.batting?.ops || 0))\n  .slice(0, 3)\n  .map(p => `#${p.number} ${(p.first||'')+' '+(p.last||'')} — OPS: ${p.batting?.ops || '—'}`);\n\nconst ha = game.home_away === 'home' ? 'HOME' : 'AWAY';\nconst msg = [\n  `🦈 SHARKS GAME DAY — ${ha}`,\n  ``,\n  `vs. ${game.opponent}`,\n  `📅 ${game.date}  🕐 ${game.time || 'TBD'}`,\n  ``,\n  `⚡ Top Hitters:`,\n  ...topBatters.map(b => `  ${b}`),\n  ``,\n  `📊 Dashboard: https://sharks.joelycannoli.com`,\n  ``,\n  `⏰ ${game.hoursUntil}h until game time`,\n].join('\\n');\n\nreturn [{ json: { message: msg, game } }];\n"
       },
       "id": "build-message",
       "name": "Build Briefing",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1340, 300]
+      "position": [
+        1340,
+        300
+      ]
     },
     {
       "parameters": {
@@ -86,22 +118,97 @@
       "name": "Send Game Day Email",
       "type": "n8n-nodes-base.gmail",
       "typeVersion": 2.1,
-      "position": [1560, 300],
-      "credentials": { "gmailOAuth2": { "name": "Gmail account" } }
+      "position": [
+        1560,
+        300
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "name": "Gmail account"
+        }
+      }
     }
   ],
   "connections": {
-    "Schedule Trigger": { "main": [[{ "node": "Fetch Schedule", "type": "main", "index": 0 }]] },
-    "Fetch Schedule":   { "main": [[{ "node": "Check Game Timing", "type": "main", "index": 0 }]] },
-    "Check Game Timing":{ "main": [[{ "node": "Game Alert?", "type": "main", "index": 0 }]] },
-    "Game Alert?":      { "main": [[{ "node": "Fetch Team Stats", "type": "main", "index": 0 }]] },
-    "Fetch Team Stats": { "main": [[{ "node": "Build Briefing", "type": "main", "index": 0 }]] },
-    "Build Briefing":   { "main": [[{ "node": "Send Game Day Email", "type": "main", "index": 0 }]] }
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Fetch Schedule",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Schedule": {
+      "main": [
+        [
+          {
+            "node": "Check Game Timing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Game Timing": {
+      "main": [
+        [
+          {
+            "node": "Game Alert?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Game Alert?": {
+      "main": [
+        [
+          {
+            "node": "Fetch Team Stats",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Team Stats": {
+      "main": [
+        [
+          {
+            "node": "Build Briefing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Briefing": {
+      "main": [
+        [
+          {
+            "node": "Send Game Day Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
   },
-  "settings": { "executionOrder": "v1" },
+  "settings": {
+    "executionOrder": "v1"
+  },
   "staticData": null,
-  "meta": { "templateCredsSetupCompleted": false },
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
   "pinData": {},
   "versionId": "1",
-  "tags": [{ "name": "sharks" }]
+  "tags": [
+    {
+      "name": "sharks"
+    }
+  ]
 }

@@ -157,24 +157,36 @@ def _is_core_player(name):
 
 
 def auto_deactivate_subs():
-    """After a game day, deactivate all non-core players and record in sub_tracker."""
-    games_dir = SHARKS_DIR / "games"
-    index_file = games_dir / "index.json"
+    \"\"\"After a game day, deactivate all non-core players and record in sub_tracker.\"\"\"
+    schedule_file = SHARKS_DIR / "schedule_manual.json"
     availability_file = SHARKS_DIR / "availability.json"
 
-    if not index_file.exists() or not availability_file.exists():
+    if not schedule_file.exists() or not availability_file.exists():
         return
 
-    with open(index_file) as f:
-        games = json.load(f)
+    with open(schedule_file) as f:
+        sched = json.load(f)
     with open(availability_file) as f:
         avail = json.load(f)
 
-    # Check if any game was yesterday
-    yesterday = (datetime.now(ET) - timedelta(days=1)).strftime("%Y-%m-%d")
-    game_yesterday = any(g.get("date") == yesterday for g in games)
+    # Find the most recent past game
+    past_games = sched.get("past", [])
+    if not past_games:
+        return
+        
+    # Sort past games by date descending to get the literal last game
+    past_games.sort(key=lambda x: x.get("date", ""), reverse=True)
+    last_game = past_games[0]
+    last_game_date_str = last_game.get("date", "")[:10]  # yyyy-mm-dd
+    
+    if not last_game_date_str:
+        return
+        
+    # If the last game's date is strictly before today (in ET), we are post-game day.
+    today_str = datetime.now(ET).strftime("%Y-%m-%d")
+    is_post_game_day = last_game_date_str < today_str
 
-    if not game_yesterday:
+    if not is_post_game_day:
         return
 
     tracker = _load_sub_tracker()
@@ -183,16 +195,20 @@ def auto_deactivate_subs():
     for name, status in list(avail.items()):
         if _is_core_player(name):
             continue
+        # If the sub is currently active
         if status is True or (isinstance(status, dict) and status.get("available")):
-            # Deactivate this sub
-            avail[name] = False
-            tracker[name] = {
-                "last_active": datetime.now(ET).isoformat(),
-                "auto_deactivated": True,
-                "deactivated_after_game": yesterday
-            }
-            logging.info(f"Auto-deactivated sub: {name} (game on {yesterday})")
-            changed = True
+            # Check if we ALREADY auto-deactivated them for this specific game to avoid spamming
+            already_deactivated = isinstance(tracker.get(name), dict) and tracker[name].get("deactivated_after_game") == last_game_date_str
+            if not already_deactivated:
+                # Deactivate this sub
+                avail[name] = False
+                tracker[name] = {
+                    "last_active": datetime.now(ET).isoformat(),
+                    "auto_deactivated": True,
+                    "deactivated_after_game": last_game_date_str
+                }
+                logging.info(f"Auto-deactivated sub: {name} (last game was on {last_game_date_str})")
+                changed = True
 
     if changed:
         with open(availability_file, "w") as f:

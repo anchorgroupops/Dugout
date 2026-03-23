@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Calendar, ChevronDown, ChevronUp, Home, Plane, Clock } from 'lucide-react';
+import { getTodayEST } from '../utils/formatDate';
 
 const StatCell = ({ label, value }) => (
   <div style={{ textAlign: 'center', minWidth: '40px' }}>
@@ -128,7 +129,7 @@ const GameCard = ({ game, onExpand, isExpanded, detail }) => {
 
 const UpcomingGameBanner = ({ schedule }) => {
   if (!schedule?.upcoming?.length) return null;
-  const today = new Date().toISOString().slice(0, 10);
+  const today = getTodayEST();
   const next = schedule.upcoming
     .filter(g => g.date >= today)
     .sort((a, b) => a.date.localeCompare(b.date))[0];
@@ -231,7 +232,7 @@ const Games = ({ gamesData, schedule }) => {
   };
 
   // Build upcoming schedule list
-  const today = new Date().toISOString().slice(0, 10);
+  const today = getTodayEST();
   const upcoming = (schedule?.upcoming || [])
     .filter(g => g.date >= today)
     .sort((a, b) => a.date.localeCompare(b.date))
