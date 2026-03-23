@@ -1,0 +1,111 @@
+{
+  "generated_at": "2026-03-23T09:15:27.464552-04:00",
+  "base_url": "https://sharks.joelycannoli.com",
+  "summary": {
+    "total": 20,
+    "passed": 20,
+    "failed": 0
+  },
+  "checks": [
+    {
+      "name": "api_team_status",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "team_batting_nonzero",
+      "ok": true,
+      "detail": "roster=13 pa>0=11"
+    },
+    {
+      "name": "api_games_status",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "api_standings_status",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "standings_games_consistency",
+      "ok": true,
+      "detail": "games=1-2 standings=1-2 name=The Sharks"
+    },
+    {
+      "name": "matchup_peppers",
+      "ok": true,
+      "detail": "status=200 empty=False data_source=opponent_game_history reason=None"
+    },
+    {
+      "name": "matchup_riptide_rebels",
+      "ok": true,
+      "detail": "status=200 empty=False data_source=opponent_game_history reason=None"
+    },
+    {
+      "name": "matchup_ravens",
+      "ok": true,
+      "detail": "status=200 empty=True data_source=opponent_public_games reason=no_player_level_history"
+    },
+    {
+      "name": "swot_artifact",
+      "ok": true,
+      "detail": "status=200 player_analyses=10"
+    },
+    {
+      "name": "lineups_artifact",
+      "ok": true,
+      "detail": "status=200 first9_pa>0=9"
+    },
+    {
+      "name": "pipeline_health_artifact",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "opponent_discovery_artifact",
+      "ok": true,
+      "detail": "status=200 teams=5"
+    },
+    {
+      "name": "security_headers",
+      "ok": true,
+      "detail": "missing=[]"
+    },
+    {
+      "name": "api_cache_control_no_store",
+      "ok": true,
+      "detail": "cache_control=no-store"
+    },
+    {
+      "name": "mutate_method_guard",
+      "ok": true,
+      "detail": "status=403"
+    },
+    {
+      "name": "mutate_content_type_guard",
+      "ok": true,
+      "detail": "status=415"
+    },
+    {
+      "name": "mutate_payload_size_guard",
+      "ok": true,
+      "detail": "status=413"
+    },
+    {
+      "name": "mutate_origin_guard",
+      "ok": true,
+      "detail": "status=403"
+    },
+    {
+      "name": "read_rate_limit_smoke",
+      "ok": true,
+      "detail": "429=20/35"
+    },
+    {
+      "name": "write_rate_limit_smoke",
+      "ok": true,
+      "detail": "429=7/10 statuses=[200, 200, 200, 429, 429, 429, 429, 429, 429, 429]"
+    }
+  ]
+}

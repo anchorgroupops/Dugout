@@ -1,0 +1,12 @@
+.env
+.tmp/
+node_modules/
+__pycache__/
+*.pyc
+data/
+*.db
+.DS_Store
+credentials/
+*.key
+dist/
+tools/frida-server
