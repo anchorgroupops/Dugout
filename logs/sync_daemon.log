@@ -223,3 +223,93 @@
 2026-03-23 15:49:43,843 [INFO] 127.0.0.1 - - [23/Mar/2026 15:49:43] "[31m[1mPOST /api/regenerate-lineups HTTP/1.1[0m" 413 -
 2026-03-23 15:49:43,846 [WARNING] [Security] Blocked mutating request from disallowed origin: https://evil.example
 2026-03-23 15:49:43,846 [INFO] 127.0.0.1 - - [23/Mar/2026 15:49:43] "[31m[1mPOST /api/regenerate-lineups HTTP/1.1[0m" 403 -
+2026-03-23 16:10:37,062 [INFO] [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://127.0.0.1:5001
+2026-03-23 16:10:37,062 [INFO] [33mPress CTRL+C to quit[0m
+2026-03-23 16:10:37,760 [INFO] [Enrich] Applied app_stats: batting=11 pitching=5 fielding=11
+2026-03-23 16:10:37,765 [INFO] [Reconcile] scorebook merge complete: matched=11 updated=11 source_players=12
+2026-03-23 16:10:37,767 [INFO] 127.0.0.1 - - [23/Mar/2026 16:10:37] "GET /api/team HTTP/1.1" 200 -
+2026-03-23 16:10:37,776 [INFO] [Enrich] Applied app_stats: batting=11 pitching=5 fielding=11
+2026-03-23 16:10:37,782 [INFO] [Reconcile] scorebook merge complete: matched=11 updated=11 source_players=12
+2026-03-23 16:10:39,360 [INFO] 127.0.0.1 - - [23/Mar/2026 16:10:39] "GET /api/voice-update HTTP/1.1" 200 -
+2026-03-23 16:10:43,141 [INFO] [Enrich] Applied app_stats: batting=11 pitching=5 fielding=11
+2026-03-23 16:10:43,146 [INFO] [Reconcile] scorebook merge complete: matched=11 updated=11 source_players=12
+2026-03-23 16:10:43,147 [INFO] 127.0.0.1 - - [23/Mar/2026 16:10:43] "GET /api/team HTTP/1.1" 200 -
+2026-03-23 16:10:43,155 [INFO] 127.0.0.1 - - [23/Mar/2026 16:10:43] "GET /api/games HTTP/1.1" 200 -
+2026-03-23 16:10:43,162 [INFO] 127.0.0.1 - - [23/Mar/2026 16:10:43] "GET /api/availability HTTP/1.1" 200 -
+2026-03-23 16:10:43,188 [INFO] 127.0.0.1 - - [23/Mar/2026 16:10:43] "GET /api/standings HTTP/1.1" 200 -
+2026-03-23 16:10:43,224 [INFO] [Enrich] Applied app_stats: batting=11 pitching=5 fielding=11
+2026-03-23 16:10:43,228 [INFO] [Reconcile] scorebook merge complete: matched=11 updated=11 source_players=12
+2026-03-23 16:10:43,233 [INFO] [OpponentStats] Matched game file 2026-03-03_peppers.json for slug 'peppers'
+2026-03-23 16:10:43,234 [INFO] [OpponentStats] Aggregated 10 players for 'peppers'
+2026-03-23 16:10:43,237 [INFO] 127.0.0.1 - - [23/Mar/2026 16:10:43] "GET /api/matchup/peppers HTTP/1.1" 200 -
+2026-03-23 16:10:43,248 [INFO] [Enrich] Applied app_stats: batting=11 pitching=5 fielding=11
+2026-03-23 16:10:43,254 [INFO] [Reconcile] scorebook merge complete: matched=11 updated=11 source_players=12
+2026-03-23 16:10:43,258 [INFO] [OpponentStats] Matched game file 2026-03-07_2026_riptide_rebels_12u.json for slug 'riptide_rebels'
+2026-03-23 16:10:43,259 [INFO] [OpponentStats] Aggregated 10 players for 'riptide_rebels'
+2026-03-23 16:10:43,261 [INFO] 127.0.0.1 - - [23/Mar/2026 16:10:43] "GET /api/matchup/riptide_rebels HTTP/1.1" 200 -
+2026-03-23 16:10:43,271 [INFO] [Enrich] Applied app_stats: batting=11 pitching=5 fielding=11
+2026-03-23 16:10:43,275 [INFO] [Reconcile] scorebook merge complete: matched=11 updated=11 source_players=12
+2026-03-23 16:10:43,282 [INFO] 127.0.0.1 - - [23/Mar/2026 16:10:43] "GET /api/matchup/ravens HTTP/1.1" 200 -
+2026-03-23 16:10:43,288 [INFO] 127.0.0.1 - - [23/Mar/2026 16:10:43] "[33mGET /data/sharks/swot_analysis.json HTTP/1.1[0m" 404 -
+2026-03-23 16:10:43,307 [INFO] 127.0.0.1 - - [23/Mar/2026 16:10:43] "[33mGET /data/sharks/lineups.json HTTP/1.1[0m" 404 -
+2026-03-23 16:10:43,344 [INFO] 127.0.0.1 - - [23/Mar/2026 16:10:43] "GET /api/games?detail=1 HTTP/1.1" 200 -
+2026-03-23 16:10:43,350 [INFO] 127.0.0.1 - - [23/Mar/2026 16:10:43] "[33mGET /data/sharks/pipeline_health.json HTTP/1.1[0m" 404 -
+2026-03-23 16:10:43,369 [INFO] 127.0.0.1 - - [23/Mar/2026 16:10:43] "GET /api/opponent-discovery HTTP/1.1" 200 -
+2026-03-23 16:10:43,391 [INFO] 127.0.0.1 - - [23/Mar/2026 16:10:43] "GET /api/stats-db/status HTTP/1.1" 200 -
+2026-03-23 16:10:43,420 [INFO] [Enrich] Applied app_stats: batting=11 pitching=5 fielding=11
+2026-03-23 16:10:43,425 [INFO] [Reconcile] scorebook merge complete: matched=11 updated=11 source_players=12
+2026-03-23 16:10:43,428 [INFO] 127.0.0.1 - - [23/Mar/2026 16:10:43] "GET /api/practice-insights HTTP/1.1" 200 -
+2026-03-23 16:10:43,439 [INFO] [Enrich] Applied app_stats: batting=11 pitching=5 fielding=11
+2026-03-23 16:10:43,444 [INFO] [Reconcile] scorebook merge complete: matched=11 updated=11 source_players=12
+2026-03-23 16:10:43,446 [INFO] 127.0.0.1 - - [23/Mar/2026 16:10:43] "GET /api/team HTTP/1.1" 200 -
+2026-03-23 16:10:43,452 [INFO] 127.0.0.1 - - [23/Mar/2026 16:10:43] "[31m[1mGET /api/regenerate-lineups HTTP/1.1[0m" 405 -
+2026-03-23 16:10:43,477 [INFO] 127.0.0.1 - - [23/Mar/2026 16:10:43] "[31m[1mPOST /api/regenerate-lineups HTTP/1.1[0m" 415 -
+2026-03-23 16:10:43,485 [INFO] 127.0.0.1 - - [23/Mar/2026 16:10:43] "[31m[1mPOST /api/regenerate-lineups HTTP/1.1[0m" 413 -
+2026-03-23 16:10:43,490 [WARNING] [Security] Blocked mutating request from disallowed origin: https://evil.example
+2026-03-23 16:10:43,490 [INFO] 127.0.0.1 - - [23/Mar/2026 16:10:43] "[31m[1mPOST /api/regenerate-lineups HTTP/1.1[0m" 403 -
+2026-03-23 16:13:30,619 [INFO] [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://127.0.0.1:5001
+2026-03-23 16:13:30,619 [INFO] [33mPress CTRL+C to quit[0m
+2026-03-23 16:13:30,932 [INFO] [Enrich] Applied app_stats: batting=11 pitching=5 fielding=11
+2026-03-23 16:13:30,938 [INFO] [Reconcile] scorebook merge complete: matched=11 updated=11 source_players=12
+2026-03-23 16:13:30,940 [INFO] 127.0.0.1 - - [23/Mar/2026 16:13:30] "GET /api/team HTTP/1.1" 200 -
+2026-03-23 16:13:30,948 [INFO] [Enrich] Applied app_stats: batting=11 pitching=5 fielding=11
+2026-03-23 16:13:30,953 [INFO] [Reconcile] scorebook merge complete: matched=11 updated=11 source_players=12
+2026-03-23 16:13:32,571 [INFO] 127.0.0.1 - - [23/Mar/2026 16:13:32] "GET /api/voice-update HTTP/1.1" 200 -
+2026-03-23 16:13:36,115 [INFO] [Enrich] Applied app_stats: batting=11 pitching=5 fielding=11
+2026-03-23 16:13:36,120 [INFO] [Reconcile] scorebook merge complete: matched=11 updated=11 source_players=12
+2026-03-23 16:13:36,121 [INFO] 127.0.0.1 - - [23/Mar/2026 16:13:36] "GET /api/team HTTP/1.1" 200 -
+2026-03-23 16:13:36,129 [INFO] 127.0.0.1 - - [23/Mar/2026 16:13:36] "GET /api/games HTTP/1.1" 200 -
+2026-03-23 16:13:36,134 [INFO] 127.0.0.1 - - [23/Mar/2026 16:13:36] "GET /api/availability HTTP/1.1" 200 -
+2026-03-23 16:13:36,153 [INFO] 127.0.0.1 - - [23/Mar/2026 16:13:36] "GET /api/standings HTTP/1.1" 200 -
+2026-03-23 16:13:36,187 [INFO] [Enrich] Applied app_stats: batting=11 pitching=5 fielding=11
+2026-03-23 16:13:36,192 [INFO] [Reconcile] scorebook merge complete: matched=11 updated=11 source_players=12
+2026-03-23 16:13:36,198 [INFO] [OpponentStats] Matched game file 2026-03-03_peppers.json for slug 'peppers'
+2026-03-23 16:13:36,199 [INFO] [OpponentStats] Aggregated 10 players for 'peppers'
+2026-03-23 16:13:36,201 [INFO] 127.0.0.1 - - [23/Mar/2026 16:13:36] "GET /api/matchup/peppers HTTP/1.1" 200 -
+2026-03-23 16:13:36,210 [INFO] [Enrich] Applied app_stats: batting=11 pitching=5 fielding=11
+2026-03-23 16:13:36,214 [INFO] [Reconcile] scorebook merge complete: matched=11 updated=11 source_players=12
+2026-03-23 16:13:36,220 [INFO] [OpponentStats] Matched game file 2026-03-07_2026_riptide_rebels_12u.json for slug 'riptide_rebels'
+2026-03-23 16:13:36,220 [INFO] [OpponentStats] Aggregated 10 players for 'riptide_rebels'
+2026-03-23 16:13:36,222 [INFO] 127.0.0.1 - - [23/Mar/2026 16:13:36] "GET /api/matchup/riptide_rebels HTTP/1.1" 200 -
+2026-03-23 16:13:36,231 [INFO] [Enrich] Applied app_stats: batting=11 pitching=5 fielding=11
+2026-03-23 16:13:36,234 [INFO] [Reconcile] scorebook merge complete: matched=11 updated=11 source_players=12
+2026-03-23 16:13:36,240 [INFO] 127.0.0.1 - - [23/Mar/2026 16:13:36] "GET /api/matchup/ravens HTTP/1.1" 200 -
+2026-03-23 16:13:36,245 [INFO] 127.0.0.1 - - [23/Mar/2026 16:13:36] "[33mGET /data/sharks/swot_analysis.json HTTP/1.1[0m" 404 -
+2026-03-23 16:13:36,248 [INFO] 127.0.0.1 - - [23/Mar/2026 16:13:36] "[33mGET /data/sharks/lineups.json HTTP/1.1[0m" 404 -
+2026-03-23 16:13:36,262 [INFO] 127.0.0.1 - - [23/Mar/2026 16:13:36] "GET /api/games?detail=1 HTTP/1.1" 200 -
+2026-03-23 16:13:36,266 [INFO] 127.0.0.1 - - [23/Mar/2026 16:13:36] "[33mGET /data/sharks/pipeline_health.json HTTP/1.1[0m" 404 -
+2026-03-23 16:13:36,272 [INFO] 127.0.0.1 - - [23/Mar/2026 16:13:36] "GET /api/opponent-discovery HTTP/1.1" 200 -
+2026-03-23 16:13:36,285 [INFO] 127.0.0.1 - - [23/Mar/2026 16:13:36] "GET /api/stats-db/status HTTP/1.1" 200 -
+2026-03-23 16:13:36,308 [INFO] [Enrich] Applied app_stats: batting=11 pitching=5 fielding=11
+2026-03-23 16:13:36,314 [INFO] [Reconcile] scorebook merge complete: matched=11 updated=11 source_players=12
+2026-03-23 16:13:36,316 [INFO] 127.0.0.1 - - [23/Mar/2026 16:13:36] "GET /api/practice-insights HTTP/1.1" 200 -
+2026-03-23 16:13:36,326 [INFO] [Enrich] Applied app_stats: batting=11 pitching=5 fielding=11
+2026-03-23 16:13:36,331 [INFO] [Reconcile] scorebook merge complete: matched=11 updated=11 source_players=12
+2026-03-23 16:13:36,332 [INFO] 127.0.0.1 - - [23/Mar/2026 16:13:36] "GET /api/team HTTP/1.1" 200 -
+2026-03-23 16:13:36,348 [INFO] 127.0.0.1 - - [23/Mar/2026 16:13:36] "[31m[1mGET /api/regenerate-lineups HTTP/1.1[0m" 405 -
+2026-03-23 16:13:36,352 [INFO] 127.0.0.1 - - [23/Mar/2026 16:13:36] "[31m[1mPOST /api/regenerate-lineups HTTP/1.1[0m" 415 -
+2026-03-23 16:13:36,358 [INFO] 127.0.0.1 - - [23/Mar/2026 16:13:36] "[31m[1mPOST /api/regenerate-lineups HTTP/1.1[0m" 413 -
+2026-03-23 16:13:36,377 [WARNING] [Security] Blocked mutating request from disallowed origin: https://evil.example
+2026-03-23 16:13:36,377 [INFO] 127.0.0.1 - - [23/Mar/2026 16:13:36] "[31m[1mPOST /api/regenerate-lineups HTTP/1.1[0m" 403 -

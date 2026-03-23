@@ -23,6 +23,27 @@ sharks_image = (
 )
 
 
+def _runtime_secret() -> modal.Secret:
+    payload = {}
+    for key in (
+        "GC_EMAIL",
+        "GC_PASSWORD",
+        "GC_TEAM_ID",
+        "GC_SEASON_SLUG",
+        "PINECONE_API_KEY",
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+        "ELEVENLABS_API_KEY",
+        "ELEVENLABS_VOICE_ID",
+    ):
+        val = os.getenv(key, "").strip()
+        if val:
+            payload[key] = val
+    if not payload:
+        payload["SOFTBALL_RUNTIME"] = "1"
+    return modal.Secret.from_dict(payload)
+
+
 def _run_step(label: str, args: list[str], env: dict[str, str]) -> None:
     print(f"[Modal] Starting step: {label}")
     proc = subprocess.run(
@@ -46,6 +67,7 @@ def _run_step(label: str, args: list[str], env: dict[str, str]) -> None:
     image=sharks_image,
     schedule=modal.Cron("0 6 * * *"),
     volumes={VOLUME_MOUNT: SESSION_VOLUME},
+    secrets=[_runtime_secret()],
     timeout=60 * 45,
 )
 def daily_scout_job():
@@ -79,7 +101,7 @@ def daily_scout_job():
     return {"status": "ok"}
 
 
-@app.function(image=sharks_image, volumes={VOLUME_MOUNT: SESSION_VOLUME}, timeout=60 * 45)
+@app.function(image=sharks_image, volumes={VOLUME_MOUNT: SESSION_VOLUME}, secrets=[_runtime_secret()], timeout=60 * 45)
 def trigger_immediate_refresh():
     """Manual trigger for immediate refresh."""
     return daily_scout_job.remote()

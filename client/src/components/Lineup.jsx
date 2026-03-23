@@ -169,7 +169,7 @@ const Lineup = ({
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem', paddingBottom: '1rem', borderBottom: '1px solid var(--surface-border)' }}>
           <div>
             <h3 style={{ fontSize: '1.5rem', color: 'var(--text-main)', textTransform: 'capitalize' }}>
-              {strategy} Strategy
+              Batting Order · {strategy} Strategy
             </h3>
             <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginTop: '0.25rem' }}>
               Enforces PCLL continuous batting order & mandatory play rules.
