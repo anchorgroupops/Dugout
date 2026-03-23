@@ -1,0 +1,2 @@
+2026-03-23 12:01:31,865 [INFO] [Enrich] Applied app_stats: batting=11 pitching=5 fielding=11
+2026-03-23 12:01:31,869 [INFO] [Reconcile] scorebook merge complete: matched=11 updated=11 source_players=12
