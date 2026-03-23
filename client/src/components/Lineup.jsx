@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Settings, ShieldCheck, RefreshCw, Clock, Home, Plane } from 'lucide-react';
 import { getTodayEST } from '../utils/formatDate';
+import RosterManager from './RosterManager';
 
 const StatBadge = ({ label, value, good, warn }) => {
   const num = typeof value === 'number' ? value : parseFloat(value) || 0;
@@ -67,7 +68,15 @@ const NextGameBanner = ({ schedule }) => {
   );
 };
 
-const Lineup = ({ lineupsData, availability, schedule, onRegenerate }) => {
+const Lineup = ({
+  team,
+  lineupsData,
+  availability,
+  schedule,
+  onRegenerate,
+  onAvailabilityChange,
+  onDataRefresh
+}) => {
   const [strategy, setStrategy] = useState('balanced');
   const [regenerating, setRegenerating] = useState(false);
 
@@ -88,11 +97,12 @@ const Lineup = ({ lineupsData, availability, schedule, onRegenerate }) => {
       const res = await fetch('/api/regenerate-lineups', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({})
+        body: JSON.stringify({ swot: true })
       });
       if (res.ok) {
         const data = await res.json();
         if (data.lineups && onRegenerate) onRegenerate(data.lineups);
+        if (onDataRefresh) await onDataRefresh();
       }
     } catch (e) {
       console.error('Regenerate failed', e);
@@ -154,6 +164,25 @@ const Lineup = ({ lineupsData, availability, schedule, onRegenerate }) => {
       </div>
 
       <NextGameBanner schedule={schedule} />
+
+      <div className="glass-panel" style={{ padding: '1.2rem', marginBottom: '1.25rem' }}>
+        <div style={{ marginBottom: '0.75rem' }}>
+          <h3 style={{ margin: 0, fontSize: '1rem', color: 'var(--primary-color)' }}>
+            Game-Day Availability & Borrowed Players
+          </h3>
+          <p style={{ margin: '0.35rem 0 0', fontSize: '0.84rem', color: 'var(--text-muted)' }}>
+            Toggle who is in tonight, add subs if needed, and lineups will auto-refresh from live stats.
+          </p>
+        </div>
+        <RosterManager
+          team={team}
+          availability={availability}
+          onAvailabilityChange={onAvailabilityChange}
+          onRosterMutated={onDataRefresh}
+          title="Game-Day Availability"
+          showTitle={false}
+        />
+      </div>
 
       <div className="glass-panel" style={{ padding: '2rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem', paddingBottom: '1rem', borderBottom: '1px solid var(--surface-border)' }}>
