@@ -188,9 +188,9 @@ def classify_hitting(derived: dict) -> tuple[list[str], list[str]]:
 
     # Inverse stats
     if h.get("k_rate", 1) <= HITTING_THRESHOLDS["k_rate"]["strong"]:
-        strengths.append(f"Low strikeout rate (K%: {h['k_rate']})")
+        strengths.append(f"Low strikeout rate as batter (K%: {h['k_rate']})")
     elif h.get("k_rate", 0) >= HITTING_THRESHOLDS["k_rate"]["weak"]:
-        weaknesses.append(f"High strikeout rate (K%: {h['k_rate']})")
+        weaknesses.append(f"High strikeout rate as batter (K%: {h['k_rate']})")
 
     if h.get("bb_rate", 0) >= HITTING_THRESHOLDS["bb_rate"]["strong"]:
         strengths.append(f"Good plate discipline (BB%: {h['bb_rate']})")
@@ -223,9 +223,9 @@ def classify_pitching(derived: dict, raw_ip: float = 0.0) -> tuple[list[str], li
 
     # K/IP (higher is better)
     if p.get("k_per_ip", 0) >= PITCHING_THRESHOLDS["k_per_ip"]["strong"]:
-        strengths.append(f"High strikeout rate (K/IP: {p['k_per_ip']})")
+        strengths.append(f"High strikeout rate as pitcher (K/IP: {p['k_per_ip']})")
     elif p.get("k_per_ip", 99) <= PITCHING_THRESHOLDS["k_per_ip"]["weak"]:
-        weaknesses.append(f"Low strikeout rate (K/IP: {p['k_per_ip']})")
+        weaknesses.append(f"Low strikeout rate as pitcher (K/IP: {p['k_per_ip']})")
 
     # BB/IP (lower is better)
     if p.get("bb_per_ip", 99) <= PITCHING_THRESHOLDS["bb_per_ip"]["strong"]:
@@ -312,7 +312,7 @@ def analyze_player(player: dict) -> dict:
         "derived_stats": derived,
         "swot": {
             "strengths": strengths or ["No standout strengths yet (need more data)"],
-            "weaknesses": weaknesses or ["No major weaknesses identified"],
+            "weaknesses": weaknesses[:3] or ["No major weaknesses identified"],
             "opportunities": opportunities or ["Continue developing all-around skills"],
             "threats": threats or ["No specific threats identified"],
         },
@@ -336,7 +336,7 @@ def analyze_team(team_data: dict) -> dict:
     weakness_types = Counter(w.split("(")[0].strip() for w in all_weaknesses)
 
     team_strengths = [f"{k} ({v} players)" for k, v in strength_types.most_common(5)]
-    team_weaknesses = [f"{k} ({v} players)" for k, v in weakness_types.most_common(5)]
+    team_weaknesses = [f"{k} ({v} players)" for k, v in weakness_types.most_common(3)]
 
     team_swot = {
         "strengths": team_strengths or ["Insufficient data for team strengths"],

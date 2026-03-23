@@ -30,7 +30,7 @@ const StatCompare = ({ label, ours, theirs, lowerIsBetter }) => {
   );
 };
 
-const MatchupPanel = () => {
+const MatchupPanel = ({ defaultOpponent }) => {
   const [opponents, setOpponents] = useState([]);
   const [selected, setSelected] = useState('');
   const [matchup, setMatchup] = useState(null);
@@ -39,9 +39,18 @@ const MatchupPanel = () => {
   useEffect(() => {
     fetch('/api/opponents')
       .then(r => r.ok ? r.json() : [])
-      .then(setOpponents)
+      .then(data => {
+        setOpponents(data);
+        if (defaultOpponent) {
+          const matched = data.find(o => o.team_name.toLowerCase() === defaultOpponent.toLowerCase() || o.slug === defaultOpponent.toLowerCase().replace(/ /g, '_'));
+          if (matched && selected !== matched.slug) {
+            handleSelect(matched.slug);
+          }
+        }
+      })
       .catch(() => setOpponents([]));
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [defaultOpponent]);
 
   const handleSelect = async (slug) => {
     setSelected(slug);
@@ -74,7 +83,7 @@ const MatchupPanel = () => {
     <div className="glass-panel" style={{ padding: '1.5rem', marginBottom: '2rem' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.75rem' }}>
         <h3 style={{ margin: 0, color: 'var(--primary-color)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <Swords size={20} /> Matchup Analysis
+          <Swords size={20} /> {defaultOpponent && selected === opponents.find(o => o.team_name.toLowerCase() === defaultOpponent.toLowerCase() || o.slug === defaultOpponent.toLowerCase().replace(/ /g, '_'))?.slug ? `Next Game Matchup vs ${defaultOpponent}` : 'Matchup Analysis'}
         </h3>
         <select
           value={selected}
@@ -185,12 +194,7 @@ const MatchupPanel = () => {
   );
 };
 
-const UpcomingGameBanner = ({ schedule }) => {
-  if (!schedule?.upcoming?.length) return null;
-  const today = getTodayEST();
-  const next = schedule.upcoming
-    .filter(g => g.date >= today)
-    .sort((a, b) => a.date.localeCompare(b.date))[0];
+const UpcomingGameBanner = ({ next }) => {
   if (!next) return null;
 
   const dateStr = new Date(next.date + 'T12:00:00').toLocaleDateString('en-US', {
@@ -242,9 +246,15 @@ const Swot = ({ swotData, roster, schedule }) => {
       (e.name && e.name.toLowerCase() === String(player.first || '').toLowerCase())
     );
     return { ...player, swot: evaluation?.swot || evaluation };
-  }).filter(p => p.swot);
+  }).filter(p => p.swot && p.core !== false)
+    .sort((a, b) => (a.last || '').localeCompare(b.last || '') || (a.first || '').localeCompare(b.first || ''));
 
   const teamSwot = swotData.team_swot;
+
+  const today = getTodayEST();
+  const nextGame = schedule?.upcoming
+    ?.filter(g => g.date >= today)
+    ?.sort((a, b) => a.date.localeCompare(b.date))[0];
 
   return (
     <div>
@@ -255,7 +265,7 @@ const Swot = ({ swotData, roster, schedule }) => {
         </span>
       </h2>
 
-      <UpcomingGameBanner schedule={schedule} />
+      <UpcomingGameBanner next={nextGame} />
 
       {/* Team-level SWOT */}
       {teamSwot && (
@@ -273,7 +283,7 @@ const Swot = ({ swotData, roster, schedule }) => {
       )}
 
       {/* Matchup Analysis */}
-      <MatchupPanel />
+      <MatchupPanel defaultOpponent={nextGame?.opponent} />
 
       {/* Player cards */}
       <div style={{
