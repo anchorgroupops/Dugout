@@ -139,6 +139,8 @@ const MatchupPanel = ({ defaultOpponent }) => {
               ? 'scorebook game history'
               : matchup.data_source === 'opponent_team_json'
                 ? 'opponent team feed'
+                : matchup.data_source === 'opponent_public_games'
+                  ? 'opponent public game feed'
                 : 'none'}
             {matchup.empty && matchup.reason ? ` · reason: ${matchup.reason}` : ''}
           </div>

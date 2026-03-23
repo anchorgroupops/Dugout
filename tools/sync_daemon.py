@@ -1052,6 +1052,7 @@ def handle_opponents():
                             "roster_size": len(td.get("roster", [])),
                             "batting_rows": len(td.get("batting_stats", [])),
                             "pitching_rows": len(td.get("pitching_stats", [])),
+                            "public_game_metrics": td.get("public_game_metrics", {}),
                         })
                     except Exception as e:
                         logging.error(f"Error reading opponent {team_dir.name}: {e}")
@@ -1114,12 +1115,26 @@ def handle_matchup(opponent_slug):
         if opp_game_stats:
             opp_team["batting_stats"] = opp_game_stats
             data_source = "opponent_game_history"
+        elif isinstance(opp_team.get("public_game_metrics"), dict) and opp_team.get("public_game_metrics", {}).get("completed_games", 0) > 0:
+            data_source = "opponent_public_games"
 
     result = analyze_matchup(our_team, opp_team)
     result["data_source"] = data_source
+    if isinstance(opp_team.get("public_game_metrics"), dict):
+        result["opponent_public_metrics"] = opp_team.get("public_game_metrics", {})
     if result.get("empty"):
         if data_source == "none":
             result["reason"] = "no_opponent_history"
+        elif data_source == "opponent_public_games":
+            result["reason"] = "no_player_level_history"
+            m = opp_team.get("public_game_metrics", {})
+            completed = int(m.get("completed_games", 0) or 0)
+            rs = m.get("runs_scored_per_game", 0)
+            ra = m.get("runs_allowed_per_game", 0)
+            result["recommendation"] = (
+                f"{result.get('recommendation', 'Limited player-level data.')}"
+                f" Opponent season profile: {completed} completed games, {rs} RS/G, {ra} RA/G."
+            ).strip()
         elif not result.get("reason"):
             result["reason"] = "insufficient_data"
 

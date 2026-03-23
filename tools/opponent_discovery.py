@@ -72,6 +72,46 @@ def _parse_org_ids() -> list[str]:
     return ids or list(DEFAULT_ORG_IDS)
 
 
+def _fetch_public_game_metrics(team_id: str) -> dict:
+    games = _safe_get_json(f"{GC_PUBLIC_API}/teams/{team_id}/games") or []
+    completed = 0
+    wins = losses = ties = 0
+    runs_scored = 0
+    runs_allowed = 0
+    for g in games:
+        score = (g or {}).get("score") or {}
+        if not isinstance(score, dict):
+            continue
+        if "team" not in score or "opponent_team" not in score:
+            continue
+        try:
+            our = int(score.get("team", 0) or 0)
+            opp = int(score.get("opponent_team", 0) or 0)
+        except Exception:
+            continue
+        completed += 1
+        runs_scored += our
+        runs_allowed += opp
+        if our > opp:
+            wins += 1
+        elif our < opp:
+            losses += 1
+        else:
+            ties += 1
+
+    return {
+        "games_total": len(games),
+        "completed_games": completed,
+        "wins": wins,
+        "losses": losses,
+        "ties": ties,
+        "runs_scored": runs_scored,
+        "runs_allowed": runs_allowed,
+        "runs_scored_per_game": round(runs_scored / completed, 2) if completed else 0.0,
+        "runs_allowed_per_game": round(runs_allowed / completed, 2) if completed else 0.0,
+    }
+
+
 def _discover_from_orgs(org_ids: list[str]) -> dict[str, dict]:
     """Return mapping keyed by team_id with merged org/public-team metadata."""
     discovered: dict[str, dict] = {}
@@ -157,6 +197,7 @@ def _discover_from_orgs(org_ids: list[str]) -> dict[str, dict]:
             # Best effort fallback; exact slug may differ for special naming.
             safe_name = re.sub(r"[^a-z0-9]+", "-", item["team_name"].lower()).strip("-")
             item["season_slug"] = f"{year}-{season}-{safe_name}"
+        item["public_game_metrics"] = _fetch_public_game_metrics(team_id)
 
     return discovered
 
@@ -252,6 +293,7 @@ def discover_and_persist_opponents(data_dir: Path | None = None, sharks_team_id:
             "batting_stats": existing.get("batting_stats", []),
             "pitching_stats": existing.get("pitching_stats", []),
             "fielding_stats": existing.get("fielding_stats", []),
+            "public_game_metrics": item.get("public_game_metrics", existing.get("public_game_metrics", {})),
             "discovery": {
                 "method": "gc_public_org_api",
                 "organization_ids": item.get("organization_ids", []),
@@ -300,6 +342,7 @@ def discover_and_persist_opponents(data_dir: Path | None = None, sharks_team_id:
                     "gc_team_id": item.get("team_id", ""),
                     "gc_season_slug": item.get("season_slug", ""),
                     "record": item.get("record", "0-0"),
+                    "public_game_metrics": item.get("public_game_metrics", {}),
                     "organization_ids": item.get("organization_ids", []),
                 }
                 for slug, item in by_slug.items()
