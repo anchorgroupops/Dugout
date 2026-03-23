@@ -73,6 +73,7 @@ const Lineup = ({
   lineupsData,
   availability,
   schedule,
+  isMobile = false,
   onRegenerate,
   onAvailabilityChange,
   onDataRefresh
@@ -119,13 +120,13 @@ const Lineup = ({
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: isMobile ? 'stretch' : 'flex-end', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.75rem' }}>
         <h2 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: 0 }}>
-          <Settings size={24} color="var(--primary-color)" /> Optimized Lineups
+          <Settings size={isMobile ? 20 : 24} color="var(--primary-color)" /> Optimized Lineups
         </h2>
 
-        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', gap: '0.5rem', background: 'var(--surface-base)', padding: '0.25rem', borderRadius: '8px', border: '1px solid var(--surface-border)' }}>
+        <div style={{ display: 'flex', gap: '0.55rem', alignItems: 'center', flexWrap: 'wrap', width: isMobile ? '100%' : 'auto' }}>
+          <div style={{ display: 'flex', gap: '0.4rem', background: 'var(--surface-base)', padding: '0.22rem', borderRadius: '8px', border: '1px solid var(--surface-border)', width: isMobile ? '100%' : 'auto', overflowX: 'auto' }}>
             {strategies.map(s => (
               <button
                 key={s.id}
@@ -133,9 +134,10 @@ const Lineup = ({
                 style={{
                   background: strategy === s.id ? 'var(--primary-glow)' : 'transparent',
                   color: strategy === s.id ? 'var(--primary-color)' : 'var(--text-muted)',
-                  border: 'none', padding: '0.5rem 1rem', borderRadius: '6px',
+                  border: 'none', padding: isMobile ? '0.45rem 0.58rem' : '0.5rem 1rem', borderRadius: '6px',
                   cursor: 'pointer', fontWeight: strategy === s.id ? '600' : '400',
-                  transition: 'all var(--transition-fast)'
+                  transition: 'all var(--transition-fast)', fontSize: isMobile ? '0.8rem' : '0.9rem',
+                  whiteSpace: 'nowrap'
                 }}
               >
                 {s.label}
@@ -150,9 +152,9 @@ const Lineup = ({
               display: 'flex', alignItems: 'center', gap: '0.4rem',
               background: 'var(--primary-glow)', color: 'var(--primary-color)',
               border: '1px solid rgba(100,200,100,0.3)',
-              padding: '0.5rem 1rem', borderRadius: '8px',
+              padding: isMobile ? '0.46rem 0.75rem' : '0.5rem 1rem', borderRadius: '8px',
               cursor: regenerating ? 'not-allowed' : 'pointer',
-              fontWeight: '600', fontSize: '0.85rem',
+              fontWeight: '600', fontSize: isMobile ? '0.78rem' : '0.85rem',
               opacity: regenerating ? 0.6 : 1,
               transition: 'all var(--transition-fast)'
             }}
@@ -165,26 +167,28 @@ const Lineup = ({
 
       <NextGameBanner schedule={schedule} />
 
-      <div className="glass-panel" style={{ padding: '2rem' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem', paddingBottom: '1rem', borderBottom: '1px solid var(--surface-border)' }}>
+      <div className="glass-panel" style={{ padding: isMobile ? '1rem' : '2rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: isMobile ? 'flex-start' : 'center', flexDirection: isMobile ? 'column' : 'row', marginBottom: isMobile ? '1rem' : '2rem', paddingBottom: '1rem', borderBottom: '1px solid var(--surface-border)', gap: isMobile ? '0.55rem' : 0 }}>
           <div>
-            <h3 style={{ fontSize: '1.5rem', color: 'var(--text-main)', textTransform: 'capitalize' }}>
+            <h3 style={{ fontSize: isMobile ? '1.08rem' : '1.5rem', color: 'var(--text-main)', textTransform: 'capitalize' }}>
               Batting Order · {strategy} Strategy
             </h3>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginTop: '0.25rem' }}>
-              Enforces PCLL continuous batting order & mandatory play rules.
-            </p>
+            {!isMobile && (
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginTop: '0.25rem' }}>
+                Enforces PCLL continuous batting order & mandatory play rules.
+              </p>
+            )}
           </div>
 
           <div style={{
             display: 'flex', alignItems: 'center', gap: '0.5rem',
             background: currentStrategy.compliant ? 'rgba(35, 134, 54, 0.1)' : 'rgba(218, 54, 51, 0.1)',
             color: currentStrategy.compliant ? 'var(--success)' : 'var(--danger)',
-            padding: '0.5rem 1rem', borderRadius: '20px', fontWeight: '600', fontSize: '0.9rem',
+            padding: isMobile ? '0.36rem 0.72rem' : '0.5rem 1rem', borderRadius: '20px', fontWeight: '600', fontSize: isMobile ? '0.78rem' : '0.9rem',
             border: `1px solid ${currentStrategy.compliant ? 'rgba(35, 134, 54, 0.3)' : 'rgba(218, 54, 51, 0.3)'}`
           }}>
-            <ShieldCheck size={18} />
-            {currentStrategy.compliant ? 'PCLL Compliant' : 'Rule Violation Detected'}
+            <ShieldCheck size={isMobile ? 14 : 18} />
+            {currentStrategy.compliant ? 'PCLL Compliant' : 'Rule Violation'}
           </div>
         </div>
 
@@ -200,11 +204,11 @@ const Lineup = ({
                 borderRadius: '8px',
                 borderLeft: `4px solid ${!avail ? 'var(--danger)' : player.borrowed ? 'rgba(63, 143, 136, 0.42)' : idx < 4 ? 'var(--primary-color)' : 'var(--surface-border)'}`,
                 opacity: avail ? 1 : 0.65,
-                gap: '0.75rem', flexWrap: 'wrap'
+                gap: isMobile ? '0.45rem' : '0.75rem', flexWrap: 'wrap'
               }}>
-                <div style={{ width: '28px', fontWeight: 'bold', color: 'var(--text-muted)', fontSize: '0.9rem' }}>{player.slot}.</div>
-                <div style={{ width: '52px', fontFamily: 'var(--font-heading)', fontSize: '1.1rem', color: '#fff' }}>#{player.number}</div>
-                <div style={{ flex: 1, minWidth: '120px', fontWeight: '600', fontSize: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <div style={{ width: isMobile ? '22px' : '28px', fontWeight: 'bold', color: 'var(--text-muted)', fontSize: isMobile ? '0.82rem' : '0.9rem' }}>{player.slot}.</div>
+                <div style={{ width: isMobile ? '42px' : '52px', fontFamily: 'var(--font-heading)', fontSize: isMobile ? '0.98rem' : '1.1rem', color: '#fff' }}>#{player.number}</div>
+                <div style={{ flex: 1, minWidth: isMobile ? '100px' : '120px', fontWeight: '600', fontSize: isMobile ? '0.9rem' : '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                   {name}
                   <AvailBadge available={avail} />
                   {player.borrowed && (
@@ -218,22 +222,28 @@ const Lineup = ({
 
                 {/* Per-player stat badges */}
                 {hasStats ? (
-                  <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-                    <StatBadge label="AVG" value={player.avg} good={0.350} warn={0.200} />
-                    <StatBadge label="OBP" value={player.obp} good={0.420} warn={0.280} />
-                    <StatBadge label="SLG" value={player.slg} good={0.450} warn={0.250} />
-                    <span style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.25)', padding: '1px 4px' }}>
-                      {player.pa} PA
+                  isMobile ? (
+                    <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+                      AVG {typeof player.avg === 'number' ? player.avg.toFixed(3).replace(/^0/, '') : '—'} · OPS {typeof player.ops === 'number' ? player.ops.toFixed(3).replace(/^0/, '') : '—'}
                     </span>
-                  </div>
+                  ) : (
+                    <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                      <StatBadge label="AVG" value={player.avg} good={0.350} warn={0.200} />
+                      <StatBadge label="OBP" value={player.obp} good={0.420} warn={0.280} />
+                      <StatBadge label="SLG" value={player.slg} good={0.450} warn={0.250} />
+                      <span style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.25)', padding: '1px 4px' }}>
+                        {player.pa} PA
+                      </span>
+                    </div>
+                  )
                 ) : (
                   <span style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.2)', fontStyle: 'italic' }}>No stats yet</span>
                 )}
 
                 <div style={{
                   background: 'var(--surface-hover)', padding: '0.2rem 0.65rem',
-                  borderRadius: '12px', fontSize: '0.8rem', color: 'var(--text-muted)',
-                  minWidth: '100px', textAlign: 'center', flexShrink: 0
+                  borderRadius: '12px', fontSize: isMobile ? '0.72rem' : '0.8rem', color: 'var(--text-muted)',
+                  minWidth: isMobile ? '80px' : '100px', textAlign: 'center', flexShrink: 0
                 }}>
                   {player.role || 'Depth'}
                 </div>
@@ -243,14 +253,16 @@ const Lineup = ({
         </div>
       </div>
 
-      <div className="glass-panel" style={{ padding: '1.2rem', marginTop: '1.25rem' }}>
+      <div className="glass-panel" style={{ padding: isMobile ? '0.9rem' : '1.2rem', marginTop: '1.25rem' }}>
         <div style={{ marginBottom: '0.75rem' }}>
           <h3 style={{ margin: 0, fontSize: '1rem', color: 'var(--primary-color)' }}>
             Game-Day Availability & Borrowed Players
           </h3>
-          <p style={{ margin: '0.35rem 0 0', fontSize: '0.84rem', color: 'var(--text-muted)' }}>
-            Toggle who is in tonight, add subs if needed, and lineups will auto-refresh from live stats.
-          </p>
+          {!isMobile && (
+            <p style={{ margin: '0.35rem 0 0', fontSize: '0.84rem', color: 'var(--text-muted)' }}>
+              Toggle who is in tonight, add subs if needed, and lineups will auto-refresh from live stats.
+            </p>
+          )}
         </div>
         <RosterManager
           team={team}
@@ -259,6 +271,7 @@ const Lineup = ({
           onRosterMutated={onDataRefresh}
           title="Game-Day Availability"
           showTitle={false}
+          isMobile={isMobile}
         />
       </div>
     </div>

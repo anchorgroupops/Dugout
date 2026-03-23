@@ -211,6 +211,31 @@ main {
   font-size: 0.84rem;
 }
 
+.mobile-tab-select-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.mobile-tab-label {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  font-weight: 700;
+}
+
+.mobile-tab-select {
+  border: 1px solid var(--surface-border);
+  border-radius: 10px;
+  padding: 0.42rem 0.6rem;
+  font-size: 0.84rem;
+  background: rgba(255, 255, 255, 0.8);
+  color: var(--text-main);
+  font-family: var(--font-base);
+  font-weight: 600;
+}
+
 button,
 input,
 select {
@@ -254,15 +279,17 @@ select {
 
 @media (max-width: 640px) {
   main {
-    padding: 0.8rem;
+    padding: 0.72rem;
   }
 
   .glass-panel {
     border-radius: 12px;
+    box-shadow: 0 7px 18px rgba(4, 101, 104, 0.08);
+    backdrop-filter: blur(6px);
   }
 
   .brand {
-    font-size: 1.05rem;
+    font-size: 1rem;
   }
 
   .nav-btn {
@@ -274,6 +301,29 @@ select {
   .voice-btn {
     font-size: 0.76rem;
     padding: 0.38rem 0.72rem;
+  }
+
+  .navbar-mobile {
+    padding: 0.6rem 0.72rem;
+    gap: 0.5rem;
+  }
+
+  .navbar-mobile .brand {
+    font-size: 0.96rem;
+    gap: 0.5rem;
+  }
+
+  .navbar-mobile .logo-avatar {
+    width: 30px;
+    height: 30px;
+  }
+
+  .mobile-tab-select {
+    width: 140px;
+  }
+
+  .hero-meta-row {
+    gap: 0.45rem;
   }
 }
 
