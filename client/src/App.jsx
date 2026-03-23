@@ -152,7 +152,7 @@ function App() {
       
       <main className="animate-fade-in">
         <div style={{ marginBottom: '2rem' }}>
-          <h1 style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>{displayTeamName}</h1>
+          <h1 style={{ fontSize: 'clamp(1.6rem, 5.5vw, 2.5rem)', marginBottom: '0.5rem', lineHeight: 1.1 }}>{displayTeamName}</h1>
           <p style={{ color: 'var(--text-muted)', fontSize: '1.1rem' }}>
             {data.team ? `${data.team.league} • Last Updated: ${formatDateTime(data.team.last_updated)}` : 'Loading...'}
           </p>
