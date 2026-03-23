@@ -1591,10 +1591,21 @@ def _all_roster_names(team: dict) -> list[str]:
     return names
 
 
+def _core_roster_names(team: dict) -> list[str]:
+    names = []
+    for p in team.get("roster", []):
+        if p.get("core") is False:
+            continue
+        name = (p.get("name") or f"{p.get('first','')} {p.get('last','')}").strip()
+        if name:
+            names.append(name)
+    return names
+
+
 def _load_practice_rsvp_defaults(team: dict) -> tuple[list[str], str, dict]:
     """Find default selected practice players.
     Priority: practice_rsvp.json -> availability.json -> full roster."""
-    roster_names = _all_roster_names(team)
+    roster_names = _core_roster_names(team)
     roster_set = {n.lower(): n for n in roster_names}
     practice_meta = {"date": None, "title": None}
 
@@ -1769,6 +1780,8 @@ def handle_practice_insights():
     team["team_name"] = _canonical_team_name(team.get("team_name", "The Sharks"), "sharks")
 
     default_players, default_source, practice_meta = _load_practice_rsvp_defaults(team)
+    core_names = _core_roster_names(team)
+    core_set = {n.lower() for n in core_names}
 
     selected_names = []
     if request.method == "POST":
@@ -1781,6 +1794,9 @@ def handle_practice_insights():
 
     if not selected_names:
         selected_names = default_players
+    selected_names = [n for n in selected_names if n.lower() in core_set]
+    if not selected_names:
+        selected_names = core_names
 
     needs = _build_practice_needs(team, selected_names)
     if not needs:
@@ -1814,7 +1830,7 @@ def handle_practice_insights():
         "default_player_source": default_source,
         "practice_meta": practice_meta,
         "selected_players": selected_names,
-        "available_players": _all_roster_names(team),
+        "available_players": core_names,
         "needs": needs,
         "recommended_plan": recommended_plan,
     })
