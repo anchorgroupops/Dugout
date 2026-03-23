@@ -20,22 +20,6 @@ const StatBadge = ({ label, value }) => (
   </div>
 );
 
-// Helper to safely get a stat value from either nested or flat player object
-const getStat = (player, category, key, fallbackKey) => {
-  // Try nested first (new schema)
-  if (player[category] && player[category][key] !== undefined) {
-    return player[category][key];
-  }
-  // Fallback to flat key (old schema)
-  if (fallbackKey && player[fallbackKey] !== undefined) {
-    return player[fallbackKey];
-  }
-  if (player[key] !== undefined) {
-    return player[key];
-  }
-  return null;
-};
-
 const fmt = (val) => (val !== null && val !== undefined ? String(val) : '—');
 
 const ExpandedStats = ({ player }) => {
@@ -146,37 +130,10 @@ const ExpandedStats = ({ player }) => {
   );
 };
 
-const Roster = ({ team, availability, onAvailabilityChange, isMobile = false }) => {
+const Roster = ({ team, availability, isMobile = false }) => {
   const [expandedPlayer, setExpandedPlayer] = useState(null);
-  const [updating, setUpdating] = useState(null); // name of player being updated
 
   if (!team || !team.roster) return <div className="loader"></div>;
-
-  const handleToggleActive = async (e, player) => {
-    e.stopPropagation(); // Don't expand the card
-    const name = `${player.first} ${player.last}`.trim();
-    const newStatus = !availability[name];
-    const newAvailability = { ...availability, [name]: newStatus };
-    
-    setUpdating(name);
-    try {
-      const res = await fetch('/api/availability', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newAvailability)
-      });
-      
-      if (res.ok) {
-        onAvailabilityChange(newAvailability);
-      } else {
-        console.error("Failed to update availability");
-      }
-    } catch (err) {
-      console.error("Error updating availability", err);
-    } finally {
-      setUpdating(null);
-    }
-  };
 
   // Sharks-only roster (exclude non-core/sub players)
   const filteredRoster = team.roster.filter(p => p.core !== false);
@@ -202,7 +159,6 @@ const Roster = ({ team, availability, onAvailabilityChange, isMobile = false }) 
           const name = `${player.first} ${player.last}`.trim();
           const isExpanded = expandedPlayer === `${player.number}-${player.last}`;
           const isActive = availability && availability[name] !== false;
-          const isUpdating = updating === name;
           const isSub = !player.core;
           const b = player.batting || {};
 
@@ -239,37 +195,15 @@ const Roster = ({ team, availability, onAvailabilityChange, isMobile = false }) 
                 </div>
               )}
               
-              <div style={{ position: 'absolute', top: '10px', right: '10px', display: 'flex', gap: '5px' }}>
-                {!player.core && (
+              {!player.core && (
+                <div style={{ position: 'absolute', top: '10px', right: '10px' }}>
                   <div style={{
                     background: 'rgba(63, 143, 136, 0.18)', color: 'var(--accent-sub)',
                     padding: '2px 8px', borderRadius: '4px', fontSize: '0.65rem',
                     fontWeight: 'bold', letterSpacing: '1px', border: '1px solid rgba(63, 143, 136, 0.28)'
                   }}>SUB</div>
-                )}
-                
-                <button
-                  onClick={(e) => handleToggleActive(e, player)}
-                  disabled={isUpdating}
-                  style={{
-                    background: isActive ? 'var(--primary-color)' : 'rgba(255,255,255,0.1)',
-                    color: isActive ? '#fff' : 'var(--text-muted)',
-                    border: 'none',
-                    padding: isMobile ? '6px 10px' : '8px 14px',
-                    borderRadius: '8px',
-                    fontSize: isMobile ? '0.72rem' : '0.8rem',
-                    fontWeight: 'bold',
-                    cursor: 'pointer',
-                    transition: 'all 0.2s ease',
-                    opacity: isUpdating ? 0.5 : 1,
-                    minWidth: isMobile ? '76px' : '88px',
-                    minHeight: isMobile ? '30px' : '36px',
-                    letterSpacing: '0.4px'
-                  }}
-                >
-                  {isUpdating ? '...' : (isActive ? 'ACTIVE' : 'INACTIVE')}
-                </button>
-              </div>
+                </div>
+              )}
               
               <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '0.75rem' : '1rem', marginBottom: isMobile ? '0.85rem' : '1.25rem' }}>
                 <div style={{
