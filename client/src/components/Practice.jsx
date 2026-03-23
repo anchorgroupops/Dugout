@@ -68,18 +68,16 @@ const Practice = ({ team, schedule }) => {
     setLoading(true);
     setError('');
     try {
-      const opts = players
-        ? {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ players })
-          }
-        : undefined;
-      const res = await fetch('/api/practice-insights', opts);
+      let url = '/api/practice-insights';
+      if (players !== null) {
+        const csv = encodeURIComponent((players || []).join(','));
+        url = `/api/practice-insights?players=${csv}`;
+      }
+      const res = await fetch(url);
       if (!res.ok) throw new Error(`practice insights status ${res.status}`);
       const data = await res.json();
       setInsights(data);
-      if (!players) setSelected(data.selected_players || []);
+      setSelected(data.selected_players || []);
     } catch (e) {
       console.error(e);
       setError('Failed to load practice insights');
@@ -158,7 +156,7 @@ const Practice = ({ team, schedule }) => {
           <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
             <button onClick={selectAll} style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text-main)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '6px', padding: '0.3rem 0.55rem', cursor: 'pointer', fontSize: '0.78rem' }}>All</button>
             <button onClick={clearAll} style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text-main)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '6px', padding: '0.3rem 0.55rem', cursor: 'pointer', fontSize: '0.78rem' }}>None</button>
-            <button onClick={applySelection} disabled={loading || selected.length === 0} style={{ background: 'var(--primary-color)', color: '#03283a', border: 'none', borderRadius: '6px', padding: '0.3rem 0.7rem', cursor: loading ? 'not-allowed' : 'pointer', fontSize: '0.78rem', fontWeight: '700' }}>Tailor Plan</button>
+            <button onClick={applySelection} disabled={loading} style={{ background: 'var(--primary-color)', color: '#03283a', border: 'none', borderRadius: '6px', padding: '0.3rem 0.7rem', cursor: loading ? 'not-allowed' : 'pointer', fontSize: '0.78rem', fontWeight: '700' }}>Tailor Plan</button>
           </div>
         </div>
 
@@ -186,7 +184,7 @@ const Practice = ({ team, schedule }) => {
             </span>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(330px, 1fr))', gap: '0.85rem', marginBottom: '1rem' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '0.85rem', marginBottom: '1rem' }}>
             {(insights.needs || []).map(need => <NeedCard key={need.key} need={need} />)}
           </div>
 

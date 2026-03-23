@@ -96,7 +96,7 @@ const League = () => {
           <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: '700', marginBottom: '0.75rem' }}>
             Opponent Scouting ({opponents.length} teams)
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '1rem' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '1rem' }}>
             {opponents.map(opp => {
               const isExpanded = expanded === opp.slug;
               const standRow = standingRows.find(s => s.slug === opp.slug);
