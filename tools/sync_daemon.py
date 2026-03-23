@@ -382,6 +382,7 @@ def _collect_pipeline_health() -> dict:
     app_stats_file = SHARKS_DIR / "app_stats.json"
     team_merged_file = SHARKS_DIR / "team_merged.json"
     games_dir = SHARKS_DIR / "games"
+    opponents_dir = DATA_DIR / "opponents"
 
     app_data = {}
     if app_stats_file.exists():
@@ -419,6 +420,27 @@ def _collect_pipeline_health() -> dict:
                 opponent_rows.extend(game.get("opponent_batting", []))
             except Exception as e:
                 logging.warning(f"[Health] Could not read game file {game_file.name}: {e}")
+
+    opponent_team_files = 0
+    opponent_batting = []
+    opponent_pitching = []
+    opponent_fielding = []
+    if opponents_dir.exists():
+        for team_dir in opponents_dir.iterdir():
+            if not team_dir.is_dir():
+                continue
+            team_file = team_dir / "team.json"
+            if not team_file.exists():
+                continue
+            try:
+                with open(team_file) as f:
+                    td = json.load(f)
+                opponent_team_files += 1
+                opponent_batting.extend(td.get("batting_stats", []))
+                opponent_pitching.extend(td.get("pitching_stats", []))
+                opponent_fielding.extend(td.get("fielding_stats", []))
+            except Exception as e:
+                logging.warning(f"[Health] Could not read opponent team file {team_file}: {e}")
 
     team_batting_adv_rows = [p.get("batting_advanced", {}) for p in team_roster]
     team_pitching_adv_rows = [p.get("pitching_advanced", {}) for p in team_roster]
@@ -465,11 +487,32 @@ def _collect_pipeline_health() -> dict:
                 "sharks_batting_populated_counts": count_populated_fields(sharks_rows, CANONICAL_BATTING_FIELDS, normalize_batting_row),
                 "opponent_batting_populated_counts": count_populated_fields(opponent_rows, CANONICAL_BATTING_FIELDS, normalize_batting_row),
             },
+            "opponents": {
+                "team_files": opponent_team_files,
+                "batting_rows": len(opponent_batting),
+                "pitching_rows": len(opponent_pitching),
+                "fielding_rows": len(opponent_fielding),
+                "batting_populated_counts": count_populated_fields(opponent_batting, CANONICAL_BATTING_FIELDS, normalize_batting_row),
+                "pitching_populated_counts": count_populated_fields(opponent_pitching, CANONICAL_PITCHING_FIELDS, normalize_pitching_row),
+                "fielding_populated_counts": count_populated_fields(opponent_fielding, CANONICAL_FIELDING_FIELDS, normalize_fielding_row),
+            },
         },
         "required_field_coverage": {
-            "batting": count_populated_fields(app_batting + [p.get("batting", {}) for p in team_roster] + sharks_rows + opponent_rows, CANONICAL_BATTING_FIELDS, normalize_batting_row),
-            "pitching": count_populated_fields(app_pitching + [p.get("pitching", {}) for p in team_roster], CANONICAL_PITCHING_FIELDS, normalize_pitching_row),
-            "fielding": count_populated_fields(app_fielding + [p.get("fielding", {}) for p in team_roster], CANONICAL_FIELDING_FIELDS, normalize_fielding_row),
+            "batting": count_populated_fields(
+                app_batting + [p.get("batting", {}) for p in team_roster] + sharks_rows + opponent_rows + opponent_batting,
+                CANONICAL_BATTING_FIELDS,
+                normalize_batting_row,
+            ),
+            "pitching": count_populated_fields(
+                app_pitching + [p.get("pitching", {}) for p in team_roster] + opponent_pitching,
+                CANONICAL_PITCHING_FIELDS,
+                normalize_pitching_row,
+            ),
+            "fielding": count_populated_fields(
+                app_fielding + [p.get("fielding", {}) for p in team_roster] + opponent_fielding,
+                CANONICAL_FIELDING_FIELDS,
+                normalize_fielding_row,
+            ),
         },
     }
 
@@ -482,7 +525,14 @@ def _write_pipeline_health_artifact():
     app_rows = out["feeds"]["app_stats"]["batting_rows"]
     team_rows = out["feeds"]["team_merged"]["roster_rows"]
     game_rows = out["feeds"]["games"]["opponent_batting_rows"]
-    logging.info(f"[Health] pipeline_health.json updated (app batting rows={app_rows}, team roster={team_rows}, opponent game rows={game_rows})")
+    opp_rows = out["feeds"]["opponents"]["batting_rows"]
+    logging.info(
+        "[Health] pipeline_health.json updated (app batting rows=%s, team roster=%s, opponent game rows=%s, opponent team batting rows=%s)",
+        app_rows,
+        team_rows,
+        game_rows,
+        opp_rows,
+    )
     return out
 
 
@@ -525,6 +575,18 @@ def run_sync_cycle():
     """Executes one full sync of schedule and stats, catching ALL exceptions."""
     try:
         logging.info("--- Starting Sync Cycle ---")
+
+        # 0. Refresh opponent discovery from public org/team feeds.
+        try:
+            from opponent_discovery import discover_and_persist_opponents
+            discovery = discover_and_persist_opponents(
+                data_dir=DATA_DIR,
+                sharks_team_id=os.getenv("GC_TEAM_ID", "NuGgx6WvP7TO"),
+            )
+            missing = len((discovery or {}).get("missing_schedule_opponents", []))
+            logging.info(f"[Sync] Opponent discovery refreshed (missing schedule opponents={missing}).")
+        except Exception as e:
+            logging.warning(f"[Sync] Opponent discovery skipped: {e}")
         
         # 1. Scrape Schedule
         logging.info("Scraping Schedule...")
@@ -985,7 +1047,11 @@ def handle_opponents():
                             "slug": team_dir.name,
                             "team_name": _canonical_team_name(td.get("team_name", team_dir.name), team_dir.name),
                             "record": td.get("record", {}),
+                            "gc_team_id": td.get("gc_team_id", ""),
+                            "gc_season_slug": td.get("gc_season_slug", ""),
                             "roster_size": len(td.get("roster", [])),
+                            "batting_rows": len(td.get("batting_stats", [])),
+                            "pitching_rows": len(td.get("pitching_stats", [])),
                         })
                     except Exception as e:
                         logging.error(f"Error reading opponent {team_dir.name}: {e}")
@@ -1249,6 +1315,16 @@ def handle_schedule():
             raw = game.get("opponent", "")
             game["opponent_raw"] = raw
             game["opponent"] = _clean_opponent_name(raw)
+    return jsonify(data)
+
+
+@app.route('/api/opponent-discovery', methods=['GET'])
+def handle_opponent_discovery():
+    """Return latest opponent ID discovery artifact."""
+    artifact_file = SHARKS_DIR / "opponent_discovery.json"
+    if not artifact_file.exists():
+        return jsonify({"generated_at": None, "teams": [], "missing_schedule_opponents": []})
+    data = _read_json_file(artifact_file, default={}) or {}
     return jsonify(data)
 
 

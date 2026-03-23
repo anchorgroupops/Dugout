@@ -38,6 +38,8 @@ services:
     environment:
       - RUN_API_SERVER=0
       - CORS_ORIGINS=https://sharks.joelycannoli.com,http://localhost:3000,http://localhost:5173
+      - WRITE_ORIGINS=https://sharks.joelycannoli.com,http://localhost:3000,http://localhost:5173
+      - GC_ORG_IDS=7ZUyPJwky5DG
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
@@ -68,6 +70,8 @@ services:
       - sync_daemon:app
     environment:
       - CORS_ORIGINS=https://sharks.joelycannoli.com,http://localhost:3000,http://localhost:5173
+      - WRITE_ORIGINS=https://sharks.joelycannoli.com,http://localhost:3000,http://localhost:5173
+      - GC_ORG_IDS=7ZUyPJwky5DG
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
