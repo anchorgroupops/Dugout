@@ -800,7 +800,7 @@ def _aggregate_stats_from_games():
                 game = json.load(f)
             for player in game.get("sharks_batting", []):
                 num = str(player.get("number", "")).strip()
-                b = player.get("batting", {})
+                b = normalize_batting_row(player)
                 if not b or not num:
                     continue
 
