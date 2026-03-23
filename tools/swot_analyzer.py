@@ -311,10 +311,10 @@ def analyze_player(player: dict) -> dict:
         "number": player.get("number", 0),
         "derived_stats": derived,
         "swot": {
-            "strengths": strengths or ["No standout strengths yet (need more data)"],
+            "strengths": strengths[:3] or ["No standout strengths yet (need more data)"],
             "weaknesses": weaknesses[:3] or ["No major weaknesses identified"],
-            "opportunities": opportunities or ["Continue developing all-around skills"],
-            "threats": threats or ["No specific threats identified"],
+            "opportunities": opportunities[:3] or ["Continue developing all-around skills"],
+            "threats": threats[:3] or ["No specific threats identified"],
         },
     }
 
@@ -335,7 +335,7 @@ def analyze_team(team_data: dict) -> dict:
     strength_types = Counter(s.split("(")[0].strip() for s in all_strengths)
     weakness_types = Counter(w.split("(")[0].strip() for w in all_weaknesses)
 
-    team_strengths = [f"{k} ({v} players)" for k, v in strength_types.most_common(5)]
+    team_strengths = [f"{k} ({v} players)" for k, v in strength_types.most_common(3)]
     team_weaknesses = [f"{k} ({v} players)" for k, v in weakness_types.most_common(3)]
 
     team_swot = {
@@ -521,6 +521,20 @@ def analyze_matchup(our_team: dict, opponent_team: dict) -> dict:
     """Compare two teams and generate matchup insights."""
     us = _team_aggregates(our_team)
     them = _team_aggregates(opponent_team)
+
+    # Do not generate statistical analysis if the opponent lacks history
+    if them.get("batting", {}).get("pa", 0) < 5 and them.get("pitching", {}).get("ip", 0) < 2.0:
+        return {
+            "our_team": our_team.get("team_name", "Sharks"),
+            "opponent": opponent_team.get("team_name", "Opponent"),
+            "empty": True,
+            "our_stats": us,
+            "their_stats": them,
+            "our_advantages": [],
+            "their_advantages": [],
+            "key_matchups": [],
+            "recommendation": "Not enough historical data available for this opponent to calculate a stat-based matchup.",
+        }
 
     our_advantages = []
     their_advantages = []

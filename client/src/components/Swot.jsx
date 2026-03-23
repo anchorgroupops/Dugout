@@ -80,7 +80,7 @@ const MatchupPanel = ({ defaultOpponent }) => {
   }
 
   return (
-    <div className="glass-panel" style={{ padding: '1.5rem', marginBottom: '2rem' }}>
+    <div className="glass-panel" style={{ padding: '1.5rem', marginBottom: '0' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.75rem' }}>
         <h3 style={{ margin: 0, color: 'var(--primary-color)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <Swords size={20} /> {defaultOpponent && selected === opponents.find(o => o.team_name.toLowerCase() === defaultOpponent.toLowerCase() || o.slug === defaultOpponent.toLowerCase().replace(/ /g, '_'))?.slug ? `Next Game Matchup vs ${defaultOpponent}` : 'Matchup Analysis'}
@@ -114,8 +114,10 @@ const MatchupPanel = ({ defaultOpponent }) => {
             {matchup.recommendation}
           </div>
 
-          {/* Side-by-side stat comparison */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', marginBottom: '1rem' }}>
+          {!matchup.empty && (
+            <>
+              {/* Side-by-side stat comparison */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', marginBottom: '1rem' }}>
             <div>
               <div style={{ fontSize: '0.7rem', color: 'var(--primary-color)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.5rem', fontWeight: '700' }}>
                 Batting
@@ -169,24 +171,30 @@ const MatchupPanel = ({ defaultOpponent }) => {
             </div>
           )}
 
-          {/* Opponent roster */}
-          {matchup.their_roster?.length > 0 && (
-            <div style={{ marginTop: '1rem', paddingTop: '0.75rem', borderTop: '1px solid var(--surface-border)' }}>
-              <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.5rem', fontWeight: '700' }}>
-                {matchup.opponent} Roster ({matchup.their_roster.length})
-              </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
-                {matchup.their_roster.map((p, i) => (
-                  <span key={i} style={{
-                    background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)',
-                    borderRadius: '6px', padding: '3px 8px', fontSize: '0.8rem', color: 'var(--text-muted)'
-                  }}>
-                    {p.number ? <span style={{ color: 'var(--primary-color)', fontWeight: '700', marginRight: '4px' }}>#{p.number}</span> : null}
-                    {p.name || `${p.first || ''} ${p.last || ''}`.trim()}
-                  </span>
-                ))}
-              </div>
-            </div>
+              {/* Opponent roster */}
+              {matchup.their_roster?.length > 0 && (
+                <div style={{ marginTop: '1rem', paddingTop: '0.75rem', borderTop: '1px solid var(--surface-border)' }}>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.5rem', fontWeight: '700' }}>
+                    {matchup.opponent} Roster ({matchup.their_roster.length})
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
+                    {[...matchup.their_roster].sort((a,b) => {
+                      const nameA = (a.name || `${a.first || ''} ${a.last || ''}`).trim().toLowerCase();
+                      const nameB = (b.name || `${b.first || ''} ${b.last || ''}`).trim().toLowerCase();
+                      return nameA.localeCompare(nameB);
+                    }).map((p, i) => (
+                      <span key={i} style={{
+                        background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)',
+                        borderRadius: '6px', padding: '3px 8px', fontSize: '0.8rem', color: 'var(--text-muted)'
+                      }}>
+                        {p.number ? <span style={{ color: 'var(--primary-color)', fontWeight: '700', marginRight: '4px' }}>#{p.number}</span> : null}
+                        {p.name || `${p.first || ''} ${p.last || ''}`.trim()}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </div>
       )}
@@ -204,7 +212,7 @@ const UpcomingGameBanner = ({ next }) => {
 
   return (
     <div className="glass-panel" style={{
-      padding: '1rem 1.5rem', marginBottom: '1.5rem',
+      padding: '1rem 1.5rem', marginBottom: '0.75rem',
       borderColor: 'rgba(0,210,255,0.3)', background: 'rgba(0,210,255,0.04)'
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
@@ -247,7 +255,11 @@ const Swot = ({ swotData, roster, schedule }) => {
     );
     return { ...player, swot: evaluation?.swot || evaluation };
   }).filter(p => p.swot && p.core !== false)
-    .sort((a, b) => (a.last || '').localeCompare(b.last || '') || (a.first || '').localeCompare(b.first || ''));
+    .sort((a, b) => {
+      const textA = `${a.last || ''} ${a.first || ''}`.trim().toLowerCase();
+      const textB = `${b.last || ''} ${b.first || ''}`.trim().toLowerCase();
+      return textA.localeCompare(textB);
+    });
 
   const teamSwot = swotData.team_swot;
 
@@ -265,9 +277,13 @@ const Swot = ({ swotData, roster, schedule }) => {
         </span>
       </h2>
 
-      <UpcomingGameBanner next={nextGame} />
+      {/* 1. Next Game & Matchups Combined Group */}
+      <div style={{ marginBottom: '2rem' }}>
+        <UpcomingGameBanner next={nextGame} />
+        <MatchupPanel defaultOpponent={nextGame?.opponent} />
+      </div>
 
-      {/* Team-level SWOT */}
+      {/* 2. Team-level SWOT */}
       {teamSwot && (
         <div className="glass-panel" style={{ marginBottom: '2rem', padding: '1.5rem', borderColor: 'var(--primary-glow)' }}>
           <h3 style={{ marginBottom: '1.25rem', color: 'var(--primary-color)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -281,9 +297,6 @@ const Swot = ({ swotData, roster, schedule }) => {
           </div>
         </div>
       )}
-
-      {/* Matchup Analysis */}
-      <MatchupPanel defaultOpponent={nextGame?.opponent} />
 
       {/* Player cards */}
       <div style={{
