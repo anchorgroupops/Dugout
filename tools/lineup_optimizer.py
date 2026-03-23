@@ -6,7 +6,6 @@ Enforces mandatory play requirements (1 AB + 6 defensive outs per player).
 
 import json
 from pathlib import Path
-from typing import Any
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 SHARKS_DIR = DATA_DIR / "sharks"
@@ -42,7 +41,6 @@ def compute_batting_score(player: dict, strategy: str = "balanced") -> float:
     triples = player.get("triples", hitting.get("triples", 0)) or 0
     hr = player.get("hr", hitting.get("hr", 0)) or 0
     sb = player.get("sb", hitting.get("sb", 0)) or 0
-    runs = player.get("r", hitting.get("runs", 0)) or 0
     rbi = player.get("rbi", hitting.get("rbi", 0)) or 0
 
     pa = ab + bb + hbp
@@ -195,6 +193,24 @@ def generate_lineup(
     if not roster:
         return {"strategy": strategy, "lineup": [], "violations": ["No roster data found"], "compliant": False}
 
+    # Attach key display stats to each player before scoring (carried into lineup entries)
+    for player in roster:
+        hitting = player.get("stats", {}).get("hitting", {})
+        ab = player.get("ab", hitting.get("ab", 0)) or 0
+        h = player.get("h", hitting.get("h", 0)) or 0
+        bb = player.get("bb", hitting.get("bb", 0)) or 0
+        hbp = player.get("hbp", hitting.get("hbp", 0)) or 0
+        doubles = player.get("doubles", hitting.get("doubles", 0)) or 0
+        triples = player.get("triples", hitting.get("triples", 0)) or 0
+        hr = player.get("hr", hitting.get("hr", 0)) or 0
+        pa = ab + bb + hbp
+        singles = max(0, h - doubles - triples - hr)
+        tb = singles + 2*doubles + 3*triples + 4*hr
+        player["_display_avg"] = round(h / ab, 3) if ab > 0 else 0.0
+        player["_display_obp"] = round((h + bb + hbp) / pa, 3) if pa > 0 else 0.0
+        player["_display_slg"] = round(tb / ab, 3) if ab > 0 else 0.0
+        player["_display_pa"] = pa
+
     # Score, sort and ensure names
     for player in roster:
         player["_batting_score"] = compute_batting_score(player, strategy)
@@ -209,11 +225,18 @@ def generate_lineup(
     # Validate
     violations = validate_mandatory_play(lineup, roster)
 
-    # Clean up temp scores
+    # Clean up temp keys from roster pool
     for player in roster:
         player.pop("_batting_score", None)
+        for k in ("_display_avg", "_display_obp", "_display_slg", "_display_pa"):
+            player.pop(k, None)
     for entry in lineup:
         entry.pop("_batting_score", None)
+        # Promote computed display stats and clean private keys
+        entry["avg"] = entry.pop("_display_avg", 0.0)
+        entry["obp"] = entry.pop("_display_obp", 0.0)
+        entry["slg"] = entry.pop("_display_slg", 0.0)
+        entry["pa"]  = entry.pop("_display_pa", 0)
 
     return {
         "strategy": strategy,
@@ -233,7 +256,10 @@ def generate_all_lineups(team_data: dict) -> dict:
 
 def run():
     """Load Sharks data and generate lineups."""
-    team_file = SHARKS_DIR / "team_merged.json"
+    # Prefer enriched file (app_stats applied) for most current stats
+    team_file = SHARKS_DIR / "team_enriched.json"
+    if not team_file.exists():
+        team_file = SHARKS_DIR / "team_merged.json"
     if not team_file.exists():
         team_file = SHARKS_DIR / "team.json"
     if not team_file.exists():

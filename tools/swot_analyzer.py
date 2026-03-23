@@ -5,7 +5,6 @@ Reads player stats from data/ and generates SWOT classifications.
 """
 
 import json
-import os
 from pathlib import Path
 from typing import Any
 
@@ -358,7 +357,14 @@ def analyze_team(team_data: dict) -> dict:
 
 
 def load_team(team_dir: Path, prefer_merged: bool = False) -> dict | None:
-    """Load team data from a directory."""
+    """Load team data from a directory.
+    Priority (Sharks): team_enriched.json > team_merged.json > team.json
+    """
+    # Always prefer the enriched file (app_stats applied) when it exists
+    enriched = team_dir / "team_enriched.json"
+    if enriched.exists():
+        with open(enriched, "r") as f:
+            return json.load(f)
     team_file = team_dir / ("team_merged.json" if prefer_merged else "team.json")
     if prefer_merged and not team_file.exists():
         team_file = team_dir / "team.json"

@@ -59,20 +59,155 @@ def send_alert(message: str, level: str = "ERROR"):
     except Exception as e:
         logging.error(f"Error reaching n8n webhook: {e}")
 
+def _safe_int(val, default: int = 0) -> int:
+    try:
+        return int(float(val)) if val not in (None, "", "-", "—") else default
+    except (ValueError, TypeError):
+        return default
+
+
+def _safe_float(val, default: float = 0.0) -> float:
+    try:
+        v = str(val).strip().lstrip(".")
+        if v in ("", "-", "—", "N/A"):
+            return default
+        if v.endswith("%"):
+            v = v[:-1]
+        return float(v)
+    except (ValueError, TypeError):
+        return default
+
+
+def _enrich_team_with_app_stats(team_data: dict) -> dict:
+    """Apply app_stats.json batting stats unconditionally to team roster (most current data).
+    Keyed by jersey number. Mutates team_data in place and returns it."""
+    app_stats_file = SHARKS_DIR / "app_stats.json"
+    if not app_stats_file.exists():
+        return team_data
+    try:
+        with open(app_stats_file) as f:
+            app_data = json.load(f)
+        app_batting = {
+            str(p.get("number", "")).strip(): p
+            for p in app_data.get("batting", [])
+            if str(p.get("number", "")).strip()
+        }
+        for player in team_data.get("roster", []):
+            num = str(player.get("number", "")).strip()
+            if num and num in app_batting:
+                ap = app_batting[num]
+                player["batting"] = {
+                    "pa":      _safe_int(ap.get("pa")),
+                    "ab":      _safe_int(ap.get("ab")),
+                    "h":       _safe_int(ap.get("h")),
+                    "bb":      _safe_int(ap.get("bb")),
+                    "hbp":     _safe_int(ap.get("hbp")),
+                    "so":      _safe_int(ap.get("so")),
+                    "hr":      _safe_int(ap.get("hr")),
+                    "rbi":     _safe_int(ap.get("rbi")),
+                    "sb":      _safe_int(ap.get("sb")),
+                    "r":       _safe_int(ap.get("r", 0)),
+                    "doubles": _safe_int(ap.get("2b")),
+                    "triples": _safe_int(ap.get("3b")),
+                    # Preserve pre-computed rates from app for display
+                    "avg": _safe_float(ap.get("avg")),
+                    "obp": _safe_float(ap.get("obp")),
+                    "slg": _safe_float(ap.get("slg")),
+                    "ops": _safe_float(ap.get("ops")),
+                }
+        logging.info(f"[Enrich] Applied app_stats to {len(app_batting)} players.")
+    except Exception as e:
+        logging.warning(f"app_stats enrichment failed: {e}")
+    return team_data
+
+
+def _aggregate_opponent_stats_from_games(opponent_slug: str) -> list:
+    """Aggregate opponent_batting stats from scorebook game JSON files for a given opponent.
+    Returns list of player dicts with 'batting' sub-dict, ready for _team_aggregates()."""
+    games_dir = SHARKS_DIR / "games"
+    if not games_dir.exists():
+        return []
+    player_acc: dict = {}
+    slug_clean = opponent_slug.lower().replace("-", "_").replace(" ", "_")
+    for game_file in sorted(games_dir.glob("*.json")):
+        if game_file.name == "index.json":
+            continue
+        try:
+            with open(game_file) as f:
+                game = json.load(f)
+            game_opp = game.get("opponent", "").lower().replace(" ", "_").replace("-", "_")
+            # Flexible slug match in either direction
+            if slug_clean not in game_opp and game_opp not in slug_clean:
+                continue
+            logging.info(f"[OpponentStats] Matched game file {game_file.name} for slug '{opponent_slug}'")
+            for p in game.get("opponent_batting", []):
+                num = str(p.get("number", "")).strip()
+                name = p.get("name", "").strip()
+                key = num if num else name
+                if not key:
+                    continue
+                b = p.get("batting", {})
+                if key not in player_acc:
+                    player_acc[key] = {
+                        "name": name, "number": num,
+                        "batting": {s: 0 for s in [
+                            "pa", "ab", "h", "singles", "doubles", "triples",
+                            "hr", "bb", "hbp", "so", "sac", "r", "rbi", "sb"
+                        ]}
+                    }
+                acc = player_acc[key]["batting"]
+                for stat in acc:
+                    acc[stat] = acc[stat] + b.get(stat, 0)
+        except Exception as e:
+            logging.warning(f"Opponent game-stat aggregation error ({game_file.name}): {e}")
+
+    # Compute derived rates so _team_aggregates() can use them
+    for pdata in player_acc.values():
+        b = pdata["batting"]
+        ab, h, bb, hbp = b["ab"], b["h"], b["bb"], b["hbp"]
+        pa = ab + bb + hbp
+        b["avg"] = round(h / ab, 3) if ab > 0 else 0.0
+        b["obp"] = round((h + bb + hbp) / pa, 3) if pa > 0 else 0.0
+        singles = b.get("singles", max(0, h - b["doubles"] - b["triples"] - b["hr"]))
+        tb = singles + 2 * b["doubles"] + 3 * b["triples"] + 4 * b["hr"]
+        b["slg"] = round(tb / ab, 3) if ab > 0 else 0.0
+        b["ops"] = round(b["obp"] + b["slg"], 3)
+
+    result = list(player_acc.values())
+    if result:
+        logging.info(f"[OpponentStats] Aggregated {len(result)} players for '{opponent_slug}'")
+    return result
+
+
 def get_next_game_time():
-    """Parses `schedule.json` to find the nearest upcoming game. Returns datetime or None."""
-    schedule_file = SHARKS_DIR / "schedule.json"
+    """Parse schedule_manual.json to find the nearest upcoming game. Returns datetime or None."""
+    schedule_file = SHARKS_DIR / "schedule_manual.json"
     if not schedule_file.exists():
         return None
-        
     try:
-        with open(schedule_file, "r") as f:
-            json.load(f)
-            # FUTURE HARDENING: parse structured game dates from schedule.json here.
-            pass
+        with open(schedule_file) as f:
+            sched = json.load(f)
+        now = datetime.now(ET)
+        for game in sched.get("upcoming", []):
+            if not game.get("is_game"):
+                continue
+            date_str = game.get("date", "")
+            time_str = game.get("time", "12:00 PM")
+            if not date_str:
+                continue
+            try:
+                naive_dt = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %I:%M %p")
+            except ValueError:
+                try:
+                    naive_dt = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
+                except ValueError:
+                    continue
+            game_dt = naive_dt.replace(tzinfo=ET)
+            # Include games that could still be in progress
+            if game_dt > now - timedelta(hours=GAME_DURATION_HOURS):
+                return game_dt
     except Exception as e:
-         logging.error(f"Error reading schedule.json: {e}")
-         
+        logging.error(f"get_next_game_time error: {e}")
     return None
 
 def check_live_override():
@@ -103,7 +238,34 @@ def run_sync_cycle():
             run_merge()
         except Exception as e:
             logging.warning(f"Aggregate merge skipped: {e}")
-            
+
+        # Write team_enriched.json (team_merged + app_stats) for downstream tools
+        try:
+            team_file = SHARKS_DIR / ("team_merged.json" if (SHARKS_DIR / "team_merged.json").exists() else "team.json")
+            with open(team_file) as f:
+                team_data = json.load(f)
+            _enrich_team_with_app_stats(team_data)
+            enriched_file = SHARKS_DIR / "team_enriched.json"
+            with open(enriched_file, "w") as f:
+                json.dump(team_data, f)
+            logging.info("[Sync] team_enriched.json written.")
+        except Exception as e:
+            logging.warning(f"team_enriched.json write skipped: {e}")
+
+        # Re-run SWOT and lineup optimizer with enriched data
+        try:
+            from swot_analyzer import run_sharks_analysis
+            run_sharks_analysis()
+            logging.info("[Sync] SWOT analysis refreshed.")
+        except Exception as e:
+            logging.warning(f"SWOT re-run skipped: {e}")
+        try:
+            from lineup_optimizer import run as run_lineup
+            run_lineup()
+            logging.info("[Sync] Lineup optimizer refreshed.")
+        except Exception as e:
+            logging.warning(f"Lineup re-run skipped: {e}")
+
         logging.info("--- Sync Cycle Complete ---")
         return True
     except Exception as e:
@@ -120,7 +282,7 @@ from flask_cors import CORS
 import threading
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, origins=["https://sharks.joelycannoli.com", "http://localhost:3000", "http://localhost:5173"])
 
 
 # ---------------------------------------------------------
@@ -467,27 +629,8 @@ def handle_matchup(opponent_slug):
     if not our_team:
         return jsonify({"error": "Sharks team data not found"}), 404
 
-    # Enrich Sharks roster with app_stats so matchup uses real season stats
-    app_stats_file = SHARKS_DIR / "app_stats.json"
-    if app_stats_file.exists():
-        try:
-            with open(app_stats_file) as f:
-                app_data = json.load(f)
-            app_batting = {str(p.get("number", "")).strip(): p for p in app_data.get("batting", []) if p.get("number")}
-            for player in our_team.get("roster", []):
-                num = str(player.get("number", "")).strip()
-                if num and num in app_batting:
-                    ap = app_batting[num]
-                    player["batting"] = {
-                        "pa": _safe_int(ap.get("pa")), "ab": _safe_int(ap.get("ab")),
-                        "h": _safe_int(ap.get("h")), "bb": _safe_int(ap.get("bb")),
-                        "hbp": _safe_int(ap.get("hbp")), "so": _safe_int(ap.get("so")),
-                        "hr": _safe_int(ap.get("hr")), "rbi": _safe_int(ap.get("rbi")),
-                        "sb": _safe_int(ap.get("sb")), "r": _safe_int(ap.get("r", 0)),
-                        "doubles": _safe_int(ap.get("2b")), "triples": _safe_int(ap.get("3b")),
-                    }
-        except Exception as e:
-            logging.warning(f"Matchup app_stats enrichment failed: {e}")
+    # Enrich Sharks roster with app_stats so matchup uses current season stats
+    _enrich_team_with_app_stats(our_team)
 
     opp_dir = DATA_DIR / "opponents" / opponent_slug
     opp_team = load_team(opp_dir)
@@ -499,6 +642,11 @@ def handle_matchup(opponent_slug):
                 opp_team = json.load(f)
         else:
             return jsonify({"error": f"Opponent '{opponent_slug}' not found"}), 404
+    # Enrich opponent with stats aggregated from scorebook game files we've played
+    opp_game_stats = _aggregate_opponent_stats_from_games(opponent_slug)
+    if opp_game_stats:
+        opp_team["batting_stats"] = opp_game_stats
+
     result = analyze_matchup(our_team, opp_team)
     # Attach opponent roster for display
     result["their_roster"] = [
@@ -582,65 +730,21 @@ def handle_team():
     with open(team_file) as f:
         team = json.load(f)
 
-    # Prefer app-scraped stats (richer, from BlueStacks GC app)
-    app_stats_file = SHARKS_DIR / "app_stats.json"
-    app_batting = {}
-    if app_stats_file.exists():
-        try:
-            with open(app_stats_file) as f:
-                app_data = json.load(f)
-            for p in app_data.get("batting", []):
-                num = str(p.get("number", "")).strip()
-                if num:
-                    app_batting[num] = p
-        except Exception as e:
-            logging.warning(f"Could not load app_stats.json: {e}")
+    # Enrich roster with current app_stats.json (always most up-to-date)
+    _enrich_team_with_app_stats(team)
 
-    # Fall back to PDF-aggregated stats
-    pdf_stats = _aggregate_stats_from_games() if not app_batting else {}
-
+    # Fall back to PDF-aggregated stats for players still missing data
+    pdf_stats = {}
     for player in team.get("roster", []):
-        num = str(player.get("number", "")).strip()
-        existing = player.get("batting", {})
-        if existing.get("pa", 0) > 0:
-            continue  # GC-scraped stats already present
-        if num and num in app_batting:
-            ap = app_batting[num]
-            player["batting"] = {
-                "gp": _safe_int(ap.get("gp")),
-                "pa": _safe_int(ap.get("pa")),
-                "ab": _safe_int(ap.get("ab")),
-                "avg": _safe_float(ap.get("avg")),
-                "obp": _safe_float(ap.get("obp")),
-                "ops": _safe_float(ap.get("ops")),
-                "slg": _safe_float(ap.get("slg")),
-                "h": _safe_int(ap.get("h")),
-                "hr": _safe_int(ap.get("hr")),
-                "rbi": _safe_int(ap.get("rbi")),
-                "bb": _safe_int(ap.get("bb")),
-                "so": _safe_int(ap.get("so")),
-                "sb": _safe_int(ap.get("sb")),
-            }
-            player["games_played"] = _safe_int(ap.get("gp"))
-        elif num and num in pdf_stats:
-            player["batting"] = pdf_stats[num]["batting"]
-            player["games_played"] = pdf_stats[num]["games_played"]
+        if player.get("batting", {}).get("pa", 0) == 0:
+            if not pdf_stats:
+                pdf_stats = _aggregate_stats_from_games()
+            num = str(player.get("number", "")).strip()
+            if num and num in pdf_stats:
+                player["batting"] = pdf_stats[num]["batting"]
+                player["games_played"] = pdf_stats[num]["games_played"]
 
     return jsonify(team)
-
-
-def _safe_int(v):
-    try:
-        return int(str(v).replace(",",""))
-    except (TypeError, ValueError):
-        return 0
-
-
-def _safe_float(v):
-    try:
-        return float(str(v).replace(",",""))
-    except (TypeError, ValueError):
-        return 0.0
 
 
 @app.route('/api/borrowed-player', methods=['POST'])
@@ -756,6 +860,36 @@ def handle_regenerate_lineups():
         return jsonify({"error": str(e)}), 500
 
 
+def _trigger_post_game_analysis():
+    """Run immediately after a game ends: re-scrape, enrich, update SWOT + lineups."""
+    logging.info("[Post-Game] Starting post-game analysis pipeline...")
+    try:
+        run_sync_cycle()
+    except Exception as e:
+        logging.error(f"[Post-Game] sync cycle failed: {e}")
+    try:
+        team_file = SHARKS_DIR / ("team_merged.json" if (SHARKS_DIR / "team_merged.json").exists() else "team.json")
+        with open(team_file) as f:
+            team_data = json.load(f)
+        _enrich_team_with_app_stats(team_data)
+        with open(SHARKS_DIR / "team_enriched.json", "w") as f:
+            json.dump(team_data, f)
+    except Exception as e:
+        logging.error(f"[Post-Game] enrichment failed: {e}")
+    try:
+        from swot_analyzer import run_sharks_analysis
+        run_sharks_analysis()
+    except Exception as e:
+        logging.error(f"[Post-Game] SWOT failed: {e}")
+    try:
+        from lineup_optimizer import run as run_lineup
+        run_lineup()
+    except Exception as e:
+        logging.error(f"[Post-Game] lineup failed: {e}")
+    send_alert("Post-game analysis complete — SWOT and lineups updated.", level="INFO")
+    logging.info("[Post-Game] Analysis pipeline complete.")
+
+
 def run_api():
     logging.info("Starting API server on port 5000...")
     app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
@@ -787,39 +921,42 @@ def main():
     api_thread.start()
     
     consecutive_errors = 0
-    
+    _last_state = "IDLE"
+
     while True:
         try:
             # Determine Polling State
             is_live_forced = check_live_override()
             next_game = get_next_game_time()
-            now = datetime.now()
-            
+            now = datetime.now(ET)
+
             state = "IDLE"
             sleep_duration = POLL_INTERVAL_IDLE
-            
+
             if is_live_forced:
                 state = "LIVE (Manual Override)"
                 sleep_duration = POLL_INTERVAL_LIVE
             elif next_game:
-                # Calculate diff
                 time_until_game = (next_game - now).total_seconds()
-                
-                if time_until_game < -(GAME_DURATION_HOURS * 3600):
-                     # Game is way in the past
-                     state = "IDLE"
-                     sleep_duration = POLL_INTERVAL_IDLE
-                elif time_until_game <= 0:
-                     # Game is actively playing
-                     state = "LIVE"
-                     sleep_duration = POLL_INTERVAL_LIVE
-                elif time_until_game <= (PREGAME_WINDOW_HOURS * 3600):
-                     # Game is starting within an hour
-                     state = "PREGAME"
-                     sleep_duration = POLL_INTERVAL_PREGAME
 
+                if time_until_game < -(GAME_DURATION_HOURS * 3600):
+                    state = "IDLE"
+                    sleep_duration = POLL_INTERVAL_IDLE
+                elif time_until_game <= 0:
+                    state = "LIVE"
+                    sleep_duration = POLL_INTERVAL_LIVE
+                elif time_until_game <= (PREGAME_WINDOW_HOURS * 3600):
+                    state = "PREGAME"
+                    sleep_duration = POLL_INTERVAL_PREGAME
+
+            # Post-game hook: fire when transitioning out of LIVE state
+            if _last_state in ("LIVE", "LIVE (Manual Override)") and state == "IDLE":
+                logging.info("[Post-Game] Game ended — triggering immediate re-analysis.")
+                _trigger_post_game_analysis()
+
+            _last_state = state
             logging.info(f"Current State: {state}. Next cycle in {sleep_duration} seconds.")
-            
+
             success = run_sync_cycle()
             
             if success:

@@ -1,5 +1,21 @@
 import React, { useState } from 'react';
-import { Settings, ShieldCheck, RefreshCw } from 'lucide-react';
+import { Settings, ShieldCheck, RefreshCw, Clock, Home, Plane } from 'lucide-react';
+import { getTodayEST } from '../utils/formatDate';
+
+const StatBadge = ({ label, value, good, warn }) => {
+  const num = typeof value === 'number' ? value : parseFloat(value) || 0;
+  const color = num >= good ? 'var(--success)' : num >= warn ? '#e8a838' : 'var(--text-muted)';
+  const display = num > 0 ? num.toFixed(3).replace(/^0/, '') : '—';
+  return (
+    <span style={{
+      fontSize: '0.72rem', fontWeight: '600', color,
+      background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)',
+      borderRadius: '4px', padding: '1px 5px', letterSpacing: '0.3px'
+    }}>
+      {label} {display}
+    </span>
+  );
+};
 
 const AvailBadge = ({ available }) => (
   <span style={{
@@ -10,7 +26,48 @@ const AvailBadge = ({ available }) => (
   }} title={available ? 'Available' : 'Unavailable'} />
 );
 
-const Lineup = ({ lineupsData, availability, onRegenerate }) => {
+const NextGameBanner = ({ schedule }) => {
+  if (!schedule) return null;
+  const today = getTodayEST();
+  const next = schedule.upcoming
+    ?.filter(g => g.date >= today)
+    ?.sort((a, b) => a.date.localeCompare(b.date))[0];
+  if (!next) return null;
+
+  const dateStr = new Date(next.date + 'T12:00:00').toLocaleDateString('en-US', {
+    timeZone: 'America/New_York', weekday: 'short', month: 'short', day: 'numeric'
+  });
+  const isHome = next.home_away === 'home';
+
+  return (
+    <div className="glass-panel" style={{
+      padding: '0.85rem 1.25rem', marginBottom: '1.25rem',
+      borderColor: 'rgba(0,210,255,0.3)', background: 'rgba(0,210,255,0.04)'
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+        <Clock size={16} color="var(--primary-color)" />
+        <span style={{ fontSize: '0.68rem', color: 'var(--primary-color)', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: '700' }}>
+          Optimizing For
+        </span>
+        <span style={{
+          display: 'inline-flex', alignItems: 'center', gap: '0.25rem',
+          background: isHome ? 'rgba(35,134,54,0.15)' : 'rgba(100,160,220,0.15)',
+          color: isHome ? 'var(--success)' : '#4a9ede',
+          padding: '2px 8px', borderRadius: '12px', fontSize: '0.68rem', fontWeight: '700'
+        }}>
+          {isHome ? <Home size={10} /> : <Plane size={10} />}
+          {isHome ? 'HOME' : 'AWAY'}
+        </span>
+        <span style={{ fontWeight: '700', fontSize: '0.95rem' }}>vs. {next.opponent}</span>
+        <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+          {dateStr}{next.time ? ` · ${next.time}` : ''}
+        </span>
+      </div>
+    </div>
+  );
+};
+
+const Lineup = ({ lineupsData, availability, schedule, onRegenerate }) => {
   const [strategy, setStrategy] = useState('balanced');
   const [regenerating, setRegenerating] = useState(false);
 
@@ -52,7 +109,7 @@ const Lineup = ({ lineupsData, availability, onRegenerate }) => {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.75rem' }}>
         <h2 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: 0 }}>
           <Settings size={24} color="var(--primary-color)" /> Optimized Lineups
         </h2>
@@ -66,11 +123,8 @@ const Lineup = ({ lineupsData, availability, onRegenerate }) => {
                 style={{
                   background: strategy === s.id ? 'var(--primary-glow)' : 'transparent',
                   color: strategy === s.id ? 'var(--primary-color)' : 'var(--text-muted)',
-                  border: 'none',
-                  padding: '0.5rem 1rem',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                  fontWeight: strategy === s.id ? '600' : '400',
+                  border: 'none', padding: '0.5rem 1rem', borderRadius: '6px',
+                  cursor: 'pointer', fontWeight: strategy === s.id ? '600' : '400',
                   transition: 'all var(--transition-fast)'
                 }}
               >
@@ -99,6 +153,8 @@ const Lineup = ({ lineupsData, availability, onRegenerate }) => {
         </div>
       </div>
 
+      <NextGameBanner schedule={schedule} />
+
       <div className="glass-panel" style={{ padding: '2rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem', paddingBottom: '1rem', borderBottom: '1px solid var(--surface-border)' }}>
           <div>
@@ -126,17 +182,19 @@ const Lineup = ({ lineupsData, availability, onRegenerate }) => {
           {currentStrategy.lineup.map((player, idx) => {
             const name = `${player.first || ''} ${player.last || ''}`.trim() || player.name || '—';
             const avail = isAvailable(player);
+            const hasStats = (player.pa || 0) > 0;
             return (
               <div key={`${player.number}-${idx}`} style={{
-                display: 'flex', alignItems: 'center', padding: '1rem',
+                display: 'flex', alignItems: 'center', padding: '0.85rem 1rem',
                 background: !avail ? 'rgba(200,50,50,0.08)' : player.borrowed ? 'rgba(255,165,0,0.04)' : 'rgba(0,0,0,0.2)',
                 borderRadius: '8px',
                 borderLeft: `4px solid ${!avail ? 'var(--danger)' : player.borrowed ? 'rgba(255,165,0,0.5)' : idx < 4 ? 'var(--primary-color)' : 'var(--surface-border)'}`,
-                opacity: avail ? 1 : 0.65
+                opacity: avail ? 1 : 0.65,
+                gap: '0.75rem', flexWrap: 'wrap'
               }}>
-                <div style={{ width: '40px', fontWeight: 'bold', color: 'var(--text-muted)' }}>{player.slot}.</div>
-                <div style={{ width: '60px', fontFamily: 'var(--font-heading)', fontSize: '1.2rem', color: '#fff' }}>#{player.number}</div>
-                <div style={{ flex: 1, fontWeight: '600', fontSize: '1.1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <div style={{ width: '28px', fontWeight: 'bold', color: 'var(--text-muted)', fontSize: '0.9rem' }}>{player.slot}.</div>
+                <div style={{ width: '52px', fontFamily: 'var(--font-heading)', fontSize: '1.1rem', color: '#fff' }}>#{player.number}</div>
+                <div style={{ flex: 1, minWidth: '120px', fontWeight: '600', fontSize: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                   {name}
                   <AvailBadge available={avail} />
                   {player.borrowed && (
@@ -147,10 +205,25 @@ const Lineup = ({ lineupsData, availability, onRegenerate }) => {
                     }}>SUB</span>
                   )}
                 </div>
+
+                {/* Per-player stat badges */}
+                {hasStats ? (
+                  <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                    <StatBadge label="AVG" value={player.avg} good={0.350} warn={0.200} />
+                    <StatBadge label="OBP" value={player.obp} good={0.420} warn={0.280} />
+                    <StatBadge label="SLG" value={player.slg} good={0.450} warn={0.250} />
+                    <span style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.25)', padding: '1px 4px' }}>
+                      {player.pa} PA
+                    </span>
+                  </div>
+                ) : (
+                  <span style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.2)', fontStyle: 'italic' }}>No stats yet</span>
+                )}
+
                 <div style={{
-                  background: 'var(--surface-hover)', padding: '0.25rem 0.75rem',
-                  borderRadius: '12px', fontSize: '0.85rem', color: 'var(--text-muted)',
-                  minWidth: '120px', textAlign: 'center'
+                  background: 'var(--surface-hover)', padding: '0.2rem 0.65rem',
+                  borderRadius: '12px', fontSize: '0.8rem', color: 'var(--text-muted)',
+                  minWidth: '100px', textAlign: 'center', flexShrink: 0
                 }}>
                   {player.role || 'Depth'}
                 </div>

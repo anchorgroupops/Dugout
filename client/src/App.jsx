@@ -91,6 +91,7 @@ function App() {
         <Lineup
           lineupsData={data.lineups}
           availability={data.availability}
+          schedule={data.schedule}
           onRegenerate={(newLineups) => setData(prev => ({ ...prev, lineups: newLineups }))}
         />
       );
