@@ -148,7 +148,6 @@ const ExpandedStats = ({ player }) => {
 
 const Roster = ({ team, availability, onAvailabilityChange }) => {
   const [expandedPlayer, setExpandedPlayer] = useState(null);
-  const [showAll, setShowAll] = useState(false);
   const [updating, setUpdating] = useState(null); // name of player being updated
 
   if (!team || !team.roster) return <div className="loader"></div>;
@@ -179,33 +178,19 @@ const Roster = ({ team, availability, onAvailabilityChange }) => {
     }
   };
 
-  // Filter by core flag, then sort alphabetically by first name
-  const filteredRoster = showAll ? team.roster : team.roster.filter(p => p.core !== false);
+  // Sharks-only roster (exclude non-core/sub players)
+  const filteredRoster = team.roster.filter(p => p.core !== false);
   const sortedRoster = [...filteredRoster].sort((a, b) => (a.first || "").localeCompare(b.first || ""));
   const coreCount = team.roster.filter(p => p.core !== false).length;
-  const totalCount = team.roster.length;
+  const totalCount = coreCount;
 
   return (
     <div>
       <h2 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
         Active Roster <span style={{ fontSize: '1rem', color: 'var(--text-muted)', fontWeight: 'normal' }}>({sortedRoster.length} Players)</span>
-        <button
-          onClick={() => setShowAll(!showAll)}
-          style={{
-            marginLeft: 'auto',
-            padding: '0.4rem 1rem',
-            borderRadius: '20px',
-            border: '1px solid rgba(255,255,255,0.15)',
-            background: showAll ? 'var(--primary-color)' : 'rgba(255,255,255,0.05)',
-            color: showAll ? '#fff' : 'var(--text-muted)',
-            cursor: 'pointer',
-            fontSize: '0.8rem',
-            fontWeight: '600',
-            transition: 'all 0.2s ease'
-          }}
-        >
-          {showAll ? `All Players (${totalCount})` : `Sharks Only (${coreCount})`}
-        </button>
+        <span style={{ marginLeft: 'auto', fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: '600' }}>
+          Sharks Only ({totalCount})
+        </span>
       </h2>
       
       <div style={{

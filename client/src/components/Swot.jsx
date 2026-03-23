@@ -287,7 +287,7 @@ const Swot = ({ swotData, roster, schedule }) => {
 
   // Combine player objects with their SWOT evaluations
   const evaluations = swotData.player_analyses || swotData.player_evaluations || [];
-  const playersWithSwot = (roster || []).map(player => {
+  const playersWithSwot = (roster || []).filter(p => p.core !== false).map(player => {
     const evaluation = evaluations.find(e =>
       (e.number && String(e.number) === String(player.number)) ||
       (e.name && e.name.toLowerCase() === `${player.first} ${player.last}`.trim().toLowerCase()) ||
