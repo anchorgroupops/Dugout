@@ -266,13 +266,16 @@ const Roster = ({ team, availability, onAvailabilityChange }) => {
                     background: isActive ? 'var(--primary-color)' : 'rgba(255,255,255,0.1)',
                     color: isActive ? '#fff' : 'var(--text-muted)',
                     border: 'none',
-                    padding: '4px 10px',
-                    borderRadius: '4px',
-                    fontSize: '0.65rem',
+                    padding: '8px 14px',
+                    borderRadius: '8px',
+                    fontSize: '0.8rem',
                     fontWeight: 'bold',
                     cursor: 'pointer',
                     transition: 'all 0.2s ease',
-                    opacity: isUpdating ? 0.5 : 1
+                    opacity: isUpdating ? 0.5 : 1,
+                    minWidth: '88px',
+                    minHeight: '36px',
+                    letterSpacing: '0.4px'
                   }}
                 >
                   {isUpdating ? '...' : (isActive ? 'ACTIVE' : 'INACTIVE')}
