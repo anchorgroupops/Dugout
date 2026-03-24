@@ -94,10 +94,21 @@ CREATE TABLE IF NOT EXISTS fielding_snapshots (
   FOREIGN KEY (player_key) REFERENCES players(player_key) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS h2h_games (
+  game_id TEXT PRIMARY KEY,
+  opponent_slug TEXT NOT NULL,
+  date TEXT NOT NULL,
+  runs_for INTEGER NOT NULL,
+  runs_against INTEGER NOT NULL,
+  result TEXT NOT NULL,
+  recorded_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_snapshots_captured_at ON snapshots(captured_at DESC);
 CREATE INDEX IF NOT EXISTS idx_batting_player ON batting_snapshots(player_key, snapshot_id DESC);
 CREATE INDEX IF NOT EXISTS idx_pitching_player ON pitching_snapshots(player_key, snapshot_id DESC);
 CREATE INDEX IF NOT EXISTS idx_fielding_player ON fielding_snapshots(player_key, snapshot_id DESC);
+CREATE INDEX IF NOT EXISTS idx_h2h_opponent ON h2h_games(opponent_slug, date DESC);
 """
 
 
@@ -265,3 +276,57 @@ def get_db_status() -> dict:
         }
     finally:
         conn.close()
+
+
+def insert_h2h_game(game_id: str, opponent_slug: str, date: str,
+                     runs_for: int, runs_against: int, result: str) -> bool:
+    """Insert a head-to-head game record. Returns True if inserted, False if duplicate."""
+    conn = _connect()
+    try:
+        conn.execute(
+            "INSERT OR IGNORE INTO h2h_games (game_id, opponent_slug, date, runs_for, runs_against, result, recorded_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (game_id, opponent_slug, date, runs_for, runs_against, result, _now_iso()),
+        )
+        conn.commit()
+        return conn.total_changes > 0
+    finally:
+        conn.close()
+
+
+def get_h2h_history(opponent_slug: str) -> list[dict]:
+    """Return all head-to-head games against a specific opponent, newest first."""
+    conn = _connect()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT game_id, date, runs_for, runs_against, result "
+            "FROM h2h_games WHERE opponent_slug = ? ORDER BY date DESC",
+            (opponent_slug,),
+        )
+        return [
+            {"game_id": r[0], "date": r[1], "runs_for": r[2], "runs_against": r[3], "result": r[4]}
+            for r in cur.fetchall()
+        ]
+    finally:
+        conn.close()
+
+
+def get_h2h_summary(opponent_slug: str) -> dict:
+    """Return a W-L-T summary for head-to-head against an opponent."""
+    games = get_h2h_history(opponent_slug)
+    wins = sum(1 for g in games if g["result"] == "W")
+    losses = sum(1 for g in games if g["result"] == "L")
+    ties = sum(1 for g in games if g["result"] == "T")
+    total_rf = sum(g["runs_for"] for g in games)
+    total_ra = sum(g["runs_against"] for g in games)
+    return {
+        "opponent_slug": opponent_slug,
+        "games_played": len(games),
+        "wins": wins, "losses": losses, "ties": ties,
+        "record": f"{wins}-{losses}" + (f"-{ties}" if ties else ""),
+        "runs_for": total_rf, "runs_against": total_ra,
+        "avg_runs_for": round(total_rf / len(games), 1) if games else 0,
+        "avg_runs_against": round(total_ra / len(games), 1) if games else 0,
+        "games": games,
+    }

@@ -55,6 +55,7 @@ LOG_DIR = Path(__file__).parent.parent / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 DEFAULT_FALLBACK_VOICE_ID = "EXAVITQu4vr4xnSDxMaL"
 _SECRET_CACHE: dict[str, str] | None = None
+_SYNC_STATUS: dict[str, str] = {"stage": "idle", "last_completed": ""}
 
 DEFAULT_CORS_ORIGINS = [
     "https://sharks.joelycannoli.com",
@@ -789,9 +790,36 @@ def _load_recent_metric_profiles(limit: int = 30) -> dict[str, list[dict[str, fl
         conn.close()
 
 
+def _detect_threshold_anomalies(team_data: dict) -> list[dict]:
+    """Flag players with concerning stat thresholds (no history needed)."""
+    alerts = []
+    roster = team_data.get("roster", [])
+    for player in roster:
+        batting = normalize_batting_row(player)
+        pa = batting.get("pa", 0)
+        if pa < 5:
+            continue
+        name = f"{player.get('first', '')} {player.get('last', '')}".strip() or player.get("name", "Unknown")
+        number = player.get("number", "?")
+        ab = batting.get("ab", 0)
+        h = batting.get("h", 0)
+        so = batting.get("so", 0)
+        ba = h / ab if ab > 0 else 0
+        k_rate = so / pa if pa > 0 else 0
+        player_alerts = []
+        if ba < 0.100 and pa >= 8:
+            player_alerts.append(f"Very low BA ({ba:.3f}) over {pa} PA")
+        if k_rate > 0.50 and pa >= 8:
+            player_alerts.append(f"High K-rate ({k_rate:.1%}) over {pa} PA")
+        if player_alerts:
+            alerts.append({"player": name, "number": number, "alerts": player_alerts})
+    return alerts
+
+
 def _validate_and_write_stat_anomalies(team_data: dict) -> list[dict]:
     """
     Flag outlier stats (>3 SD by default) before writing team_enriched.json.
+    Also applies threshold-based detection for teams without enough history.
     """
     z_threshold = float(os.getenv("STATS_OUTLIER_Z_THRESHOLD", "3.0"))
     min_samples = int(os.getenv("STATS_OUTLIER_MIN_SAMPLES", "5"))
@@ -805,6 +833,8 @@ def _validate_and_write_stat_anomalies(team_data: dict) -> list[dict]:
         min_history_samples=min_samples,
     )
 
+    threshold_alerts = _detect_threshold_anomalies(team_data)
+
     out = {
         "generated_at": datetime.now(ET).isoformat(),
         "z_threshold": z_threshold,
@@ -812,6 +842,8 @@ def _validate_and_write_stat_anomalies(team_data: dict) -> list[dict]:
         "history_snapshot_limit": history_limit,
         "anomaly_count": len(findings),
         "anomalies": findings,
+        "threshold_alerts": threshold_alerts,
+        "threshold_alert_count": len(threshold_alerts),
     }
     out_file = SHARKS_DIR / "stats_anomalies.json"
     with open(out_file, "w") as f:
@@ -876,6 +908,7 @@ def run_sync_cycle():
     """Executes one full sync of schedule and stats, catching ALL exceptions."""
     try:
         logging.info("--- Starting Sync Cycle ---")
+        _SYNC_STATUS["stage"] = "starting"
 
         # 0. Refresh opponent discovery from public org/team feeds.
         try:
@@ -890,6 +923,7 @@ def run_sync_cycle():
             logging.warning(f"[Sync] Opponent discovery skipped: {e}")
         
         # 1. Scrape Schedule
+        _SYNC_STATUS["stage"] = "scraping_schedule"
         logging.info("Scraping Schedule...")
         sched_scraper = ScheduleScraper()
         sched_scraper.scrape_schedule()
@@ -916,6 +950,7 @@ def run_sync_cycle():
             logging.warning(f"[Sync] Web box score ingest skipped: {e}")
         
         # 2. Scrape Stats
+        _SYNC_STATUS["stage"] = "scraping_stats"
         logging.info("Scraping Live Stats...")
         try:
             from playwright.sync_api import sync_playwright
@@ -936,6 +971,7 @@ def run_sync_cycle():
 
         enriched_team_data = None
 
+        _SYNC_STATUS["stage"] = "enriching"
         # Write team_enriched.json (team_merged + app_stats + scorebook reconciliation)
         try:
             team_file = SHARKS_DIR / ("team_merged.json" if (SHARKS_DIR / "team_merged.json").exists() else "team.json")
@@ -957,6 +993,7 @@ def run_sync_cycle():
         except Exception as e:
             logging.warning(f"team_enriched.json write skipped: {e}")
 
+        _SYNC_STATUS["stage"] = "analyzing"
         # Re-run SWOT and lineup optimizer with enriched data
         try:
             from swot_analyzer import run_sharks_analysis
@@ -971,6 +1008,21 @@ def run_sync_cycle():
         except Exception as e:
             logging.warning(f"Lineup re-run skipped: {e}")
 
+        # Practice plan scheduling:
+        #  - initial generation waits until 1h after last completed game/practice
+        #  - refresh runs 1h before next practice only if new source data is detected
+        try:
+            from practice_gen import run_scheduled as run_practice_planner
+
+            practice_result = run_practice_planner(force=False)
+            logging.info(
+                "[Sync] Practice planner: status=%s reason=%s",
+                practice_result.get("status"),
+                practice_result.get("reason"),
+            )
+        except Exception as e:
+            logging.warning(f"[Sync] Practice planner skipped: {e}")
+
         # Refresh pipeline coverage metrics artifact
         try:
             _write_pipeline_health_artifact()
@@ -981,6 +1033,8 @@ def run_sync_cycle():
         if isinstance(enriched_team_data, dict):
             _record_stats_db_snapshot(enriched_team_data, source="sync_cycle")
 
+        _SYNC_STATUS["stage"] = "idle"
+        _SYNC_STATUS["last_completed"] = datetime.now(ET).isoformat()
         logging.info("--- Sync Cycle Complete ---")
         return True
     except Exception as e:
@@ -1549,6 +1603,73 @@ def handle_opponent_detail(slug):
     return jsonify(team)
 
 
+@app.route('/api/next-game', methods=['GET'])
+def handle_next_game():
+    """Return the next upcoming game with opponent slug and matchup URL."""
+    sched_file = SHARKS_DIR / "schedule_manual.json"
+    if not sched_file.exists():
+        return jsonify({"error": "Schedule unavailable"}), 503
+    try:
+        with open(sched_file) as f:
+            schedule = json.load(f)
+    except Exception:
+        return jsonify({"error": "Schedule unavailable"}), 503
+    if not isinstance(schedule, dict):
+        return jsonify({"error": "Schedule unavailable"}), 503
+    now = datetime.now(ET)
+    disc_file = SHARKS_DIR / "opponent_discovery.json"
+    teams_list = []
+    if disc_file.exists():
+        try:
+            with open(disc_file) as f:
+                discovery = json.load(f)
+            teams_list = discovery.get("teams", []) if isinstance(discovery, dict) else []
+        except Exception:
+            pass
+
+    for game in schedule.get("upcoming", []):
+        if not isinstance(game, dict) or game.get("is_game") is False:
+            continue
+        date_str = (game.get("date") or "").strip()
+        time_str = (game.get("time") or "").strip()
+        if not date_str:
+            continue
+        try:
+            from practice_gen import _parse_event_datetime, _clean_opponent_name
+            start = _parse_event_datetime(date_str, time_str, default_time="12:00 PM")
+        except Exception:
+            start = None
+        if start and start > now:
+            raw_opponent = (game.get("opponent") or "").strip()
+            try:
+                opponent = _clean_opponent_name(raw_opponent)
+            except Exception:
+                opponent = raw_opponent
+            # Resolve slug
+            slug = None
+            for t in teams_list:
+                tn = (t.get("team_name") or "").lower()
+                if tn and (tn in opponent.lower() or opponent.lower() in tn):
+                    slug = t.get("slug")
+                    break
+            if not slug:
+                opp_dir = DATA_DIR / "opponents"
+                if opp_dir.exists():
+                    name_lower = opponent.lower().replace(" ", "_").replace("-", "_")
+                    for d in opp_dir.iterdir():
+                        if d.is_dir() and d.name in name_lower:
+                            slug = d.name
+                            break
+            return jsonify({
+                "opponent": opponent,
+                "slug": slug,
+                "date": date_str,
+                "time": time_str,
+                "home_away": game.get("home_away", ""),
+            })
+    return jsonify({"opponent": None, "slug": None, "date": None, "message": "No upcoming games"})
+
+
 @app.route('/api/matchup/<opponent_slug>', methods=['GET'])
 def handle_matchup(opponent_slug):
     """Run matchup analysis: Sharks vs a specific opponent."""
@@ -1689,6 +1810,57 @@ def _aggregate_stats_from_games():
         b["ops"] = round(b["obp"] + b["slg"], 3)
 
     return player_stats
+
+
+@app.route('/api/sync/status', methods=['GET'])
+def handle_sync_status():
+    """Return current sync daemon stage and last completion time."""
+    return jsonify(_SYNC_STATUS)
+
+
+@app.route('/api/health', methods=['GET'])
+def handle_health():
+    """Return pipeline health with staleness detection for each data source."""
+    STALE_THRESHOLD_HOURS = 48
+    now = datetime.now(ET)
+    sources = {
+        "team_enriched": SHARKS_DIR / "team_enriched.json",
+        "swot_analysis": SHARKS_DIR / "swot_analysis.json",
+        "lineups": SHARKS_DIR / "lineups.json",
+        "app_stats": SHARKS_DIR / "app_stats.json",
+        "schedule": SHARKS_DIR / "schedule_manual.json",
+        "pipeline_health": SHARKS_DIR / "pipeline_health.json",
+    }
+    result = {"checked_at": now.isoformat(), "stale_sources": [], "sources": {}}
+    for name, path in sources.items():
+        if not path.exists():
+            result["sources"][name] = {"exists": False, "stale": True}
+            result["stale_sources"].append(name)
+            continue
+        mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=ET)
+        age_hours = (now - mtime).total_seconds() / 3600
+        stale = age_hours > STALE_THRESHOLD_HOURS
+        result["sources"][name] = {
+            "exists": True,
+            "last_updated": mtime.isoformat(),
+            "age_hours": round(age_hours, 1),
+            "stale": stale,
+        }
+        if stale:
+            result["stale_sources"].append(name)
+    return jsonify(result)
+
+
+@app.route('/api/h2h/<opponent_slug>', methods=['GET'])
+def handle_h2h(opponent_slug):
+    """Return head-to-head game history and W-L summary against an opponent."""
+    try:
+        from stats_db import get_h2h_summary
+        summary = get_h2h_summary(opponent_slug)
+        return jsonify(summary)
+    except Exception as e:
+        logging.warning(f"[H2H] query failed for '{opponent_slug}': {e}")
+        return jsonify({"error": "H2H data unavailable", "games": [], "games_played": 0}), 503
 
 
 @app.route('/api/team', methods=['GET'])
@@ -2225,6 +2397,66 @@ def handle_regenerate_lineups():
         return jsonify({"error": str(e)}), 500
 
 
+def _record_h2h_from_games():
+    """Scan game JSON files and insert h2h records for any new games."""
+    games_dir = SHARKS_DIR / "games"
+    if not games_dir.exists():
+        return
+    try:
+        from stats_db import insert_h2h_game
+    except Exception:
+        return
+    schedule = {}
+    sched_file = SHARKS_DIR / "schedule_manual.json"
+    if sched_file.exists():
+        try:
+            with open(sched_file) as f:
+                schedule = json.load(f)
+        except Exception:
+            pass
+    # Build a lookup of results from schedule
+    sched_results = {}
+    for section in ("past", "upcoming"):
+        for row in (schedule.get(section) or []):
+            if not isinstance(row, dict):
+                continue
+            result = (row.get("result") or "").strip()
+            score = (row.get("score") or "").strip()
+            if result and score:
+                date = (row.get("date") or "").strip()
+                if date:
+                    sched_results[date] = {"result": result, "score": score}
+
+    for gf in sorted(games_dir.glob("*.json")):
+        if gf.name == "index.json":
+            continue
+        try:
+            with open(gf) as f:
+                game = json.load(f)
+            game_id = gf.stem
+            date = game.get("date", game_id[:10])
+            sharks_score = game.get("sharks_score", game.get("runs_for", 0))
+            opp_score = game.get("opponent_score", game.get("runs_against", 0))
+            opp_slug = game.get("opponent_slug", "")
+            if not opp_slug:
+                opp_name = game.get("opponent", "").lower().replace(" ", "_").replace("-", "_")
+                opp_slug = opp_name
+            result = game.get("result", "")
+            if not result:
+                sr = sched_results.get(date, {})
+                result = sr.get("result", "")
+            if not result:
+                if sharks_score > opp_score:
+                    result = "W"
+                elif opp_score > sharks_score:
+                    result = "L"
+                else:
+                    result = "T"
+            insert_h2h_game(game_id, opp_slug, date, int(sharks_score), int(opp_score), result)
+        except Exception as e:
+            logging.debug(f"[H2H] skipped {gf.name}: {e}")
+
+
 def _trigger_post_game_analysis():
     """Run immediately after a game ends: re-scrape, enrich, update SWOT + lineups."""
     logging.info("[Post-Game] Starting post-game analysis pipeline...")
@@ -2239,6 +2471,12 @@ def _trigger_post_game_analysis():
         success = run_sync_cycle()
     except Exception as e:
         logging.error(f"[Post-Game] sync cycle failed: {e}")
+    # Record h2h results from game files
+    try:
+        _record_h2h_from_games()
+        logging.info("[Post-Game] H2H records updated.")
+    except Exception as e:
+        logging.warning(f"[Post-Game] H2H recording skipped: {e}")
     if success:
         send_alert("Post-game analysis complete — scorebooks, SWOT, and lineups refreshed.", level="INFO")
         logging.info("[Post-Game] Analysis pipeline complete.")
@@ -2292,7 +2530,14 @@ def main():
             _record_stats_db_snapshot(bootstrap_team, source="startup_bootstrap")
     except Exception as e:
         logging.warning(f"[DB] startup bootstrap snapshot skipped: {e}")
-    
+
+    # Bootstrap h2h records from existing game files
+    try:
+        _record_h2h_from_games()
+        logging.info("[Startup] H2H game records bootstrapped.")
+    except Exception as e:
+        logging.warning(f"[Startup] H2H bootstrap skipped: {e}")
+
     consecutive_errors = 0
     _last_state = "IDLE"
     _last_post_game_trigger_at = None

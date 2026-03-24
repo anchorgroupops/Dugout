@@ -8,3 +8,5 @@ flask-cors
 gunicorn==22.0.0
 pdfplumber
 tzdata
+fastapi[standard]
+uvicorn

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Trophy, Users, ChevronDown, ChevronUp } from 'lucide-react';
+import { Trophy, Users, ChevronDown, ChevronUp, Shield, AlertTriangle } from 'lucide-react';
 
 const League = ({ isMobile = false }) => {
   const [standings, setStandings] = useState(null);
@@ -147,8 +147,8 @@ const League = ({ isMobile = false }) => {
                     {isExpanded ? <ChevronUp size={16} color="var(--text-muted)" /> : <ChevronDown size={16} color="var(--text-muted)" />}
                   </div>
 
-                  {isExpanded && opp.roster_size > 0 && (
-                    <OpponentRoster slug={opp.slug} />
+                  {isExpanded && (
+                    <OpponentDetail slug={opp.slug} hasRoster={opp.roster_size > 0} />
                   )}
                 </div>
               );
@@ -160,34 +160,74 @@ const League = ({ isMobile = false }) => {
   );
 };
 
-const OpponentRoster = ({ slug }) => {
+const OpponentDetail = ({ slug, hasRoster }) => {
   const [roster, setRoster] = useState(null);
+  const [matchup, setMatchup] = useState(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch(`/api/opponents/${slug}`)
-      .then(r => r.ok ? r.json() : null)
-      .then(data => setRoster(data?.roster || []))
-      .catch(() => setRoster([]));
-  }, [slug]);
+    const fetches = [
+      fetch(`/api/matchup/${slug}`).then(r => r.ok ? r.json() : null).catch(() => null),
+    ];
+    if (hasRoster) {
+      fetches.push(fetch(`/api/opponents/${slug}`).then(r => r.ok ? r.json() : null).catch(() => null));
+    }
+    Promise.all(fetches).then(([m, opp]) => {
+      setMatchup(m);
+      if (opp) setRoster(opp?.roster || []);
+      setLoading(false);
+    });
+  }, [slug, hasRoster]);
 
-  if (roster === null) return <div className="loader" style={{ width: '20px', height: '20px', margin: '0.75rem auto' }}></div>;
+  if (loading) return <div className="loader" style={{ width: '20px', height: '20px', margin: '0.75rem auto' }} />;
 
   return (
     <div style={{ marginTop: '1rem', paddingTop: '0.75rem', borderTop: '1px solid var(--surface-border)' }}>
-      <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: '700', marginBottom: '0.5rem' }}>
-        Roster
-      </div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
-        {roster.map((p, i) => (
-          <span key={i} style={{
-            background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)',
-            borderRadius: '6px', padding: '3px 8px', fontSize: '0.8rem', color: 'var(--text-muted)'
-          }}>
-            {p.number ? <span style={{ color: 'var(--primary-color)', fontWeight: '700', marginRight: '4px' }}>#{p.number}</span> : null}
-            {p.name || `${p.first || ''} ${p.last || ''}`.trim()}
-          </span>
-        ))}
-      </div>
+      {matchup && !matchup.empty && (
+        <div style={{ marginBottom: '0.75rem' }}>
+          {matchup.our_advantages?.length > 0 && (
+            <div style={{ marginBottom: '0.5rem' }}>
+              <span style={{ fontSize: '0.68rem', color: 'var(--success)', textTransform: 'uppercase', fontWeight: '700' }}>
+                <Shield size={11} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '3px' }} />
+                Our Advantages
+              </span>
+              <ul style={{ margin: '0.2rem 0 0 1rem', fontSize: '0.8rem', color: 'var(--text-muted)', paddingLeft: '0.5rem' }}>
+                {matchup.our_advantages.slice(0, 3).map((a, i) => <li key={i}>{a}</li>)}
+              </ul>
+            </div>
+          )}
+          {matchup.their_advantages?.length > 0 && (
+            <div>
+              <span style={{ fontSize: '0.68rem', color: 'var(--danger)', textTransform: 'uppercase', fontWeight: '700' }}>
+                <AlertTriangle size={11} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '3px' }} />
+                Their Strengths
+              </span>
+              <ul style={{ margin: '0.2rem 0 0 1rem', fontSize: '0.8rem', color: 'var(--text-muted)', paddingLeft: '0.5rem' }}>
+                {matchup.their_advantages.slice(0, 3).map((a, i) => <li key={i}>{a}</li>)}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+
+      {roster && roster.length > 0 && (
+        <div>
+          <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: '700', marginBottom: '0.5rem' }}>
+            Roster
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
+            {roster.map((p, i) => (
+              <span key={i} style={{
+                background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)',
+                borderRadius: '6px', padding: '3px 8px', fontSize: '0.8rem', color: 'var(--text-muted)'
+              }}>
+                {p.number ? <span style={{ color: 'var(--primary-color)', fontWeight: '700', marginRight: '4px' }}>#{p.number}</span> : null}
+                {p.name || `${p.first || ''} ${p.last || ''}`.trim()}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

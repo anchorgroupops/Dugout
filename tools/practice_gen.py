@@ -4,13 +4,24 @@ Maps identified weaknesses from SWOT analysis to targeted drills.
 Generates structured practice plans in the user's existing format.
 """
 
+import argparse
+import hashlib
 import json
-from datetime import datetime
+import re
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from pathlib import Path
+from typing import Any
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 SHARKS_DIR = DATA_DIR / "sharks"
+ET_TZ = ZoneInfo("America/New_York")
+GAME_DURATION_HOURS = 2.5
+PRACTICE_DURATION_HOURS = 1.5
+PLANNING_COOLDOWN_HOURS = 1.0
+PRACTICE_REFRESH_LEAD_HOURS = 1.0
+PLAN_FILE = SHARKS_DIR / "next_practice.txt"
+PLAN_META_FILE = SHARKS_DIR / "next_practice_meta.json"
 
 
 # ── Drill Library ─────────────────────────────────────────────────────────
@@ -244,15 +255,41 @@ WEAKNESS_DRILL_MAP = {
 }
 
 
-def map_weaknesses_to_drills(swot_analysis: dict) -> list[dict]:
-    """Map team weaknesses to recommended drills with priority."""
+MATCHUP_DRILL_BOOSTS: dict[str, list[str]] = {
+    "Higher team batting average": ["ground_ball_circuit", "fly_ball_communication", "cutoff_relay", "target_pitching"],
+    "Higher team OBP": ["target_pitching", "pitch_count_sim", "ground_ball_circuit"],
+    "Higher team slugging": ["target_pitching", "cutoff_relay", "fly_ball_communication"],
+    "More aggressive baserunning": ["pickle_drill", "cutoff_relay", "ground_ball_circuit"],
+    "Better pitching control": ["soft_toss", "tee_work", "live_bp", "bunting_practice"],
+    "Lower ERA": ["soft_toss", "tee_work", "pepper_drill", "live_bp"],
+    "Lower WHIP": ["soft_toss", "bunting_practice", "live_bp"],
+    "Better fielding": ["soft_toss", "tee_work", "live_bp"],
+}
+
+EXPLOIT_DRILL_BOOSTS: dict[str, list[str]] = {
+    "Higher team batting average": ["live_bp", "tee_work"],
+    "Higher team OBP": ["bunting_practice", "live_bp"],
+    "More aggressive baserunning": ["lead_and_steal", "baserunning_431"],
+    "Better fielding": ["ground_ball_circuit", "fly_ball_communication"],
+    "Better pitching control": ["target_pitching", "pitch_count_sim"],
+}
+
+
+def map_weaknesses_to_drills(
+    swot_analysis: dict,
+    matchup: dict | None = None,
+) -> list[dict]:
+    """Map team weaknesses to recommended drills with priority.
+
+    If *matchup* is provided (from analyze_matchup()), boost drills that
+    counter the opponent's strengths and exploit their weaknesses.
+    """
     team_weaknesses = swot_analysis.get("team_swot", {}).get("weaknesses", [])
 
     drill_scores: dict[str, int] = {}
     drill_reasons: dict[str, list[str]] = {}
 
     for weakness in team_weaknesses:
-        # Extract the weakness label (before the player count)
         label = weakness.split("(")[0].strip()
         drills = WEAKNESS_DRILL_MAP.get(label, [])
         for drill_id in drills:
@@ -261,13 +298,34 @@ def map_weaknesses_to_drills(swot_analysis: dict) -> list[dict]:
                 drill_reasons[drill_id] = []
             drill_reasons[drill_id].append(label)
 
-    # Also analyze individual player weaknesses
     for pa in swot_analysis.get("player_analyses", []):
         for weakness in pa.get("swot", {}).get("weaknesses", []):
             label = weakness.split("(")[0].strip()
             drills = WEAKNESS_DRILL_MAP.get(label, [])
             for drill_id in drills:
                 drill_scores[drill_id] = drill_scores.get(drill_id, 0) + 1
+
+    # ── Matchup-aware boosting ───────────────────────────────────────────
+    if matchup and not matchup.get("empty"):
+        opponent_name = matchup.get("opponent", "")
+        # Counter their strengths: boost defensive/pitching drills
+        for adv in matchup.get("their_advantages", []):
+            for pattern, boosts in MATCHUP_DRILL_BOOSTS.items():
+                if pattern.lower() in adv.lower():
+                    for drill_id in boosts:
+                        drill_scores[drill_id] = drill_scores.get(drill_id, 0) + 2
+                        if drill_id not in drill_reasons:
+                            drill_reasons[drill_id] = []
+                        drill_reasons[drill_id].append(f"Counter {opponent_name}: {pattern}")
+        # Exploit our advantages: sharpen what we're already good at
+        for adv in matchup.get("our_advantages", []):
+            for pattern, boosts in EXPLOIT_DRILL_BOOSTS.items():
+                if pattern.lower() in adv.lower():
+                    for drill_id in boosts:
+                        drill_scores[drill_id] = drill_scores.get(drill_id, 0) + 1
+                        if drill_id not in drill_reasons:
+                            drill_reasons[drill_id] = []
+                        drill_reasons[drill_id].append(f"Exploit vs {opponent_name}: {pattern}")
 
     # Sort by priority (most needed first)
     sorted_drills = sorted(drill_scores.items(), key=lambda x: x[1], reverse=True)
@@ -290,18 +348,19 @@ def generate_practice_plan(
     swot_analysis: dict,
     duration_minutes: int = 120,
     date: str | None = None,
+    matchup: dict | None = None,
 ) -> str:
     """
     Generate a structured practice plan based on SWOT weaknesses.
+    If *matchup* is provided, drills are biased toward countering
+    the next opponent's strengths and exploiting their weaknesses.
     Output format matches the user's existing Google Doc practice plan style.
     """
     if date is None:
-        # Eastern Time for practice planning
-        et_tz = ZoneInfo("America/New_York")
-        now = datetime.now(et_tz)
+        now = datetime.now(ET_TZ)
         date = f"{now.month}/{now.day}/{now.year}"
 
-    drills = map_weaknesses_to_drills(swot_analysis)
+    drills = map_weaknesses_to_drills(swot_analysis, matchup=matchup)
     if not drills:
         drills = [
             DRILL_LIBRARY["baserunning_431"],
@@ -311,13 +370,20 @@ def generate_practice_plan(
             DRILL_LIBRARY["strike_at_home"],
         ]
 
-    # Always start with warmup
-    plan_lines = [
-        f"{date}",
+    # Build header with optional opponent context
+    opponent_name = ""
+    if matchup and not matchup.get("empty"):
+        opponent_name = matchup.get("opponent", "")
+
+    plan_lines = [f"{date}"]
+    if opponent_name:
+        plan_lines.append(f"Prep for: {opponent_name}")
+    reason_set = set(r for d in drills[:5] for r in d.get("reasons", ["general development"])[:2])
+    plan_lines.append(
         f"Objectives: Address identified weaknesses — "
-        + ", ".join(set(r for d in drills[:5] for r in d.get("reasons", ["general development"])[:2]))
+        + ", ".join(reason_set)
         + ". Emphasize fun, safety, rotation, proper form.",
-    ]
+    )
 
     # Build practice plan
     remaining_time = duration_minutes
@@ -365,28 +431,411 @@ def generate_practice_plan(
     return "\n".join(plan_lines)
 
 
-def run():
-    """Load SWOT analysis and generate a practice plan."""
+def _iso(dt: datetime | None) -> str | None:
+    return dt.isoformat() if dt else None
+
+
+def _load_json(path: Path, default: Any) -> Any:
+    if not path.exists():
+        return default
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return default
+
+
+def _normalize_date_str(date_str: str) -> str:
+    raw = (date_str or "").strip()
+    if not raw:
+        return ""
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw):
+        return raw
+    if re.fullmatch(r"\d{1,2}/\d{1,2}/\d{4}", raw):
+        dt = datetime.strptime(raw, "%m/%d/%Y")
+        return dt.strftime("%Y-%m-%d")
+    return raw
+
+
+def _parse_event_datetime(date_str: str, time_str: str = "", default_time: str = "12:00 PM") -> datetime | None:
+    date_part = _normalize_date_str(date_str)
+    if not date_part:
+        return None
+    time_part = (time_str or "").strip() or default_time
+    date_time = f"{date_part} {time_part}".strip()
+    candidates = [
+        ("%Y-%m-%d %I:%M %p", date_time),
+        ("%Y-%m-%d %I %p", date_time),
+        ("%Y-%m-%d %H:%M", date_time),
+        ("%Y-%m-%d", date_part),
+    ]
+    for fmt, text in candidates:
+        try:
+            parsed = datetime.strptime(text, fmt)
+            return parsed.replace(tzinfo=ET_TZ)
+        except ValueError:
+            continue
+    return None
+
+
+def _extract_time_hint(raw_event: dict[str, Any]) -> str:
+    for key in ("time", "start_time", "start", "practice_time"):
+        val = str(raw_event.get(key, "")).strip()
+        if val:
+            return val
+    title = str(raw_event.get("title", "")).strip()
+    if title:
+        match = re.search(r"\b(\d{1,2}(?::\d{2})?\s*[APMapm]{2})\b", title)
+        if match:
+            return match.group(1).upper().replace("  ", " ")
+    return ""
+
+
+def _load_practice_events(now: datetime) -> list[dict[str, Any]]:
+    rsvp_file = SHARKS_DIR / "practice_rsvp.json"
+    data = _load_json(rsvp_file, {})
+    if not isinstance(data, dict):
+        return []
+
+    raw_events: list[dict[str, Any]] = []
+    if isinstance(data.get("next"), dict):
+        raw_events.append(data["next"])
+    if isinstance(data.get("practices"), list):
+        raw_events.extend([p for p in data["practices"] if isinstance(p, dict)])
+
+    seen: set[tuple[str, str, str]] = set()
+    out: list[dict[str, Any]] = []
+    for raw in raw_events:
+        date_str = str(raw.get("date", "")).strip()
+        if not date_str:
+            continue
+        time_hint = _extract_time_hint(raw)
+        start = _parse_event_datetime(date_str, time_hint, default_time="6:00 PM")
+        if not start:
+            continue
+        title = str(raw.get("title", "Practice")).strip() or "Practice"
+        key = (_normalize_date_str(date_str), time_hint, title)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(
+            {
+                "kind": "practice",
+                "title": title,
+                "start": start,
+                "end": start + timedelta(hours=PRACTICE_DURATION_HOURS),
+                "is_future": start > now,
+            }
+        )
+    out.sort(key=lambda e: e["start"])
+    return out
+
+
+def _clean_opponent_name(name: str) -> str:
+    cleaned = (name or "").strip()
+    for prefix in ("@ ", "vs. ", "vs "):
+        if cleaned.startswith(prefix):
+            cleaned = cleaned[len(prefix):]
+    return cleaned.strip()
+
+
+def _load_game_events(now: datetime) -> list[dict[str, Any]]:
+    schedule = _load_json(SHARKS_DIR / "schedule_manual.json", {})
+    if not isinstance(schedule, dict):
+        return []
+    rows = []
+    for section in ("past", "upcoming"):
+        payload = schedule.get(section, [])
+        if isinstance(payload, list):
+            rows.extend([r for r in payload if isinstance(r, dict)])
+
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        if row.get("is_game") is False:
+            continue
+        date_str = str(row.get("date", "")).strip()
+        if not date_str:
+            continue
+        start = _parse_event_datetime(date_str, str(row.get("time", "")).strip(), default_time="12:00 PM")
+        if not start:
+            continue
+        opponent = _clean_opponent_name(str(row.get("opponent", "Game")).strip() or "Game")
+        out.append(
+            {
+                "kind": "game",
+                "title": opponent,
+                "start": start,
+                "end": start + timedelta(hours=GAME_DURATION_HOURS),
+                "is_future": start > now,
+            }
+        )
+    out.sort(key=lambda e: e["start"])
+    return out
+
+
+def _compute_windows(now: datetime) -> dict[str, Any]:
+    practice_events = _load_practice_events(now)
+    game_events = _load_game_events(now)
+    completed = [e for e in (practice_events + game_events) if e["end"] <= now]
+    latest_completed = max(completed, key=lambda e: e["end"]) if completed else None
+    latest_completed_end = latest_completed["end"] if latest_completed else None
+    planning_allowed_after = (
+        latest_completed_end + timedelta(hours=PLANNING_COOLDOWN_HOURS)
+        if latest_completed_end
+        else now
+    )
+
+    next_practice = next((p for p in practice_events if p["start"] >= now), None)
+    next_practice_start = next_practice["start"] if next_practice else None
+    refresh_window_start = (
+        next_practice_start - timedelta(hours=PRACTICE_REFRESH_LEAD_HOURS)
+        if next_practice_start
+        else None
+    )
+
+    return {
+        "latest_completed_event": latest_completed,
+        "latest_completed_end": latest_completed_end,
+        "planning_allowed_after": planning_allowed_after,
+        "next_practice": next_practice,
+        "next_practice_start": next_practice_start,
+        "refresh_window_start": refresh_window_start,
+    }
+
+
+def _snapshot_source_files() -> dict[str, dict[str, Any]]:
+    candidates = [
+        SHARKS_DIR / "swot_analysis.json",
+        SHARKS_DIR / "team_enriched.json",
+        SHARKS_DIR / "team_merged.json",
+        SHARKS_DIR / "team.json",
+        SHARKS_DIR / "app_stats.json",
+        SHARKS_DIR / "availability.json",
+        SHARKS_DIR / "practice_rsvp.json",
+        SHARKS_DIR / "schedule_manual.json",
+        SHARKS_DIR / "opponent_discovery.json",
+    ]
+
+    snapshot: dict[str, dict[str, Any]] = {}
+    for path in candidates:
+        key = str(path.relative_to(DATA_DIR.parent))
+        if not path.exists():
+            snapshot[key] = {"exists": False}
+            continue
+        stat = path.stat()
+        hasher = hashlib.sha1()
+        with open(path, "rb") as f:
+            hasher.update(f.read())
+        snapshot[key] = {
+            "exists": True,
+            "mtime_ns": int(stat.st_mtime_ns),
+            "size": int(stat.st_size),
+            "sha1": hasher.hexdigest(),
+        }
+    return snapshot
+
+
+def _load_plan_meta() -> dict[str, Any]:
+    data = _load_json(PLAN_META_FILE, {})
+    return data if isinstance(data, dict) else {}
+
+
+def _save_plan_meta(meta: dict[str, Any]) -> None:
+    SHARKS_DIR.mkdir(parents=True, exist_ok=True)
+    with open(PLAN_META_FILE, "w", encoding="utf-8") as f:
+        json.dump(meta, f, indent=2)
+
+
+def _write_plan(swot: dict[str, Any], windows: dict[str, Any], matchup: dict | None = None) -> str:
+    target_date = windows.get("next_practice_start") or datetime.now(ET_TZ)
+    plan_date = f"{target_date.month}/{target_date.day}/{target_date.year}"
+    plan = generate_practice_plan(swot, date=plan_date, matchup=matchup)
+    with open(PLAN_FILE, "w", encoding="utf-8") as f:
+        f.write(plan)
+    return plan
+
+
+def _resolve_next_opponent_matchup() -> dict | None:
+    """Load matchup data for the next upcoming opponent, if available."""
+    schedule = _load_json(SHARKS_DIR / "schedule_manual.json", {})
+    if not isinstance(schedule, dict):
+        return None
+    now = datetime.now(ET_TZ)
+    for game in schedule.get("upcoming", []):
+        if not isinstance(game, dict) or game.get("is_game") is False:
+            continue
+        start = _parse_event_datetime(
+            str(game.get("date", "")),
+            str(game.get("time", "")),
+            default_time="12:00 PM",
+        )
+        if start and start > now:
+            opponent_name = _clean_opponent_name(str(game.get("opponent", "")))
+            slug = _resolve_opponent_slug(opponent_name)
+            if slug:
+                matchup_file = DATA_DIR / "opponents" / slug / "team.json"
+                if matchup_file.exists():
+                    try:
+                        from swot_analyzer import analyze_matchup, load_team
+                        our_team = load_team(SHARKS_DIR, prefer_merged=True)
+                        with open(matchup_file, "r", encoding="utf-8") as f:
+                            opp_team = json.load(f)
+                        if our_team:
+                            m = analyze_matchup(our_team, opp_team)
+                            m["opponent"] = opponent_name
+                            m["opponent_slug"] = slug
+                            return m
+                    except Exception:
+                        pass
+            return None
+    return None
+
+
+def _resolve_opponent_slug(opponent_name: str) -> str | None:
+    """Map a schedule opponent name to a data/opponents/ directory slug."""
+    discovery = _load_json(SHARKS_DIR / "opponent_discovery.json", {})
+    if isinstance(discovery, dict):
+        for team in discovery.get("teams", []):
+            if not isinstance(team, dict):
+                continue
+            team_name = team.get("team_name", "")
+            slug = team.get("slug", "")
+            if team_name and slug:
+                if team_name.lower() in opponent_name.lower() or opponent_name.lower() in team_name.lower():
+                    return slug
+    # Fallback: fuzzy match against opponent directory names
+    opponents_dir = DATA_DIR / "opponents"
+    if opponents_dir.exists():
+        name_lower = opponent_name.lower().replace(" ", "_").replace("-", "_")
+        for d in opponents_dir.iterdir():
+            if d.is_dir() and d.name in name_lower:
+                return d.name
+    return None
+
+
+def run_scheduled(force: bool = False) -> dict[str, Any]:
+    """Run planner with timing policy:
+    1) wait 1h after completed game/practice to begin planning
+    2) refresh 1h before next practice only when new inputs exist."""
+    now = datetime.now(ET_TZ)
+    swot_file = SHARKS_DIR / "swot_analysis.json"
+    if not swot_file.exists():
+        return {"status": "skipped", "reason": "missing_swot"}
+
+    with open(swot_file, "r", encoding="utf-8") as f:
+        swot = json.load(f)
+
+    windows = _compute_windows(now)
+    source_snapshot = _snapshot_source_files()
+    meta = _load_plan_meta()
+
+    if not force and now < windows["planning_allowed_after"]:
+        return {
+            "status": "skipped",
+            "reason": "cooldown_after_event",
+            "planning_allowed_after": _iso(windows["planning_allowed_after"]),
+        }
+
+    next_practice_start = windows.get("next_practice_start")
+    refresh_window_start = windows.get("refresh_window_start")
+    latest_completed_end = windows.get("latest_completed_end")
+    cycle_anchor_end = _iso(latest_completed_end)
+    prev_cycle_anchor_end = str(meta.get("cycle_anchor_end") or "")
+
+    mode = "scheduled_initial"
+    reason = "initial_after_event_cooldown"
+
+    if force:
+        mode = "scheduled_force"
+        reason = "force"
+    elif not meta or prev_cycle_anchor_end != (cycle_anchor_end or ""):
+        mode = "scheduled_initial"
+        reason = "initial_after_event_cooldown"
+    else:
+        in_refresh_window = bool(
+            next_practice_start
+            and refresh_window_start
+            and refresh_window_start <= now <= next_practice_start
+        )
+        if in_refresh_window:
+            refresh_for = _iso(next_practice_start)
+            already_refreshed = str(meta.get("last_refresh_for_practice") or "") == (refresh_for or "")
+            if already_refreshed:
+                return {
+                    "status": "skipped",
+                    "reason": "refresh_already_done",
+                    "refresh_for": refresh_for,
+                }
+            if meta.get("source_snapshot") != source_snapshot:
+                mode = "scheduled_refresh"
+                reason = "pre_practice_new_info"
+            else:
+                return {
+                    "status": "skipped",
+                    "reason": "no_new_info",
+                    "refresh_for": refresh_for,
+                }
+        else:
+            return {"status": "skipped", "reason": "outside_refresh_window"}
+
+    matchup = _resolve_next_opponent_matchup()
+    _write_plan(swot, windows, matchup=matchup)
+    next_practice = windows.get("next_practice") or {}
+    refresh_for = _iso(next_practice_start) if mode == "scheduled_refresh" else None
+    new_meta = {
+        "updated_at": now.isoformat(),
+        "mode": mode,
+        "reason": reason,
+        "cycle_anchor_end": cycle_anchor_end,
+        "planning_allowed_after": _iso(windows.get("planning_allowed_after")),
+        "next_practice": {
+            "title": next_practice.get("title"),
+            "start": _iso(next_practice_start),
+            "refresh_window_start": _iso(refresh_window_start),
+        },
+        "last_refresh_for_practice": refresh_for,
+        "source_snapshot": source_snapshot,
+    }
+    _save_plan_meta(new_meta)
+
+    return {
+        "status": "generated",
+        "mode": mode,
+        "reason": reason,
+        "next_practice_start": _iso(next_practice_start),
+    }
+
+
+def run() -> str | None:
+    """Manual plan generation (immediate)."""
     swot_file = SHARKS_DIR / "swot_analysis.json"
     if not swot_file.exists():
         print("[PRACTICE] No SWOT analysis found. Run swot_analyzer.py first.")
         return None
 
-    with open(swot_file, "r") as f:
+    with open(swot_file, "r", encoding="utf-8") as f:
         swot = json.load(f)
 
-    plan = generate_practice_plan(swot)
-    output_file = SHARKS_DIR / "next_practice.txt"
-    with open(output_file, "w") as f:
-        f.write(plan)
-
-    print(f"[PRACTICE] Plan saved to {output_file}")
+    matchup = _resolve_next_opponent_matchup()
+    if matchup and not matchup.get("empty"):
+        print(f"[PRACTICE] Next opponent: {matchup.get('opponent', '?')} — tailoring drills")
+    windows = _compute_windows(datetime.now(ET_TZ))
+    plan = _write_plan(swot, windows, matchup=matchup)
+    print(f"[PRACTICE] Plan saved to {PLAN_FILE}")
     print(f"\n{'='*60}")
     print(plan)
     print(f"{'='*60}")
-
     return plan
 
 
 if __name__ == "__main__":
-    run()
+    parser = argparse.ArgumentParser(description="Generate practice plans.")
+    parser.add_argument("--scheduled", action="store_true", help="Apply scheduling policy and refresh checks.")
+    parser.add_argument("--force", action="store_true", help="Force generation in scheduled mode.")
+    args = parser.parse_args()
+
+    if args.scheduled:
+        result = run_scheduled(force=args.force)
+        print(f"[PRACTICE] status={result.get('status')} reason={result.get('reason')}")
+    else:
+        run()
