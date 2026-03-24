@@ -1,18 +1,18 @@
 @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&display=swap');
 
 :root {
-  --bg-color: #f7ece1;
-  --bg-gradient: radial-gradient(circle at 15% -5%, #fffdf8 0%, #f7ece1 45%, #e9ddd1 100%);
-  --surface-base: rgba(255, 255, 255, 0.75);
-  --surface-hover: rgba(255, 255, 255, 0.92);
-  --surface-border: rgba(4, 101, 104, 0.24);
-  --primary-color: #046568;
-  --primary-glow: rgba(4, 101, 104, 0.18);
+  --bg-color: #060d1c;
+  --bg-gradient: radial-gradient(circle at 12% -8%, #17264b 0%, #0a1328 42%, #050a16 100%);
+  --surface-base: rgba(16, 27, 50, 0.78);
+  --surface-hover: rgba(22, 35, 61, 0.92);
+  --surface-border: rgba(130, 203, 195, 0.26);
+  --primary-color: #82cbc3;
+  --primary-glow: rgba(130, 203, 195, 0.18);
   --secondary-color: #82cbc3;
   --accent-away: #2a8f93;
   --accent-sub: #3f8f88;
-  --text-main: #12393a;
-  --text-muted: #4f7a79;
+  --text-main: #eaf5fb;
+  --text-muted: #9bb1c8;
   --success: #2f8f62;
   --warning: #a87421;
   --danger: #b34a39;
@@ -82,7 +82,7 @@ main {
   align-items: center;
   flex-wrap: wrap;
   padding: 1rem 2rem;
-  background: rgba(247, 236, 225, 0.9);
+  background: rgba(8, 14, 30, 0.92);
   backdrop-filter: blur(16px);
   border-bottom: 1px solid var(--surface-border);
   position: sticky;
@@ -230,7 +230,7 @@ main {
   border-radius: 10px;
   padding: 0.42rem 0.6rem;
   font-size: 0.84rem;
-  background: rgba(255, 255, 255, 0.8);
+  background: rgba(14, 23, 43, 0.95);
   color: var(--text-main);
   font-family: var(--font-base);
   font-weight: 600;
