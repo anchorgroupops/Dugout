@@ -313,3 +313,53 @@
 2026-03-23 16:13:36,358 [INFO] 127.0.0.1 - - [23/Mar/2026 16:13:36] "[31m[1mPOST /api/regenerate-lineups HTTP/1.1[0m" 413 -
 2026-03-23 16:13:36,377 [WARNING] [Security] Blocked mutating request from disallowed origin: https://evil.example
 2026-03-23 16:13:36,377 [INFO] 127.0.0.1 - - [23/Mar/2026 16:13:36] "[31m[1mPOST /api/regenerate-lineups HTTP/1.1[0m" 403 -
+2026-03-23 22:51:17,061 [INFO] --- Starting Sync Cycle ---
+2026-03-23 22:52:33,826 [INFO] [OpponentDiscovery] org_ids=7ZUyPJwky5DG discovered=6 persisted=5 missing_schedule=2
+2026-03-23 22:52:33,826 [INFO] [Sync] Opponent discovery refreshed (missing schedule opponents=2).
+2026-03-23 22:52:33,826 [INFO] Scraping Schedule...
+2026-03-23 22:52:37,957 [INFO] Scraping Live Stats...
+2026-03-23 22:52:41,570 [ERROR] Fatal Error in sync cycle: [GC] Missing credentials. Set GC_EMAIL and GC_PASSWORD in .env
+Traceback (most recent call last):
+  File "H:\Repos\Personal\Softball\tools\sync_daemon.py", line 844, in run_sync_cycle
+    stat_scraper.login(pw)
+  File "H:\Repos\Personal\Softball\tools\gc_scraper.py", line 182, in login
+    self._validate_credentials()
+  File "H:\Repos\Personal\Softball\tools\gc_scraper.py", line 176, in _validate_credentials
+    raise ValueError(
+ValueError: [GC] Missing credentials. Set GC_EMAIL and GC_PASSWORD in .env
+
+2026-03-23 22:52:41,746 [WARNING] Failed to alert n8n. Status: 404
+2026-03-23 22:53:12,729 [INFO] --- Starting Sync Cycle ---
+2026-03-23 22:53:57,972 [INFO] [OpponentDiscovery] org_ids=7ZUyPJwky5DG discovered=6 persisted=5 missing_schedule=2
+2026-03-23 22:53:57,972 [INFO] [Sync] Opponent discovery refreshed (missing schedule opponents=2).
+2026-03-23 22:53:57,972 [INFO] Scraping Schedule...
+2026-03-23 22:54:37,171 [INFO] Scraping Live Stats...
+2026-03-23 22:54:50,283 [WARNING] Failed to alert n8n. Status: 404
+2026-03-23 22:55:37,424 [INFO] --- Starting Sync Cycle ---
+2026-03-23 22:56:22,154 [INFO] [OpponentDiscovery] org_ids=7ZUyPJwky5DG discovered=6 persisted=5 missing_schedule=2
+2026-03-23 22:56:22,154 [INFO] [Sync] Opponent discovery refreshed (missing schedule opponents=2).
+2026-03-23 22:56:22,155 [INFO] Scraping Schedule...
+2026-03-23 22:57:00,722 [INFO] Scraping Live Stats...
+2026-03-23 22:57:16,290 [INFO] [Enrich] Applied app_stats: batting=11 pitching=5 fielding=11
+2026-03-23 22:57:16,329 [INFO] [Reconcile] scorebook merge complete: matched=11 updated=11 source_players=12
+2026-03-23 22:57:16,357 [INFO] [Validate] No outlier stats detected before team save.
+2026-03-23 22:57:16,362 [INFO] [Sync] team_enriched.json written (scorebook matched=11 updated=11, anomalies=0).
+2026-03-23 22:57:16,428 [INFO] [Sync] SWOT analysis refreshed.
+2026-03-23 22:57:16,479 [INFO] [Sync] Lineup optimizer refreshed.
+2026-03-23 22:57:16,498 [INFO] [Health] pipeline_health.json updated (app batting rows=13, team roster=13, opponent game rows=29, opponent team batting rows=0)
+2026-03-23 22:57:16,523 [INFO] [DB] Recorded stats snapshot id=2 source=sync_cycle
+2026-03-23 22:57:16,523 [INFO] --- Sync Cycle Complete ---
+2026-03-23 22:59:16,042 [INFO] --- Starting Sync Cycle ---
+2026-03-23 23:00:08,448 [INFO] [OpponentDiscovery] org_ids=7ZUyPJwky5DG discovered=6 persisted=5 missing_schedule=2
+2026-03-23 23:00:08,448 [INFO] [Sync] Opponent discovery refreshed (missing schedule opponents=2).
+2026-03-23 23:00:08,448 [INFO] Scraping Schedule...
+2026-03-23 23:00:51,080 [INFO] Scraping Live Stats...
+2026-03-23 23:01:09,343 [INFO] [Enrich] Applied app_stats: batting=11 pitching=5 fielding=11
+2026-03-23 23:01:09,347 [INFO] [Reconcile] scorebook merge complete: matched=11 updated=11 source_players=12
+2026-03-23 23:01:09,358 [INFO] [Validate] No outlier stats detected before team save.
+2026-03-23 23:01:09,364 [INFO] [Sync] team_enriched.json written (scorebook matched=11 updated=11, anomalies=0).
+2026-03-23 23:01:09,397 [INFO] [Sync] SWOT analysis refreshed.
+2026-03-23 23:01:09,436 [INFO] [Sync] Lineup optimizer refreshed.
+2026-03-23 23:01:09,460 [INFO] [Health] pipeline_health.json updated (app batting rows=13, team roster=13, opponent game rows=29, opponent team batting rows=0)
+2026-03-23 23:01:09,480 [INFO] [DB] Recorded stats snapshot id=3 source=sync_cycle
+2026-03-23 23:01:09,480 [INFO] --- Sync Cycle Complete ---
