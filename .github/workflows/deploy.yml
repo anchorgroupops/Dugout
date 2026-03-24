@@ -17,4 +17,4 @@ jobs:
           key: ${{ secrets.PI_SSH_KEY }}
           script: |
             cd /home/joelycannoli/sharks
-            ./deploy.sh
+            bash ./scripts/deploy.sh
