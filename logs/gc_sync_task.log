@@ -48,3 +48,26 @@ Traceback (most recent call last):
     raise UiObjectNotFoundError({'code': -32002, 'data': str(self.selector), 'method': 'wait'})
 uiautomator2.exceptions.UiObjectNotFoundError: {'code': -32002, 'data': "Selector [text='Schedule']", 'method': 'wait'}
 [Mon 03/23/2026 23:33:19.61] GC sync complete. 
+[Tue 03/24/2026  9:00:03.22] Starting GC sync... 
+{
+  "target_games": 4,
+  "saved": 1,
+  "skipped_existing": 3,
+  "failed": 0,
+  "outputs": [
+    "H:\\Repos\\Personal\\Softball\\data\\sharks\\games\\2026-03-07_riptide_rebels.json"
+  ]
+}
+[GC App] Connecting to emulator-5554...
+[GC App] Connected: p3sxxx
+[GC App] Navigating to Schedule...
+Traceback (most recent call last):
+  File "H:\Repos\Personal\Softball\tools\gc_app_auto.py", line 726, in <module>
+    main()
+  File "H:\Repos\Personal\Softball\tools\gc_app_auto.py", line 712, in main
+    schedule = scrape_schedule(d)
+               ^^^^^^^^^^^^^^^^^^
+  File "H:\Repos\Personal\Softball\tools\gc_app_auto.py", line 195, in scrape_schedule
+    raise RuntimeError(f"Schedule/Events tab not found. Visible texts: {visible}")
+RuntimeError: Schedule/Events tab not found. Visible texts: ['Mon, Mar 23', 'Sharks', '16', 'Final', '7', 'Ravens - Major SB Spring 2026', 'Replay GameStream', 'Recap', 'Video', 'Plays', 'Box Score', 'Info', 'Sharks Take Lead And Never Look Back In Win Over Ravens - Major SB Spring 2026', 'Live stream to unlock curated game highlights. Learn how to stream', 'Sharks easily dispatched Ravens - Major SB Spring 2026 on Monday at St. Augustine Little League Complex, 1310 Osceola Elementary Rd, St. Augustine, FL 32084, 16-7.\n\nSharks got on the board in the top of the first inning after Lexi M flew out, Emma W walked, Addison walked, Sharks scored on a wild pitch, and Leila V flew out, each scoring one run.\n\nSharks scored seven runs on one hit in the top of the second inning. Ember H drew a walk, scoring one run, Addison drew a walk, scoring one run, Addy drew a walk, scoring one run, Leila V drew a walk, scoring one run, and Sephina S doubled, scoring three runs.\n\nRavens - Major SB Spring 2026 scored six runs on one hit in the bottom of the second inning. Emma D drew a walk, scoring one run, Charlotte. D singled, scoring two runs, and Raven A grounded out, scoring three runs.\n\nA walk by Emma W, a ground out by Addison, and a single by Ruby V helped Sharks extend their early lead in the third.\n\nLexi M opened the game for Sharks. The starting pitcher gave up one hit and seven runs over two and one-third innings, striking out four and walking nine. Kahlani T stepped in the circle first for Ravens - Major SB Spring 2026. The pitcher gave up one hit and 12 runs (11 earned) over one and two-thirds innings, striking out one and walking 12.\n\nRuby V, Sephina S, and Addy each collected one hit for Sharks. Sephina S went 1-for-1 at the plate and led the team with three runs batted in. Ember H led Sharks with three walks. Overall, the team had a strong eye at the plate, piling up 15 walks for the game. Emma W and Sephina S each stole multiple bases for Sharks. Sharks ran wild on the base paths, accumulating six stolen bases for the game.\n\nRaven A led the team with one run batted in. Charlotte. D led Ravens - Major SB Spring 2026 with one hit in one at bat. Ravens - Major SB Spring 2026 had patience at the plate, piling up nine walks for the game. Lila T and Elizabeth A led the team with two free passes each. Dakota S and Emma D each stole multiple bases for Ravens - Major SB Spring 2026. Ravens - Major SB Spring 2026 stole seven bases in the game.\n\nNext up for Sharks is a game at Peppers on Saturday.', 'Copy recap story', 'Copyright © 2026 GameChanger, Inc. All rights reserved. Any reuse or republication of this story must include the preceding attribution and is subject to the Dick’s Sporting Goods, Inc. Terms of Use, License Agreement, and Privacy Policy.', '.', 'Edit']
+[Tue 03/24/2026  9:01:14.75] GC sync complete. 
