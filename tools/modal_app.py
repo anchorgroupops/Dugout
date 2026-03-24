@@ -17,9 +17,10 @@ sharks_image = (
         "requests",
         "pinecone",
         "google-generativeai",
+        "fastapi[standard]",
     )
     .run_commands("playwright install --with-deps chromium")
-    .add_local_dir(".", remote_path="/app")
+    .add_local_dir(".", remote_path="/app", ignore=["node_modules", "data", "client/node_modules", "client/dist", ".git"])
 )
 
 
