@@ -5,6 +5,7 @@ Enforces mandatory play requirements (1 AB + 6 defensive outs per player).
 """
 
 import json
+import random
 from pathlib import Path
 
 from logger import log_decision
@@ -299,11 +300,154 @@ def generate_lineup(
     }
 
 
-def generate_all_lineups(team_data: dict) -> dict:
-    """Generate lineups for all three strategies."""
+def _player_outcome_probs(player: dict) -> dict[str, float]:
+    """Derive outcome probabilities from a player's batting stats."""
+    hitting = normalize_player_batting(player)
+    ab = hitting.get("ab", 0)
+    h = hitting.get("h", 0)
+    bb = hitting.get("bb", 0)
+    hbp = hitting.get("hbp", 0)
+    doubles = hitting.get("doubles", hitting.get("2b", 0))
+    triples = hitting.get("triples", hitting.get("3b", 0))
+    hr = hitting.get("hr", 0)
+    pa = ab + bb + hbp
+    if pa < 3:
+        # Not enough data — use league-average youth rates
+        return {"single": 0.18, "double": 0.04, "triple": 0.01, "hr": 0.005, "bb": 0.12, "out": 0.645}
+    singles = h - doubles - triples - hr
+    return {
+        "single": max(singles, 0) / pa,
+        "double": doubles / pa,
+        "triple": triples / pa,
+        "hr": hr / pa,
+        "bb": (bb + hbp) / pa,
+        "out": max(1.0 - (h + bb + hbp) / pa, 0.0),
+    }
+
+
+def simulate_inning(lineup: list[dict], num_simulations: int = 1000, seed: int = 42) -> float:
+    """Monte Carlo simulation of runs scored per game (6 innings).
+
+    Each batter's plate appearance uses their real outcome probabilities.
+    Baserunner advancement: single=1 base, double=2, triple=3, hr=clears.
+    Deterministic via fixed seed.
+    """
+    rng = random.Random(seed)
+    if not lineup:
+        return 0.0
+
+    probs_list = []
+    for entry in lineup:
+        p = _player_outcome_probs(entry)
+        # Build cumulative distribution
+        cumulative = []
+        running = 0.0
+        for outcome in ("single", "double", "triple", "hr", "bb", "out"):
+            running += p.get(outcome, 0)
+            cumulative.append((running, outcome))
+        # Normalize
+        if cumulative:
+            total = cumulative[-1][0]
+            if total > 0:
+                cumulative = [(c / total, o) for c, o in cumulative]
+        probs_list.append(cumulative)
+
+    total_runs = 0
+    innings_per_game = 6
+    num_batters = len(probs_list)
+
+    for _ in range(num_simulations):
+        batter_idx = 0
+        game_runs = 0
+        for _ in range(innings_per_game):
+            outs = 0
+            bases = [False, False, False]  # 1st, 2nd, 3rd
+            while outs < 3:
+                roll = rng.random()
+                cum = probs_list[batter_idx % num_batters]
+                outcome = "out"
+                for threshold, o in cum:
+                    if roll <= threshold:
+                        outcome = o
+                        break
+                batter_idx += 1
+
+                if outcome == "out":
+                    outs += 1
+                elif outcome == "bb" or outcome == "single":
+                    # Advance each runner 1 base
+                    if bases[2]:
+                        game_runs += 1
+                    bases[2] = bases[1]
+                    bases[1] = bases[0]
+                    bases[0] = True
+                elif outcome == "double":
+                    if bases[2]:
+                        game_runs += 1
+                    if bases[1]:
+                        game_runs += 1
+                    bases[2] = bases[0]
+                    bases[1] = True
+                    bases[0] = False
+                elif outcome == "triple":
+                    game_runs += sum(bases)
+                    bases = [False, False, True]
+                elif outcome == "hr":
+                    game_runs += sum(bases) + 1
+                    bases = [False, False, False]
+
+        total_runs += game_runs
+
+    return round(total_runs / num_simulations, 2)
+
+
+def recommend_strategy(matchup: dict | None = None) -> str:
+    """Auto-select lineup strategy based on opponent matchup data.
+
+    - Strong opponent pitching (low ERA, high K) → 'balanced' (OBP/contact focus)
+    - Weak opponent pitching → 'aggressive' (capitalize with power)
+    - Insufficient data / development game → 'balanced' (safe default)
+    """
+    if not matchup or matchup.get("empty"):
+        return "balanced"
+
+    their_advantages = [a.lower() for a in matchup.get("their_advantages", [])]
+    our_advantages = [a.lower() for a in matchup.get("our_advantages", [])]
+
+    # Detect strong opponent pitching
+    opp_strong_pitching = any(
+        kw in adv for adv in their_advantages
+        for kw in ("era", "whip", "strikeout", "pitching")
+    )
+    # Detect weak opponent pitching
+    our_pitching_advantage = any(
+        kw in adv for adv in our_advantages
+        for kw in ("era", "whip", "strikeout", "pitching")
+    )
+    # Detect weak opponent defense
+    opp_weak_defense = any(
+        kw in adv for adv in our_advantages
+        for kw in ("fielding", "error", "defense")
+    )
+
+    if opp_strong_pitching:
+        return "balanced"
+    if our_pitching_advantage or opp_weak_defense:
+        return "aggressive"
+    return "balanced"
+
+
+def generate_all_lineups(team_data: dict, matchup: dict | None = None) -> dict:
+    """Generate lineups for all three strategies, with a recommended pick."""
+    recommended = recommend_strategy(matchup)
     results = {}
     for strategy in ["balanced", "aggressive", "development"]:
-        results[strategy] = generate_lineup(team_data, strategy)
+        lineup_result = generate_lineup(team_data, strategy)
+        lineup_result["simulated_runs_per_game"] = simulate_inning(lineup_result.get("lineup", []))
+        results[strategy] = lineup_result
+    results["recommended_strategy"] = recommended
+    if matchup and not matchup.get("empty"):
+        results["matchup_opponent"] = matchup.get("opponent", "")
     return results
 
 
@@ -356,7 +500,19 @@ def run():
         print(f"[LINEUP] Filtered roster: {len(active_roster)}/{len(original_roster)} players active.")
         team_data["roster"] = active_roster
 
-    results = generate_all_lineups(team_data)
+    # ── Matchup-Aware Strategy ──────────────────────────────────────────────
+    matchup = None
+    try:
+        from practice_gen import _resolve_next_opponent_matchup
+        matchup = _resolve_next_opponent_matchup()
+        if matchup and not matchup.get("empty"):
+            print(f"[LINEUP] Next opponent: {matchup.get('opponent', '?')} — recommending strategy")
+    except Exception:
+        pass
+
+    results = generate_all_lineups(team_data, matchup=matchup)
+    if results.get("recommended_strategy"):
+        print(f"[LINEUP] Recommended strategy: {results['recommended_strategy']}")
 
     output_file = SHARKS_DIR / "lineups.json"
     with open(output_file, "w") as f:
