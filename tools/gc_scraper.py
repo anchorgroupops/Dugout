@@ -177,6 +177,54 @@ class GameChangerScraper:
                 "[GC] Missing credentials. Set GC_EMAIL and GC_PASSWORD in .env"
             )
 
+    def _auth_gate_present(self) -> bool:
+        """Detect whether current page is a sign-in gate."""
+        try:
+            if "login" in (self.page.url or "").lower():
+                return True
+            if self.page.locator('input[name="email"], input[type="email"]').count() > 0:
+                return True
+            lower_text = self.page.content().lower()
+            if "join or sign in" in lower_text or "enter your email" in lower_text:
+                return True
+        except Exception:
+            return False
+        return False
+
+    def _complete_login_flow(self):
+        """Handle current GC login UX (email step -> password step)."""
+        print("[GC] Entering credentials...")
+
+        # Step 1: email gate
+        email_field = self.page.locator('input[name="email"], input[type="email"]').first
+        if email_field.count() > 0:
+            email_field.fill(self.email)
+            clicked = False
+            for sel in ('button:has-text("Continue")', 'button[type="submit"]'):
+                btn = self.page.locator(sel).first
+                if btn.count() > 0:
+                    btn.click()
+                    clicked = True
+                    break
+            if not clicked:
+                email_field.press("Enter")
+            self.page.wait_for_timeout(1200)
+
+        # Step 2: password gate
+        pwd_field = self.page.locator('input[name="password"], input[type="password"]').first
+        if pwd_field.count() > 0:
+            pwd_field.fill(self.password)
+            clicked = False
+            for sel in ('button:has-text("Continue")', 'button:has-text("Sign in")', 'button[type="submit"]'):
+                btn = self.page.locator(sel).first
+                if btn.count() > 0:
+                    btn.click()
+                    clicked = True
+                    break
+            if not clicked:
+                pwd_field.press("Enter")
+            self.page.wait_for_timeout(1500)
+
     def login(self, playwright):
         """Log in to GameChanger via browser automation using persistent sessions."""
         self._validate_credentials()
@@ -217,31 +265,24 @@ class GameChangerScraper:
         print(f"[GC] Navigating to {GC_BASE_URL}...")
         self.page.goto(GC_BASE_URL, wait_until="domcontentloaded", timeout=60000)
         self.page.wait_for_timeout(3000)
-        
-        # Check if we are already logged in
-        if "login" not in self.page.url:
-            print(f"[GC] Session valid. Currently at: {self.page.url}")
-            return self.page
 
-        print(f"[GC] Session invalid or missing. Navigating to login page...")
-        self.page.goto(GC_LOGIN_URL, wait_until="networkidle", timeout=60000)
+        # Validate auth against the target stats page, not just GC home.
+        self.page.goto(self.stats_url, wait_until="domcontentloaded", timeout=60000)
+        self.page.wait_for_timeout(2500)
 
-        # Fill login form
-        print("[GC] Entering credentials...")
-        self.page.fill('input[name="email"], input[type="email"]', self.email)
-        self.page.fill('input[name="password"], input[type="password"]', self.password)
-        self.page.click('button[type="submit"]')
+        if self._auth_gate_present():
+            print("[GC] Session invalid or expired. Running login flow...")
+            self._complete_login_flow()
+            self.page.wait_for_load_state("networkidle", timeout=60000)
+            self.page.goto(self.stats_url, wait_until="domcontentloaded", timeout=60000)
+            self.page.wait_for_timeout(2000)
 
-        print("[GC] Waiting for login to complete...")
-        self.page.wait_for_load_state("networkidle", timeout=60000)
-        
-        # Handle 2FA/CAPTCHA
-        if "login" in self.page.url or "challenge" in self.page.content().lower():
-             print("[WARNING] Stuck on login/challenge page! Manual intervention may be required.")
-             self.page.wait_for_timeout(60000)
-             
-        print(f"[GC] Logged in. Current URL: {self.page.url}")
-        
+        if self._auth_gate_present() or "challenge" in self.page.content().lower():
+            print("[WARNING] Still on auth/challenge page after login attempt.")
+            raise RuntimeError("[GC] Authentication failed or blocked by challenge.")
+
+        print(f"[GC] Authenticated. Current URL: {self.page.url}")
+
         # Save session state
         print(f"[GC] Saving authenticated session state to {auth_file}...")
         self.context.storage_state(path=str(auth_file))
@@ -461,10 +502,10 @@ class GameChangerScraper:
                 self.page.wait_for_timeout(2000)
 
             except Exception as e:
-                print(f"[GC] ⚠ Error scraping game {link}: {e}")
+                print(f"[GC] [WARN] Error scraping game {link}: {e}")
                 continue
 
-        print(f"[GC] ✅ Box scores complete: {len(games)} games scraped")
+        print(f"[GC] [OK] Box scores complete: {len(games)} games scraped")
         return games
 
     # ------------------------------------------------------------------ #
@@ -499,28 +540,28 @@ class GameChangerScraper:
         last_major = None
 
         for major_tab, sub_tab, col_map, json_key in STAT_VIEWS:
-            print(f"[GC] Scraping: {major_tab} → {sub_tab}...")
+            print(f"[GC] Scraping: {major_tab} -> {sub_tab}...")
 
             # Click major tab only if we're switching categories
             if major_tab != last_major:
                 if not self._click_tab(major_tab):
-                    print(f"[GC]   ⚠ Could not find major tab '{major_tab}', skipping...")
+                    print(f"[GC]   [WARN] Could not find major tab '{major_tab}', skipping...")
                     continue
                 last_major = major_tab
 
             # Click sub tab
             if sub_tab != "Standard":
                 if not self._click_tab(sub_tab):
-                    print(f"[GC]   ⚠ Could not find sub tab '{sub_tab}', skipping...")
+                    print(f"[GC]   [WARN] Could not find sub tab '{sub_tab}', skipping...")
                     continue
 
             # Extract the table
             rows = self._extract_table()
             if not rows:
-                print(f"[GC]   ⚠ No data found for {major_tab}/{sub_tab}")
+                print(f"[GC]   [WARN] No data found for {major_tab}/{sub_tab}")
                 continue
 
-            print(f"[GC]   ✓ Got {len(rows)} rows")
+                print(f"[GC]   [OK] Got {len(rows)} rows")
 
             for row in rows:
                 # Identify player: first column is usually "Player" or the player name
@@ -636,7 +677,7 @@ class GameChangerScraper:
         roster.sort(key=lambda x: x.get("first", "").lower())
         # GUARD: Do not overwrite existing data with empty results
         if not roster:
-            print("[GC] ⚠ No players scraped! Skipping team.json write to preserve existing data.")
+            print("[GC] [WARN] No players scraped! Skipping team.json write to preserve existing data.")
             return None
 
         team = {
@@ -657,7 +698,7 @@ class GameChangerScraper:
         output = self.out_dir / "team.json"
         with open(output, "w") as f:
             json.dump(team, f, indent=2)
-        print(f"[GC] ✅ Team data saved to {output} ({len(roster)} players, {len(STAT_VIEWS)} stat categories)")
+        print(f"[GC] [OK] Team data saved to {output} ({len(roster)} players, {len(STAT_VIEWS)} stat categories)")
 
         return team
 
