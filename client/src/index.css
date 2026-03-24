@@ -211,6 +211,31 @@ main {
   font-size: 0.84rem;
 }
 
+.sync-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border: 1px solid rgba(130, 203, 195, 0.4);
+  background: linear-gradient(135deg, rgba(130, 203, 195, 0.15), rgba(4, 101, 104, 0.2));
+  color: var(--primary-color);
+  border-radius: 999px;
+  padding: 0.42rem 0.85rem;
+  font-weight: 700;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.sync-btn:hover {
+  background: linear-gradient(135deg, rgba(130, 203, 195, 0.25), rgba(4, 101, 104, 0.3));
+  border-color: var(--primary-color);
+}
+
+.sync-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .mobile-tab-select-wrap {
   display: flex;
   align-items: center;

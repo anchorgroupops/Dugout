@@ -53,6 +53,8 @@ DATA_DIR = Path(__file__).parent.parent / "data"
 SHARKS_DIR = DATA_DIR / "sharks"
 LOG_DIR = Path(__file__).parent.parent / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
+DEFAULT_FALLBACK_VOICE_ID = "EXAVITQu4vr4xnSDxMaL"
+_SECRET_CACHE: dict[str, str] | None = None
 
 DEFAULT_CORS_ORIGINS = [
     "https://sharks.joelycannoli.com",
@@ -75,6 +77,62 @@ WRITE_ORIGINS = [
 ]
 if not WRITE_ORIGINS:
     WRITE_ORIGINS = DEFAULT_WRITE_ORIGINS
+
+
+def _candidate_secrets_csv_paths() -> list[Path]:
+    raw_paths = [
+        os.getenv("SECRETS_CSV", "").strip(),
+        os.getenv("APIS_CSV_PATH", "").strip(),
+        r"H:\APIs.csv",
+        r"H:\APIs - Sheet1 (6).csv",
+        str(Path(__file__).parent.parent / "APIs.csv"),
+        str(Path(__file__).parent / "APIs - Sheet1 (6).csv"),
+        str(Path(__file__).parent.parent / "Scorebooks" / "APIs - Sheet1 (6).csv"),
+    ]
+    out: list[Path] = []
+    seen: set[str] = set()
+    for p in raw_paths:
+        if not p:
+            continue
+        norm = str(Path(p))
+        if norm in seen:
+            continue
+        seen.add(norm)
+        out.append(Path(p))
+    return out
+
+
+def _load_secret_cache() -> dict[str, str]:
+    global _SECRET_CACHE
+    if isinstance(_SECRET_CACHE, dict):
+        return _SECRET_CACHE
+
+    _SECRET_CACHE = {}
+    try:
+        from runtime_ops import extract_secrets_from_csv  # lazy import; no CLI side effects
+    except Exception:
+        return _SECRET_CACHE
+
+    for path in _candidate_secrets_csv_paths():
+        try:
+            if not path.exists():
+                continue
+            found = extract_secrets_from_csv(path)
+            if isinstance(found, dict):
+                _SECRET_CACHE = {k: str(v).strip() for k, v in found.items() if str(v).strip()}
+                if _SECRET_CACHE:
+                    return _SECRET_CACHE
+        except Exception:
+            continue
+    return _SECRET_CACHE
+
+
+def _resolve_secret(name: str, default: str = "") -> str:
+    env_val = os.getenv(name, "").strip()
+    if env_val:
+        return env_val
+    cache = _load_secret_cache()
+    return str(cache.get(name, default)).strip()
 
 
 def _origin_hostname(origin: str) -> str:
@@ -835,14 +893,39 @@ def run_sync_cycle():
         logging.info("Scraping Schedule...")
         sched_scraper = ScheduleScraper()
         sched_scraper.scrape_schedule()
+
+        # 1b. Secondary game ingest path (mobile-web box scores -> data/sharks/games/*.json).
+        # Keeps scorebook-derived reconciliation alive even when GC app selectors drift.
+        try:
+            from gc_web_mobile_scraper import sync_recent_games as sync_web_mobile_games
+
+            web_ingest = sync_web_mobile_games(
+                team_id=os.getenv("GC_TEAM_ID", "NuGgx6WvP7TO"),
+                season_slug=os.getenv("GC_SEASON_SLUG", "2026-spring-sharks"),
+                sharks_team_name=os.getenv("TEAM_NAME", "Sharks"),
+                max_games=int(os.getenv("GC_WEB_BOX_MAX_GAMES", "8")),
+            )
+            logging.info(
+                "[Sync] Web box score ingest: target=%s saved=%s skipped=%s failed=%s",
+                web_ingest.get("target_games", 0),
+                web_ingest.get("saved", 0),
+                web_ingest.get("skipped_existing", 0),
+                web_ingest.get("failed", 0),
+            )
+        except Exception as e:
+            logging.warning(f"[Sync] Web box score ingest skipped: {e}")
         
         # 2. Scrape Stats
         logging.info("Scraping Live Stats...")
-        from playwright.sync_api import sync_playwright
-        with sync_playwright() as pw:
-            stat_scraper = GameChangerScraper()
-            stat_scraper.login(pw)
-            stat_scraper.scrape_team_stats()
+        try:
+            from playwright.sync_api import sync_playwright
+
+            with sync_playwright() as pw:
+                stat_scraper = GameChangerScraper()
+                stat_scraper.login(pw)
+                stat_scraper.scrape_team_stats()
+        except Exception as e:
+            logging.warning(f"[Sync] Live stat scrape failed; continuing with fallback data: {e}")
 
         # Merge multi-team stats if available
         try:
@@ -1945,8 +2028,12 @@ def _build_voice_overview_text(ctx: dict) -> str:
 
 
 def _synthesize_voice_update(text: str) -> bytes:
-    api_key = os.getenv("ELEVENLABS_API_KEY", "").strip()
-    voice_id = os.getenv("ELEVENLABS_VOICE_ID", "").strip() or os.getenv("ELEVENLABS_DEFAULT_VOICE_ID", "").strip()
+    api_key = _resolve_secret("ELEVENLABS_API_KEY")
+    voice_id = (
+        _resolve_secret("ELEVENLABS_VOICE_ID")
+        or os.getenv("ELEVENLABS_DEFAULT_VOICE_ID", "").strip()
+        or DEFAULT_FALLBACK_VOICE_ID
+    )
     model_id = os.getenv("ELEVENLABS_MODEL_ID", "eleven_turbo_v2_5")
 
     if not api_key:

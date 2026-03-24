@@ -1,2 +1,50 @@
 [Mon 03/23/2026  9:00:06.33] Starting GC sync... 
 [Mon 03/23/2026  9:00:16.16] BlueStacks emulator-5554 not available. Skipping. 
+[Mon 03/23/2026 23:07:33.07] Starting GC sync... 
+[Mon 03/23/2026 23:07:38.72] BlueStacks emulator-5554 not available. Skipping. 
+[Mon 03/23/2026 23:09:44.68] Starting GC sync... 
+[GC App] Connecting to emulator-5554...
+[GC App] Connected: p3sxxx
+[GC App] Navigating to Schedule...
+Traceback (most recent call last):
+  File "H:\Repos\Personal\Softball\tools\gc_app_auto.py", line 692, in <module>
+    main()
+  File "H:\Repos\Personal\Softball\tools\gc_app_auto.py", line 678, in main
+    schedule = scrape_schedule(d)
+               ^^^^^^^^^^^^^^^^^^
+  File "H:\Repos\Personal\Softball\tools\gc_app_auto.py", line 165, in scrape_schedule
+    d(text="Schedule").click()
+  File "C:\Users\joely\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\uiautomator2\_selector.py", line 149, in click
+    self.must_wait(timeout=timeout)
+  File "C:\Users\joely\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\uiautomator2\_selector.py", line 338, in must_wait
+    raise UiObjectNotFoundError({'code': -32002, 'data': str(self.selector), 'method': 'wait'})
+uiautomator2.exceptions.UiObjectNotFoundError: {'code': -32002, 'data': "Selector [text='Schedule']", 'method': 'wait'}
+[Mon 03/23/2026 23:11:07.64] GC sync complete. 
+[Mon 03/23/2026 23:32:08.72] Starting GC sync... 
+{
+  "target_games": 4,
+  "saved": 2,
+  "skipped_existing": 2,
+  "failed": 0,
+  "outputs": [
+    "H:\\Repos\\Personal\\Softball\\data\\sharks\\games\\2026-03-23_ravens_major_sb_spring_2026.json",
+    "H:\\Repos\\Personal\\Softball\\data\\sharks\\games\\2026-03-07_riptide_rebels.json"
+  ]
+}
+[GC App] Connecting to emulator-5554...
+[GC App] Connected: p3sxxx
+[GC App] Navigating to Schedule...
+Traceback (most recent call last):
+  File "H:\Repos\Personal\Softball\tools\gc_app_auto.py", line 692, in <module>
+    main()
+  File "H:\Repos\Personal\Softball\tools\gc_app_auto.py", line 678, in main
+    schedule = scrape_schedule(d)
+               ^^^^^^^^^^^^^^^^^^
+  File "H:\Repos\Personal\Softball\tools\gc_app_auto.py", line 165, in scrape_schedule
+    d(text="Schedule").click()
+  File "C:\Users\joely\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\uiautomator2\_selector.py", line 149, in click
+    self.must_wait(timeout=timeout)
+  File "C:\Users\joely\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\site-packages\uiautomator2\_selector.py", line 338, in must_wait
+    raise UiObjectNotFoundError({'code': -32002, 'data': str(self.selector), 'method': 'wait'})
+uiautomator2.exceptions.UiObjectNotFoundError: {'code': -32002, 'data': "Selector [text='Schedule']", 'method': 'wait'}
+[Mon 03/23/2026 23:33:19.61] GC sync complete. 

@@ -95,6 +95,7 @@ def daily_scout_job():
     _run_step("GameChanger scrape", ["python", "tools/gc_scraper.py"], env=env)
     _run_step("SWOT analysis", ["python", "tools/swot_analyzer.py"], env=env)
     _run_step("NotebookLM payload sync", ["python", "tools/notebooklm_sync.py"], env=env)
+    _run_step("RAG Memory sync", ["python", "tools/memory_engine.py", "sync"], env=env)
 
     SESSION_VOLUME.commit()
     print("[Modal] Daily scouting job finished.")
@@ -102,8 +103,16 @@ def daily_scout_job():
 
 
 @app.function(image=sharks_image, volumes={VOLUME_MOUNT: SESSION_VOLUME}, secrets=[_runtime_secret()], timeout=60 * 45)
+@modal.web_endpoint(method="POST")
+def manual_sync():
+    """Manual trigger via Webhook (POST)."""
+    daily_scout_job.spawn()
+    return {"status": "triggered", "message": "Scouting job started in background."}
+
+
+@app.function(image=sharks_image, volumes={VOLUME_MOUNT: SESSION_VOLUME}, secrets=[_runtime_secret()], timeout=60 * 45)
 def trigger_immediate_refresh():
-    """Manual trigger for immediate refresh."""
+    """Internal manual trigger."""
     return daily_scout_job.remote()
 
 

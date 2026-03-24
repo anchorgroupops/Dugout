@@ -58,6 +58,33 @@ def gc_texts(d):
     return [n.get("text", "") for n in root.iter("node")
             if n.get("package", "").startswith("com.gc") and n.get("text", "").strip()]
 
+def _click_first_visible_text(d, labels: list[str], timeout_sec: float = 5.0) -> bool:
+    """
+    Try clicking one of the requested labels using exact and fuzzy visible-text matching.
+    Returns True when a click is performed.
+    """
+    deadline = time.time() + timeout_sec
+    labels_l = [x.lower() for x in labels]
+
+    while time.time() < deadline:
+        for label in labels:
+            if d(text=label).exists(timeout=0.3):
+                d(text=label).click()
+                time.sleep(1.0)
+                return True
+
+        texts = gc_texts(d)
+        for t in texts:
+            tl = t.strip().lower()
+            if any(lbl in tl for lbl in labels_l):
+                if d(text=t).exists(timeout=0.3):
+                    d(text=t).click()
+                    time.sleep(1.0)
+                    return True
+        time.sleep(0.4)
+
+    return False
+
 
 def scroll_down(d, n=1):
     for _ in range(n):
@@ -99,7 +126,7 @@ def _slug_for_opponent(name: str) -> str:
 def _navigate_to_sharks_team(d):
     """From anywhere in the app, navigate to the Sharks team page."""
     # If we're already on the team page Schedule/Stats tabs are visible
-    if d(text="Schedule").exists(timeout=2):
+    if _click_first_visible_text(d, ["Schedule", "Events"], timeout_sec=1.0):
         return
     # Restart app to get to home feed
     d.app_stop("com.gc.teammanager")
@@ -112,7 +139,8 @@ def _navigate_to_sharks_team(d):
         time.sleep(4)
     else:
         # Fallback: tap first visible "Sharks" anywhere
-        d(text="Sharks").click()
+        if not _click_first_visible_text(d, ["Sharks"], timeout_sec=5.0):
+            raise RuntimeError("Could not open Sharks team page in GC app.")
         time.sleep(4)
 
 
@@ -162,7 +190,9 @@ def _stream_scroll(d, scrolls=20):
 def scrape_schedule(d):
     print("[GC App] Navigating to Schedule...")
     _navigate_to_sharks_team(d)
-    d(text="Schedule").click()
+    if not _click_first_visible_text(d, ["Schedule", "Events"], timeout_sec=6.0):
+        visible = gc_texts(d)[:30]
+        raise RuntimeError(f"Schedule/Events tab not found. Visible texts: {visible}")
     time.sleep(3)
     stream = _stream_scroll(d, scrolls=20)
     return _parse_schedule(stream)
@@ -361,7 +391,9 @@ def _parse_table_rows(flat, col_names):
 def scrape_stats(d):
     print("[GC App] Navigating to Stats...")
     _navigate_to_sharks_team(d)
-    d(text="Stats").click()
+    if not _click_first_visible_text(d, ["Stats"], timeout_sec=6.0):
+        visible = gc_texts(d)[:30]
+        raise RuntimeError(f"Stats tab not found. Visible texts: {visible}")
     time.sleep(2)
 
     # --- Batting Standard ---
@@ -429,7 +461,9 @@ def _navigate_to_opponent_from_schedule(d, opponent_keyword: str) -> bool:
     Returns True if successfully landed on the opponent team page (Stats tab visible).
     """
     _navigate_to_sharks_team(d)
-    d(text="Schedule").click()
+    if not _click_first_visible_text(d, ["Schedule", "Events"], timeout_sec=6.0):
+        print("  [Opponent] Could not open Schedule/Events tab")
+        return False
     time.sleep(2)
 
     # Scroll down looking for the opponent entry

@@ -363,3 +363,36 @@ ValueError: [GC] Missing credentials. Set GC_EMAIL and GC_PASSWORD in .env
 2026-03-23 23:01:09,460 [INFO] [Health] pipeline_health.json updated (app batting rows=13, team roster=13, opponent game rows=29, opponent team batting rows=0)
 2026-03-23 23:01:09,480 [INFO] [DB] Recorded stats snapshot id=3 source=sync_cycle
 2026-03-23 23:01:09,480 [INFO] --- Sync Cycle Complete ---
+2026-03-23 23:29:33,787 [INFO] --- Starting Sync Cycle ---
+2026-03-23 23:30:32,507 [INFO] [OpponentDiscovery] org_ids=7ZUyPJwky5DG discovered=6 persisted=5 missing_schedule=2
+2026-03-23 23:30:32,507 [INFO] [Sync] Opponent discovery refreshed (missing schedule opponents=2).
+2026-03-23 23:30:32,507 [INFO] Scraping Schedule...
+2026-03-23 23:31:27,616 [INFO] [Sync] Web box score ingest: target=4 saved=2 skipped=2 failed=0
+2026-03-23 23:31:27,616 [INFO] Scraping Live Stats...
+2026-03-23 23:31:48,441 [INFO] [Enrich] Applied app_stats: batting=11 pitching=5 fielding=11
+2026-03-23 23:31:48,449 [INFO] [Reconcile] scorebook merge complete: matched=11 updated=11 source_players=16
+2026-03-23 23:31:48,484 [INFO] [Validate] No outlier stats detected before team save.
+2026-03-23 23:31:48,491 [INFO] [Sync] team_enriched.json written (scorebook matched=11 updated=11, anomalies=0).
+2026-03-23 23:31:48,539 [INFO] [Sync] SWOT analysis refreshed.
+2026-03-23 23:31:48,590 [INFO] [Sync] Lineup optimizer refreshed.
+2026-03-23 23:31:48,619 [INFO] [Health] pipeline_health.json updated (app batting rows=13, team roster=13, opponent game rows=47, opponent team batting rows=0)
+2026-03-23 23:31:48,649 [INFO] [DB] Recorded stats snapshot id=4 source=sync_cycle
+2026-03-23 23:31:48,649 [INFO] --- Sync Cycle Complete ---
+2026-03-24 06:40:43,994 [INFO] [Enrich] Applied app_stats: batting=11 pitching=5 fielding=11
+2026-03-24 06:40:44,068 [INFO] [Reconcile] scorebook merge complete: matched=11 updated=11 source_players=16
+2026-03-24 06:49:10,518 [INFO] --- Starting Sync Cycle ---
+2026-03-24 06:50:12,935 [INFO] [OpponentDiscovery] org_ids=7ZUyPJwky5DG discovered=6 persisted=5 missing_schedule=2
+2026-03-24 06:50:12,935 [INFO] [Sync] Opponent discovery refreshed (missing schedule opponents=2).
+2026-03-24 06:50:12,935 [INFO] Scraping Schedule...
+2026-03-24 06:50:24,443 [INFO] [Sync] Web box score ingest: target=4 saved=1 skipped=3 failed=0
+2026-03-24 06:50:24,444 [INFO] Scraping Live Stats...
+2026-03-24 06:50:27,655 [WARNING] [Sync] Live stat scrape failed; continuing with fallback data: [GC] Missing credentials. Set GC_EMAIL and GC_PASSWORD in .env
+2026-03-24 06:50:27,697 [INFO] [Enrich] Applied app_stats: batting=11 pitching=5 fielding=11
+2026-03-24 06:50:27,714 [INFO] [Reconcile] scorebook merge complete: matched=12 updated=12 source_players=17
+2026-03-24 06:50:27,750 [INFO] [Validate] No outlier stats detected before team save.
+2026-03-24 06:50:27,755 [INFO] [Sync] team_enriched.json written (scorebook matched=12 updated=12, anomalies=0).
+2026-03-24 06:50:27,794 [INFO] [Sync] SWOT analysis refreshed.
+2026-03-24 06:50:27,838 [INFO] [Sync] Lineup optimizer refreshed.
+2026-03-24 06:50:27,860 [INFO] [Health] pipeline_health.json updated (app batting rows=13, team roster=13, opponent game rows=39, opponent team batting rows=0)
+2026-03-24 06:50:27,899 [INFO] [DB] Recorded stats snapshot id=5 source=sync_cycle
+2026-03-24 06:50:27,899 [INFO] --- Sync Cycle Complete ---
