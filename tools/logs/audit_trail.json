@@ -1,0 +1,256 @@
+[
+  {
+    "timestamp": "2026-03-23T23:31:48.537404",
+    "category": "swot_analysis",
+    "input": {
+      "team_name": "The Sharks",
+      "players_analyzed": 13
+    },
+    "output": {
+      "team_swot": {
+        "strengths": [
+          "Gets on base frequently (9 players)",
+          "Good plate discipline (6 players)",
+          "Low strikeout rate as batter (5 players)"
+        ],
+        "weaknesses": [
+          "Limited power (9 players)",
+          "Low batting average (8 players)",
+          "Error-prone fielding (4 players)"
+        ],
+        "opportunities": [
+          "10 players with multiple areas for growth",
+          "Targeted practice plans can address common weaknesses"
+        ],
+        "threats": [
+          "1 players vulnerable to strikeout pitchers"
+        ]
+      }
+    },
+    "rationale": "Top offensive signals: Amelia OPS 2.0, Leila VanDeusen OPS 1.167, Emma Williams OPS 1.071. Strikeout pressure drivers: Addy A K% 0.375, Chloe Johnson K% 0.333, Sephina Santiago K% 0.267. Defensive risk markers: Addy A FPCT 0.0, Chloe Johnson FPCT 0.0."
+  },
+  {
+    "timestamp": "2026-03-23T23:31:48.575854",
+    "category": "lineup_optimizer",
+    "input": {
+      "active_roster_size": 12
+    },
+    "output": {
+      "balanced": {
+        "compliant": true,
+        "top_3": [
+          {
+            "slot": 1,
+            "number": "",
+            "name": "Amelia",
+            "obp": 1.0,
+            "slg": 1.0,
+            "pa": 3
+          },
+          {
+            "slot": 2,
+            "number": "00",
+            "name": "Ember Hourahan",
+            "obp": 0.571,
+            "slg": 0.4,
+            "pa": 14
+          },
+          {
+            "slot": 3,
+            "number": "4",
+            "name": "Emma Williams",
+            "obp": 0.571,
+            "slg": 0.5,
+            "pa": 7
+          }
+        ]
+      },
+      "aggressive": {
+        "compliant": true,
+        "top_3": [
+          {
+            "slot": 1,
+            "number": "",
+            "name": "Amelia",
+            "obp": 1.0,
+            "slg": 1.0,
+            "pa": 3
+          },
+          {
+            "slot": 2,
+            "number": "00",
+            "name": "Ember Hourahan",
+            "obp": 0.571,
+            "slg": 0.4,
+            "pa": 14
+          },
+          {
+            "slot": 3,
+            "number": "4",
+            "name": "Emma Williams",
+            "obp": 0.571,
+            "slg": 0.5,
+            "pa": 7
+          }
+        ]
+      },
+      "development": {
+        "compliant": true,
+        "top_3": [
+          {
+            "slot": 1,
+            "number": "",
+            "name": "Amelia",
+            "obp": 1.0,
+            "slg": 1.0,
+            "pa": 3
+          },
+          {
+            "slot": 2,
+            "number": "00",
+            "name": "Ember Hourahan",
+            "obp": 0.571,
+            "slg": 0.4,
+            "pa": 14
+          },
+          {
+            "slot": 3,
+            "number": "7",
+            "name": "Deliliah Gomez",
+            "obp": 0.778,
+            "slg": 0.0,
+            "pa": 9
+          }
+        ]
+      }
+    },
+    "rationale": "Top-order placements were driven by batting production metrics. balanced: # Amelia (OBP 1.0, SLG 1.0, PA 3), #00 Ember Hourahan (OBP 0.571, SLG 0.4, PA 14), #4 Emma Williams (OBP 0.571, SLG 0.5, PA 7) | aggressive: # Amelia (OBP 1.0, SLG 1.0, PA 3), #00 Ember Hourahan (OBP 0.571, SLG 0.4, PA 14), #4 Emma Williams (OBP 0.571, SLG 0.5, PA 7) | development: # Amelia (OBP 1.0, SLG 1.0, PA 3), #00 Ember Hourahan (OBP 0.571, SLG 0.4, PA 14), #7 Deliliah Gomez (OBP 0.778, SLG 0.0, PA 9)"
+  },
+  {
+    "timestamp": "2026-03-24T06:50:27.779795",
+    "category": "swot_analysis",
+    "input": {
+      "team_name": "The Sharks",
+      "players_analyzed": 13
+    },
+    "output": {
+      "team_swot": {
+        "strengths": [
+          "Gets on base frequently (12 players)",
+          "Good plate discipline (6 players)",
+          "Low strikeout rate as batter (6 players)"
+        ],
+        "weaknesses": [
+          "Limited power (8 players)",
+          "Low batting average (7 players)",
+          "Error-prone fielding (6 players)"
+        ],
+        "opportunities": [
+          "10 players with multiple areas for growth",
+          "Targeted practice plans can address common weaknesses"
+        ],
+        "threats": [
+          "0 players vulnerable to strikeout pitchers"
+        ]
+      }
+    },
+    "rationale": "Top offensive signals: Amelia OPS 2.0, Emma Williams OPS 1.524, Ember Hourahan OPS 1.143. Strikeout pressure drivers: Chloe Johnson K% 0.333, Juliette Moros K% 0.25, Addy A K% 0.25. Defensive risk markers: Addy A FPCT 0.0, Chloe Johnson FPCT 0.0."
+  },
+  {
+    "timestamp": "2026-03-24T06:50:27.822861",
+    "category": "lineup_optimizer",
+    "input": {
+      "active_roster_size": 12
+    },
+    "output": {
+      "balanced": {
+        "compliant": true,
+        "top_3": [
+          {
+            "slot": 1,
+            "number": "",
+            "name": "Amelia",
+            "obp": 1.0,
+            "slg": 1.0,
+            "pa": 3
+          },
+          {
+            "slot": 2,
+            "number": "13",
+            "name": "Leila VanDeusen",
+            "obp": 0.636,
+            "slg": 0.429,
+            "pa": 11
+          },
+          {
+            "slot": 3,
+            "number": "4",
+            "name": "Emma Williams",
+            "obp": 0.857,
+            "slg": 0.667,
+            "pa": 7
+          }
+        ]
+      },
+      "aggressive": {
+        "compliant": true,
+        "top_3": [
+          {
+            "slot": 1,
+            "number": "",
+            "name": "Amelia",
+            "obp": 1.0,
+            "slg": 1.0,
+            "pa": 3
+          },
+          {
+            "slot": 2,
+            "number": "13",
+            "name": "Leila VanDeusen",
+            "obp": 0.636,
+            "slg": 0.429,
+            "pa": 11
+          },
+          {
+            "slot": 3,
+            "number": "4",
+            "name": "Emma Williams",
+            "obp": 0.857,
+            "slg": 0.667,
+            "pa": 7
+          }
+        ]
+      },
+      "development": {
+        "compliant": true,
+        "top_3": [
+          {
+            "slot": 1,
+            "number": "",
+            "name": "Amelia",
+            "obp": 1.0,
+            "slg": 1.0,
+            "pa": 3
+          },
+          {
+            "slot": 2,
+            "number": "00",
+            "name": "Ember Hourahan",
+            "obp": 0.714,
+            "slg": 0.429,
+            "pa": 14
+          },
+          {
+            "slot": 3,
+            "number": "7",
+            "name": "Deliliah Gomez",
+            "obp": 0.75,
+            "slg": 0.0,
+            "pa": 12
+          }
+        ]
+      }
+    },
+    "rationale": "Top-order placements were driven by batting production metrics. balanced: # Amelia (OBP 1.0, SLG 1.0, PA 3), #13 Leila VanDeusen (OBP 0.636, SLG 0.429, PA 11), #4 Emma Williams (OBP 0.857, SLG 0.667, PA 7) | aggressive: # Amelia (OBP 1.0, SLG 1.0, PA 3), #13 Leila VanDeusen (OBP 0.636, SLG 0.429, PA 11), #4 Emma Williams (OBP 0.857, SLG 0.667, PA 7) | development: # Amelia (OBP 1.0, SLG 1.0, PA 3), #00 Ember Hourahan (OBP 0.714, SLG 0.429, PA 14), #7 Deliliah Gomez (OBP 0.75, SLG 0.0, PA 12)"
+  }
+]

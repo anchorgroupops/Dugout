@@ -6,6 +6,7 @@ Generates structured practice plans in the user's existing format.
 
 import json
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from pathlib import Path
 
 DATA_DIR = Path(__file__).parent.parent / "data"
@@ -295,7 +296,9 @@ def generate_practice_plan(
     Output format matches the user's existing Google Doc practice plan style.
     """
     if date is None:
-        now = datetime.now()
+        # Eastern Time for practice planning
+        et_tz = ZoneInfo("America/New_York")
+        now = datetime.now(et_tz)
         date = f"{now.month}/{now.day}/{now.year}"
 
     drills = map_weaknesses_to_drills(swot_analysis)

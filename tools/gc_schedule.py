@@ -74,7 +74,7 @@ class ScheduleScraper(GameChangerScraper):
     def _take_error_snapshot(self, page, name_prefix):
         """Helper to capture state on failure for debugging."""
         TMP_DIR.mkdir(parents=True, exist_ok=True)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now(ET).strftime("%Y%m%d_%H%M%S")
         try:
             filename = TMP_DIR / f"{name_prefix}_{timestamp}.png"
             page.screenshot(path=str(filename))

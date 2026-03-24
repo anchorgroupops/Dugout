@@ -16,6 +16,7 @@ function App() {
   );
   const [voiceLoading, setVoiceLoading] = useState(false);
   const [voiceError, setVoiceError] = useState('');
+  const [syncLoading, setSyncLoading] = useState(false);
   const [data, setData] = useState({
     team: null,
     swot: null,
@@ -117,6 +118,23 @@ function App() {
       setVoiceError(err?.message || 'Voice update playback failed');
     } finally {
       setVoiceLoading(false);
+    }
+  }, []);
+
+  const handleManualSync = useCallback(async () => {
+    if (!window.confirm("Trigger full end-to-end data refresh? (Scrape -> Analysis -> RAG)")) return;
+    setSyncLoading(true);
+    try {
+      const res = await fetch('https://anchorgroupops--softball-strategy-sharks-manual-sync.modal.run', {
+        method: 'POST'
+      });
+      if (!res.ok) throw new Error('Sync trigger failed');
+      alert("Manual sync triggered successfully! Results will be available in ~5-10 minutes.");
+    } catch (err) {
+      console.error('Sync failed', err);
+      alert("Sync failed: " + err.message);
+    } finally {
+      setSyncLoading(false);
     }
   }, []);
 
@@ -245,6 +263,15 @@ function App() {
             >
               <Volume2 size={16} />
               {voiceLoading ? 'Preparing...' : 'Voice Update'}
+            </button>
+            <button
+              className="sync-btn"
+              onClick={handleManualSync}
+              disabled={syncLoading}
+              title="Trigger manual data refresh"
+            >
+              <Activity size={16} />
+              {syncLoading ? 'Syncing...' : 'Manual Sync'}
             </button>
           </div>
           {voiceError && <p className="voice-error">{voiceError}</p>}

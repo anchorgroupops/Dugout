@@ -5,6 +5,7 @@ Intended for combining Sharks + borrowed players' home-team stats.
 import json
 import re
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -334,7 +335,7 @@ def main():
         "team_name": manifest.get("primary_team", {}).get("name", "Merged Teams"),
         "league": teams[0][0].get("league", ""),
         "season": teams[0][0].get("season", ""),
-        "last_updated": datetime.now().isoformat(),
+        "last_updated": datetime.now(ZoneInfo("America/New_York")).isoformat(),
         "source_teams": [e.get("name") for e in team_entries if e.get("name")],
         "roster": merged_roster,
         "team_totals": {}

@@ -1,6 +1,7 @@
 import os
 import json
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from mitmproxy import http
 from mitmproxy import ctx
@@ -14,8 +15,10 @@ CAPTURE_INDEX = DATA_DIR / "app_captures_index.json"
 
 EXIT_ON_CAPTURE = os.getenv("GC_CAPTURE_EXIT", "0") == "1"
 
+ET = ZoneInfo("America/New_York")
+
 def _now_tag():
-    return datetime.now().strftime("%Y%m%d_%H%M%S")
+    return datetime.now(ET).strftime("%Y%m%d_%H%M%S")
 
 def _is_json(content_type: str) -> bool:
     return "json" in content_type or "text" in content_type
@@ -66,7 +69,7 @@ class GCCaptureAddon:
                     "content_type": content_type,
                     "size": len(body),
                     "saved_to": str(EVENTS_PATH),
-                    "captured_at": datetime.now().isoformat()
+                    "captured_at": datetime.now(ET).isoformat()
                 })
                 ctx.log.info(f"[GC Capture] Saved events JSON -> {EVENTS_PATH}")
                 captured_any = True

@@ -177,117 +177,203 @@ class GameChangerScraper:
                 "[GC] Missing credentials. Set GC_EMAIL and GC_PASSWORD in .env"
             )
 
-    def _auth_gate_present(self) -> bool:
-        """Detect whether current page is a sign-in gate."""
+    def _capture_diagnostics(self, label: str):
+        """Capture screenshot and HTML source for debugging on failure."""
+        if not self.page:
+            return
+        
+        # Use global ET (America/New_York)
+        ts = datetime.now(ET).strftime("%Y%m%d_%H%M%S")
+        diag_dir = Path(__file__).parent.parent / "logs" / "diagnostics"
+        diag_dir.mkdir(parents=True, exist_ok=True)
+        
+        screenshot_path = diag_dir / f"fail_{label}_{ts}.png"
+        html_path = diag_dir / f"fail_{label}_{ts}.html"
+        
         try:
-            if "login" in (self.page.url or "").lower():
-                return True
-            if self.page.locator('input[name="email"], input[type="email"]').count() > 0:
-                return True
-            lower_text = self.page.content().lower()
-            if "join or sign in" in lower_text or "enter your email" in lower_text:
-                return True
-        except Exception:
-            return False
-        return False
+            self.page.screenshot(path=str(screenshot_path), full_page=True)
+            with open(html_path, "w", encoding="utf-8") as f:
+                f.write(self.page.content())
+            print(f"[GC] 📸 Diagnostics saved: {screenshot_path.name}")
+        except Exception as e:
+            print(f"[GC] [WARN] Could not capture diagnostics: {e}")
+
+    def _get_auth_state(self) -> str:
+        """Categorize the current page state."""
+        url = self.page.url.lower()
+        if "login" in url or "signin" in url:
+            return "LOGIN_REQUIRED"
+        if "challenge" in url or "verif" in url:
+            return "CHALLENGED"
+        
+        # Check for specific elements
+        if self.page.locator('input[name="email"], input[type="email"]').count() > 0:
+            return "LOGIN_REQUIRED"
+        
+        # Check if we are on the stats page or team page
+        if "/teams/" in url or "stats" in url:
+            return "AUTHENTICATED"
+            
+        return "UNKNOWN"
 
     def _complete_login_flow(self):
         """Handle current GC login UX (email step -> password step)."""
         print("[GC] Entering credentials...")
 
-        # Step 1: email gate
-        email_field = self.page.locator('input[name="email"], input[type="email"]').first
-        if email_field.count() > 0:
+        try:
+            # Step 1: email gate
+            email_field = self.page.get_by_label("Email", exact=False).or_(
+                self.page.locator('input[name="email"], input[type="email"]')
+            ).first
+            
+            email_field.wait_for(state="visible", timeout=15000)
             email_field.fill(self.email)
-            clicked = False
-            for sel in ('button:has-text("Continue")', 'button[type="submit"]'):
-                btn = self.page.locator(sel).first
-                if btn.count() > 0:
-                    btn.click()
-                    clicked = True
-                    break
-            if not clicked:
+            
+            # Look for Continue button
+            continue_btn = self.page.get_by_role("button", name=re.compile("Continue|Sign in", re.I)).first
+            if continue_btn.count() > 0:
+                continue_btn.click()
+            else:
                 email_field.press("Enter")
-            self.page.wait_for_timeout(1200)
-
-        # Step 2: password gate
-        pwd_field = self.page.locator('input[name="password"], input[type="password"]').first
-        if pwd_field.count() > 0:
+            
+            # Step 2: password gate
+            pwd_field = self.page.get_by_label("Password", exact=False).or_(
+                self.page.locator('input[name="password"], input[type="password"]')
+            ).first
+            
+            pwd_field.wait_for(state="visible", timeout=15000)
             pwd_field.fill(self.password)
-            clicked = False
-            for sel in ('button:has-text("Continue")', 'button:has-text("Sign in")', 'button[type="submit"]'):
-                btn = self.page.locator(sel).first
-                if btn.count() > 0:
-                    btn.click()
-                    clicked = True
-                    break
-            if not clicked:
+            
+            sign_in_btn = self.page.get_by_role("button", name=re.compile("Sign in|Continue", re.I)).first
+            if sign_in_btn.count() > 0:
+                sign_in_btn.click()
+            else:
                 pwd_field.press("Enter")
-            self.page.wait_for_timeout(1500)
+                
+            # Wait for navigation away from login
+            self.page.wait_for_load_state("networkidle", timeout=30000)
+            
+        except Exception as e:
+            self._capture_diagnostics("login_flow_error")
+            raise RuntimeError(f"[GC] Error during login flow: {e}")
 
-    def login(self, playwright):
+    def _heal_locator(self, target_text: str, role: str = "button") -> Any:
+        """Self-healing locator factory. Tries multiple strategies to find an element."""
+        # Strategy 1: Strict role + text
+        loc = self.page.get_by_role(role, name=target_text, exact=False).first
+        if loc.count() > 0:
+            return loc
+
+        # Strategy 2: Fuzzy text matching (any element)
+        loc = self.page.get_by_text(target_text, exact=False).first
+        if loc.count() > 0:
+            print(f"[GC] [HEAL] Found '{target_text}' via fuzzy text instead of role '{role}'")
+            return loc
+
+        # Strategy 3: Regex match on all clickable elements
+        try:
+            loc = self.page.locator(f"button, a, [role='button'], [role='tab']").filter(
+                has_text=re.compile(target_text, re.I)
+            ).first
+            if loc.count() > 0:
+                print(f"[GC] [HEAL] Found '{target_text}' via regex filter on clickable elements")
+                return loc
+        except Exception:
+            pass
+
+        return None
+
+    def login(self, playwright, force_refresh: bool = False):
         """Log in to GameChanger via browser automation using persistent sessions."""
         self._validate_credentials()
+        self.playwright = playwright
 
         auth_file_env = os.getenv("GC_AUTH_FILE", "").strip()
         auth_file = Path(auth_file_env) if auth_file_env else (DATA_DIR / "auth.json")
         auth_file.parent.mkdir(parents=True, exist_ok=True)
 
         context_dir = os.getenv("GC_PLAYWRIGHT_CONTEXT_DIR", "").strip()
-        user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
+        self.browser = playwright.chromium.launch(
+            headless=GC_HEADLESS,
+            args=["--no-sandbox", "--disable-dev-shm-usage"]
+        )
 
         if context_dir:
             context_path = Path(context_dir)
             context_path.mkdir(parents=True, exist_ok=True)
-            print(f"[GC] Using persistent Playwright context dir: {context_path}")
+            print(f"[GC] Using persistent context at {context_path}")
             self.context = playwright.chromium.launch_persistent_context(
                 user_data_dir=str(context_path),
-                headless=True,
-                user_agent=user_agent,
+                headless=GC_HEADLESS,
+                user_agent=user_agent
             )
             self.browser = self.context
         else:
-            self.browser = playwright.chromium.launch(headless=True)
-
-            # Load existing session if available
-            if auth_file.exists():
-                print(f"[GC] Loading existing session from {auth_file}")
+            if auth_file.exists() and not force_refresh:
+                print(f"[GC] Loading session from {auth_file.name}")
                 self.context = self.browser.new_context(
-                    user_agent=user_agent,
                     storage_state=str(auth_file),
+                    user_agent=user_agent
                 )
             else:
-                print("[GC] No existing session found. Creating new context.")
+                print("[GC] Creating new clean context")
                 self.context = self.browser.new_context(user_agent=user_agent)
 
         self.page = self.context.pages[0] if self.context.pages else self.context.new_page()
 
         print(f"[GC] Navigating to {GC_BASE_URL}...")
         self.page.goto(GC_BASE_URL, wait_until="domcontentloaded", timeout=60000)
-        self.page.wait_for_timeout(3000)
+        
+        # Check initial state
+        state = self._get_auth_state()
+        print(f"[GC] Initial state: {state}")
 
-        # Validate auth against the target stats page, not just GC home.
-        self.page.goto(self.stats_url, wait_until="domcontentloaded", timeout=60000)
-        self.page.wait_for_timeout(2500)
-
-        if self._auth_gate_present():
+        if state == "LOGIN_REQUIRED":
             print("[GC] Session invalid or expired. Running login flow...")
             self._complete_login_flow()
-            self.page.wait_for_load_state("networkidle", timeout=60000)
-            self.page.goto(self.stats_url, wait_until="domcontentloaded", timeout=60000)
-            self.page.wait_for_timeout(2000)
+            self._wait_for_stable_page(self.stats_url)
+        elif state == "AUTHENTICATED":
+            print("[GC] Session restored from storage state.")
+            self._wait_for_stable_page(self.stats_url)
+        elif state == "CHALLENGED":
+            self._capture_diagnostics("auth_challenged")
+            if not force_refresh:
+                print("[GC] [HEAL] Attempting fresh context after challenge...")
+                self.close()
+                return self.login(playwright, force_refresh=True)
+            raise RuntimeError("[GC] Blocked by security challenge (Bot detection).")
 
-        if self._auth_gate_present() or "challenge" in self.page.content().lower():
-            print("[WARNING] Still on auth/challenge page after login attempt.")
-            raise RuntimeError("[GC] Authentication failed or blocked by challenge.")
+        # Final validation
+        final_state = self._get_auth_state()
+        if final_state != "AUTHENTICATED":
+            if not force_refresh:
+                print("[GC] [HEAL] Auth failed with cached state, trying fresh login...")
+                self.close()
+                return self.login(playwright, force_refresh=True)
+            
+            self._capture_diagnostics("auth_failed")
+            print(f"[GC] Current URL: {self.page.url}")
+            raise RuntimeError(f"[GC] Authentication failed. State: {final_state}")
 
         print(f"[GC] Authenticated. Current URL: {self.page.url}")
 
-        # Save session state
-        print(f"[GC] Saving authenticated session state to {auth_file}...")
-        self.context.storage_state(path=str(auth_file))
+        # Save session for next time (even if using persistent context, helps on Modal)
+        if not context_dir:
+            self.context.storage_state(path=str(auth_file))
+            print(f"[GC] Session state saved to {auth_file.name}")
 
         return self.page
+
+    def _wait_for_stable_page(self, url: str, timeout: int = 30000):
+        """Wait for page navigation and stability."""
+        try:
+            self.page.goto(url, wait_until="networkidle", timeout=timeout)
+            self.page.wait_for_timeout(1000) # Final settle
+        except Exception as e:
+            print(f"[GC] [WARN] Network idle not reached for {url}: {e}")
+            self.page.goto(url, wait_until="domcontentloaded", timeout=timeout)
 
     # ------------------------------------------------------------------ #
     #  Core: Extract a single stat table from the current view
@@ -341,29 +427,21 @@ class GameChangerScraper:
             return []
 
     def _click_tab(self, tab_text: str) -> bool:
-        """Click a tab/button by its visible text. Returns True if found."""
+        """Click a tab/button with self-healing capabilities."""
         try:
-            # GC uses styled tabs — try multiple selector strategies
-            selectors = [
-                f'button:has-text("{tab_text}")',
-                f'[role="tab"]:has-text("{tab_text}")',
-                f'a:has-text("{tab_text}")',
-                f'div[role="tablist"] >> text="{tab_text}"',
-            ]
-            for sel in selectors:
-                loc = self.page.locator(sel).first
-                if loc.count() > 0:
-                    loc.click()
-                    self.page.wait_for_timeout(1500)
+            # Try roles first: tab then button
+            for role in ["tab", "button", "link"]:
+                btn = self._heal_locator(tab_text, role=role)
+                if btn:
+                    btn.click()
+                    self.page.wait_for_timeout(1000)
                     return True
-            # Fallback: broader text match
-            loc = self.page.locator(f'text="{tab_text}"').first
-            if loc.count() > 0:
-                loc.click()
-                self.page.wait_for_timeout(1500)
-                return True
+            
+            print(f"[GC] [WARN] Self-healing could not find tab/button/link labeled '{tab_text}'")
+            self._capture_diagnostics(f"click_tab_failed_{tab_text}")
+                
         except Exception as e:
-            print(f"[GC] Could not click tab '{tab_text}': {e}")
+            print(f"[GC] Error clicking tab '{tab_text}': {e}")
         return False
 
     # ------------------------------------------------------------------ #

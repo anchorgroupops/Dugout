@@ -1,19 +1,24 @@
 import json
 import os
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from typing import Any, Dict
 
 LOG_FILE = "logs/audit_trail.json"
+ET = ZoneInfo("America/New_York")
 
 def log_decision(category: str, input_data: Dict[str, Any], output_data: Dict[str, Any], rationale: str):
     """
     Records a deterministic decision (SWOT/Lineup) for auditability.
+    Timestamps are forced to America/New_York.
     """
     if not os.path.exists("logs"):
         os.makedirs("logs")
 
+    now_et = datetime.now(ET)
+
     entry = {
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": now_et.isoformat(),
         "category": category,
         "input": input_data,
         "output": output_data,
@@ -38,4 +43,4 @@ def log_decision(category: str, input_data: Dict[str, Any], output_data: Dict[st
 
 if __name__ == "__main__":
     # Test entry
-    log_decision("test", {"test": True}, {"result": "success"}, "Initialization test.")
+    log_decision("test", {"test": True}, {"result": "success"}, "Timezone alignment test.")
