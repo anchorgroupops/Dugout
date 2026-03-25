@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { AlertTriangle, TrendingUp, ShieldAlert, Target, ChevronDown, ChevronUp, Swords, Clock, Home, Plane } from 'lucide-react';
-import { getTodayEST } from '../utils/formatDate';
+import { AlertTriangle, TrendingUp, ShieldAlert, Target, ChevronDown, ChevronUp, Swords, Clock, Home, Plane, Zap, ThumbsDown } from 'lucide-react';
+import { getTodayEST, formatDateMMDDYYYY } from '../utils/formatDate';
+import { TipBadge, PlayerName } from './StatTooltip';
 
 const SwotQuadrant = ({ title, items, color, icon }) => (
   <div>
@@ -17,22 +18,18 @@ const SwotQuadrant = ({ title, items, color, icon }) => (
   </div>
 );
 
-const PlayerStatChip = ({ label, value }) => (
-  <span className="stat-chip">
-    <span className="stat-chip__label">{label}</span>
-    <span className="stat-chip__value">{value}</span>
-  </span>
-);
-
 const StatCompare = ({ label, ours, theirs, lowerIsBetter }) => {
   const diff = lowerIsBetter ? theirs - ours : ours - theirs;
   const color = diff > 0 ? 'var(--success)' : diff < 0 ? 'var(--danger)' : 'var(--text-muted)';
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.4rem 0', fontSize: 'var(--text-sm)' }}>
-      <span style={{ width: '70px', color: 'var(--text-muted)', fontSize: 'var(--text-xs)', textTransform: 'uppercase' }}>{label}</span>
-      <span style={{ width: '60px', textAlign: 'right', fontWeight: '600', color }}>{ours}</span>
-      <span style={{ color: 'rgba(255,255,255,0.2)', fontSize: 'var(--text-xs)' }}>vs</span>
-      <span style={{ width: '60px', fontWeight: '600', color: 'var(--text-muted)' }}>{theirs}</span>
+    <div style={{
+      display: 'grid', gridTemplateColumns: '70px 60px 30px 60px', alignItems: 'center',
+      gap: '0.25rem', padding: '0.4rem 0', fontSize: 'var(--text-sm)'
+    }}>
+      <span style={{ color: 'var(--text-muted)', fontSize: 'var(--text-xs)', textTransform: 'uppercase' }}>{label}</span>
+      <span style={{ textAlign: 'right', fontWeight: '600', color }}>{ours}</span>
+      <span style={{ textAlign: 'center', color: 'rgba(255,255,255,0.2)', fontSize: 'var(--text-xs)' }}>vs</span>
+      <span style={{ fontWeight: '600', color: 'var(--text-muted)' }}>{theirs}</span>
     </div>
   );
 };
@@ -73,6 +70,11 @@ const MatchupPanel = ({ defaultOpponent }) => {
     }
   };
 
+  const isNextGame = defaultOpponent && selected === opponents.find(o =>
+    o.team_name.toLowerCase() === defaultOpponent.toLowerCase() ||
+    o.slug === defaultOpponent.toLowerCase().replace(/ /g, '_')
+  )?.slug;
+
   if (opponents.length === 0) {
     return (
       <div className="glass-panel" style={{ padding: 'var(--space-xl)', marginBottom: '2rem', opacity: 0.7 }}>
@@ -88,22 +90,33 @@ const MatchupPanel = ({ defaultOpponent }) => {
 
   return (
     <div className="glass-panel" style={{ padding: 'var(--space-xl)', marginBottom: '0' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+      <div style={{ marginBottom: '1rem' }}>
         <h3 style={{ margin: 0, color: 'var(--primary-color)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <Swords size={20} /> {defaultOpponent && selected === opponents.find(o => o.team_name.toLowerCase() === defaultOpponent.toLowerCase() || o.slug === defaultOpponent.toLowerCase().replace(/ /g, '_'))?.slug ? `Next Game Matchup vs ${defaultOpponent}` : 'Matchup Analysis'}
+          <Swords size={20} /> {isNextGame ? 'Next Game Matchup' : 'Matchup Analysis'}
         </h3>
+        {isNextGame && (
+          <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', marginTop: '0.25rem', paddingLeft: '1.75rem' }}>
+            vs {defaultOpponent}
+          </div>
+        )}
+      </div>
+
+      <div style={{ marginBottom: '1rem' }}>
         <select
           value={selected}
           onChange={e => handleSelect(e.target.value)}
           style={{
             padding: '0.5rem 0.75rem', borderRadius: '6px', minHeight: 'var(--touch-min)',
             background: 'rgba(0,0,0,0.3)', border: '1px solid var(--surface-border)',
-            color: 'var(--text-main)', fontSize: 'var(--text-sm)', fontFamily: 'inherit', cursor: 'pointer'
+            color: 'var(--text-main)', fontSize: 'var(--text-sm)', fontFamily: 'inherit', cursor: 'pointer',
+            width: '100%', maxWidth: '320px'
           }}
         >
           <option value="">Select opponent...</option>
           {opponents.map(o => (
-            <option key={o.slug} value={o.slug}>{o.team_name} ({o.roster_size} players)</option>
+            <option key={o.slug} value={o.slug}>
+              {o.team_name} - {o.roster_size} players
+            </option>
           ))}
         </select>
       </div>
@@ -184,7 +197,7 @@ const MatchupPanel = ({ defaultOpponent }) => {
               {matchup.their_roster?.length > 0 && (
                 <div style={{ marginTop: '1rem', paddingTop: '0.75rem', borderTop: '1px solid var(--surface-border)' }}>
                   <div className="section-label section-label--muted">
-                    {matchup.opponent} Roster ({matchup.their_roster.length})
+                    Roster ({matchup.their_roster.length})
                   </div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
                     {[...matchup.their_roster].sort((a,b) => {
@@ -202,8 +215,11 @@ const MatchupPanel = ({ defaultOpponent }) => {
                         background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)',
                         borderRadius: '6px', padding: '3px 8px', fontSize: 'var(--text-xs)', color: 'var(--text-muted)'
                       }}>
-                        {p.number ? <span style={{ color: 'var(--primary-color)', fontWeight: '700', marginRight: '4px' }}>#{p.number}</span> : null}
-                        {p.name || `${p.first || ''} ${p.last || ''}`.trim()}
+                        <PlayerName
+                          name={p.name || `${p.first || ''} ${p.last || ''}`.trim()}
+                          number={p.number}
+                          size="xs"
+                        />
                       </span>
                     ))}
                   </div>
@@ -220,9 +236,7 @@ const MatchupPanel = ({ defaultOpponent }) => {
 const UpcomingGameBanner = ({ next }) => {
   if (!next) return null;
 
-  const dateStr = new Date(next.date + 'T12:00:00').toLocaleDateString('en-US', {
-    timeZone: 'America/New_York', weekday: 'short', month: 'short', day: 'numeric'
-  });
+  const dateStr = formatDateMMDDYYYY(next.date);
   const isHome = next.home_away === 'home';
 
   return (
@@ -245,6 +259,100 @@ const UpcomingGameBanner = ({ next }) => {
           <span style={{ color: 'var(--text-muted)', fontSize: 'var(--text-sm)' }}>@ {next.location}</span>
         )}
       </div>
+    </div>
+  );
+};
+
+/** Compact player card with collapsible detail */
+const PlayerSwotCard = ({ player, isMobile, isExpanded, onToggle }) => {
+  const hitting = player.derivedStats?.hitting || {};
+  const pa = Number(hitting.pa || 0);
+  const avg = Number(hitting.ba || 0).toFixed(3).replace(/^0/, '');
+  const obp = Number(hitting.obp || 0).toFixed(3).replace(/^0/, '');
+  const ops = Number(hitting.ops || 0).toFixed(3).replace(/^0/, '');
+  const kRate = `${Math.round(Number(hitting.k_rate || 0) * 100)}%`;
+  const bbRate = `${Math.round(Number(hitting.bb_rate || 0) * 100)}%`;
+
+  const strengths = player.swot?.strengths || [];
+  const weaknesses = player.swot?.weaknesses || [];
+  const hasStrengths = strengths.length > 0;
+  const hasWeaknesses = weaknesses.length > 0;
+
+  return (
+    <div
+      className="glass-panel"
+      style={{ padding: isMobile ? 'var(--space-lg)' : '1.25rem', cursor: 'pointer' }}
+      onClick={onToggle}
+    >
+      {/* Collapsed header: name, number, key badges, trait icons */}
+      <div style={{
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        marginBottom: isExpanded ? '0.75rem' : 0,
+        paddingBottom: isExpanded ? '0.5rem' : 0,
+        borderBottom: isExpanded ? '1px solid var(--surface-border)' : 'none'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap', flex: 1, minWidth: 0 }}>
+          <PlayerName
+            first={player.first}
+            last={player.last}
+            number={player.number}
+            size={isMobile ? 'sm' : 'md'}
+          />
+          {/* Compact stat badges — always visible */}
+          {pa > 0 ? (
+            <span style={{ display: 'inline-flex', gap: '0.3rem', flexWrap: 'wrap' }}>
+              <TipBadge label="AVG" value={avg} />
+              <TipBadge label="OBP" value={obp} />
+              {!isMobile && <TipBadge label="OPS" value={ops} />}
+            </span>
+          ) : (
+            <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', fontStyle: 'italic' }}>No PAs</span>
+          )}
+          {/* Trait icons for quick scanning */}
+          <span style={{ display: 'inline-flex', gap: '0.25rem', alignItems: 'center' }}>
+            {hasStrengths && (
+              <span title={`Strengths: ${strengths.length}`} style={{ color: 'var(--success)', display: 'inline-flex', alignItems: 'center' }}>
+                <Zap size={14} />
+              </span>
+            )}
+            {hasWeaknesses && (
+              <span title={`Areas for growth: ${weaknesses.length}`} style={{ color: 'var(--danger)', display: 'inline-flex', alignItems: 'center' }}>
+                <ThumbsDown size={14} />
+              </span>
+            )}
+          </span>
+        </div>
+        {isExpanded ? <ChevronUp size={18} color="var(--text-muted)" /> : <ChevronDown size={18} color="var(--text-muted)" />}
+      </div>
+
+      {/* Expanded detail */}
+      {isExpanded && (
+        <div style={{ marginTop: '0.5rem' }}>
+          {/* Full stat row */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', marginBottom: '0.9rem' }}>
+            {pa > 0 ? (
+              <>
+                <TipBadge label="PA" value={pa} />
+                <TipBadge label="AVG" value={avg} />
+                <TipBadge label="OBP" value={obp} />
+                <TipBadge label="OPS" value={ops} />
+                <TipBadge label="K%" value={kRate} />
+                <TipBadge label="BB%" value={bbRate} />
+              </>
+            ) : (
+              <TipBadge label="Stats" value="No plate appearances yet" />
+            )}
+          </div>
+
+          {/* Full SWOT quadrants */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            <SwotQuadrant title="Strengths" items={strengths} color="var(--success)" icon={<TrendingUp size={13} />} />
+            <SwotQuadrant title="Areas for Growth" items={weaknesses} color="var(--danger)" icon={<AlertTriangle size={13} />} />
+            <SwotQuadrant title="Opportunities" items={player.swot?.opportunities} color="#3b9ede" icon={<Target size={13} />} />
+            <SwotQuadrant title="Threats" items={player.swot?.threats} color="var(--warning)" icon={<ShieldAlert size={13} />} />
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -289,7 +397,36 @@ const Swot = ({ swotData, roster, schedule, isMobile = false }) => {
         </span>
       </h2>
 
-      {/* 1. Next Game & Matchups */}
+      {/* ──── 1. Team-level SWOT — most prominent, shown FIRST ──── */}
+      {teamSwot && (
+        isMobile ? (
+          <div className="glass-panel" style={{ marginBottom: 'var(--space-md)', padding: 'var(--space-lg)', borderColor: 'var(--primary-glow)' }}>
+            <h3 style={{ marginBottom: '1rem', color: 'var(--primary-color)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <ShieldAlert size={20} /> Team Analysis
+            </h3>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.85rem' }}>
+              <SwotQuadrant title="Strengths" items={(teamSwot.strengths || []).slice(0, 4)} color="var(--success)" icon={<TrendingUp size={14} />} />
+              <SwotQuadrant title="Areas for Growth" items={(teamSwot.weaknesses || []).slice(0, 4)} color="var(--danger)" icon={<AlertTriangle size={14} />} />
+              <SwotQuadrant title="Opportunities" items={(teamSwot.opportunities || []).slice(0, 4)} color="#3b9ede" icon={<Target size={14} />} />
+              <SwotQuadrant title="Threats" items={(teamSwot.threats || []).slice(0, 4)} color="var(--warning)" icon={<ShieldAlert size={14} />} />
+            </div>
+          </div>
+        ) : (
+          <div className="glass-panel" style={{ marginBottom: '2rem', padding: '1.5rem', borderColor: 'var(--primary-glow)' }}>
+            <h3 style={{ marginBottom: '1.25rem', color: 'var(--primary-color)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <ShieldAlert size={20} /> Team Analysis
+            </h3>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1.25rem' }}>
+              <SwotQuadrant title="Strengths" items={teamSwot.strengths} color="var(--success)" icon={<TrendingUp size={14} />} />
+              <SwotQuadrant title="Areas for Growth" items={teamSwot.weaknesses} color="var(--danger)" icon={<AlertTriangle size={14} />} />
+              <SwotQuadrant title="Opportunities" items={teamSwot.opportunities} color="#3b9ede" icon={<Target size={14} />} />
+              <SwotQuadrant title="Threats" items={teamSwot.threats} color="var(--warning)" icon={<ShieldAlert size={14} />} />
+            </div>
+          </div>
+        )
+      )}
+
+      {/* ──── 2. Next Game Banner + Matchup ──── */}
       <div style={{ marginBottom: isMobile ? 'var(--space-md)' : '2rem' }}>
         <UpcomingGameBanner next={nextGame} />
         {isMobile ? (
@@ -322,85 +459,19 @@ const Swot = ({ swotData, roster, schedule, isMobile = false }) => {
         )}
       </div>
 
-      {/* 2. Team-level SWOT */}
-      {teamSwot && (
-        isMobile ? (
-          <details className="glass-panel" style={{ marginBottom: 'var(--space-md)', padding: 'var(--space-lg)', borderColor: 'var(--primary-glow)' }}>
-            <summary style={{ cursor: 'pointer', color: 'var(--primary-color)', fontWeight: 700 }}>Team Analysis</summary>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '0.85rem', marginTop: '0.75rem' }}>
-              <SwotQuadrant title="Strengths" items={(teamSwot.strengths || []).slice(0, 4)} color="var(--success)" icon={<TrendingUp size={14} />} />
-              <SwotQuadrant title="Areas for Growth" items={(teamSwot.weaknesses || []).slice(0, 4)} color="var(--danger)" icon={<AlertTriangle size={14} />} />
-              <SwotQuadrant title="Opportunities" items={(teamSwot.opportunities || []).slice(0, 4)} color="#3b9ede" icon={<Target size={14} />} />
-              <SwotQuadrant title="Threats" items={(teamSwot.threats || []).slice(0, 4)} color="var(--warning)" icon={<ShieldAlert size={14} />} />
-            </div>
-          </details>
-        ) : (
-          <div className="glass-panel" style={{ marginBottom: '2rem', padding: '1.5rem', borderColor: 'var(--primary-glow)' }}>
-            <h3 style={{ marginBottom: '1.25rem', color: 'var(--primary-color)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <ShieldAlert size={20} /> Team Analysis
-            </h3>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '1.25rem' }}>
-              <SwotQuadrant title="Strengths" items={teamSwot.strengths} color="var(--success)" icon={<TrendingUp size={14} />} />
-              <SwotQuadrant title="Areas for Growth" items={teamSwot.weaknesses} color="var(--danger)" icon={<AlertTriangle size={14} />} />
-              <SwotQuadrant title="Opportunities" items={teamSwot.opportunities} color="#3b9ede" icon={<Target size={14} />} />
-              <SwotQuadrant title="Threats" items={teamSwot.threats} color="var(--warning)" icon={<ShieldAlert size={14} />} />
-            </div>
-          </div>
-        )
-      )}
-
-      {/* Player cards */}
+      {/* ──── 3. Player cards — collapsible ──── */}
       <div className="card-grid">
         {playersWithSwot.map(player => {
           const key = `${player.number}-${player.last}`;
           const isExpanded = expandedPlayer === key;
-          const hitting = player.derivedStats?.hitting || {};
-          const pa = Number(hitting.pa || 0);
-          const avg = Number(hitting.ba || 0).toFixed(3).replace(/^0/, '');
-          const obp = Number(hitting.obp || 0).toFixed(3).replace(/^0/, '');
-          const ops = Number(hitting.ops || 0).toFixed(3).replace(/^0/, '');
-          const kRate = `${Math.round(Number(hitting.k_rate || 0) * 100)}%`;
-          const bbRate = `${Math.round(Number(hitting.bb_rate || 0) * 100)}%`;
           return (
-            <div
+            <PlayerSwotCard
               key={key}
-              className="glass-panel"
-              style={{ padding: isMobile ? 'var(--space-lg)' : '1.5rem', cursor: 'pointer' }}
-              onClick={() => setExpandedPlayer(isExpanded ? null : key)}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', paddingBottom: '0.5rem', borderBottom: '1px solid var(--surface-border)' }}>
-                <h3 style={{ fontSize: isMobile ? 'var(--text-base)' : '1.1rem', margin: 0 }}>
-                  {player.number ? `#${player.number} ` : ''}{player.first} {player.last}
-                </h3>
-                {isExpanded ? <ChevronUp size={18} color="var(--text-muted)" /> : <ChevronDown size={18} color="var(--text-muted)" />}
-              </div>
-
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', marginBottom: '0.9rem' }}>
-                {pa > 0 ? (
-                  <>
-                    <PlayerStatChip label="PA" value={pa} />
-                    <PlayerStatChip label="AVG" value={avg} />
-                    <PlayerStatChip label="OBP" value={obp} />
-                    <PlayerStatChip label="OPS" value={ops} />
-                    {!isMobile && <PlayerStatChip label="K%" value={kRate} />}
-                    {!isMobile && <PlayerStatChip label="BB%" value={bbRate} />}
-                  </>
-                ) : (
-                  <PlayerStatChip label="Stats" value="No plate appearances yet" />
-                )}
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                <SwotQuadrant title="Strengths" items={isMobile ? (player.swot?.strengths || []).slice(0, 2) : player.swot?.strengths} color="var(--success)" icon={<TrendingUp size={13} />} />
-                <SwotQuadrant title="Areas for Growth" items={isMobile ? (player.swot?.weaknesses || []).slice(0, 2) : player.swot?.weaknesses} color="var(--danger)" icon={<AlertTriangle size={13} />} />
-                {isExpanded && (
-                  <>
-                    <SwotQuadrant title="Opportunities" items={player.swot?.opportunities} color="#3b9ede" icon={<Target size={13} />} />
-                    <SwotQuadrant title="Threats" items={player.swot?.threats} color="var(--warning)" icon={<ShieldAlert size={13} />} />
-                  </>
-                )}
-              </div>
-            </div>
+              player={player}
+              isMobile={isMobile}
+              isExpanded={isExpanded}
+              onToggle={() => setExpandedPlayer(isExpanded ? null : key)}
+            />
           );
         })}
       </div>

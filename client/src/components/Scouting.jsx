@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Target, Shield, Swords, AlertTriangle, Calendar, MapPin } from 'lucide-react';
+import { formatDateMMDDYYYY } from '../utils/formatDate';
+import { Tip, TipBadge, PlayerName } from './StatTooltip';
 
 const BulletCard = ({ title, items, color, icon, emptyText }) => (
   <div className="glass-panel" style={{ padding: 'var(--space-lg)', marginBottom: 'var(--space-sm)' }}>
@@ -69,24 +71,59 @@ export default function Scouting({ isMobile }) {
     <div className="animate-fade-in">
       {/* Header card */}
       <div className="glass-panel" style={{
-        padding: isMobile ? 'var(--space-lg)' : '1.25rem',
+        padding: isMobile ? 'var(--space-lg)' : '1.5rem 1.25rem',
         marginBottom: 'var(--space-md)',
         textAlign: 'center',
       }}>
-        <p className="section-label" style={{ marginBottom: '0.3rem' }}>
+        <p className="section-label" style={{
+          marginBottom: '0.5rem',
+          fontSize: 'var(--text-sm)',
+          letterSpacing: '0.08em',
+          textTransform: 'uppercase',
+        }}>
           Next Opponent
         </p>
-        <h2 style={{
-          fontSize: isMobile ? '1.3rem' : '1.6rem',
-          fontFamily: 'var(--font-heading)',
-          color: 'var(--text-main)',
-          margin: '0 0 0.5rem 0',
+
+        {/* Team logo placeholder + opponent name */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '0.75rem',
+          marginBottom: '0.6rem',
         }}>
-          {nextGame.opponent}
-        </h2>
+          <div style={{
+            width: isMobile ? 40 : 52,
+            height: isMobile ? 40 : 52,
+            borderRadius: '50%',
+            background: 'linear-gradient(135deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02))',
+            border: '2px solid rgba(255,255,255,0.12)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: isMobile ? '1rem' : '1.3rem',
+            fontWeight: '700',
+            color: 'var(--primary-color)',
+            fontFamily: 'var(--font-heading)',
+            flexShrink: 0,
+          }}>
+            {nextGame.opponent?.charAt(0) || '?'}
+          </div>
+          <h2 style={{
+            fontSize: isMobile ? '1.6rem' : '2rem',
+            fontFamily: 'var(--font-heading)',
+            color: 'var(--text-main)',
+            margin: 0,
+            letterSpacing: '-0.01em',
+            lineHeight: 1.1,
+          }}>
+            {nextGame.opponent}
+          </h2>
+        </div>
+
         <div style={{ display: 'flex', justifyContent: 'center', gap: '1rem', fontSize: 'var(--text-sm)', color: 'var(--text-muted)', flexWrap: 'wrap' }}>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
-            <Calendar size={14} /> {nextGame.date}
+            <Calendar size={14} /> {formatDateMMDDYYYY(nextGame.date)}
           </span>
           {nextGame.time && (
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
@@ -99,6 +136,19 @@ export default function Scouting({ isMobile }) {
             </span>
           )}
         </div>
+
+        {/* Data source indicator */}
+        {matchup?.data_source && (
+          <p style={{
+            marginTop: '0.5rem',
+            marginBottom: 0,
+            fontSize: 'var(--text-xs)',
+            color: 'rgba(255,255,255,0.35)',
+            fontStyle: 'italic',
+          }}>
+            Source: {matchup.data_source}
+          </p>
+        )}
       </div>
 
       {isInsufficient ? (
@@ -165,7 +215,7 @@ export default function Scouting({ isMobile }) {
                     color: g.result === 'W' ? 'var(--success)' : g.result === 'L' ? 'var(--danger)' : 'var(--text-muted)',
                     border: `1px solid ${g.result === 'W' ? 'rgba(47,143,98,0.3)' : g.result === 'L' ? 'rgba(179,74,57,0.3)' : 'rgba(255,255,255,0.12)'}`,
                   }}>
-                    {g.result} {g.runs_for}-{g.runs_against} ({g.date})
+                    {g.result} {g.runs_for}-{g.runs_against} ({formatDateMMDDYYYY(g.date)})
                   </span>
                 ))}
               </div>

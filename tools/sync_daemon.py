@@ -2156,6 +2156,36 @@ def _load_voice_context() -> dict:
     return {"team": team, "swot": swot, "lineups": lineups, "schedule": schedule}
 
 
+# Phonetic pronunciation map for names the TTS engine mispronounces.
+# Key: substring to find (case-insensitive), Value: phonetic replacement.
+_PHONETIC_MAP = {
+    "VanDeusen": "Van Doo-sen",
+    "Hourahan": "Hour-a-han",
+    "Moros": "Morr-ohs",
+    "Gomez": "Go-mez",
+    "Santiago": "Sahn-tee-ah-go",
+    "McKinney": "Mick-Kinney",
+    "Sephina": "Seh-fee-nah",
+    "Maylani": "May-lah-nee",
+    "Mikayla": "Mih-Kay-lah",
+    "Juliette": "Julie-ett",
+    "Deliliah": "Deh-lie-lee-ah",
+    "NWVLL": "North West Volusia Little League",
+    "PCLL": "Palm Coast Little League",
+    "Stihlers": "Steelers",
+}
+
+
+def _apply_phonetics(text: str) -> str:
+    """Replace known mispronounced names/words with phonetic spellings for TTS."""
+    result = text
+    for word, phonetic in _PHONETIC_MAP.items():
+        # Case-insensitive replacement preserving original position
+        import re
+        result = re.sub(re.escape(word), phonetic, result, flags=re.IGNORECASE)
+    return result
+
+
 def _build_voice_overview_text(ctx: dict) -> str:
     team = ctx.get("team", {}) if isinstance(ctx, dict) else {}
     swot = ctx.get("swot", {}) if isinstance(ctx, dict) else {}
@@ -2179,7 +2209,7 @@ def _build_voice_overview_text(ctx: dict) -> str:
         reverse=True,
     )[:3]
     hitter_text = ", ".join(
-        f"{_player_name(p)} on-base {normalize_batting_row(p).get('obp', 0.0):.3f}"
+        f"{_player_name(p)} with an on-base of {normalize_batting_row(p).get('obp', 0.0):.3f}"
         for p in top_hitters
     ) or "no clear hitting leaders yet"
 
@@ -2190,7 +2220,7 @@ def _build_voice_overview_text(ctx: dict) -> str:
 
     balanced = (lineups.get("balanced") or {}).get("lineup") or []
     top_order = ", ".join(
-        f"#{p.get('number', '?')} {_player_name(p)}"
+        f"{_player_name(p)} number {p.get('number', '?')}"
         for p in balanced[:3]
     ) or "lineup not generated"
 
@@ -2199,20 +2229,23 @@ def _build_voice_overview_text(ctx: dict) -> str:
         [g for g in (schedule.get("upcoming") or []) if str(g.get("date", "")) >= today],
         key=lambda x: str(x.get("date", "")),
     )
-    next_game_text = "No upcoming game on file."
+    next_game_text = "No games on the horizon right now."
     if next_game:
         game = next_game[0]
         opp = _clean_opponent_name(str(game.get("opponent", "Opponent")))
-        next_game_text = f"Next game is {game.get('date', 'TBD')} against {opp}."
+        ha = "at home" if game.get("home_away") == "home" else "on the road"
+        next_game_text = f"Next up, the Sharks take on the {opp} {ha} on {game.get('date', 'a date to be determined')}! Let's go!"
 
-    return (
-        f"{team_name} status update. Current record is {record}. "
-        f"Top on-base contributors: {hitter_text}. "
-        f"Primary strength: {strengths_text}. "
-        f"Primary focus area: {weaknesses_text}. "
-        f"Balanced top order currently projects as {top_order}. "
+    raw = (
+        f"Hey Sharks fans! Here's your {team_name} update! "
+        f"The team is sitting at {record} this season. "
+        f"Leading the charge at the plate: {hitter_text}! "
+        f"The team's biggest strength right now? {strengths_text}. "
+        f"Area to focus on: {weaknesses_text}. "
+        f"The projected top of the batting order is {top_order}. "
         f"{next_game_text}"
     )
+    return _apply_phonetics(raw)
 
 
 def _synthesize_voice_update(text: str) -> bytes:
@@ -2234,8 +2267,10 @@ def _synthesize_voice_update(text: str) -> bytes:
         "text": text,
         "model_id": model_id,
         "voice_settings": {
-            "stability": 0.35,
-            "similarity_boost": 0.75,
+            "stability": 0.22,
+            "similarity_boost": 0.85,
+            "style": 0.45,
+            "use_speaker_boost": True,
         },
     }
     headers = {

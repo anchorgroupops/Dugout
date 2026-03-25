@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Settings2, UserPlus, Check, X, Search, ChevronDown } from 'lucide-react';
+import { PlayerName } from './StatTooltip';
 
 const ToggleRow = ({ player, available, onToggle, updating, isMobile = false }) => {
   const name = `${player.first} ${player.last}`.trim();
@@ -27,7 +28,9 @@ const ToggleRow = ({ player, available, onToggle, updating, isMobile = false }) 
         {player.number}
       </div>
       <div style={{ flex: 1 }}>
-        <div style={{ fontWeight: '600', fontSize: isMobile ? 'var(--text-sm)' : '0.95rem' }}>{name}</div>
+        <div style={{ fontSize: isMobile ? 'var(--text-sm)' : '0.95rem' }}>
+          <PlayerName name={name} number={player.number} size="sm" />
+        </div>
         <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
           {b.gp != null ? `${b.gp} GP` : ''}
           {b.avg != null ? ` · .${String(Math.round((b.avg || 0) * 1000)).padStart(3, '0')} AVG` : ''}
@@ -122,7 +125,7 @@ const PlayerCombobox = ({ players, onSelect, placeholder }) => {
                 onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
               >
                 <div style={{ fontWeight: '600', fontSize: '0.9rem' }}>
-                  #{p.number} {p.first} {p.last}
+                  {p.first} {p.last} <span style={{ color: 'var(--primary-color)' }}>#{p.number}</span>
                 </div>
                 <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                   {p.team_name}
@@ -331,7 +334,7 @@ const RosterManager = ({
         {/* Sub players */}
         {(subRoster.filter(p => isAvailable(p)).length > 0 || subRoster.filter(p => !isAvailable(p)).length > 0) && (
           <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid rgba(63, 143, 136, 0.2)' }}>
-            
+
             {/* Active Subs */}
             {subRoster.filter(p => isAvailable(p)).length > 0 && (
               <div style={{ marginBottom: subRoster.filter(p => !isAvailable(p)).length > 0 ? '1rem' : 0 }}>
@@ -435,7 +438,7 @@ const RosterManager = ({
                     background: 'rgba(4, 101, 104, 0.08)', border: '1px solid rgba(4, 101, 104, 0.2)',
                     fontSize: '0.85rem', color: 'var(--primary-color)', fontWeight: '600'
                   }}>
-                    Selected: #{borrowForm.number} {borrowForm.first} {borrowForm.last}
+                    Selected: {borrowForm.first} {borrowForm.last} #{borrowForm.number}
                     <button
                       type="button"
                       onClick={() => setBorrowForm({ first: '', last: '', number: '', gc_team_id: '' })}
