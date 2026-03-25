@@ -254,6 +254,9 @@ function App() {
                 className={`sync-status-dot ${staleSources.length > 0 ? 'stale' : 'fresh'}`}
                 title={staleSources.length > 0 ? `Stale: ${staleSources.join(', ')}` : 'Data is fresh'}
               />
+              {syncStage !== 'idle' && (
+                <span className="sync-stage-tag">{syncStage}</span>
+              )}
             </div>
             <div className="mobile-header-actions">
               <button
@@ -303,8 +306,8 @@ function App() {
             <h1 style={{ fontSize: 'clamp(1.6rem, 5.5vw, 2.5rem)', marginBottom: '0.4rem', lineHeight: 1.1 }}>
               {displayTeamName}
             </h1>
-            <div className="hero-meta-row" style={{ alignItems: 'center' }}>
-              <p style={{ color: 'var(--text-muted)', fontSize: '1.1rem', flex: 1 }}>
+            <div className="hero-meta-row">
+              <p style={{ color: 'var(--text-muted)', fontSize: '1.1rem' }}>
                 {data.team ? `${data.team.league} \u2022 Last Updated: ${formatDateTime(data.team.last_updated)}` : 'Loading...'}
               </p>
               <button className={`sync-btn ${syncLoading ? 'sync-btn--active' : ''}`} onClick={handleManualSync} disabled={syncLoading} title="Trigger manual data refresh">
@@ -316,13 +319,6 @@ function App() {
                 {voiceLoading ? 'Preparing...' : 'Voice Update'}
               </button>
             </div>
-          </div>
-        )}
-
-        {(syncLoading || syncStage !== 'idle') && (
-          <div className="sync-progress-bar">
-            <div className="spinner-small" />
-            <span>Sync in progress... Current Stage: <span className="sync-stage-tag">{syncStage}</span></span>
           </div>
         )}
 
