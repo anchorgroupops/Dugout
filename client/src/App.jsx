@@ -261,19 +261,20 @@ function App() {
             <div className="mobile-header-actions">
               <button
                 className="mobile-action-btn"
+                onClick={handleVoiceUpdate}
+                disabled={voiceLoading}
+                title="Voice Update"
+              >
+                <Volume2 size={20} className={voiceLoading ? 'sync-spin' : ''} />
+              </button>
+              <button
+                className={`mobile-action-btn ${syncLoading ? 'sync-btn--active' : ''}`}
                 onClick={handleManualSync}
                 disabled={syncLoading}
                 title="Manual Sync"
               >
                 <RefreshCw size={20} className={syncLoading ? 'sync-spin' : ''} />
-              </button>
-              <button
-                className="mobile-action-btn"
-                onClick={handleVoiceUpdate}
-                disabled={voiceLoading}
-                title="Voice Update"
-              >
-                <Volume2 size={20} />
+                {syncLoading && <span style={{ fontSize: '0.6rem', position: 'absolute', bottom: '-8px', whiteSpace: 'nowrap' }}>Syncing...</span>}
               </button>
             </div>
           </div>
@@ -310,13 +311,13 @@ function App() {
               <p style={{ color: 'var(--text-muted)', fontSize: '1.1rem' }}>
                 {data.team ? `${data.team.league} \u2022 Last Updated: ${formatDateTime(data.team.last_updated)}` : 'Loading...'}
               </p>
+              <button className="voice-btn" onClick={handleVoiceUpdate} disabled={voiceLoading} title="Play latest audio overview">
+                <Volume2 size={16} className={voiceLoading ? 'sync-spin' : ''} />
+                {voiceLoading ? 'Preparing...' : 'Voice Update'}
+              </button>
               <button className={`sync-btn ${syncLoading ? 'sync-btn--active' : ''}`} onClick={handleManualSync} disabled={syncLoading} title="Trigger manual data refresh">
                 <RefreshCw size={16} className={syncLoading ? 'sync-spin' : ''} />
                 {syncLoading ? 'Syncing...' : syncStage !== 'idle' ? `Sync: ${syncStage}` : 'Manual Sync'}
-              </button>
-              <button className="voice-btn" onClick={handleVoiceUpdate} disabled={voiceLoading} title="Play latest audio overview">
-                <Volume2 size={16} />
-                {voiceLoading ? 'Preparing...' : 'Voice Update'}
               </button>
             </div>
           </div>
