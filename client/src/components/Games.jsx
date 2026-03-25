@@ -1,13 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Calendar, ChevronDown, ChevronUp, Home, Plane, Clock } from 'lucide-react';
-import { getTodayEST } from '../utils/formatDate';
-
-const StatCell = ({ label, value }) => (
-  <div className="stat-badge">
-    <span className="stat-badge__label">{label}</span>
-    <span className="stat-badge__value">{value ?? '\u2014'}</span>
-  </div>
-);
+import { getTodayEST, formatDateMMDDYYYY } from '../utils/formatDate';
+import { TipBadge, PlayerName } from './StatTooltip';
 
 const PlayerBattingRow = ({ player }) => {
   const b = player.batting || {};
@@ -21,22 +15,19 @@ const PlayerBattingRow = ({ player }) => {
       background: 'rgba(0,0,0,0.15)',
       flexWrap: 'wrap'
     }}>
-      <div style={{ width: '32px', fontSize: 'var(--text-sm)', fontWeight: '700', color: 'var(--primary-color)' }}>
-        #{player.number}
-      </div>
-      <div style={{ minWidth: '120px', fontSize: 'var(--text-sm)', fontWeight: '600' }}>
-        {player.name}
+      <div style={{ minWidth: '120px' }}>
+        <PlayerName name={player.name} number={player.number} size="sm" />
         {player.pos && <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginLeft: '0.4rem' }}>({player.pos})</span>}
       </div>
       <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-        <StatCell label="PA" value={b.pa} />
-        <StatCell label="AB" value={b.ab} />
-        <StatCell label="H" value={b.h} />
-        <StatCell label="BB" value={b.bb} />
-        <StatCell label="HBP" value={b.hbp} />
-        <StatCell label="SO" value={b.so} />
-        <StatCell label="AVG" value={b.avg != null ? b.avg.toFixed(3) : null} />
-        <StatCell label="OBP" value={b.obp != null ? b.obp.toFixed(3) : null} />
+        <TipBadge label="PA" value={b.pa} />
+        <TipBadge label="AB" value={b.ab} />
+        <TipBadge label="H" value={b.h} />
+        <TipBadge label="BB" value={b.bb} />
+        <TipBadge label="HBP" value={b.hbp} />
+        <TipBadge label="SO" value={b.so} />
+        <TipBadge label="AVG" value={b.avg != null ? b.avg.toFixed(3) : null} />
+        <TipBadge label="OBP" value={b.obp != null ? b.obp.toFixed(3) : null} />
       </div>
       {player.at_bats_raw?.length > 0 && (
         <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', fontStyle: 'italic' }}>
@@ -64,9 +55,7 @@ const ResultBadge = ({ result, score }) => {
 const GameCard = ({ game, onExpand, isExpanded, detail, isMobile = false }) => {
   const t = game.sharks_totals || {};
   const isHome = game.sharks_side === 'home';
-  const dateStr = game.date
-    ? new Date(game.date + 'T12:00:00').toLocaleDateString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric', year: 'numeric' })
-    : 'Unknown Date';
+  const dateStr = game.date ? formatDateMMDDYYYY(game.date) : 'Unknown Date';
 
   return (
     <div className="glass-panel" style={{ padding: isMobile ? 'var(--space-lg)' : '1.25rem', cursor: isMobile ? 'default' : 'pointer' }} onClick={onExpand}>
@@ -86,15 +75,15 @@ const GameCard = ({ game, onExpand, isExpanded, detail, isMobile = false }) => {
       </div>
 
       {game.sharks_totals && <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-        <StatCell label="PA" value={t.pa} />
-        <StatCell label="H" value={t.h} />
-        {!isMobile && <StatCell label="AB" value={t.ab} />}
-        {!isMobile && <StatCell label="2B" value={t.doubles || 0} />}
-        {!isMobile && <StatCell label="HR" value={t.hr || 0} />}
-        {!isMobile && <StatCell label="BB" value={t.bb} />}
-        {!isMobile && <StatCell label="HBP" value={t.hbp} />}
-        {!isMobile && <StatCell label="SO" value={t.so} />}
-        <StatCell label="AVG" value={t.avg != null ? t.avg.toFixed(3) : null} />
+        <TipBadge label="PA" value={t.pa} />
+        <TipBadge label="H" value={t.h} />
+        {!isMobile && <TipBadge label="AB" value={t.ab} />}
+        {!isMobile && <TipBadge label="2B" value={t.doubles || 0} />}
+        {!isMobile && <TipBadge label="HR" value={t.hr || 0} />}
+        {!isMobile && <TipBadge label="BB" value={t.bb} />}
+        {!isMobile && <TipBadge label="HBP" value={t.hbp} />}
+        {!isMobile && <TipBadge label="SO" value={t.so} />}
+        <TipBadge label="AVG" value={t.avg != null ? t.avg.toFixed(3) : null} />
       </div>}
 
       {!isMobile && isExpanded && detail && (
@@ -120,9 +109,7 @@ const UpcomingGameBanner = ({ schedule }) => {
     .sort((a, b) => a.date.localeCompare(b.date))[0];
   if (!next) return null;
 
-  const dateStr = new Date(next.date + 'T12:00:00').toLocaleDateString('en-US', {
-    timeZone: 'America/New_York', weekday: 'short', month: 'short', day: 'numeric'
-  });
+  const dateStr = formatDateMMDDYYYY(next.date);
   const isHome = next.home_away === 'home';
 
   return (
@@ -152,9 +139,7 @@ const UpcomingGameBanner = ({ schedule }) => {
 
 const ScheduleRow = ({ game }) => {
   const isHome = game.home_away === 'home';
-  const dateStr = game.date
-    ? new Date(game.date + 'T12:00:00').toLocaleDateString('en-US', { timeZone: 'America/New_York', weekday: 'short', month: 'short', day: 'numeric' })
-    : '\u2014';
+  const dateStr = game.date ? formatDateMMDDYYYY(game.date) : '\u2014';
   const isNext = game._isNext;
 
   return (
@@ -221,16 +206,43 @@ const Games = ({ gamesData, schedule, isMobile = false }) => {
 
       {upcoming.length > 0 && (
         <div className="glass-panel" style={{ padding: isMobile ? 'var(--space-lg)' : '1.25rem', marginBottom: isMobile ? 'var(--space-md)' : '2rem' }}>
-          <div className="section-label">Upcoming Schedule ({upcoming.length} games)</div>
+          <div className="section-label" style={{
+            color: 'var(--primary-color)',
+            fontSize: 'var(--text-base)',
+            fontWeight: '800',
+            letterSpacing: '0.5px',
+            textTransform: 'uppercase',
+            borderBottom: '2px solid rgba(4, 101, 104, 0.3)',
+            paddingBottom: '0.5rem',
+            marginBottom: '0.75rem',
+          }}>Upcoming Schedule ({upcoming.length} games)</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
             {upcoming.map((g, i) => <ScheduleRow key={i} game={g} />)}
           </div>
         </div>
       )}
 
+      {/* Visual divider between upcoming and past */}
+      {upcoming.length > 0 && sorted.length > 0 && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: '1rem',
+          margin: '1.5rem 0 1rem',
+        }}>
+          <div style={{ flex: 1, height: '1px', background: 'linear-gradient(to right, transparent, rgba(255,255,255,0.1), transparent)' }} />
+        </div>
+      )}
+
       {sorted.length > 0 ? (
         <>
-          <div className="section-label section-label--muted">Past Games ({sorted.length})</div>
+          <div className="section-label" style={{
+            color: 'var(--text-muted)',
+            fontSize: 'var(--text-sm)',
+            fontWeight: '600',
+            letterSpacing: '0.3px',
+            textTransform: 'uppercase',
+            opacity: 0.6,
+            marginBottom: '0.75rem',
+          }}>Past Games ({sorted.length})</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
             {sorted.map(game => (
               <GameCard

@@ -9,7 +9,7 @@
   --primary-color: #82cbc3;
   --primary-glow: rgba(130, 203, 195, 0.18);
   --secondary-color: #82cbc3;
-  --accent-away: #2a8f93;
+  --accent-away: #6b8adb;
   --accent-sub: #3f8f88;
   --text-main: #eaf5fb;
   --text-muted: #9bb1c8;
@@ -308,6 +308,7 @@ select {
   gap: 2px;
   flex: 1;
   min-width: 48px;
+  cursor: help;
 }
 
 .stat-badge__label {
@@ -321,6 +322,43 @@ select {
   font-size: var(--text-base);
   font-weight: bold;
   color: var(--text-main);
+}
+
+/* Tooltip helper for stat abbreviations */
+.stat-tip {
+  cursor: help;
+  border-bottom: 1px dotted var(--text-muted);
+}
+
+/* Dark checkbox styling (unchecked = dark interior) */
+input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 20px;
+  height: 20px;
+  border: 2px solid rgba(130, 203, 195, 0.4);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+  flex-shrink: 0;
+  position: relative;
+  transition: all var(--transition-fast);
+}
+
+input[type="checkbox"]:checked {
+  background: var(--primary-color);
+  border-color: var(--primary-color);
+}
+
+input[type="checkbox"]:checked::after {
+  content: '\2713';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: #03283a;
+  font-size: 14px;
+  font-weight: 700;
 }
 
 .stat-chip {
@@ -379,11 +417,13 @@ select {
 .home-away-pill--home {
   background: rgba(35, 134, 54, 0.15);
   color: var(--success);
+  border: 1px solid rgba(35, 134, 54, 0.3);
 }
 
 .home-away-pill--away {
-  background: rgba(42, 143, 147, 0.16);
+  background: rgba(107, 138, 219, 0.16);
   color: var(--accent-away);
+  border: 1px solid rgba(107, 138, 219, 0.32);
 }
 
 .swot-label {

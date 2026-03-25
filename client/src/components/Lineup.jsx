@@ -1,22 +1,8 @@
 import React, { useState } from 'react';
 import { Settings, ShieldCheck, RefreshCw, Clock, Home, Plane } from 'lucide-react';
-import { getTodayEST } from '../utils/formatDate';
+import { getTodayEST, formatDateMMDDYYYY } from '../utils/formatDate';
+import { TipBadge, PlayerName } from './StatTooltip';
 import RosterManager from './RosterManager';
-
-const StatBadge = ({ label, value, good, warn }) => {
-  const num = typeof value === 'number' ? value : parseFloat(value) || 0;
-  const color = num >= good ? 'var(--success)' : num >= warn ? 'var(--warning)' : 'var(--text-muted)';
-  const display = num > 0 ? num.toFixed(3).replace(/^0/, '') : '\u2014';
-  return (
-    <span style={{
-      fontSize: 'var(--text-xs)', fontWeight: '600', color,
-      background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)',
-      borderRadius: '4px', padding: '2px 6px', letterSpacing: '0.3px'
-    }}>
-      {label} {display}
-    </span>
-  );
-};
 
 const AvailBadge = ({ available }) => (
   <span style={{
@@ -27,6 +13,14 @@ const AvailBadge = ({ available }) => (
   }} title={available ? 'Available' : 'Unavailable'} />
 );
 
+const slotLabel = (slot) => {
+  if (slot === 1) return 'Leadoff';
+  if (slot === 2) return 'Table Setter';
+  if (slot === 3) return 'Power';
+  if (slot === 4) return 'Run Producer';
+  return null;
+};
+
 const NextGameBanner = ({ schedule }) => {
   if (!schedule) return null;
   const today = getTodayEST();
@@ -35,9 +29,7 @@ const NextGameBanner = ({ schedule }) => {
     ?.sort((a, b) => a.date.localeCompare(b.date))[0];
   if (!next) return null;
 
-  const dateStr = new Date(next.date + 'T12:00:00').toLocaleDateString('en-US', {
-    timeZone: 'America/New_York', weekday: 'short', month: 'short', day: 'numeric'
-  });
+  const dateStr = formatDateMMDDYYYY(next.date);
   const isHome = next.home_away === 'home';
 
   return (
@@ -105,10 +97,17 @@ const Lineup = ({
     }
   };
 
+  /* Default availability: all core=true Sharks are available */
   const isAvailable = (player) => {
-    if (!availability) return true;
+    if (!availability) return player.core !== false;
     const name = `${player.first || ''} ${player.last || ''}`.trim();
+    if (availability[name] === undefined) return player.core !== false;
     return availability[name] !== false;
+  };
+
+  const fmtStat = (v) => {
+    const num = typeof v === 'number' ? v : parseFloat(v) || 0;
+    return num > 0 ? num.toFixed(3).replace(/^0/, '') : '\u2014';
   };
 
   return (
@@ -167,7 +166,7 @@ const Lineup = ({
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: isMobile ? 'flex-start' : 'center', flexDirection: isMobile ? 'column' : 'row', marginBottom: isMobile ? '1rem' : '2rem', paddingBottom: '1rem', borderBottom: '1px solid var(--surface-border)', gap: isMobile ? '0.55rem' : 0 }}>
           <div>
             <h3 style={{ fontSize: isMobile ? 'var(--text-lg)' : '1.5rem', color: 'var(--text-main)', textTransform: 'capitalize' }}>
-              Batting Order \u00b7 {strategy} Strategy
+              Batting Order &middot; {strategy} Strategy
             </h3>
             {!isMobile && (
               <p style={{ color: 'var(--text-muted)', fontSize: 'var(--text-sm)', marginTop: '0.25rem' }}>
@@ -193,6 +192,7 @@ const Lineup = ({
             const name = `${player.first || ''} ${player.last || ''}`.trim() || player.name || '\u2014';
             const avail = isAvailable(player);
             const hasStats = (player.pa || 0) > 0;
+            const roleLabel = slotLabel(player.slot);
             return (
               <div key={`${player.number}-${idx}`} style={{
                 display: 'flex', alignItems: 'center', padding: '0.85rem 1rem',
@@ -202,10 +202,11 @@ const Lineup = ({
                 opacity: avail ? 1 : 0.65,
                 gap: isMobile ? '0.5rem' : '0.75rem', flexWrap: 'wrap'
               }}>
-                <div style={{ width: isMobile ? '22px' : '28px', fontWeight: 'bold', color: 'var(--text-muted)', fontSize: isMobile ? 'var(--text-sm)' : 'var(--text-sm)' }}>{player.slot}.</div>
-                <div style={{ width: isMobile ? '42px' : '52px', fontFamily: 'var(--font-heading)', fontSize: isMobile ? 'var(--text-base)' : '1.1rem', color: '#fff' }}>#{player.number}</div>
-                <div style={{ flex: 1, minWidth: isMobile ? '100px' : '120px', fontWeight: '600', fontSize: isMobile ? 'var(--text-sm)' : 'var(--text-base)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  {name}
+                <div style={{ width: isMobile ? '22px' : '28px', fontWeight: 'bold', color: 'var(--text-muted)', fontSize: 'var(--text-sm)' }}>{player.slot}.</div>
+
+                {/* Name first, then number */}
+                <div style={{ flex: 1, minWidth: isMobile ? '100px' : '120px', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <PlayerName name={name} number={player.number} size={isMobile ? 'sm' : 'md'} />
                   <AvailBadge available={avail} />
                   {player.borrowed && (
                     <span style={{
@@ -214,18 +215,27 @@ const Lineup = ({
                       fontWeight: 'bold', letterSpacing: '1px', border: '1px solid rgba(63, 143, 136, 0.28)'
                     }}>SUB</span>
                   )}
+                  {roleLabel && (
+                    <span style={{
+                      fontSize: 'var(--text-xs)', fontWeight: '600',
+                      color: 'rgba(255,220,120,0.85)',
+                      background: 'rgba(255,220,120,0.08)',
+                      border: '1px solid rgba(255,220,120,0.18)',
+                      padding: '1px 6px', borderRadius: '4px', letterSpacing: '0.3px'
+                    }}>{roleLabel}</span>
+                  )}
                 </div>
 
                 {hasStats ? (
                   isMobile ? (
                     <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
-                      AVG {typeof player.avg === 'number' ? player.avg.toFixed(3).replace(/^0/, '') : '\u2014'} \u00b7 OPS {typeof player.ops === 'number' ? player.ops.toFixed(3).replace(/^0/, '') : '\u2014'}
+                      AVG {fmtStat(player.avg)} &middot; OPS {fmtStat(player.ops)}
                     </span>
                   ) : (
                     <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-                      <StatBadge label="AVG" value={player.avg} good={0.350} warn={0.200} />
-                      <StatBadge label="OBP" value={player.obp} good={0.420} warn={0.280} />
-                      <StatBadge label="SLG" value={player.slg} good={0.450} warn={0.250} />
+                      <TipBadge label="AVG" value={fmtStat(player.avg)} />
+                      <TipBadge label="OBP" value={fmtStat(player.obp)} />
+                      <TipBadge label="SLG" value={fmtStat(player.slg)} />
                       <span style={{ fontSize: 'var(--text-xs)', color: 'rgba(255,255,255,0.25)', padding: '1px 4px' }}>
                         {player.pa} PA
                       </span>
@@ -237,7 +247,7 @@ const Lineup = ({
 
                 <div style={{
                   background: 'var(--surface-hover)', padding: '0.25rem 0.65rem',
-                  borderRadius: '12px', fontSize: isMobile ? 'var(--text-xs)' : 'var(--text-xs)',
+                  borderRadius: '12px', fontSize: 'var(--text-xs)',
                   color: 'var(--text-muted)',
                   minWidth: isMobile ? '80px' : '100px', textAlign: 'center', flexShrink: 0
                 }}>
@@ -254,14 +264,25 @@ const Lineup = ({
       <div
         className="glass-panel"
         data-testid="availability-block"
-        style={{ padding: isMobile ? 'var(--space-lg)' : '1.2rem', marginTop: '1.25rem' }}
+        style={{
+          padding: isMobile ? 'var(--space-lg)' : '1.2rem',
+          marginTop: '1.75rem',
+          borderTop: '3px solid var(--primary-color)',
+        }}
       >
         <div style={{ marginBottom: '0.75rem' }}>
-          <h3 style={{ margin: 0, fontSize: 'var(--text-base)', color: 'var(--primary-color)' }}>
-            Game-Day Availability & Borrowed Players
+          <h3 style={{
+            margin: 0,
+            fontSize: isMobile ? 'var(--text-lg)' : '1.25rem',
+            fontWeight: '700',
+            color: 'var(--primary-color)',
+            paddingBottom: '0.5rem',
+            borderBottom: '2px solid rgba(4, 101, 104, 0.35)',
+          }}>
+            Game Day Roster
           </h3>
           {!isMobile && (
-            <p style={{ margin: '0.35rem 0 0', fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>
+            <p style={{ margin: '0.5rem 0 0', fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>
               Toggle who is in tonight, add subs if needed, and lineups will auto-refresh from live stats.
             </p>
           )}
@@ -271,7 +292,7 @@ const Lineup = ({
           availability={availability}
           onAvailabilityChange={onAvailabilityChange}
           onRosterMutated={onDataRefresh}
-          title="Game-Day Availability"
+          title="Game Day Roster"
           showTitle={false}
           isMobile={isMobile}
         />
