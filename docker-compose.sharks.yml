@@ -119,6 +119,8 @@ services:
       - MUTATE_RATE_WINDOW_SEC=60
       - MUTATE_RATE_MAX=12
       - GC_ORG_IDS=7ZUyPJwky5DG
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY}
+      - ELEVENLABS_VOICE_ID=${ELEVENLABS_VOICE_ID}
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
