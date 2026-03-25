@@ -610,12 +610,12 @@ def _team_aggregates(team_data: dict) -> dict:
         total_a += _parse_number(fielding.get("a", 0))
         total_e += _parse_number(fielding.get("e", 0))
 
-    q_pct = _safe_div(adv_qab, adv_pa) if adv_pa > 0 else 0.0
-    c_pct = _safe_div(weighted_c, adv_pa) if adv_pa > 0 else 0.0
-    ld_pct = _safe_div(weighted_ld, adv_pa) if adv_pa > 0 else 0.0
-    fb_pct = _safe_div(weighted_fb, adv_pa) if adv_pa > 0 else 0.0
-    gb_pct = _safe_div(weighted_gb, adv_pa) if adv_pa > 0 else 0.0
-    bb_per_k = _safe_div(adv_bb, adv_so) if adv_so > 0 else 0.0
+    q_pct = _safe_div(adv_qab, adv_pa) if adv_pa > 0 else None
+    c_pct = _safe_div(weighted_c, adv_pa) if adv_pa > 0 else None
+    ld_pct = _safe_div(weighted_ld, adv_pa) if adv_pa > 0 else None
+    fb_pct = _safe_div(weighted_fb, adv_pa) if adv_pa > 0 else None
+    gb_pct = _safe_div(weighted_gb, adv_pa) if adv_pa > 0 else None
+    bb_per_k = _safe_div(adv_bb, adv_so) if adv_so > 0 else None
 
     return {
         "batting": {
@@ -630,23 +630,23 @@ def _team_aggregates(team_data: dict) -> dict:
         },
         "batting_advanced": {
             "qab": int(adv_qab),
-            "qab_pct": round(q_pct, 3),
-            "c_pct": round(c_pct, 3),
-            "ld_pct": round(ld_pct, 3),
-            "fb_pct": round(fb_pct, 3),
-            "gb_pct": round(gb_pct, 3),
+            "qab_pct": round(q_pct, 3) if q_pct is not None else None,
+            "c_pct": round(c_pct, 3) if c_pct is not None else None,
+            "ld_pct": round(ld_pct, 3) if ld_pct is not None else None,
+            "fb_pct": round(fb_pct, 3) if fb_pct is not None else None,
+            "gb_pct": round(gb_pct, 3) if gb_pct is not None else None,
             "hhb": int(adv_hhb),
-            "bb_per_k": round(bb_per_k, 3),
+            "bb_per_k": round(bb_per_k, 3) if bb_per_k is not None else None,
         },
         "pitching": {
-            "era": round(_safe_div(total_er * 7, total_ip), 2),
-            "whip": round(_safe_div(total_p_bb + total_p_h, total_ip), 2),
-            "k_per_ip": round(_safe_div(total_p_so, total_ip), 2),
-            "bb_per_ip": round(_safe_div(total_p_bb, total_ip), 2),
+            "era": round(_safe_div(total_er * 7, total_ip), 2) if total_ip > 0 else None,
+            "whip": round(_safe_div(total_p_bb + total_p_h, total_ip), 2) if total_ip > 0 else None,
+            "k_per_ip": round(_safe_div(total_p_so, total_ip), 2) if total_ip > 0 else None,
+            "bb_per_ip": round(_safe_div(total_p_bb, total_ip), 2) if total_ip > 0 else None,
             "ip": round(total_ip, 1),
         },
         "fielding": {
-            "fpct": round(_safe_div(total_po + total_a, total_po + total_a + total_e), 3),
+            "fpct": round(_safe_div(total_po + total_a, total_po + total_a + total_e), 3) if (total_po + total_a + total_e) > 0 else None,
             "errors": int(total_e),
         },
         "roster_size": len(roster),
