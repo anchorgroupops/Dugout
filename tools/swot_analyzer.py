@@ -619,12 +619,12 @@ def _team_aggregates(team_data: dict) -> dict:
 
     return {
         "batting": {
-            "avg": round(_safe_div(h, ab), 3),
-            "obp": round(_safe_div(h + bb + hbp, pa), 3),
-            "slg": round(_safe_div(tb, ab), 3),
-            "ops": round(_safe_div(h + bb + hbp, pa) + _safe_div(tb, ab), 3),
-            "k_rate": round(_safe_div(so, pa), 3),
-            "bb_rate": round(_safe_div(bb, pa), 3),
+            "avg": round(_safe_div(h, ab), 3) if ab > 0 else None,
+            "obp": round(_safe_div(h + bb + hbp, pa), 3) if pa > 0 else None,
+            "slg": round(_safe_div(tb, ab), 3) if ab > 0 else None,
+            "ops": round(_safe_div(h + bb + hbp, pa) + _safe_div(tb, ab), 3) if pa > 0 else None,
+            "k_rate": round(_safe_div(so, pa), 3) if pa > 0 else None,
+            "bb_rate": round(_safe_div(bb, pa), 3) if pa > 0 else None,
             "hr": int(hr), "sb": int(sb), "r": int(r), "rbi": int(rbi),
             "ab": int(ab), "h": int(h), "pa": int(pa),
         },

@@ -2370,7 +2370,7 @@ def handle_practice_insights():
             team_file = SHARKS_DIR / ("team_merged.json" if (SHARKS_DIR / "team_merged.json").exists() else "team.json")
         team = _read_json_file(team_file, default={}) or {}
         if not isinstance(team, dict):
-            return jsonify({"error": "team_data_unavailable"}), 503
+            team = {}
 
         try:
             _enrich_team_with_app_stats(team)
@@ -2465,9 +2465,20 @@ def handle_practice_insights():
             "practice_meta": {"date": None, "title": None},
             "selected_players": [],
             "available_players": [],
-            "needs": [],
+            "needs": [{
+                "key": "general_fundamentals",
+                "title": "General Fundamentals",
+                "priority": 1,
+                "score": 1.0,
+                "focus_players": [],
+                "why": "Practice data temporarily unavailable — run general fundamentals.",
+                "drills": [
+                    {"name": "Throw-Catch-Footwork Circuit", "duration_min": 15, "goal": "Improve transfer speed and receiving mechanics."},
+                    {"name": "Contact + Baserun Combo", "duration_min": 15, "goal": "Build consistent bat-to-ball and first-step aggression."},
+                ],
+            }],
             "recommended_plan": [],
-        }), 500
+        })
 
 
 @app.route('/api/stats-db/status', methods=['GET'])
