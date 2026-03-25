@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Users, Activity, ListOrdered, Calendar, Trophy, Dumbbell, Volume2, Target, AlertTriangle, MoreHorizontal } from 'lucide-react';
+import { Users, Activity, RefreshCw, ListOrdered, Calendar, Trophy, Dumbbell, Volume2, Target, AlertTriangle, MoreHorizontal } from 'lucide-react';
 import { formatDateTime } from './utils/formatDate';
 import Roster from './components/Roster';
 import Swot from './components/Swot';
@@ -270,7 +270,7 @@ function App() {
                 disabled={syncLoading}
                 title="Manual Sync"
               >
-                <Activity size={20} className={syncLoading ? 'spinner' : ''} />
+                <RefreshCw size={20} className={syncLoading ? 'sync-spin' : ''} />
               </button>
             </div>
           </div>
@@ -311,8 +311,8 @@ function App() {
                 <Volume2 size={16} />
                 {voiceLoading ? 'Preparing...' : 'Voice Update'}
               </button>
-              <button className="sync-btn" onClick={handleManualSync} disabled={syncLoading} title="Trigger manual data refresh">
-                <Activity size={16} />
+              <button className={`sync-btn ${syncLoading ? 'sync-btn--active' : ''}`} onClick={handleManualSync} disabled={syncLoading} title="Trigger manual data refresh">
+                <RefreshCw size={16} className={syncLoading ? 'sync-spin' : ''} />
                 {syncLoading ? 'Syncing...' : syncStage !== 'idle' ? `Sync: ${syncStage}` : 'Manual Sync'}
               </button>
             </div>
