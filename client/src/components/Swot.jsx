@@ -173,15 +173,25 @@ const MatchupPanel = ({ defaultOpponent }) => {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                 <div>
                   <div className="section-label" style={{ color: 'var(--success)' }}>Our Advantages</div>
-                  <ul style={{ paddingLeft: '1.2rem', fontSize: 'var(--text-sm)', color: 'var(--text-muted)', margin: 0 }}>
-                    {matchup.our_advantages.map((a, i) => <li key={i} style={{ marginBottom: '2px' }}>{a}</li>)}
-                  </ul>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                    {matchup.our_advantages.map((a, i) => (
+                      <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>
+                        <span style={{ color: 'var(--success)', fontSize: '1rem', lineHeight: 1, flexShrink: 0 }}>{'\u2714'}</span>
+                        <span>{a}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
                 <div>
                   <div className="section-label" style={{ color: 'var(--danger)' }}>Their Advantages</div>
-                  <ul style={{ paddingLeft: '1.2rem', fontSize: 'var(--text-sm)', color: 'var(--text-muted)', margin: 0 }}>
-                    {matchup.their_advantages.map((a, i) => <li key={i} style={{ marginBottom: '2px' }}>{a}</li>)}
-                  </ul>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                    {matchup.their_advantages.map((a, i) => (
+                      <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>
+                        <span style={{ color: 'var(--danger)', fontSize: '1rem', lineHeight: 1, flexShrink: 0 }}>{'\u26A0'}</span>
+                        <span>{a}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
 

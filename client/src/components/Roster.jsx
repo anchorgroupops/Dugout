@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { ChevronDown, ChevronUp } from 'lucide-react';
 import { TipBadge, PlayerName } from './StatTooltip';
 
 const fmt = (val) => (val !== null && val !== undefined ? String(val) : '\u2014');
@@ -234,7 +235,16 @@ const Roster = ({ team, availability, isMobile = false }) => {
                   </div>
                   <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', display: 'block', marginTop: '2px' }}>
                     {b.gp != null ? `${b.gp} GP` : ''}{b.pa != null ? ` \u2022 ${b.pa} PA` : ''}
-                    {!isExpanded && ' \u2022 Tap to expand'}
+                    {!isExpanded && (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.2rem', marginLeft: '0.3rem', color: 'var(--primary-color)' }}>
+                        <ChevronDown size={12} /> Stats
+                      </span>
+                    )}
+                    {isExpanded && (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.2rem', marginLeft: '0.3rem', color: 'var(--primary-color)' }}>
+                        <ChevronUp size={12} /> Collapse
+                      </span>
+                    )}
                   </span>
                   {player.teams && player.teams.length > 0 && (
                     <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginTop: '2px' }}>

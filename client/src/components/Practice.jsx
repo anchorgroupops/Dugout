@@ -114,7 +114,7 @@ const Practice = ({ team, schedule, isMobile = false }) => {
   const [initialLoaded, setInitialLoaded] = useState(false);
   const debounceRef = useRef(null);
 
-  const availablePlayers = useMemo(() => insights?.available_players || [], [insights]);
+  const availablePlayers = useMemo(() => [...(insights?.available_players || [])].sort((a, b) => a.localeCompare(b)), [insights]);
 
   // Core roster names from team prop (used to default-select ALL Sharks players)
   const coreRosterNames = useMemo(() => {
@@ -244,7 +244,7 @@ const Practice = ({ team, schedule, isMobile = false }) => {
               minHeight: 'var(--touch-min)',
             }}
           >
-            <RefreshCw size={14} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
+            <RefreshCw size={14} className={loading ? 'spin-smooth' : ''} />
             Refresh
           </button>
         </div>

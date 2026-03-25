@@ -59,12 +59,22 @@ def compute_batting_score(player: dict, strategy: str = "balanced") -> float:
     total_bases = singles + (2 * doubles) + (3 * triples) + (4 * hr)
     slg = total_bases / ab if ab > 0 else 0
     k_rate = k / pa
-    q_pct = hitting_adv.get("qab_pct", 0.0)  # quality at-bat ratio
-    contact_quality = hitting_adv.get("c_pct", 0.0)
-    line_drive_rate = hitting_adv.get("ld_pct", 0.0)
-    discipline_ratio = hitting_adv.get("bb_per_k", 0.0)
+    # GC advanced stats are on 0-100 scale — normalize to 0-1
+    q_pct = min(hitting_adv.get("qab_pct", 0.0), 100.0) / 100.0
+    contact_quality = min(hitting_adv.get("c_pct", 0.0), 100.0) / 100.0
+    line_drive_rate = min(hitting_adv.get("ld_pct", 0.0), 100.0) / 100.0
+    discipline_ratio = min(hitting_adv.get("bb_per_k", 0.0), 10.0)  # cap at 10
     pa_per_bb = hitting_adv.get("pa_per_bb", 0.0)
     pa_per_bb_bonus = (1 / pa_per_bb) if pa_per_bb > 0 else 0.0
+
+    # Apply sample size regression: small-sample players (< 8 PA) get
+    # their rates pulled toward league average to prevent fluky rankings.
+    LEAGUE_AVG = {"obp": 0.380, "slg": 0.280, "ba": 0.250, "k_rate": 0.30}
+    confidence = min(pa / 8, 1.0)
+    obp = confidence * obp + (1 - confidence) * LEAGUE_AVG["obp"]
+    slg = confidence * slg + (1 - confidence) * LEAGUE_AVG["slg"]
+    ba = confidence * ba + (1 - confidence) * LEAGUE_AVG["ba"]
+    k_rate = confidence * k_rate + (1 - confidence) * LEAGUE_AVG["k_rate"]
 
     if strategy == "balanced":
         # OBP is king, then SLG, then contact, then speed
@@ -126,6 +136,10 @@ def slot_players(sorted_players: list[dict]) -> list[dict]:
         return lineup
 
     # Find best leadoff candidate: highest OBP + speed combo
+    # Apply regression to mean for small samples (< 8 PA) to prevent 3-PA
+    # players with 1.000 OBP from outranking proven hitters.
+    LEAGUE_AVG_OBP = 0.380  # youth softball league average
+    MIN_PA_FULL_WEIGHT = 8  # PA threshold for full stat trust
     leadoff_scores = []
     for i, p in enumerate(pool):
         hitting = normalize_player_batting(p)
@@ -136,10 +150,14 @@ def slot_players(sorted_players: list[dict]) -> list[dict]:
         hbp = hitting.get("hbp", 0)
         sb = hitting.get("sb", 0)
         pa = ab + bb + hbp
-        obp = (h + bb + hbp) / pa if pa > 0 else 0
+        raw_obp = (h + bb + hbp) / pa if pa > 0 else 0
+        # Regress small-sample OBP toward league average
+        confidence = min(pa / MIN_PA_FULL_WEIGHT, 1.0)
+        obp = confidence * raw_obp + (1 - confidence) * LEAGUE_AVG_OBP
         speed = sb / max(pa, 1)
-        qab_pct = hitting_adv.get("qab_pct", 0.0)
-        leadoff_scores.append((i, obp * 0.55 + speed * 0.30 + qab_pct * 0.15))
+        # qab_pct is 0-100 scale from GC; normalize to 0-1 for scoring
+        qab_pct = min(hitting_adv.get("qab_pct", 0.0), 100.0) / 100.0
+        leadoff_scores.append((i, obp * 0.60 + speed * 0.25 + qab_pct * 0.15))
 
     leadoff_scores.sort(key=lambda x: x[1], reverse=True)
     leadoff_idx = leadoff_scores[0][0]
