@@ -1,6 +1,5 @@
-/* eslint-disable no-unused-vars */
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Users, Activity, ListOrdered, Calendar, Trophy, Dumbbell, Volume2, Target, AlertTriangle } from 'lucide-react';
+import { Users, Activity, ListOrdered, Calendar, Trophy, Dumbbell, Volume2, Target, AlertTriangle, MoreHorizontal } from 'lucide-react';
 import { formatDateTime } from './utils/formatDate';
 import Roster from './components/Roster';
 import Swot from './components/Swot';
@@ -21,6 +20,7 @@ function App() {
   const [staleSources, setStaleSources] = useState([]);
   const [syncStage, setSyncStage] = useState('idle');
   const [syncLoading, setSyncLoading] = useState(false);
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [data, setData] = useState({
     team: null,
     swot: null,
@@ -78,11 +78,8 @@ function App() {
   }, []);
 
   useEffect(() => {
-    fetchData(); // Initial fetch
-    
-    // Set up real-time polling every 30 seconds
+    fetchData();
     const intervalId = setInterval(fetchData, 30000);
-    
     return () => clearInterval(intervalId);
   }, [fetchData]);
 
@@ -158,6 +155,7 @@ function App() {
     }
   }, []);
 
+  // All nav items for desktop
   const navItems = [
     { id: 'scout', label: 'Scout', icon: <Target size={18} /> },
     { id: 'swot', label: 'SWOT', icon: <Activity size={18} /> },
@@ -166,6 +164,20 @@ function App() {
     { id: 'games', label: 'Games', icon: <Calendar size={18} /> },
     { id: 'league', label: 'League', icon: <Trophy size={18} /> },
     { id: 'practice', label: 'Practice', icon: <Dumbbell size={18} /> }
+  ];
+
+  // Mobile: 4 primary bottom tabs + "More" overflow
+  const primaryNavItems = [
+    { id: 'scout', label: 'Scout', icon: <Target size={22} /> },
+    { id: 'lineups', label: 'Lineups', icon: <ListOrdered size={22} /> },
+    { id: 'roster', label: 'Roster', icon: <Users size={22} /> },
+    { id: 'games', label: 'Games', icon: <Calendar size={22} /> },
+  ];
+
+  const overflowNavItems = [
+    { id: 'swot', label: 'SWOT Analysis', icon: <Activity size={20} /> },
+    { id: 'league', label: 'League', icon: <Trophy size={20} /> },
+    { id: 'practice', label: 'Practice', icon: <Dumbbell size={20} /> },
   ];
 
   const renderContent = () => {
@@ -229,12 +241,46 @@ function App() {
 
   return (
     <>
-      <nav className={`navbar ${isMobile ? 'navbar-mobile' : ''}`}>
-        <div className="brand">
-          <img src="/sharks-logo-round.png" alt="Sharks" className="logo-avatar" />
-          The Sharks
-        </div>
-        {!isMobile ? (
+      {/* ─── Top Navigation ─── */}
+      {isMobile ? (
+        <nav className="navbar navbar-mobile">
+          <div className="mobile-header">
+            <div className="mobile-header-left">
+              <img src="/sharks-logo-round.png" alt="Sharks" className="logo-avatar" />
+              <span className="brand" style={{ fontSize: '1.125rem' }}>Sharks</span>
+              <span
+                className={`sync-status-dot ${staleSources.length > 0 ? 'stale' : 'fresh'}`}
+                title={staleSources.length > 0 ? `Stale: ${staleSources.join(', ')}` : 'Data is fresh'}
+              />
+            </div>
+            <div className="mobile-header-actions">
+              <button
+                className="mobile-action-btn"
+                onClick={handleVoiceUpdate}
+                disabled={voiceLoading}
+                title="Voice Update"
+              >
+                <Volume2 size={20} />
+              </button>
+              <button
+                className="mobile-action-btn"
+                onClick={handleManualSync}
+                disabled={syncLoading}
+                title="Manual Sync"
+              >
+                <Activity size={20} style={{
+                  animation: syncLoading ? 'spin 1s linear infinite' : 'none'
+                }} />
+              </button>
+            </div>
+          </div>
+        </nav>
+      ) : (
+        <nav className="navbar">
+          <div className="brand">
+            <img src="/sharks-logo-round.png" alt="Sharks" className="logo-avatar" />
+            The Sharks
+          </div>
           <div className="nav-links">
             {navItems.map(item => (
               <button
@@ -247,72 +293,91 @@ function App() {
               </button>
             ))}
           </div>
-        ) : (
-          <div className="mobile-tab-select-wrap">
-            <label htmlFor="mobile-tab-select" className="mobile-tab-label">View</label>
-            <select
-              id="mobile-tab-select"
-              className="mobile-tab-select"
-              value={currentView}
-              onChange={(e) => setCurrentView(e.target.value)}
-            >
-              {navItems.map(item => (
-                <option key={item.id} value={item.id}>{item.label}</option>
-              ))}
-            </select>
+        </nav>
+      )}
+
+      <main className="animate-fade-in">
+        {/* Desktop hero */}
+        {!isMobile && (
+          <div style={{ marginBottom: '2rem' }}>
+            <h1 style={{ fontSize: 'clamp(1.6rem, 5.5vw, 2.5rem)', marginBottom: '0.4rem', lineHeight: 1.1 }}>
+              {displayTeamName}
+            </h1>
+            <div className="hero-meta-row">
+              <p style={{ color: 'var(--text-muted)', fontSize: '1.1rem' }}>
+                {data.team ? `${data.team.league} \u2022 Last Updated: ${formatDateTime(data.team.last_updated)}` : 'Loading...'}
+              </p>
+              <button className="voice-btn" onClick={handleVoiceUpdate} disabled={voiceLoading} title="Play latest audio overview">
+                <Volume2 size={16} />
+                {voiceLoading ? 'Preparing...' : 'Voice Update'}
+              </button>
+              <button className="sync-btn" onClick={handleManualSync} disabled={syncLoading} title="Trigger manual data refresh">
+                <Activity size={16} />
+                {syncLoading ? 'Syncing...' : syncStage !== 'idle' ? `Sync: ${syncStage}` : 'Manual Sync'}
+              </button>
+            </div>
           </div>
         )}
-      </nav>
-      
-      <main className="animate-fade-in">
-        <div style={{ marginBottom: isMobile ? '1rem' : '2rem' }}>
-          <h1 style={{ fontSize: isMobile ? '1.45rem' : 'clamp(1.6rem, 5.5vw, 2.5rem)', marginBottom: '0.4rem', lineHeight: 1.1 }}>
-            {displayTeamName}
-          </h1>
-          <div className="hero-meta-row">
-            <p style={{ color: 'var(--text-muted)', fontSize: isMobile ? '0.86rem' : '1.1rem' }}>
-              {data.team
-                ? (isMobile
-                  ? `Updated ${formatDateTime(data.team.last_updated)}`
-                  : `${data.team.league} • Last Updated: ${formatDateTime(data.team.last_updated)}`)
-                : 'Loading...'}
-            </p>
-            <button
-              className="voice-btn"
-              onClick={handleVoiceUpdate}
-              disabled={voiceLoading}
-              title="Play latest audio overview"
-            >
-              <Volume2 size={16} />
-              {voiceLoading ? 'Preparing...' : 'Voice Update'}
-            </button>
-            <button
-              className="sync-btn"
-              onClick={handleManualSync}
-              disabled={syncLoading}
-              title="Trigger manual data refresh"
-            >
-              <Activity size={16} />
-              {syncLoading ? 'Syncing...' : syncStage !== 'idle' ? `Sync: ${syncStage}` : 'Manual Sync'}
-            </button>
-          </div>
-          {voiceError && <p className="voice-error">{voiceError}</p>}
-        </div>
+
+        {voiceError && <p className="voice-error">{voiceError}</p>}
 
         {staleSources.length > 0 && (
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: '0.5rem',
-            padding: '0.6rem 1rem', marginBottom: '1rem', borderRadius: '10px',
-            background: 'rgba(168, 116, 33, 0.15)', border: '1px solid rgba(168, 116, 33, 0.3)',
-            fontSize: '0.82rem', color: 'var(--warning)',
-          }}>
-            <AlertTriangle size={15} />
+          <div className="stale-banner">
+            <AlertTriangle size={16} />
             <span>Data may be stale: {staleSources.join(', ')}</span>
           </div>
         )}
 
         {renderContent()}
       </main>
+
+      {/* ─── Mobile Bottom Navigation ─── */}
+      {isMobile && (
+        <>
+          {moreMenuOpen && (
+            <div className="more-menu-overlay" onClick={() => setMoreMenuOpen(false)} />
+          )}
+          {moreMenuOpen && (
+            <div className="more-menu">
+              {overflowNavItems.map(item => (
+                <button
+                  key={item.id}
+                  className={`more-menu-item ${currentView === item.id ? 'active' : ''}`}
+                  onClick={() => {
+                    setCurrentView(item.id);
+                    setMoreMenuOpen(false);
+                  }}
+                >
+                  {item.icon}
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          )}
+          <nav className="bottom-nav">
+            {primaryNavItems.map(item => (
+              <button
+                key={item.id}
+                className={`bottom-nav-item ${currentView === item.id ? 'active' : ''}`}
+                onClick={() => {
+                  setCurrentView(item.id);
+                  setMoreMenuOpen(false);
+                }}
+              >
+                {item.icon}
+                <span>{item.label}</span>
+              </button>
+            ))}
+            <button
+              className={`bottom-nav-item ${overflowNavItems.some(i => i.id === currentView) ? 'active' : ''}`}
+              onClick={() => setMoreMenuOpen(prev => !prev)}
+            >
+              <MoreHorizontal size={22} />
+              <span>More</span>
+            </button>
+          </nav>
+        </>
+      )}
     </>
   );
 }
