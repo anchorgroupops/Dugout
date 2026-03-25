@@ -148,7 +148,10 @@ const Roster = ({ team, availability, isMobile = false }) => {
   if (!team || !team.roster) return <div className="loader"></div>;
 
   const filteredRoster = team.roster.filter(p => p.core !== false);
-  const sortedRoster = [...filteredRoster].sort((a, b) => (a.first || "").localeCompare(b.first || ""));
+  const sortedRoster = [...filteredRoster].sort((a, b) => {
+    const cmp = (a.first || '').localeCompare(b.first || '');
+    return cmp !== 0 ? cmp : (a.last || '').localeCompare(b.last || '');
+  });
   const totalCount = filteredRoster.length;
 
   return (

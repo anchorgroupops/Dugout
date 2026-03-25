@@ -189,7 +189,8 @@ main {
 }
 
 /* Smooth GPU-accelerated spin for buttons (prevents jank) */
-.spin-smooth {
+.spin-smooth,
+.spinner {
   animation: spin 1s linear infinite;
   will-change: transform;
   transform-origin: center;
@@ -236,7 +237,9 @@ main {
   font-weight: 700;
   font-size: 0.8rem;
   cursor: pointer;
-  transition: all var(--transition-fast);
+  transition: all 0.3s ease;
+  min-width: 130px;
+  justify-content: center;
 }
 
 .voice-btn:hover {
@@ -266,7 +269,9 @@ main {
   font-weight: 700;
   font-size: 0.8rem;
   cursor: pointer;
-  transition: all var(--transition-fast);
+  transition: all 0.3s ease;
+  min-width: 130px;
+  justify-content: center;
 }
 
 .sync-btn:hover {
@@ -519,12 +524,13 @@ input[type="checkbox"]:checked::after {
   justify-content: center;
   width: var(--touch-min);
   height: var(--touch-min);
+  min-width: var(--touch-min);
   border-radius: 12px;
   border: 1px solid var(--surface-border);
   background: var(--surface-base);
   color: var(--primary-color);
   cursor: pointer;
-  transition: all var(--transition-fast);
+  transition: all 0.3s ease;
   -webkit-tap-highlight-color: transparent;
 }
 

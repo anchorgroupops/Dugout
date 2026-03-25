@@ -270,7 +270,7 @@ function App() {
                 disabled={syncLoading}
                 title="Manual Sync"
               >
-                <Activity size={20} className={syncLoading ? 'spin-smooth' : ''} />
+                <Activity size={20} className={syncLoading ? 'spinner' : ''} />
               </button>
             </div>
           </div>

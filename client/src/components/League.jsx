@@ -282,7 +282,11 @@ const OpponentDetail = ({ slug, hasRoster }) => {
         <div>
           <div className="section-label section-label--muted" style={{ fontSize: 'var(--text-xs)' }}>Roster</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
-            {roster.map((p, i) => (
+            {[...roster].sort((a, b) => {
+              const nameA = (a.name || `${a.first || ''} ${a.last || ''}`.trim()).toLowerCase();
+              const nameB = (b.name || `${b.first || ''} ${b.last || ''}`.trim()).toLowerCase();
+              return nameA.localeCompare(nameB);
+            }).map((p, i) => (
               <span key={i} style={{
                 background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)',
                 borderRadius: '6px', padding: '3px 8px', fontSize: 'var(--text-xs)', color: 'var(--text-muted)'
