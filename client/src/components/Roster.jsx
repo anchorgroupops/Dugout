@@ -1,26 +1,13 @@
 import React, { useState } from 'react';
 
 const StatBadge = ({ label, value }) => (
-  <div style={{
-    background: 'rgba(0, 0, 0, 0.2)',
-    padding: '0.4rem 0.6rem',
-    borderRadius: '6px',
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    gap: '2px',
-    flex: 1
-  }}>
-    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-      {label}
-    </span>
-    <span style={{ fontSize: '1rem', fontWeight: 'bold', color: 'var(--text-main)' }}>
-      {value ?? '—'}
-    </span>
+  <div className="stat-badge">
+    <span className="stat-badge__label">{label}</span>
+    <span className="stat-badge__value">{value ?? '\u2014'}</span>
   </div>
 );
 
-const fmt = (val) => (val !== null && val !== undefined ? String(val) : '—');
+const fmt = (val) => (val !== null && val !== undefined ? String(val) : '\u2014');
 
 const ExpandedStats = ({ player }) => {
   const b = player.batting || {};
@@ -32,12 +19,9 @@ const ExpandedStats = ({ player }) => {
 
   return (
     <div style={{ marginTop: '1rem', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '1rem' }}>
-      {/* Batting Advanced */}
       {Object.keys(ba).length > 0 && (
-        <div style={{ marginBottom: '0.75rem' }}>
-          <div style={{ fontSize: '0.7rem', color: 'var(--primary-color)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.4rem', fontWeight: 'bold' }}>
-            Batting Advanced
-          </div>
+        <div style={{ marginBottom: 'var(--space-sm)' }}>
+          <div className="section-label">Batting Advanced</div>
           <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
             <StatBadge label="BABIP" value={fmt(ba.babip)} />
             <StatBadge label="QAB%" value={fmt(ba.qab_pct)} />
@@ -53,12 +37,9 @@ const ExpandedStats = ({ player }) => {
         </div>
       )}
 
-      {/* Pitching */}
       {Object.keys(p).length > 0 && (
-        <div style={{ marginBottom: '0.75rem' }}>
-          <div style={{ fontSize: '0.7rem', color: 'var(--primary-color)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.4rem', fontWeight: 'bold' }}>
-            Pitching
-          </div>
+        <div style={{ marginBottom: 'var(--space-sm)' }}>
+          <div className="section-label">Pitching</div>
           <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
             <StatBadge label="IP" value={fmt(p.ip)} />
             <StatBadge label="ERA" value={fmt(p.era)} />
@@ -74,12 +55,9 @@ const ExpandedStats = ({ player }) => {
         </div>
       )}
 
-      {/* Fielding */}
       {Object.keys(f).length > 0 && (
-        <div style={{ marginBottom: '0.75rem' }}>
-          <div style={{ fontSize: '0.7rem', color: 'var(--primary-color)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.4rem', fontWeight: 'bold' }}>
-            Fielding
-          </div>
+        <div style={{ marginBottom: 'var(--space-sm)' }}>
+          <div className="section-label">Fielding</div>
           <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
             <StatBadge label="FPCT" value={fmt(f.fpct)} />
             <StatBadge label="TC" value={fmt(f.tc)} />
@@ -89,12 +67,9 @@ const ExpandedStats = ({ player }) => {
         </div>
       )}
 
-      {/* Catching */}
       {Object.keys(c).length > 0 && (
-        <div style={{ marginBottom: '0.75rem' }}>
-          <div style={{ fontSize: '0.7rem', color: 'var(--primary-color)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.4rem', fontWeight: 'bold' }}>
-            Catching
-          </div>
+        <div style={{ marginBottom: 'var(--space-sm)' }}>
+          <div className="section-label">Catching</div>
           <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
             <StatBadge label="INN" value={fmt(c.inn)} />
             <StatBadge label="CS%" value={fmt(c.cs_pct)} />
@@ -104,12 +79,9 @@ const ExpandedStats = ({ player }) => {
         </div>
       )}
 
-      {/* Innings Played */}
       {Object.keys(ip).length > 0 && (
         <div>
-          <div style={{ fontSize: '0.7rem', color: 'var(--primary-color)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.4rem', fontWeight: 'bold' }}>
-            Innings Played
-          </div>
+          <div className="section-label">Innings Played</div>
           <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
             <StatBadge label="Total" value={fmt(ip.total)} />
             <StatBadge label="P" value={fmt(ip.p)} />
@@ -135,26 +107,20 @@ const Roster = ({ team, availability, isMobile = false }) => {
 
   if (!team || !team.roster) return <div className="loader"></div>;
 
-  // Sharks-only roster (exclude non-core/sub players)
   const filteredRoster = team.roster.filter(p => p.core !== false);
   const sortedRoster = [...filteredRoster].sort((a, b) => (a.first || "").localeCompare(b.first || ""));
-  const coreCount = team.roster.filter(p => p.core !== false).length;
-  const totalCount = coreCount;
+  const totalCount = filteredRoster.length;
 
   return (
     <div>
-      <h2 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-        Active Roster <span style={{ fontSize: '1rem', color: 'var(--text-muted)', fontWeight: 'normal' }}>({sortedRoster.length} Players)</span>
-        <span style={{ marginLeft: 'auto', fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: '600' }}>
+      <h2 className="view-title">
+        Active Roster <span style={{ fontSize: 'var(--text-base)', color: 'var(--text-muted)', fontWeight: 'normal' }}>({sortedRoster.length} Players)</span>
+        <span style={{ marginLeft: 'auto', fontSize: 'var(--text-sm)', color: 'var(--text-muted)', fontWeight: '600' }}>
           Sharks Only ({totalCount})
         </span>
       </h2>
-      
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(260px, 1fr))',
-        gap: isMobile ? '0.85rem' : '1.5rem'
-      }}>
+
+      <div className="card-grid">
         {sortedRoster.map(player => {
           const name = `${player.first} ${player.last}`.trim();
           const isExpanded = expandedPlayer === `${player.number}-${player.last}`;
@@ -167,7 +133,7 @@ const Roster = ({ team, availability, isMobile = false }) => {
               key={`${player.number}-${player.last}`}
               className={`glass-panel ${isActive ? '' : 'inactive-player'}`}
               style={{
-                padding: isMobile ? '0.95rem' : '1.5rem',
+                padding: isMobile ? 'var(--space-lg)' : '1.5rem',
                 position: 'relative',
                 overflow: 'hidden',
                 cursor: isMobile ? 'default' : 'pointer',
@@ -194,49 +160,38 @@ const Roster = ({ team, availability, isMobile = false }) => {
                   {player.number}
                 </div>
               )}
-              
+
               {!player.core && (
                 <div style={{ position: 'absolute', top: '10px', right: '10px' }}>
                   <div style={{
                     background: 'rgba(63, 143, 136, 0.18)', color: 'var(--accent-sub)',
-                    padding: '2px 8px', borderRadius: '4px', fontSize: '0.65rem',
+                    padding: '2px 8px', borderRadius: '4px', fontSize: 'var(--text-xs)',
                     fontWeight: 'bold', letterSpacing: '1px', border: '1px solid rgba(63, 143, 136, 0.28)'
                   }}>SUB</div>
                 </div>
               )}
-              
+
               <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '0.75rem' : '1rem', marginBottom: isMobile ? '0.85rem' : '1.25rem' }}>
-                <div style={{
-                  width: isMobile ? '40px' : '45px',
-                  height: isMobile ? '40px' : '45px',
-                  borderRadius: '50%',
+                <div className="player-avatar" style={{
                   background: isActive ? 'linear-gradient(135deg, var(--primary-color), var(--secondary-color))' : '#444',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: isMobile ? '1rem' : '1.2rem',
-                  fontWeight: 'bold',
-                  color: '#fff',
-                  flexShrink: 0,
                   transition: 'all 0.3s ease'
                 }}>
                   {player.number}
                 </div>
                 <div>
-                  <h3 style={{ fontSize: isMobile ? '1.02rem' : '1.2rem', marginBottom: '2px' }}>{player.first} {player.last}</h3>
-                  <span style={{ fontSize: isMobile ? '0.7rem' : '0.75rem', color: 'var(--text-muted)' }}>
-                    {b.gp != null ? `${b.gp} GP` : ''}{b.pa != null ? ` • ${b.pa} PA` : ''}
-                    {!isExpanded && !isMobile && ' • Click to expand'}
+                  <h3 style={{ fontSize: isMobile ? 'var(--text-base)' : '1.2rem', marginBottom: '2px' }}>{player.first} {player.last}</h3>
+                  <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
+                    {b.gp != null ? `${b.gp} GP` : ''}{b.pa != null ? ` \u2022 ${b.pa} PA` : ''}
+                    {!isExpanded && !isMobile && ' \u2022 Click to expand'}
                   </span>
                   {player.teams && player.teams.length > 0 && (
-                    <div style={{ fontSize: isMobile ? '0.66rem' : '0.7rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                    <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginTop: '2px' }}>
                       Teams: {player.teams.join(', ')}
                     </div>
                   )}
                 </div>
               </div>
 
-              {/* Primary batting stats — works with both nested and flat schema */}
               <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' }}>
                 <StatBadge label="AVG" value={fmt(b.avg ?? player.avg)} />
                 <StatBadge label="OBP" value={fmt(b.obp ?? player.obp)} />

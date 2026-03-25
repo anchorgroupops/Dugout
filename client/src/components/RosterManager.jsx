@@ -17,18 +17,18 @@ const ToggleRow = ({ player, available, onToggle, updating, isMobile = false }) 
       transition: 'all 0.2s ease'
     }}>
       <div style={{
-        width: isMobile ? '32px' : '36px', height: isMobile ? '32px' : '36px', borderRadius: '50%', flexShrink: 0,
+        width: isMobile ? '40px' : '44px', height: isMobile ? '40px' : '44px', borderRadius: '50%', flexShrink: 0,
         background: available
           ? (isSub ? 'linear-gradient(135deg, var(--accent-sub), #cc8400)' : 'linear-gradient(135deg, var(--primary-color), var(--secondary-color))')
           : '#444',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: isMobile ? '0.78rem' : '0.85rem', fontWeight: 'bold', color: '#fff', transition: 'all 0.2s ease'
+        fontSize: isMobile ? 'var(--text-sm)' : '0.85rem', fontWeight: 'bold', color: '#fff', transition: 'all 0.2s ease'
       }}>
         {player.number}
       </div>
       <div style={{ flex: 1 }}>
-        <div style={{ fontWeight: '600', fontSize: isMobile ? '0.88rem' : '0.95rem' }}>{name}</div>
-        <div style={{ fontSize: isMobile ? '0.7rem' : '0.75rem', color: 'var(--text-muted)' }}>
+        <div style={{ fontWeight: '600', fontSize: isMobile ? 'var(--text-sm)' : '0.95rem' }}>{name}</div>
+        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
           {b.gp != null ? `${b.gp} GP` : ''}
           {b.avg != null ? ` · .${String(Math.round((b.avg || 0) * 1000)).padStart(3, '0')} AVG` : ''}
           {isSub && <span style={{ color: 'var(--accent-sub)', marginLeft: '0.4rem', fontWeight: '600' }}>SUB</span>}
@@ -39,11 +39,12 @@ const ToggleRow = ({ player, available, onToggle, updating, isMobile = false }) 
         disabled={updating}
         style={{
           display: 'flex', alignItems: 'center', gap: '0.3rem',
-          padding: isMobile ? '0.28rem 0.65rem' : '0.3rem 0.8rem', borderRadius: '6px', border: 'none',
+          padding: isMobile ? '0.5rem 0.75rem' : '0.3rem 0.8rem', borderRadius: '6px', border: 'none',
           background: available ? 'var(--primary-glow)' : 'rgba(200,50,50,0.15)',
           color: available ? 'var(--success)' : 'var(--danger)',
           cursor: updating ? 'not-allowed' : 'pointer',
-          fontWeight: '600', fontSize: isMobile ? '0.72rem' : '0.75rem',
+          fontWeight: '600', fontSize: 'var(--text-xs)',
+          minHeight: 'var(--touch-min)',
           opacity: updating ? 0.5 : 1, transition: 'all 0.2s ease'
         }}
       >
@@ -285,31 +286,31 @@ const RosterManager = ({
       )}
 
       {/* Availability section */}
-      <div className="glass-panel" style={{ padding: isMobile ? '0.95rem' : '1.5rem', marginBottom: '1.5rem' }}>
+      <div className="glass-panel" style={{ padding: isMobile ? 'var(--space-lg)' : '1.5rem', marginBottom: '1.5rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: isMobile ? 'flex-start' : 'center', marginBottom: '1rem', flexDirection: isMobile ? 'column' : 'row', gap: isMobile ? '0.65rem' : 0 }}>
           <h3 style={{ margin: 0, color: 'var(--primary-color)', fontSize: '1rem' }}>Game-Day Availability</h3>
           <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
             <button
               onClick={handleSharksOnly}
-              style={{ padding: isMobile ? '0.28rem 0.62rem' : '0.3rem 0.75rem', borderRadius: '6px', border: '1px solid rgba(4, 101, 104, 0.32)', background: 'rgba(4, 101, 104, 0.13)', color: 'var(--primary-color)', cursor: 'pointer', fontSize: isMobile ? '0.74rem' : '0.8rem', fontWeight: '600' }}
+              style={{ padding: isMobile ? '0.5rem 0.75rem' : '0.3rem 0.75rem', borderRadius: '6px', border: '1px solid rgba(4, 101, 104, 0.32)', background: 'rgba(4, 101, 104, 0.13)', color: 'var(--primary-color)', cursor: 'pointer', fontSize: 'var(--text-xs)', fontWeight: '600', minHeight: 'var(--touch-min)' }}
             >
               Sharks Only
             </button>
             <button
               onClick={() => handleSetAll(true)}
-              style={{ padding: isMobile ? '0.28rem 0.62rem' : '0.3rem 0.75rem', borderRadius: '6px', border: '1px solid rgba(35,134,54,0.3)', background: 'rgba(35,134,54,0.1)', color: 'var(--success)', cursor: 'pointer', fontSize: isMobile ? '0.74rem' : '0.8rem', fontWeight: '600' }}
+              style={{ padding: isMobile ? '0.5rem 0.75rem' : '0.3rem 0.75rem', borderRadius: '6px', border: '1px solid rgba(35,134,54,0.3)', background: 'rgba(35,134,54,0.1)', color: 'var(--success)', cursor: 'pointer', fontSize: 'var(--text-xs)', fontWeight: '600', minHeight: 'var(--touch-min)' }}
             >
               All In
             </button>
             <button
               onClick={() => handleSetAll(false)}
-              style={{ padding: isMobile ? '0.28rem 0.62rem' : '0.3rem 0.75rem', borderRadius: '6px', border: '1px solid rgba(200,50,50,0.3)', background: 'rgba(200,50,50,0.1)', color: 'var(--danger)', cursor: 'pointer', fontSize: isMobile ? '0.74rem' : '0.8rem', fontWeight: '600' }}
+              style={{ padding: isMobile ? '0.5rem 0.75rem' : '0.3rem 0.75rem', borderRadius: '6px', border: '1px solid rgba(200,50,50,0.3)', background: 'rgba(200,50,50,0.1)', color: 'var(--danger)', cursor: 'pointer', fontSize: 'var(--text-xs)', fontWeight: '600', minHeight: 'var(--touch-min)' }}
             >
               All Out
             </button>
           </div>
         </div>
-        <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginBottom: '1rem', display: isMobile ? 'none' : 'block' }}>
+        <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', marginBottom: '1rem', display: isMobile ? 'none' : 'block' }}>
           Toggle players in/out for the next game. Lineups and SWOT will regenerate automatically.
         </p>
 
@@ -334,7 +335,7 @@ const RosterManager = ({
             {/* Active Subs */}
             {subRoster.filter(p => isAvailable(p)).length > 0 && (
               <div style={{ marginBottom: subRoster.filter(p => !isAvailable(p)).length > 0 ? '1rem' : 0 }}>
-                <div style={{ fontSize: '0.7rem', color: 'var(--accent-sub)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.5rem', fontWeight: '700' }}>
+                <div className="section-label" style={{ color: 'var(--accent-sub)', marginBottom: '0.5rem' }}>
                   Active Borrowed Players
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
@@ -355,7 +356,7 @@ const RosterManager = ({
             {/* Inactive / Recent Subs */}
             {subRoster.filter(p => !isAvailable(p)).length > 0 && (
               <div style={{ paddingTop: subRoster.filter(p => isAvailable(p)).length > 0 ? '1rem' : 0, borderTop: subRoster.filter(p => isAvailable(p)).length > 0 ? '1px dashed rgba(255,255,255,0.1)' : 'none' }}>
-                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.5rem', fontWeight: '700' }}>
+                <div className="section-label section-label--muted" style={{ marginBottom: '0.5rem' }}>
                   Recent / Inactive Subs
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
@@ -378,25 +379,26 @@ const RosterManager = ({
       </div>
 
       {/* Add borrowed player section */}
-      <div className="glass-panel" style={{ padding: isMobile ? '0.95rem' : '1.5rem' }}>
+      <div className="glass-panel" style={{ padding: isMobile ? 'var(--space-lg)' : '1.5rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: isMobile ? 'flex-start' : 'center', marginBottom: '1rem', flexDirection: isMobile ? 'column' : 'row', gap: isMobile ? '0.65rem' : 0 }}>
           <h3 style={{ margin: 0, color: 'var(--primary-color)', fontSize: '1rem' }}>Add Borrowed Player</h3>
           <button
             onClick={() => { setShowBorrowForm(!showBorrowForm); setBorrowStatus(null); setManualMode(false); }}
             style={{
               display: 'flex', alignItems: 'center', gap: '0.4rem',
-              padding: isMobile ? '0.35rem 0.75rem' : '0.4rem 0.9rem', borderRadius: '8px',
+              padding: isMobile ? '0.5rem 0.85rem' : '0.4rem 0.9rem', borderRadius: '8px',
               border: '1px solid rgba(100,200,100,0.3)',
               background: showBorrowForm ? 'rgba(200,50,50,0.1)' : 'var(--primary-glow)',
               color: showBorrowForm ? 'var(--danger)' : 'var(--primary-color)',
-              cursor: 'pointer', fontWeight: '600', fontSize: isMobile ? '0.78rem' : '0.85rem'
+              cursor: 'pointer', fontWeight: '600', fontSize: 'var(--text-sm)',
+              minHeight: 'var(--touch-min)',
             }}
           >
             {showBorrowForm ? <><X size={14} /> Cancel</> : <><UserPlus size={14} /> Add Player</>}
           </button>
         </div>
 
-        <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginBottom: showBorrowForm ? '1rem' : 0, display: isMobile ? 'none' : 'block' }}>
+        <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', marginBottom: showBorrowForm ? '1rem' : 0, display: isMobile ? 'none' : 'block' }}>
           Search PCLL league players or manually add a borrowed player. Stats auto-scrape if their team has been scraped.
         </p>
 
@@ -414,8 +416,9 @@ const RosterManager = ({
                   onClick={() => setManualMode(true)}
                   style={{
                     marginTop: '0.5rem', background: 'none', border: 'none',
-                    color: 'var(--text-muted)', fontSize: '0.8rem', cursor: 'pointer',
-                    textDecoration: 'underline', padding: 0
+                    color: 'var(--text-muted)', fontSize: 'var(--text-sm)', cursor: 'pointer',
+                    textDecoration: 'underline', padding: '0.25rem 0',
+                    minHeight: 'var(--touch-min)',
                   }}
                 >
                   Or enter player details manually
@@ -496,8 +499,9 @@ const RosterManager = ({
                       padding: '0.5rem 1.5rem', borderRadius: '8px', border: 'none',
                       background: 'var(--primary-color)', color: '#fff',
                       cursor: (borrowStatus === 'adding' || !borrowForm.first.trim()) ? 'not-allowed' : 'pointer',
-                      fontWeight: '600', fontSize: '0.9rem',
-                      opacity: (borrowStatus === 'adding' || !borrowForm.first.trim()) ? 0.6 : 1
+                      fontWeight: '600', fontSize: 'var(--text-sm)',
+                      opacity: (borrowStatus === 'adding' || !borrowForm.first.trim()) ? 0.6 : 1,
+                      minHeight: 'var(--touch-min)',
                     }}
                   >
                     {borrowStatus === 'adding' ? 'Adding...' : 'Add Player'}
