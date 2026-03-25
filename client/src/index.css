@@ -558,6 +558,7 @@ input[type="checkbox"]:checked::after {
   cursor: pointer;
   transition: all 0.3s ease;
   -webkit-tap-highlight-color: transparent;
+  position: relative;
 }
 
 .mobile-action-btn:active {
