@@ -120,6 +120,7 @@ main {
   font-weight: 800;
   background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
   -webkit-background-clip: text;
+  background-clip: text;
   -webkit-text-fill-color: transparent;
   color: var(--primary-color);
 }
@@ -567,10 +568,9 @@ input[type="checkbox"]:checked::after {
   opacity: 0.5;
   cursor: not-allowed;
 }
-
 .sync-status-dot {
-  width: 12px;
-  height: 12px;
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
   flex-shrink: 0;
 }
