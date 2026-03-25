@@ -167,17 +167,19 @@ function App() {
   ];
 
   // Mobile: 4 primary bottom tabs + "More" overflow
+  // Elevated: SWOT + Practice to primary (most used on the field)
+  // Demoted: Roster + Games to overflow (reference tabs)
   const primaryNavItems = [
     { id: 'scout', label: 'Scout', icon: <Target size={22} /> },
+    { id: 'swot', label: 'SWOT', icon: <Activity size={22} /> },
     { id: 'lineups', label: 'Lineups', icon: <ListOrdered size={22} /> },
-    { id: 'roster', label: 'Roster', icon: <Users size={22} /> },
-    { id: 'games', label: 'Games', icon: <Calendar size={22} /> },
+    { id: 'practice', label: 'Practice', icon: <Dumbbell size={22} /> },
   ];
 
   const overflowNavItems = [
-    { id: 'swot', label: 'SWOT Analysis', icon: <Activity size={20} /> },
+    { id: 'roster', label: 'Roster', icon: <Users size={20} /> },
+    { id: 'games', label: 'Games', icon: <Calendar size={20} /> },
     { id: 'league', label: 'League', icon: <Trophy size={20} /> },
-    { id: 'practice', label: 'Practice', icon: <Dumbbell size={20} /> },
   ];
 
   const renderContent = () => {
@@ -268,9 +270,7 @@ function App() {
                 disabled={syncLoading}
                 title="Manual Sync"
               >
-                <Activity size={20} style={{
-                  animation: syncLoading ? 'spin 1s linear infinite' : 'none'
-                }} />
+                <Activity size={20} className={syncLoading ? 'spin-smooth' : ''} />
               </button>
             </div>
           </div>

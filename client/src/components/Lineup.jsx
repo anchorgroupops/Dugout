@@ -158,7 +158,7 @@ const Lineup = ({
               minHeight: 'var(--touch-min)',
             }}
           >
-            <RefreshCw size={14} style={{ animation: regenerating ? 'spin 1s linear infinite' : 'none' }} />
+            <RefreshCw size={14} className={regenerating ? 'spin-smooth' : ''} />
             {regenerating ? 'Regenerating...' : 'Regenerate'}
           </button>
         </div>

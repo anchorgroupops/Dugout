@@ -188,6 +188,13 @@ main {
   100% { transform: rotate(360deg); }
 }
 
+/* Smooth GPU-accelerated spin for buttons (prevents jank) */
+.spin-smooth {
+  animation: spin 1s linear infinite;
+  will-change: transform;
+  transform-origin: center;
+}
+
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
@@ -559,14 +566,29 @@ input[type="checkbox"]:checked::after {
 /* ─── Mobile (768px and below) ─── */
 @media (max-width: 768px) {
   main {
-    padding: var(--space-md);
-    padding-bottom: calc(var(--bottom-nav-height) + var(--space-lg));
+    padding: var(--space-lg);
+    padding-bottom: calc(var(--bottom-nav-height) + var(--space-xl));
   }
 
   .glass-panel {
     border-radius: 14px;
     box-shadow: 0 7px 18px rgba(4, 101, 104, 0.08);
     backdrop-filter: blur(6px);
+    padding: var(--space-lg);
+    margin-bottom: var(--space-md);
+  }
+
+  /* Increase spacing between all major sections on mobile */
+  .view-title {
+    margin-bottom: var(--space-md);
+  }
+
+  .section-label {
+    margin-bottom: var(--space-sm);
+  }
+
+  .card-grid {
+    gap: var(--space-md);
   }
 
   .navbar {
