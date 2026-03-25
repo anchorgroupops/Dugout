@@ -1713,6 +1713,18 @@ def handle_matchup(opponent_slug):
         opp_game_stats = _aggregate_opponent_stats_from_games(opponent_slug)
         if opp_game_stats:
             opp_team["batting_stats"] = opp_game_stats
+            # Also inject batting into roster entries so _team_aggregates roster-first
+            # path can pick up stats (it checks roster[].batting before batting_stats[]).
+            roster = opp_team.get("roster", [])
+            if roster:
+                game_by_num = {str(g.get("number", "")).strip(): g for g in opp_game_stats if g.get("number")}
+                game_by_name = {g.get("name", "").strip().lower(): g for g in opp_game_stats if g.get("name")}
+                for rp in roster:
+                    rnum = str(rp.get("number", "")).strip()
+                    rname = (rp.get("name") or "").strip().lower()
+                    match = game_by_num.get(rnum) or game_by_name.get(rname)
+                    if match and not rp.get("batting"):
+                        rp["batting"] = {k: v for k, v in match.items() if k not in ("name", "number")}
             data_source = "opponent_game_history"
         elif isinstance(opp_team.get("public_game_metrics"), dict) and opp_team.get("public_game_metrics", {}).get("completed_games", 0) > 0:
             data_source = "opponent_public_games"
@@ -1742,12 +1754,14 @@ def handle_matchup(opponent_slug):
         elif not result.get("reason"):
             result["reason"] = "insufficient_data"
 
-    # Attach opponent roster for display
-    result["their_roster"] = [
+    # Attach opponent roster for display, sorted alphabetically by first name
+    their_roster = [
         {"name": p.get("name", f"{p.get('first','')} {p.get('last','')}".strip()),
          "number": p.get("number", "")}
         for p in opp_team.get("roster", [])
     ]
+    their_roster.sort(key=lambda p: (p.get("name") or "").strip().lower())
+    result["their_roster"] = their_roster
     return jsonify(result)
 
 
@@ -1899,6 +1913,13 @@ def handle_team():
     _merge_team_with_scorebook_stats(team)
     team["team_name"] = _canonical_team_name(team.get("team_name", "The Sharks"), "sharks")
 
+    # Sort roster alphabetically by first name for consistent display
+    if isinstance(team.get("roster"), list):
+        team["roster"] = sorted(
+            team["roster"],
+            key=lambda p: (p.get("first") or p.get("name", "")).strip().lower()
+        )
+
     return jsonify(team)
 
 
@@ -1999,6 +2020,8 @@ def _core_roster_names(team: dict) -> list[str]:
         name = (p.get("name") or f"{p.get('first','')} {p.get('last','')}").strip()
         if name:
             names.append(name)
+    # Sort alphabetically by first name for consistent display
+    names.sort(key=lambda n: n.strip().lower())
     return names
 
 
@@ -2341,72 +2364,110 @@ def handle_opponent_discovery():
 @app.route('/api/practice-insights', methods=['GET', 'POST'])
 def handle_practice_insights():
     """Build tailored practice priorities from current team stats."""
-    team_file = SHARKS_DIR / "team_enriched.json"
-    if not team_file.exists():
-        team_file = SHARKS_DIR / ("team_merged.json" if (SHARKS_DIR / "team_merged.json").exists() else "team.json")
-    team = _read_json_file(team_file, default={}) or {}
-    if not isinstance(team, dict):
-        return jsonify({"error": "team_data_unavailable"}), 503
+    try:
+        team_file = SHARKS_DIR / "team_enriched.json"
+        if not team_file.exists():
+            team_file = SHARKS_DIR / ("team_merged.json" if (SHARKS_DIR / "team_merged.json").exists() else "team.json")
+        team = _read_json_file(team_file, default={}) or {}
+        if not isinstance(team, dict):
+            return jsonify({"error": "team_data_unavailable"}), 503
 
-    _enrich_team_with_app_stats(team)
-    _merge_team_with_scorebook_stats(team)
-    team["team_name"] = _canonical_team_name(team.get("team_name", "The Sharks"), "sharks")
+        try:
+            _enrich_team_with_app_stats(team)
+        except Exception as e:
+            logging.warning(f"[PracticeInsights] app_stats enrichment skipped: {e}")
+        try:
+            _merge_team_with_scorebook_stats(team)
+        except Exception as e:
+            logging.warning(f"[PracticeInsights] scorebook merge skipped: {e}")
+        team["team_name"] = _canonical_team_name(team.get("team_name", "The Sharks"), "sharks")
 
-    default_players, default_source, practice_meta = _load_practice_rsvp_defaults(team)
-    core_names = _core_roster_names(team)
-    core_set = {n.lower() for n in core_names}
+        # Ensure roster exists as a list even if missing/malformed
+        if not isinstance(team.get("roster"), list):
+            team["roster"] = []
 
-    selected_names = []
-    if request.method == "POST":
-        body = request.get_json(silent=True) or {}
-        selected_names = [str(n).strip() for n in (body.get("players") or []) if str(n).strip()]
-    else:
-        csv = (request.args.get("players") or "").strip()
-        if csv:
-            selected_names = [p.strip() for p in csv.split(",") if p.strip()]
+        default_players, default_source, practice_meta = _load_practice_rsvp_defaults(team)
+        core_names = _core_roster_names(team)
+        core_set = {n.lower() for n in core_names}
 
-    if not selected_names:
-        selected_names = default_players
-    selected_names = [n for n in selected_names if n.lower() in core_set]
-    if not selected_names:
-        selected_names = core_names
+        selected_names = []
+        if request.method == "POST":
+            body = request.get_json(silent=True) or {}
+            if not isinstance(body, dict):
+                body = {}
+            players_raw = body.get("players") or []
+            if not isinstance(players_raw, list):
+                players_raw = []
+            selected_names = [str(n).strip() for n in players_raw if str(n).strip()]
+        else:
+            csv = (request.args.get("players") or "").strip()
+            if csv:
+                selected_names = [p.strip() for p in csv.split(",") if p.strip()]
 
-    needs = _build_practice_needs(team, selected_names)
-    if not needs:
-        needs = [{
-            "key": "general_fundamentals",
-            "title": "General Fundamentals",
-            "priority": 1,
-            "score": 1.0,
-            "focus_players": selected_names[:5],
-            "why": "Not enough player sample for stat-targeted specialization yet.",
-            "drills": [
-                {"name": "Throw-Catch-Footwork Circuit", "duration_min": 15, "goal": "Improve transfer speed and receiving mechanics."},
-                {"name": "Contact + Baserun Combo", "duration_min": 15, "goal": "Build consistent bat-to-ball and first-step aggression."},
-            ],
-        }]
+        if not selected_names:
+            selected_names = default_players if isinstance(default_players, list) else []
+        selected_names = [n for n in selected_names if n.lower() in core_set]
+        if not selected_names:
+            selected_names = core_names if isinstance(core_names, list) else []
 
-    recommended_plan = []
-    for need in needs[:3]:
-        for drill in need.get("drills", [])[:2]:
-            recommended_plan.append({
-                "need": need["title"],
-                "drill": drill["name"],
-                "duration_min": drill["duration_min"],
-                "goal": drill["goal"],
-                "focus_players": need.get("focus_players", []),
-            })
+        try:
+            needs = _build_practice_needs(team, selected_names)
+        except Exception as e:
+            logging.warning(f"[PracticeInsights] _build_practice_needs failed: {e}")
+            needs = []
+        if not needs:
+            needs = [{
+                "key": "general_fundamentals",
+                "title": "General Fundamentals",
+                "priority": 1,
+                "score": 1.0,
+                "focus_players": selected_names[:5],
+                "why": "Not enough player sample for stat-targeted specialization yet.",
+                "drills": [
+                    {"name": "Throw-Catch-Footwork Circuit", "duration_min": 15, "goal": "Improve transfer speed and receiving mechanics."},
+                    {"name": "Contact + Baserun Combo", "duration_min": 15, "goal": "Build consistent bat-to-ball and first-step aggression."},
+                ],
+            }]
 
-    return jsonify({
-        "generated_at": datetime.now(ET).isoformat(),
-        "team_name": team.get("team_name", "The Sharks"),
-        "default_player_source": default_source,
-        "practice_meta": practice_meta,
-        "selected_players": selected_names,
-        "available_players": core_names,
-        "needs": needs,
-        "recommended_plan": recommended_plan,
-    })
+        recommended_plan = []
+        for need in needs[:3]:
+            if not isinstance(need, dict):
+                continue
+            for drill in (need.get("drills") or [])[:2]:
+                if not isinstance(drill, dict):
+                    continue
+                recommended_plan.append({
+                    "need": need.get("title", ""),
+                    "drill": drill.get("name", ""),
+                    "duration_min": drill.get("duration_min", 10),
+                    "goal": drill.get("goal", ""),
+                    "focus_players": need.get("focus_players", []),
+                })
+
+        return jsonify({
+            "generated_at": datetime.now(ET).isoformat(),
+            "team_name": team.get("team_name", "The Sharks"),
+            "default_player_source": default_source,
+            "practice_meta": practice_meta if isinstance(practice_meta, dict) else {"date": None, "title": None},
+            "selected_players": selected_names,
+            "available_players": core_names,
+            "needs": needs,
+            "recommended_plan": recommended_plan,
+        })
+    except Exception as e:
+        logging.error(f"[PracticeInsights] Unhandled error: {e}")
+        return jsonify({
+            "error": "practice_insights_failed",
+            "detail": str(e),
+            "generated_at": datetime.now(ET).isoformat(),
+            "team_name": "The Sharks",
+            "default_player_source": "error",
+            "practice_meta": {"date": None, "title": None},
+            "selected_players": [],
+            "available_players": [],
+            "needs": [],
+            "recommended_plan": [],
+        }), 500
 
 
 @app.route('/api/stats-db/status', methods=['GET'])
@@ -2438,6 +2499,17 @@ def handle_regenerate_lineups():
         if lineups_file.exists():
             with open(lineups_file) as f:
                 lineups = json.load(f)
+        # Sanitize: separate strategy dicts from metadata strings so callers
+        # can safely iterate values calling .get() without crashing.
+        if isinstance(lineups, dict):
+            sanitized = {}
+            meta = {}
+            for k, v in lineups.items():
+                if isinstance(v, dict):
+                    sanitized[k] = v
+                else:
+                    meta[k] = v
+            lineups = {**sanitized, "_meta": meta}
         # Optionally regenerate SWOT too
         if data.get("swot"):
             from swot_analyzer import run_sharks_analysis

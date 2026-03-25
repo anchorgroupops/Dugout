@@ -1,22 +1,40 @@
 import React, { useState, useEffect } from 'react';
-import { AlertTriangle, TrendingUp, ShieldAlert, Target, ChevronDown, ChevronUp, Swords, Clock, Home, Plane, Zap, ThumbsDown } from 'lucide-react';
+import { AlertTriangle, TrendingUp, ShieldAlert, Target, ChevronDown, ChevronUp, Swords, Clock, Home, Plane, Zap, ThumbsDown, CheckCircle, AlertCircle } from 'lucide-react';
 import { getTodayEST, formatDateMMDDYYYY } from '../utils/formatDate';
 import { TipBadge, PlayerName } from './StatTooltip';
 
-const SwotQuadrant = ({ title, items, color, icon }) => (
-  <div>
-    <h4 className="swot-label" style={{ color }}>
-      {icon} {title}
-    </h4>
-    {items?.length > 0 ? (
-      <ul style={{ paddingLeft: '1.2rem', fontSize: 'var(--text-sm)', color: 'var(--text-muted)', margin: 0 }}>
-        {items.map((s, i) => <li key={i} style={{ marginBottom: '2px' }}>{s}</li>)}
-      </ul>
-    ) : (
-      <p style={{ fontSize: 'var(--text-sm)', color: 'rgba(255,255,255,0.3)', fontStyle: 'italic', margin: 0 }}>Need more data</p>
-    )}
-  </div>
-);
+const quadrantIcons = {
+  'Strengths': { Icon: CheckCircle, color: 'var(--success)' },
+  'Areas for Growth': { Icon: AlertCircle, color: 'var(--danger)' },
+  'Opportunities': { Icon: TrendingUp, color: '#3b9ede' },
+  'Threats': { Icon: ShieldAlert, color: '#c87533' },
+};
+
+const SwotQuadrant = ({ title, items, color, icon }) => {
+  const itemIcon = quadrantIcons[title] || null;
+  return (
+    <div>
+      <h4 className="swot-label" style={{ color }}>
+        {icon} {title}
+      </h4>
+      {items?.length > 0 ? (
+        <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', margin: 0, display: 'flex', flexDirection: 'column', gap: '3px' }}>
+          {items.map((s, i) => {
+            const ItemIcon = itemIcon?.Icon;
+            return (
+              <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: '0.4rem' }}>
+                {ItemIcon && <ItemIcon size={14} color={itemIcon.color} style={{ flexShrink: 0, marginTop: '2px' }} />}
+                <span>{s}</span>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <p style={{ fontSize: 'var(--text-sm)', color: 'rgba(255,255,255,0.3)', fontStyle: 'italic', margin: 0 }}>Need more data</p>
+      )}
+    </div>
+  );
+};
 
 const StatCompare = ({ label, ours, theirs, lowerIsBetter }) => {
   const diff = lowerIsBetter ? theirs - ours : ours - theirs;
