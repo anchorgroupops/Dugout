@@ -69,7 +69,7 @@ const NeedCard = ({ need }) => (
             <span style={{ marginRight: '0.35rem' }}>{drillIcon(drill.name)}</span>
             {drill.name}
           </div>
-          <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>{drill.duration_min} min \u00b7 {drill.goal}</div>
+          <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>{drill.duration_min} min — {drill.goal}</div>
         </div>
       ))}
     </div>
@@ -101,7 +101,7 @@ const SessionItem = ({ item, index }) => (
         {item.drill}
         <span style={{ color: 'var(--text-muted)', fontWeight: '500', marginLeft: '0.4rem' }}>({item.duration_min} min)</span>
       </div>
-      <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>{item.need} \u00b7 {item.goal}</div>
+      <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>{item.need} — {item.goal}</div>
     </div>
   </div>
 );
@@ -208,7 +208,7 @@ const Practice = ({ team, schedule, isMobile = false }) => {
     const meta = insights?.practice_meta || {};
     if (meta?.date) {
       const formatted = formatDateMMDDYYYY(meta.date);
-      return `${meta.title ? `${meta.title} \u00b7 ` : ''}${formatted}`;
+      return `${meta.title ? `${meta.title} — ` : ''}${formatted}`;
     }
     const nextGame = (schedule?.upcoming || [])[0];
     if (nextGame) {
@@ -277,7 +277,22 @@ const Practice = ({ team, schedule, isMobile = false }) => {
         </div>
       </div>
 
-      {error && <p style={{ color: 'var(--danger)' }}>{error}</p>}
+      {error && (
+        <div
+          className="glass-panel"
+          onClick={() => fetchInsights()}
+          style={{
+            padding: 'var(--space-lg)', marginBottom: 'var(--space-md)', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', gap: '0.75rem',
+            background: 'rgba(179, 74, 57, 0.12)', border: '1px solid rgba(179, 74, 57, 0.3)',
+          }}
+        >
+          <RefreshCw size={16} color="var(--danger)" />
+          <span style={{ color: 'var(--danger)', fontSize: 'var(--text-sm)', fontWeight: '600' }}>
+            Could not load practice data. Tap to retry.
+          </span>
+        </div>
+      )}
 
       {insights && (
         <>

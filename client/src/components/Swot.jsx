@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { AlertTriangle, TrendingUp, ShieldAlert, Target, ChevronDown, ChevronUp, Swords, Clock, Home, Plane, Zap, ThumbsDown, CheckCircle, AlertCircle } from 'lucide-react';
+import { AlertTriangle, TrendingUp, ShieldAlert, Target, ChevronDown, ChevronUp, Swords, Clock, Home, Plane, Zap, ThumbsDown, CheckCircle, AlertCircle, CircleDot, Shield, Eye } from 'lucide-react';
 import { getTodayEST, formatDateMMDDYYYY } from '../utils/formatDate';
 import { TipBadge, PlayerName } from './StatTooltip';
 
 const quadrantIcons = {
   'Strengths': { Icon: CheckCircle, color: 'var(--success)' },
-  'Areas for Growth': { Icon: AlertCircle, color: 'var(--danger)' },
+  'Weaknesses': { Icon: AlertCircle, color: 'var(--danger)' },
   'Opportunities': { Icon: TrendingUp, color: '#3b9ede' },
   'Threats': { Icon: ShieldAlert, color: '#c87533' },
 };
@@ -56,7 +56,7 @@ const StatCompare = ({ label, ours, theirs, lowerIsBetter }) => {
   const color = (oFmt === '\u2014' || tFmt === '\u2014') ? 'var(--text-muted)' : diff > 0 ? 'var(--success)' : diff < 0 ? 'var(--danger)' : 'var(--text-muted)';
   return (
     <div style={{
-      display: 'grid', gridTemplateColumns: '70px 60px 30px 60px', alignItems: 'center',
+      display: 'grid', gridTemplateColumns: 'minmax(0, 70px) minmax(0, 60px) 30px minmax(0, 60px)', alignItems: 'center',
       gap: '0.25rem', padding: '0.4rem 0', fontSize: 'var(--text-sm)'
     }}>
       <span style={{ color: 'var(--text-muted)', fontSize: 'var(--text-xs)', textTransform: 'uppercase' }}>{label}</span>
@@ -182,6 +182,7 @@ const MatchupPanel = ({ defaultOpponent }) => {
 
           {!matchup.empty && (
             <>
+              <div style={{ overflowX: 'auto', maxWidth: '100%' }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', marginBottom: '1rem' }}>
                 <div>
                   <div className="section-label">Batting</div>
@@ -201,6 +202,7 @@ const MatchupPanel = ({ defaultOpponent }) => {
                   <StatCompare label="K/IP" ours={matchup.our_stats.pitching.k_per_ip} theirs={matchup.their_stats.pitching.k_per_ip} />
                   <StatCompare label="FPCT" ours={matchup.our_stats.fielding.fpct} theirs={matchup.their_stats.fielding.fpct} />
                 </div>
+              </div>
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
@@ -306,6 +308,17 @@ const UpcomingGameBanner = ({ next }) => {
   );
 };
 
+/** Map a SWOT text string to a skill-specific icon component */
+const getSkillIcon = (text) => {
+  const t = (text || '').toLowerCase();
+  if (/bat|hit|contact|slug|avg|obp|ops/.test(t)) return CircleDot;
+  if (/field|defense|glove|catch/.test(t)) return Shield;
+  if (/speed|base|run|steal/.test(t)) return Zap;
+  if (/pitch|throw|control|strike/.test(t)) return Target;
+  if (/eye|walk|discipline|patient/.test(t)) return Eye;
+  return TrendingUp;
+};
+
 /** Compact player card with collapsible detail */
 const PlayerSwotCard = ({ player, isMobile, isExpanded, onToggle }) => {
   const hitting = player.derivedStats?.hitting || {};
@@ -332,6 +345,7 @@ const PlayerSwotCard = ({ player, isMobile, isExpanded, onToggle }) => {
       {/* Collapsed header: name, number, key badges, trait icons */}
       <div style={{
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        overflow: 'hidden',
         marginBottom: isExpanded ? '0.75rem' : 0,
         paddingBottom: isExpanded ? '0.5rem' : 0,
         borderBottom: isExpanded ? '1px solid var(--surface-border)' : 'none'
@@ -345,26 +359,32 @@ const PlayerSwotCard = ({ player, isMobile, isExpanded, onToggle }) => {
           />
           {/* Compact stat badges — always visible */}
           {pa > 0 ? (
-            <span style={{ display: 'inline-flex', gap: '0.3rem', flexWrap: 'wrap' }}>
+            <span style={{ display: 'inline-flex', gap: '0.3rem', flexWrap: 'wrap', minWidth: 0 }}>
               <TipBadge label="AVG" value={avg} />
               <TipBadge label="OBP" value={obp} />
               {!isMobile && <TipBadge label="OPS" value={ops} />}
             </span>
           ) : (
-            <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', fontStyle: 'italic' }}>No PAs</span>
+            <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', fontStyle: 'italic', minWidth: 0 }}>No PAs</span>
           )}
-          {/* Trait icons for quick scanning */}
-          <span style={{ display: 'inline-flex', gap: '0.25rem', alignItems: 'center' }}>
-            {hasStrengths && (
-              <span title={`Strengths: ${strengths.length}`} style={{ color: 'var(--success)', display: 'inline-flex', alignItems: 'center' }}>
-                <Zap size={14} />
-              </span>
-            )}
-            {hasWeaknesses && (
-              <span title={`Areas for growth: ${weaknesses.length}`} style={{ color: 'var(--danger)', display: 'inline-flex', alignItems: 'center' }}>
-                <ThumbsDown size={14} />
-              </span>
-            )}
+          {/* Skill-specific trait icons for quick scanning */}
+          <span style={{ display: 'inline-flex', gap: '0.25rem', alignItems: 'center', minWidth: 0 }}>
+            {hasStrengths && strengths.slice(0, 3).map((s, i) => {
+              const SkillIcon = getSkillIcon(s);
+              return (
+                <span key={`s-${i}`} title={s} style={{ color: 'var(--success)', display: 'inline-flex', alignItems: 'center' }}>
+                  <SkillIcon size={14} />
+                </span>
+              );
+            })}
+            {hasWeaknesses && weaknesses.slice(0, 3).map((w, i) => {
+              const SkillIcon = getSkillIcon(w);
+              return (
+                <span key={`w-${i}`} title={w} style={{ color: 'var(--danger)', display: 'inline-flex', alignItems: 'center' }}>
+                  <SkillIcon size={14} />
+                </span>
+              );
+            })}
           </span>
         </div>
         {isExpanded ? <ChevronUp size={18} color="var(--text-muted)" /> : <ChevronDown size={18} color="var(--text-muted)" />}
@@ -392,7 +412,7 @@ const PlayerSwotCard = ({ player, isMobile, isExpanded, onToggle }) => {
           {/* Full SWOT quadrants */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
             <SwotQuadrant title="Strengths" items={strengths} color="var(--success)" icon={<TrendingUp size={13} />} />
-            <SwotQuadrant title="Areas for Growth" items={weaknesses} color="var(--danger)" icon={<AlertTriangle size={13} />} />
+            <SwotQuadrant title="Weaknesses" items={weaknesses} color="var(--danger)" icon={<AlertTriangle size={13} />} />
             <SwotQuadrant title="Opportunities" items={player.swot?.opportunities} color="#3b9ede" icon={<Target size={13} />} />
             <SwotQuadrant title="Threats" items={player.swot?.threats} color="var(--warning)" icon={<ShieldAlert size={13} />} />
           </div>
@@ -451,7 +471,7 @@ const Swot = ({ swotData, roster, schedule, isMobile = false }) => {
             </h3>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.85rem' }}>
               <SwotQuadrant title="Strengths" items={(teamSwot.strengths || []).slice(0, 4)} color="var(--success)" icon={<TrendingUp size={14} />} />
-              <SwotQuadrant title="Areas for Growth" items={(teamSwot.weaknesses || []).slice(0, 4)} color="var(--danger)" icon={<AlertTriangle size={14} />} />
+              <SwotQuadrant title="Weaknesses" items={(teamSwot.weaknesses || []).slice(0, 4)} color="var(--danger)" icon={<AlertTriangle size={14} />} />
               <SwotQuadrant title="Opportunities" items={(teamSwot.opportunities || []).slice(0, 4)} color="#3b9ede" icon={<Target size={14} />} />
               <SwotQuadrant title="Threats" items={(teamSwot.threats || []).slice(0, 4)} color="var(--warning)" icon={<ShieldAlert size={14} />} />
             </div>
@@ -463,7 +483,7 @@ const Swot = ({ swotData, roster, schedule, isMobile = false }) => {
             </h3>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1.25rem' }}>
               <SwotQuadrant title="Strengths" items={teamSwot.strengths} color="var(--success)" icon={<TrendingUp size={14} />} />
-              <SwotQuadrant title="Areas for Growth" items={teamSwot.weaknesses} color="var(--danger)" icon={<AlertTriangle size={14} />} />
+              <SwotQuadrant title="Weaknesses" items={teamSwot.weaknesses} color="var(--danger)" icon={<AlertTriangle size={14} />} />
               <SwotQuadrant title="Opportunities" items={teamSwot.opportunities} color="#3b9ede" icon={<Target size={14} />} />
               <SwotQuadrant title="Threats" items={teamSwot.threats} color="var(--warning)" icon={<ShieldAlert size={14} />} />
             </div>
