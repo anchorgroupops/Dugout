@@ -548,9 +548,9 @@ input[type="checkbox"]:checked::after {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: var(--touch-min);
-  height: var(--touch-min);
-  min-width: var(--touch-min);
+  width: 48px;
+  height: 48px;
+  min-width: 48px;
   border-radius: 12px;
   border: 1px solid var(--surface-border);
   background: var(--surface-base);
