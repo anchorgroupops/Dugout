@@ -2176,7 +2176,31 @@ def _load_voice_context() -> dict:
     swot = _read_json_file(SHARKS_DIR / "swot_analysis.json", default={}) or {}
     lineups = _read_json_file(SHARKS_DIR / "lineups.json", default={}) or {}
     schedule = _read_json_file(SHARKS_DIR / "schedule_manual.json", default={"upcoming": [], "past": []}) or {"upcoming": [], "past": []}
-    return {"team": team, "swot": swot, "lineups": lineups, "schedule": schedule}
+
+    # Build games list from schedule past + game JSON files for win/loss record
+    games = []
+    past_games = schedule.get("past", []) if isinstance(schedule, dict) else []
+    if isinstance(past_games, list):
+        games.extend(past_games)
+    # Also load game index for score-based W/L detection
+    games_index = _read_json_file(SHARKS_DIR / "games" / "index.json", default=[]) or []
+    if isinstance(games_index, list):
+        for gi in games_index:
+            if not isinstance(gi, dict):
+                continue
+            gid = gi.get("game_id", "")
+            game_detail = _read_json_file(SHARKS_DIR / "games" / f"{gid}.json", default=None)
+            if isinstance(game_detail, dict) and "score" in game_detail:
+                score = game_detail["score"]
+                s_score = score.get("sharks", 0)
+                o_score = score.get("opponent", 0)
+                if s_score > o_score:
+                    gi["result"] = "W"
+                elif o_score > s_score:
+                    gi["result"] = "L"
+                games.append(gi)
+
+    return {"team": team, "swot": swot, "lineups": lineups, "schedule": schedule, "games": games}
 
 
 # Phonetic pronunciation map for names the TTS engine mispronounces.
@@ -2192,7 +2216,10 @@ _PHONETIC_MAP = {
     "Maylani": "May-lah-nee",
     "Mikayla": "Mih-Kay-lah",
     "Juliette": "Julie-ett",
-    "Deliliah": "Deh-lie-lee-ah",
+    "Deliliah": "Duh-LYE-luh",
+    "Ember": "Em-ber",
+    "Lexi": "LEX-ee",
+    "Ruby": "ROO-bee",
     "NWVLL": "North West Volusia Little League",
     "PCLL": "Palm Coast Little League",
     "Stihlers": "Steelers",
@@ -2215,8 +2242,15 @@ def _build_voice_overview_text(ctx: dict) -> str:
     lineups = ctx.get("lineups", {}) if isinstance(ctx, dict) else {}
     schedule = ctx.get("schedule", {}) if isinstance(ctx, dict) else {}
 
-    team_name = team.get("team_name", "The Sharks")
-    record = str(team.get("record", "0-0"))
+    # Compute record from games data
+    games_list = ctx.get("games", [])
+    if isinstance(games_list, list):
+        wins = sum(1 for g in games_list if isinstance(g, dict) and g.get("result") == "W")
+        losses = sum(1 for g in games_list if isinstance(g, dict) and g.get("result") == "L")
+        record = f"{wins} and {losses}" if (wins + losses) > 0 else "oh and oh"
+    else:
+        record = "oh and oh"
+
     roster = [p for p in team.get("roster", []) if isinstance(p, dict) and p.get("core", True) is not False]
 
     def _player_name(p: dict) -> str:
@@ -2243,7 +2277,7 @@ def _build_voice_overview_text(ctx: dict) -> str:
 
     balanced = (lineups.get("balanced") or {}).get("lineup") or []
     top_order = ", ".join(
-        f"{_player_name(p)} number {p.get('number', '?')}"
+        f"{_player_name(p)}, jersey number {p.get('number', '?')}"
         for p in balanced[:3]
     ) or "lineup not generated"
 
@@ -2257,11 +2291,17 @@ def _build_voice_overview_text(ctx: dict) -> str:
         game = next_game[0]
         opp = _clean_opponent_name(str(game.get("opponent", "Opponent")))
         ha = "at home" if game.get("home_away") == "home" else "on the road"
-        next_game_text = f"Next up, the Sharks take on the {opp} {ha} on {game.get('date', 'a date to be determined')}! Let's go!"
+        game_date = game.get('date', '')
+        try:
+            dt = datetime.strptime(game_date, '%Y-%m-%d')
+            date_spoken = dt.strftime('%A, %B ') + str(dt.day)
+        except Exception:
+            date_spoken = game_date or 'a date to be determined'
+        next_game_text = f"Next up, the Sharks take on the {opp} {ha} on {date_spoken}! Let's go!"
 
     raw = (
-        f"Hey Sharks fans! Here's your {team_name} update! "
-        f"The team is sitting at {record} this season. "
+        f"Hey Sharks fans! Here's your latest Sharks update! "
+        f"The squad is {record} this season! "
         f"Leading the charge at the plate: {hitter_text}! "
         f"The team's biggest strength right now? {strengths_text}. "
         f"Area to focus on: {weaknesses_text}. "
@@ -2290,9 +2330,9 @@ def _synthesize_voice_update(text: str) -> bytes:
         "text": text,
         "model_id": model_id,
         "voice_settings": {
-            "stability": 0.22,
+            "stability": 0.15,
             "similarity_boost": 0.85,
-            "style": 0.45,
+            "style": 0.65,
             "use_speaker_boost": True,
         },
     }

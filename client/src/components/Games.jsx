@@ -47,7 +47,7 @@ const ResultBadge = ({ result, score }) => {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
       <span className={`result-badge ${isWin ? 'result-badge--win' : 'result-badge--loss'}`}>{result}</span>
-      {score && <span style={{ fontSize: 'var(--text-sm)', fontWeight: '600', color: 'var(--text-muted)' }}>{sharksScore}\u2013{oppScore}</span>}
+      {score && <span style={{ fontSize: 'var(--text-base)', fontWeight: '700', color: '#fff' }}>{sharksScore}\u2013{oppScore}</span>}
     </div>
   );
 };
@@ -67,9 +67,27 @@ const GameCard = ({ game, onExpand, isExpanded, detail, isMobile = false }) => {
               {isHome ? 'HOME' : 'AWAY'}
             </span>
             <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>{dateStr}</span>
-            <ResultBadge result={game.result} score={game.score} />
+            <ResultBadge result={game.result} />
           </div>
-          <h3 style={{ fontSize: isMobile ? 'var(--text-base)' : '1.1rem', margin: 0 }}>vs. {game.opponent}</h3>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem' }}>
+            <h3 style={{ fontSize: isMobile ? 'var(--text-base)' : '1.1rem', margin: 0 }}>vs. {game.opponent}</h3>
+            {game.result && game.score && (() => {
+              const isWin = game.result === 'W';
+              const parts = (game.score || '').split('-');
+              const sharksScore = isWin ? Math.max(...parts.map(Number)) : Math.min(...parts.map(Number));
+              const oppScore = isWin ? Math.min(...parts.map(Number)) : Math.max(...parts.map(Number));
+              return (
+                <span style={{
+                  fontSize: isMobile ? '1.5rem' : '1.75rem',
+                  fontWeight: '800',
+                  color: isWin ? 'var(--success-color, #4ade80)' : 'var(--danger-color, #f87171)',
+                  letterSpacing: '1px',
+                  lineHeight: 1,
+                  whiteSpace: 'nowrap',
+                }}>{sharksScore}\u2013{oppScore}</span>
+              );
+            })()}
+          </div>
         </div>
         {!isMobile && game.sharks_totals && (isExpanded ? <ChevronUp size={18} color="var(--text-muted)" /> : <ChevronDown size={18} color="var(--text-muted)" />)}
       </div>
