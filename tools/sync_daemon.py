@@ -1820,22 +1820,37 @@ def handle_sync_status():
 
 @app.route('/api/health', methods=['GET'])
 def handle_health():
-    """Return pipeline health with staleness detection for each data source."""
+    """Return pipeline health with staleness detection for each data source.
+
+    Sources are split into *required* (produced by the sync daemon pipeline)
+    and *optional* (produced by external tools like gc_app_auto).  Only
+    required sources contribute to the ``stale_sources`` warning list shown
+    in the dashboard banner.  Optional sources are still reported in the
+    per-source detail so operators can inspect them, but missing/stale
+    optional files no longer trigger a user-facing warning.
+    """
     STALE_THRESHOLD_HOURS = 48
     now = datetime.now(ET)
-    sources = {
+    # Required: files the sync daemon pipeline directly creates/updates
+    required_sources = {
         "team_enriched": SHARKS_DIR / "team_enriched.json",
         "swot_analysis": SHARKS_DIR / "swot_analysis.json",
         "lineups": SHARKS_DIR / "lineups.json",
-        "app_stats": SHARKS_DIR / "app_stats.json",
-        "schedule": SHARKS_DIR / "schedule_manual.json",
         "pipeline_health": SHARKS_DIR / "pipeline_health.json",
     }
+    # Optional: external feed files (gc_app_auto produces these; the daemon
+    # consumes them but does not generate them)
+    optional_sources = {
+        "app_stats": SHARKS_DIR / "app_stats.json",
+        "schedule": SHARKS_DIR / "schedule_manual.json",
+    }
     result = {"checked_at": now.isoformat(), "stale_sources": [], "sources": {}}
-    for name, path in sources.items():
+    for name, path in {**required_sources, **optional_sources}.items():
+        is_required = name in required_sources
         if not path.exists():
-            result["sources"][name] = {"exists": False, "stale": True}
-            result["stale_sources"].append(name)
+            result["sources"][name] = {"exists": False, "stale": True, "required": is_required}
+            if is_required:
+                result["stale_sources"].append(name)
             continue
         mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=ET)
         age_hours = (now - mtime).total_seconds() / 3600
@@ -1845,8 +1860,9 @@ def handle_health():
             "last_updated": mtime.isoformat(),
             "age_hours": round(age_hours, 1),
             "stale": stale,
+            "required": is_required,
         }
-        if stale:
+        if stale and is_required:
             result["stale_sources"].append(name)
     return jsonify(result)
 
@@ -2209,7 +2225,7 @@ def _synthesize_voice_update(text: str) -> bytes:
     model_id = os.getenv("ELEVENLABS_MODEL_ID", "eleven_turbo_v2_5")
 
     if not api_key:
-        raise RuntimeError("Missing ELEVENLABS_API_KEY.")
+        raise RuntimeError("Voice updates require an ElevenLabs API key. Add ELEVENLABS_API_KEY to .env")
     if not voice_id:
         raise RuntimeError("Missing ELEVENLABS_VOICE_ID.")
 
