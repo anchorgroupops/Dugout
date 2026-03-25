@@ -541,6 +541,8 @@ def run():
         rationale = _build_lineup_rationale(results)
         output_summary = {}
         for strategy, payload in results.items():
+            if not isinstance(payload, dict):
+                continue  # skip non-dict entries like "recommended_strategy"
             output_summary[strategy] = {
                 "compliant": bool(payload.get("compliant", False)),
                 "top_3": [
