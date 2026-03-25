@@ -36,18 +36,33 @@ const SwotQuadrant = ({ title, items, color, icon }) => {
   );
 };
 
+const fmtStat = (v) => {
+  if (v == null || v === '' || v === 0 || v === '0' || v === '0.0') return '\u2014';
+  const n = Number(v);
+  if (isNaN(n)) return v;
+  if (n === 0) return '\u2014';
+  // Rates between 0-1 → .xxx format; percentages/larger values → as-is
+  if (n > 0 && n < 1) return n.toFixed(3).replace(/^0/, '');
+  if (Number.isInteger(n)) return String(n);
+  return n.toFixed(2);
+};
+
 const StatCompare = ({ label, ours, theirs, lowerIsBetter }) => {
-  const diff = lowerIsBetter ? theirs - ours : ours - theirs;
-  const color = diff > 0 ? 'var(--success)' : diff < 0 ? 'var(--danger)' : 'var(--text-muted)';
+  const oFmt = fmtStat(ours);
+  const tFmt = fmtStat(theirs);
+  const oNum = Number(ours || 0);
+  const tNum = Number(theirs || 0);
+  const diff = lowerIsBetter ? tNum - oNum : oNum - tNum;
+  const color = (oFmt === '\u2014' || tFmt === '\u2014') ? 'var(--text-muted)' : diff > 0 ? 'var(--success)' : diff < 0 ? 'var(--danger)' : 'var(--text-muted)';
   return (
     <div style={{
       display: 'grid', gridTemplateColumns: '70px 60px 30px 60px', alignItems: 'center',
       gap: '0.25rem', padding: '0.4rem 0', fontSize: 'var(--text-sm)'
     }}>
       <span style={{ color: 'var(--text-muted)', fontSize: 'var(--text-xs)', textTransform: 'uppercase' }}>{label}</span>
-      <span style={{ textAlign: 'right', fontWeight: '600', color }}>{ours}</span>
+      <span style={{ textAlign: 'right', fontWeight: '600', color }}>{oFmt}</span>
       <span style={{ textAlign: 'center', color: 'rgba(255,255,255,0.2)', fontSize: 'var(--text-xs)' }}>vs</span>
-      <span style={{ fontWeight: '600', color: 'var(--text-muted)' }}>{theirs}</span>
+      <span style={{ fontWeight: '600', color: 'var(--text-muted)' }}>{tFmt}</span>
     </div>
   );
 };
@@ -295,11 +310,13 @@ const UpcomingGameBanner = ({ next }) => {
 const PlayerSwotCard = ({ player, isMobile, isExpanded, onToggle }) => {
   const hitting = player.derivedStats?.hitting || {};
   const pa = Number(hitting.pa || 0);
-  const avg = Number(hitting.ba || 0).toFixed(3).replace(/^0/, '');
-  const obp = Number(hitting.obp || 0).toFixed(3).replace(/^0/, '');
-  const ops = Number(hitting.ops || 0).toFixed(3).replace(/^0/, '');
-  const kRate = `${Math.round(Number(hitting.k_rate || 0) * 100)}%`;
-  const bbRate = `${Math.round(Number(hitting.bb_rate || 0) * 100)}%`;
+  const fmtRate = (v) => { const n = Number(v || 0); return n === 0 ? '\u2014' : n.toFixed(3).replace(/^0/, ''); };
+  const fmtPct = (v) => { const n = Number(v || 0); return n === 0 ? '\u2014' : `${Math.round(n * 100)}%`; };
+  const avg = fmtRate(hitting.ba);
+  const obp = fmtRate(hitting.obp);
+  const ops = fmtRate(hitting.ops);
+  const kRate = fmtPct(hitting.k_rate);
+  const bbRate = fmtPct(hitting.bb_rate);
 
   const strengths = player.swot?.strengths || [];
   const weaknesses = player.swot?.weaknesses || [];

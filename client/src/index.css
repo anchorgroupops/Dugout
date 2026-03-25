@@ -196,6 +196,31 @@ main {
   transform-origin: center;
 }
 
+/* ── Sync-specific animation: eased rotation with scale pulse ── */
+@keyframes syncSpin {
+  0%   { transform: rotate(0deg)   scale(1);    filter: drop-shadow(0 0 0px transparent); }
+  25%  { transform: rotate(90deg)  scale(1.08); filter: drop-shadow(0 0 4px rgba(130, 203, 195, 0.5)); }
+  50%  { transform: rotate(180deg) scale(1);    filter: drop-shadow(0 0 6px rgba(130, 203, 195, 0.7)); }
+  75%  { transform: rotate(270deg) scale(1.08); filter: drop-shadow(0 0 4px rgba(130, 203, 195, 0.5)); }
+  100% { transform: rotate(360deg) scale(1);    filter: drop-shadow(0 0 0px transparent); }
+}
+
+.sync-spin {
+  animation: syncSpin 1.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  will-change: transform, filter;
+  transform-origin: center;
+}
+
+/* Active glow state on the sync button while syncing */
+@keyframes borderGlow {
+  0%, 100% { border-color: rgba(130, 203, 195, 0.4); box-shadow: 0 0 8px rgba(130, 203, 195, 0.1); }
+  50%      { border-color: var(--primary-color);      box-shadow: 0 0 16px rgba(130, 203, 195, 0.25), inset 0 0 8px rgba(130, 203, 195, 0.06); }
+}
+
+.sync-btn--active {
+  animation: borderGlow 2s ease-in-out infinite;
+}
+
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
