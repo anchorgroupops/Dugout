@@ -567,6 +567,8 @@ def run():
         print(f"[LINEUP] Audit log skipped: {e}")
 
     for strategy, data in results.items():
+        if not isinstance(data, dict):
+            continue  # skip non-dict entries like "recommended_strategy"
         print(f"\n{'='*50}")
         print(f"  STRATEGY: {strategy.upper()}")
         if "compliant" not in data:
