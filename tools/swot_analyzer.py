@@ -653,6 +653,11 @@ def _team_aggregates(team_data: dict) -> dict:
     }
 
 
+def _n(v):
+    """Coerce None to 0 for safe numeric comparison."""
+    return 0 if v is None else v
+
+
 def analyze_matchup(our_team: dict, opponent_team: dict) -> dict:
     """Compare two teams and generate matchup insights."""
     us = _team_aggregates(our_team)
@@ -678,78 +683,79 @@ def analyze_matchup(our_team: dict, opponent_team: dict) -> dict:
     key_matchups = []
 
     # Batting comparison
-    if us["batting"]["avg"] > them["batting"]["avg"] + 0.030:
+    if _n(us["batting"]["avg"]) > _n(them["batting"]["avg"]) + 0.030:
         our_advantages.append(f"Higher team batting average ({us['batting']['avg']} vs {them['batting']['avg']})")
-    elif them["batting"]["avg"] > us["batting"]["avg"] + 0.030:
+    elif _n(them["batting"]["avg"]) > _n(us["batting"]["avg"]) + 0.030:
         their_advantages.append(f"Higher team batting average ({them['batting']['avg']} vs {us['batting']['avg']})")
 
-    if us["batting"]["obp"] > them["batting"]["obp"] + 0.030:
+    if _n(us["batting"]["obp"]) > _n(them["batting"]["obp"]) + 0.030:
         our_advantages.append(f"Better on-base percentage ({us['batting']['obp']} vs {them['batting']['obp']})")
-    elif them["batting"]["obp"] > us["batting"]["obp"] + 0.030:
+    elif _n(them["batting"]["obp"]) > _n(us["batting"]["obp"]) + 0.030:
         their_advantages.append(f"Better on-base percentage ({them['batting']['obp']} vs {us['batting']['obp']})")
 
-    if us["batting"]["ops"] > them["batting"]["ops"] + 0.050:
+    if _n(us["batting"]["ops"]) > _n(them["batting"]["ops"]) + 0.050:
         our_advantages.append(f"Stronger overall hitting (OPS: {us['batting']['ops']} vs {them['batting']['ops']})")
-    elif them["batting"]["ops"] > us["batting"]["ops"] + 0.050:
+    elif _n(them["batting"]["ops"]) > _n(us["batting"]["ops"]) + 0.050:
         their_advantages.append(f"Stronger overall hitting (OPS: {them['batting']['ops']} vs {us['batting']['ops']})")
 
     # K rate comparison (lower is better for batting team)
-    if us["batting"]["k_rate"] < them["batting"]["k_rate"] - 0.05:
+    if _n(us["batting"]["k_rate"]) < _n(them["batting"]["k_rate"]) - 0.05:
         our_advantages.append(f"Better contact rate (K%: {us['batting']['k_rate']} vs {them['batting']['k_rate']})")
-    elif them["batting"]["k_rate"] < us["batting"]["k_rate"] - 0.05:
+    elif _n(them["batting"]["k_rate"]) < _n(us["batting"]["k_rate"]) - 0.05:
         their_advantages.append(f"Better contact rate (K%: {them['batting']['k_rate']} vs {us['batting']['k_rate']})")
 
     # Advanced batting quality signals
-    if us["batting_advanced"]["qab_pct"] > them["batting_advanced"]["qab_pct"] + 0.08:
+    if _n(us["batting_advanced"]["qab_pct"]) > _n(them["batting_advanced"]["qab_pct"]) + 0.08:
         our_advantages.append(
             f"Higher quality-at-bat rate (QAB%: {us['batting_advanced']['qab_pct']} vs {them['batting_advanced']['qab_pct']})"
         )
-    elif them["batting_advanced"]["qab_pct"] > us["batting_advanced"]["qab_pct"] + 0.08:
+    elif _n(them["batting_advanced"]["qab_pct"]) > _n(us["batting_advanced"]["qab_pct"]) + 0.08:
         their_advantages.append(
             f"Higher quality-at-bat rate (QAB%: {them['batting_advanced']['qab_pct']} vs {us['batting_advanced']['qab_pct']})"
         )
 
-    if us["batting_advanced"]["c_pct"] > them["batting_advanced"]["c_pct"] + 0.07:
+    if _n(us["batting_advanced"]["c_pct"]) > _n(them["batting_advanced"]["c_pct"]) + 0.07:
         our_advantages.append(
             f"Better contact quality (C%: {us['batting_advanced']['c_pct']} vs {them['batting_advanced']['c_pct']})"
         )
-    elif them["batting_advanced"]["c_pct"] > us["batting_advanced"]["c_pct"] + 0.07:
+    elif _n(them["batting_advanced"]["c_pct"]) > _n(us["batting_advanced"]["c_pct"]) + 0.07:
         their_advantages.append(
             f"Better contact quality (C%: {them['batting_advanced']['c_pct']} vs {us['batting_advanced']['c_pct']})"
         )
 
-    # Pitching comparison
-    if us["pitching"]["ip"] >= 3 and them["pitching"]["ip"] >= 3:
-        if us["pitching"]["era"] < them["pitching"]["era"] - 1.0:
+    # Pitching comparison — only if both teams have meaningful innings
+    if _n(us["pitching"]["ip"]) >= 3 and _n(them["pitching"]["ip"]) >= 3:
+        if _n(us["pitching"]["era"]) < _n(them["pitching"]["era"]) - 1.0:
             our_advantages.append(f"Superior pitching (ERA: {us['pitching']['era']} vs {them['pitching']['era']})")
-        elif them["pitching"]["era"] < us["pitching"]["era"] - 1.0:
+        elif _n(them["pitching"]["era"]) < _n(us["pitching"]["era"]) - 1.0:
             their_advantages.append(f"Superior pitching (ERA: {them['pitching']['era']} vs {us['pitching']['era']})")
 
-        if us["pitching"]["whip"] < them["pitching"]["whip"] - 0.2:
+        if _n(us["pitching"]["whip"]) < _n(them["pitching"]["whip"]) - 0.2:
             our_advantages.append(f"Better pitch control (WHIP: {us['pitching']['whip']} vs {them['pitching']['whip']})")
-        elif them["pitching"]["whip"] < us["pitching"]["whip"] - 0.2:
+        elif _n(them["pitching"]["whip"]) < _n(us["pitching"]["whip"]) - 0.2:
             their_advantages.append(f"Better pitch control (WHIP: {them['pitching']['whip']} vs {us['pitching']['whip']})")
 
-    # Fielding
-    if us["fielding"]["fpct"] > them["fielding"]["fpct"] + 0.02:
-        our_advantages.append(f"Cleaner defense (FPCT: {us['fielding']['fpct']} vs {them['fielding']['fpct']})")
-    elif them["fielding"]["fpct"] > us["fielding"]["fpct"] + 0.02:
-        their_advantages.append(f"Cleaner defense (FPCT: {them['fielding']['fpct']} vs {us['fielding']['fpct']})")
+    # Fielding — skip comparison if either side has no fielding data
+    if us["fielding"]["fpct"] is not None and them["fielding"]["fpct"] is not None:
+        if _n(us["fielding"]["fpct"]) > _n(them["fielding"]["fpct"]) + 0.02:
+            our_advantages.append(f"Cleaner defense (FPCT: {us['fielding']['fpct']} vs {them['fielding']['fpct']})")
+        elif _n(them["fielding"]["fpct"]) > _n(us["fielding"]["fpct"]) + 0.02:
+            their_advantages.append(f"Cleaner defense (FPCT: {them['fielding']['fpct']} vs {us['fielding']['fpct']})")
 
     # Cross-matchups: our batting vs their pitching and vice versa
-    if us["batting"]["ops"] > 0.700 and them["pitching"]["era"] > 5.0:
+    if _n(us["batting"]["ops"]) > 0.700 and _n(them["pitching"]["era"]) > 5.0:
         key_matchups.append("Our offense should exploit their pitching struggles")
-    if them["batting"]["ops"] > 0.700 and us["pitching"]["era"] > 5.0:
+    if _n(them["batting"]["ops"]) > 0.700 and _n(us["pitching"]["era"]) > 5.0:
         key_matchups.append("Their offense could exploit our pitching - keep pitch count low")
-    if us["batting"]["k_rate"] > 0.35 and them["pitching"]["k_per_ip"] > 0.8:
+    if _n(us["batting"]["k_rate"]) > 0.35 and _n(them["pitching"]["k_per_ip"]) > 0.8:
         key_matchups.append("Warning: our high K-rate meets their strikeout pitcher - focus on contact approach")
-    if them["batting"]["k_rate"] > 0.35 and us["pitching"]["k_per_ip"] > 0.8:
+    if _n(them["batting"]["k_rate"]) > 0.35 and _n(us["pitching"]["k_per_ip"]) > 0.8:
         key_matchups.append("Opportunity: their team strikes out a lot and our pitchers can rack up Ks")
-    if us["batting"]["sb"] > them["batting"]["sb"] + 3:
+    if _n(us["batting"]["sb"]) > _n(them["batting"]["sb"]) + 3:
         key_matchups.append("Speed advantage - aggressive baserunning recommended")
-    if them["batting_advanced"]["ld_pct"] > 0.30 and us["fielding"]["fpct"] < 0.900:
+    if _n(them["batting_advanced"]["ld_pct"]) > 0.30 and _n(us["fielding"]["fpct"]) < 0.900:
         key_matchups.append("They profile as a line-drive offense; tighten infield readiness and first-step defense.")
-    if us["batting_advanced"]["bb_per_k"] > them["batting_advanced"]["bb_per_k"] + 0.25:
+    if _n(us["batting_advanced"]["bb_per_k"]) > _n(them["batting_advanced"]["bb_per_k"]) + 0.25:
         key_matchups.append("Plate-discipline edge favors us; work deep counts and force pitch volume.")
 
     # Recommendation
