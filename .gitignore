@@ -12,3 +12,5 @@ dist/
 tools/frida-server
 # Claude Code internal agent state — never commit
 .claude/worktrees/
+# Runtime logs (generated on Pi, not source-controlled)
+logs/

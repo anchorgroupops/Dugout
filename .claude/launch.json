@@ -1,0 +1,20 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "Vite (React Frontend)",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "client",
+      "port": 5173
+    },
+    {
+      "name": "Flask API (sync_daemon)",
+      "runtimeExecutable": "py",
+      "runtimeArgs": ["sync_daemon.py"],
+      "cwd": "tools",
+      "port": 5001,
+      "env": { "PORT": "5001" }
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__Claude_Preview__preview_start",
+      "Bash(findstr \":5000\")",
+      "Bash(tasklist /FI \"PID eq 32772\" /FO LIST)",
+      "Bash(powershell -Command \"Get-Process -Id 32772 | Select-Object Name, Id, Path\")",
+      "Bash(powershell -Command \"netstat -ano | Select-String '':5000''\")",
+      "Bash(docker stop:*)",
+      "Bash(powershell -Command \"5001,5050,5100,5200,8000,8080,8888 | ForEach-Object { $port = $_ $conn = New-Object System.Net.Sockets.TcpClient; try { $conn.Connect\\(''127.0.0.1'', $port\\); \"\"$port IN USE\"\" } catch { \"\"$port FREE\"\" } finally { $conn.Dispose\\(\\) } }\")",
+      "Bash(powershell -Command \":*)",
+      "Bash(where python:*)",
+      "Bash(where py:*)"
+    ]
+  }
+}
