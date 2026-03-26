@@ -11,7 +11,7 @@ import statistics
 from typing import Any, Callable
 
 
-CANONICAL_BATTING_FIELDS = ["pa", "ab", "h", "1b", "2b", "3b", "hr", "bb", "hbp", "so", "rbi", "sb", "r"]
+CANONICAL_BATTING_FIELDS = ["pa", "ab", "h", "1b", "2b", "3b", "hr", "bb", "hbp", "so", "rbi", "sb", "r", "sac"]
 CANONICAL_BATTING_ADV_FIELDS = [
     "qab",
     "qab_pct",
@@ -94,7 +94,11 @@ def innings_to_float(val: Any) -> float:
     if "." in s:
         try:
             whole, frac = s.split(".", 1)
-            outs = int(whole) * 3 + int(frac)
+            frac_int = int(frac)
+            if frac_int > 2:
+                # Invalid innings notation (outs must be 0-2); treat as plain float
+                return float(s)
+            outs = int(whole) * 3 + frac_int
             return outs / 3.0
         except Exception:
             return 0.0

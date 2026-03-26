@@ -1973,8 +1973,19 @@ def handle_matchup(opponent_slug):
                     rnum = str(rp.get("number", "")).strip()
                     rname = (rp.get("name") or "").strip().lower()
                     match = game_by_num.get(rnum) or game_by_name.get(rname)
-                    if match and not rp.get("batting"):
-                        rp["batting"] = {k: v for k, v in match.items() if k not in ("name", "number")}
+                    if match:
+                        game_bat = {k: v for k, v in match.items() if k not in ("name", "number")}
+                        existing = rp.get("batting")
+                        if not existing:
+                            rp["batting"] = game_bat
+                        else:
+                            # Merge: use max() per counting stat so partial data doesn't zero-out game history
+                            for k, v in game_bat.items():
+                                cur = existing.get(k, 0)
+                                if isinstance(v, (int, float)) and isinstance(cur, (int, float)):
+                                    existing[k] = max(cur, v)
+                                elif k not in existing or not cur:
+                                    existing[k] = v
             data_source = "opponent_game_history"
         elif isinstance(opp_team.get("public_game_metrics"), dict) and opp_team.get("public_game_metrics", {}).get("completed_games", 0) > 0:
             data_source = "opponent_public_games"
