@@ -2674,18 +2674,68 @@ def handle_voice_update():
 
 @app.route('/api/schedule', methods=['GET'])
 def handle_schedule():
-    """Return upcoming and past games from schedule_manual.json."""
+    """Return upcoming and past games from schedule_manual.json.
+
+    Dynamically reconciles placement: any 'upcoming' game whose date has
+    already passed is promoted to 'past', and its result/score are filled
+    in from config/known_game_results.json if available.  This means the
+    Pi never needs a manual edit when schedule_manual.json lags reality.
+    """
     schedule_file = SHARKS_DIR / "schedule_manual.json"
     if not schedule_file.exists():
         return jsonify({"upcoming": [], "past": []})
     data = _read_json_file(schedule_file, default={"upcoming": [], "past": []}) or {"upcoming": [], "past": []}
+
+    # Load authoritative known results (tracked in git)
+    known_by_date: dict = {}
+    known_results_file = CONFIG_DIR / "known_game_results.json"
+    if known_results_file.exists():
+        try:
+            kd = _read_json_file(known_results_file, default={}) or {}
+            for kr in kd.get("results", []):
+                kr_date = (kr.get("date") or "")[:10]
+                if kr_date:
+                    known_by_date[kr_date] = kr
+        except Exception:
+            pass
+
+    today_str = datetime.now(ET).strftime("%Y-%m-%d")
+
+    # Promote stale 'upcoming' entries to 'past'
+    still_upcoming: list = []
+    promoted: list = []
+    for game in data.get("upcoming", []):
+        game_date = (game.get("date") or "")[:10]
+        if game_date and game_date < today_str:
+            # Apply known result if available
+            kr = known_by_date.get(game_date)
+            if kr:
+                game.setdefault("result", kr.get("result", ""))
+                game.setdefault("score", kr.get("score", ""))
+            promoted.append(game)
+        else:
+            still_upcoming.append(game)
+
+    # Merge promoted games at the front of past (newest first)
+    merged_past = promoted + list(data.get("past", []))
+
+    # Apply known results to all past games (fill blanks)
+    for game in merged_past:
+        game_date = (game.get("date") or "")[:10]
+        kr = known_by_date.get(game_date)
+        if kr:
+            if not game.get("result"):
+                game["result"] = kr.get("result", "")
+            if not game.get("score"):
+                game["score"] = kr.get("score", "")
+
     # Clean opponent names for display
-    for section in ("upcoming", "past"):
-        for game in data.get(section, []):
-            raw = game.get("opponent", "")
-            game["opponent_raw"] = raw
-            game["opponent"] = _clean_opponent_name(raw)
-    return jsonify(data)
+    for game in still_upcoming + merged_past:
+        raw = game.get("opponent", "")
+        game["opponent_raw"] = raw
+        game["opponent"] = _clean_opponent_name(raw)
+
+    return jsonify({"upcoming": still_upcoming, "past": merged_past})
 
 
 @app.route('/api/opponent-discovery', methods=['GET'])

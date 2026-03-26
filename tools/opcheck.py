@@ -82,6 +82,8 @@ def run_opcheck(base_url: str, include_burst: bool = True) -> dict:
                 detail += f" line_score_games={lsg}"
         add(f"matchup_{slug}", ok, detail)
 
+    time.sleep(0.5)
+
     # SWOT + lineups artifacts
     swot_r, swot = _req_json(s, f"{base}/data/sharks/swot_analysis.json")
     analyses = (swot or {}).get("player_analyses", []) if isinstance(swot, dict) else []
@@ -95,9 +97,8 @@ def run_opcheck(base_url: str, include_burst: bool = True) -> dict:
     line_r, lineups = _req_json(s, f"{base}/data/sharks/lineups.json")
     balanced = (((lineups or {}).get("balanced") or {}).get("lineup") or []) if isinstance(lineups, dict) else []
     lineup_nonzero = sum(1 for p in balanced[:9] if (p.get("pa", 0) or 0) > 0)
-    # Fetch availability to know how many players are active; fewer than 9 available = warning only
-    avail_data = _req_json(s, f"{base}/api/availability")[1] or {}
-    active_count = sum(1 for v in avail_data.values() if v is not False)
+    # Reuse availability data already fetched above
+    active_count = sum(1 for v in (avail or {}).values() if v is not False)
     # Pass if lineup exists and has as many players as active roster (or 9+)
     lineup_ok = line_r.status_code == 200 and len(balanced) > 0 and (
         len(balanced) >= min(9, active_count) and lineup_nonzero > 0
@@ -140,6 +141,8 @@ def run_opcheck(base_url: str, include_burst: bool = True) -> dict:
         f"status={gd_r.status_code} deficits={len(deficits)} sample={deficits[:5]}",
     )
 
+    time.sleep(0.5)
+
     health_r, health = _req_json(s, f"{base}/data/sharks/pipeline_health.json")
     has_required = isinstance(health, dict) and "required_field_coverage" in health
     add("pipeline_health_artifact", health_r.status_code == 200 and has_required, f"status={health_r.status_code}")
@@ -177,9 +180,10 @@ def run_opcheck(base_url: str, include_burst: bool = True) -> dict:
         f"status={practice_r.status_code} needs={len(practice.get('needs', [])) if isinstance(practice, dict) else 'n/a'} selected={len(practice.get('selected_players', [])) if isinstance(practice, dict) else 'n/a'} source={practice.get('default_player_source') if isinstance(practice, dict) else 'n/a'}",
     )
 
-    # Security headers and method controls
-    hdr_r = s.get(f"{base}/api/team", timeout=30)
-    headers = {k.lower(): v for k, v in hdr_r.headers.items()}
+    time.sleep(0.5)
+
+    # Security headers and method controls — reuse the first /api/team response (already fetched above)
+    headers = {k.lower(): v for k, v in team_r.headers.items()}
     required_headers = [
         "x-content-type-options",
         "x-frame-options",
