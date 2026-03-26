@@ -716,6 +716,25 @@ input[type="checkbox"]:checked::after {
   text-transform: capitalize;
 }
 
+/* ─── Last Updated Tag ─── */
+.last-updated-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: rgba(130, 203, 195, 0.08);
+  border: 1px solid rgba(130, 203, 195, 0.15);
+  border-radius: 999px;
+  padding: 0.2rem 0.65rem;
+  margin-bottom: 0.75rem;
+}
+
+.last-updated-tag svg {
+  opacity: 0.6;
+}
+
 /* ─── Desktop media query ─── */
 @media (min-width: 769px) {
   .card-grid {
