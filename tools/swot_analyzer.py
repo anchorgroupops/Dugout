@@ -570,24 +570,36 @@ def _team_aggregates(team_data: dict) -> dict:
     weighted_ld = 0.0
     weighted_fb = 0.0
     weighted_gb = 0.0
+    has_real_adv_data = False  # Track whether source actually has advanced stats
 
     def _acc_adv(row: dict, pa_hint: float = 0.0):
         nonlocal adv_pa, adv_qab, adv_hhb, adv_bb, adv_so
-        nonlocal weighted_c, weighted_ld, weighted_fb, weighted_gb
+        nonlocal weighted_c, weighted_ld, weighted_fb, weighted_gb, has_real_adv_data
         adv = normalize_batting_advanced_row(row or {})
         row_pa = _parse_number(adv.get("pa", 0))
         if row_pa <= 0 and pa_hint > 0:
             row_pa = pa_hint
         wt = row_pa if row_pa > 0 else 1.0
         adv_pa += row_pa
-        adv_qab += _parse_number(adv.get("qab", 0))
-        adv_hhb += _parse_number(adv.get("hhb", 0))
+        qab_val = _parse_number(adv.get("qab", 0))
+        hhb_val = _parse_number(adv.get("hhb", 0))
+        c_val = _parse_number(adv.get("c_pct", 0))
+        ld_val = _parse_number(adv.get("ld_pct", 0))
+        fb_val = _parse_number(adv.get("fb_pct", 0))
+        gb_val = _parse_number(adv.get("gb_pct", 0))
+        # Detect if source data actually contains advanced metrics (not just zeros
+        # from missing fields).  QAB, C%, LD%, FB%, GB% are only available from
+        # GC CSV export — opponent game aggregation never has them.
+        if qab_val > 0 or c_val > 0 or ld_val > 0 or fb_val > 0 or gb_val > 0 or hhb_val > 0:
+            has_real_adv_data = True
+        adv_qab += qab_val
+        adv_hhb += hhb_val
         adv_bb += _parse_number(adv.get("bb", 0))
         adv_so += _parse_number(adv.get("so", 0))
-        weighted_c += _parse_number(adv.get("c_pct", 0)) * wt
-        weighted_ld += _parse_number(adv.get("ld_pct", 0)) * wt
-        weighted_fb += _parse_number(adv.get("fb_pct", 0)) * wt
-        weighted_gb += _parse_number(adv.get("gb_pct", 0)) * wt
+        weighted_c += c_val * wt
+        weighted_ld += ld_val * wt
+        weighted_fb += fb_val * wt
+        weighted_gb += gb_val * wt
 
     for p in roster:
         batting = p.get("batting", {})
@@ -635,11 +647,21 @@ def _team_aggregates(team_data: dict) -> dict:
         total_a += _parse_number(fielding.get("a", 0))
         total_e += _parse_number(fielding.get("e", 0))
 
-    q_pct = _safe_div(adv_qab, adv_pa) if adv_pa > 0 else None
-    c_pct = _safe_div(weighted_c, adv_pa) if adv_pa > 0 else None
-    ld_pct = _safe_div(weighted_ld, adv_pa) if adv_pa > 0 else None
-    fb_pct = _safe_div(weighted_fb, adv_pa) if adv_pa > 0 else None
-    gb_pct = _safe_div(weighted_gb, adv_pa) if adv_pa > 0 else None
+    # Only compute advanced rate stats if the source data actually had advanced
+    # metrics.  Opponent game-aggregated data only has basic batting (AB/H/BB/…)
+    # so adv_pa > 0 but QAB/C%/LD% are all 0 — returning 0.0 would be misleading.
+    if has_real_adv_data and adv_pa > 0:
+        q_pct = _safe_div(adv_qab, adv_pa)
+        c_pct = _safe_div(weighted_c, adv_pa)
+        ld_pct = _safe_div(weighted_ld, adv_pa)
+        fb_pct = _safe_div(weighted_fb, adv_pa)
+        gb_pct = _safe_div(weighted_gb, adv_pa)
+    else:
+        q_pct = None
+        c_pct = None
+        ld_pct = None
+        fb_pct = None
+        gb_pct = None
     bb_per_k = _safe_div(adv_bb, adv_so) if adv_so > 0 else None
 
     return {
@@ -749,9 +771,9 @@ def analyze_matchup(our_team: dict, opponent_team: dict) -> dict:
     # we require BOTH sides to have a real (> 0) value before comparing.
     # A 0.0 opponent value means "no data collected", not "zero QABs".
     if batting_sample_ok:
-        us_qab = _n(us["batting_advanced"]["qab_pct"])
-        them_qab = _n(them["batting_advanced"]["qab_pct"])
-        if us_qab > 0 and them_qab > 0:
+        us_qab = us["batting_advanced"]["qab_pct"]
+        them_qab = them["batting_advanced"]["qab_pct"]
+        if us_qab is not None and them_qab is not None and us_qab > 0 and them_qab > 0:
             if us_qab > them_qab + 0.08:
                 our_advantages.append(
                     f"Higher quality-at-bat rate (QAB%: {us['batting_advanced']['qab_pct']} vs {them['batting_advanced']['qab_pct']})"
@@ -761,9 +783,9 @@ def analyze_matchup(our_team: dict, opponent_team: dict) -> dict:
                     f"Higher quality-at-bat rate (QAB%: {them['batting_advanced']['qab_pct']} vs {us['batting_advanced']['qab_pct']})"
                 )
 
-        us_cpct = _n(us["batting_advanced"]["c_pct"])
-        them_cpct = _n(them["batting_advanced"]["c_pct"])
-        if us_cpct > 0 and them_cpct > 0:
+        us_cpct = us["batting_advanced"]["c_pct"]
+        them_cpct = them["batting_advanced"]["c_pct"]
+        if us_cpct is not None and them_cpct is not None and us_cpct > 0 and them_cpct > 0:
             if us_cpct > them_cpct + 0.07:
                 our_advantages.append(
                     f"Better contact quality (C%: {us['batting_advanced']['c_pct']} vs {them['batting_advanced']['c_pct']})"
@@ -803,9 +825,9 @@ def analyze_matchup(our_team: dict, opponent_team: dict) -> dict:
         key_matchups.append("Opportunity: their team strikes out a lot and our pitchers can rack up Ks")
     if _n(us["batting"]["sb"]) > _n(them["batting"]["sb"]) + 3:
         key_matchups.append("Speed advantage - aggressive baserunning recommended")
-    if _n(them["batting_advanced"]["ld_pct"]) > 0.30 and _n(us["fielding"]["fpct"]) < 0.900:
+    if them["batting_advanced"]["ld_pct"] is not None and _n(them["batting_advanced"]["ld_pct"]) > 0.30 and _n(us["fielding"]["fpct"]) < 0.900:
         key_matchups.append("They profile as a line-drive offense; tighten infield readiness and first-step defense.")
-    if _n(us["batting_advanced"]["bb_per_k"]) > _n(them["batting_advanced"]["bb_per_k"]) + 0.25:
+    if us["batting_advanced"]["bb_per_k"] is not None and them["batting_advanced"]["bb_per_k"] is not None and _n(us["batting_advanced"]["bb_per_k"]) > _n(them["batting_advanced"]["bb_per_k"]) + 0.25:
         key_matchups.append("Plate-discipline edge favors us; work deep counts and force pitch volume.")
 
     # Recommendation
