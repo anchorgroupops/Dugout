@@ -10,3 +10,5 @@ credentials/
 *.key
 dist/
 tools/frida-server
+# Claude Code internal agent state — never commit
+.claude/worktrees/
