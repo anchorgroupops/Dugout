@@ -52,6 +52,7 @@ N8N_WEBHOOK_URL = "https://n8n.joelycannoli.com/webhook/gc-alert"
 DATA_DIR = Path(__file__).parent.parent / "data"
 SHARKS_DIR = DATA_DIR / "sharks"
 LOG_DIR = Path(__file__).parent.parent / "logs"
+CONFIG_DIR = Path(__file__).parent.parent / "config"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 DEFAULT_FALLBACK_VOICE_ID = "EXAVITQu4vr4xnSDxMaL"
 _SECRET_CACHE: dict[str, str] | None = None
@@ -1436,6 +1437,25 @@ def _build_games_feed(include_detail: bool = False) -> list[dict]:
                 if sg.get("score"):
                     game["score"] = sg.get("score", "")
                 break
+
+    # Load known game results override (tracked in git; authoritative for confirmed games)
+    known_results_file = CONFIG_DIR / "known_game_results.json"
+    if known_results_file.exists():
+        try:
+            known_data = _read_json_file(known_results_file, default={}) or {}
+            for kr in known_data.get("results", []):
+                kr_date = (kr.get("date") or "")[:10]
+                if not kr_date or not kr.get("result"):
+                    continue
+                for game in pdf_games:
+                    g_date = (game.get("date") or "")[:10]
+                    if g_date == kr_date and not game.get("result"):
+                        game["result"] = kr["result"]
+                        game["score"] = kr.get("score", "")
+                        logging.debug(f"[Feed] Applied known result {kr_date} {kr['result']} to {game.get('game_id')}")
+                        break
+        except Exception as _ke:
+            logging.debug(f"_build_games_feed known_results read error: {_ke}")
 
     # Self-heal: backfill result/score for PDF games from GC UUID game files by date match
     if games_dir.exists():
