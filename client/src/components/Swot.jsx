@@ -170,7 +170,7 @@ const MatchupPanel = ({ defaultOpponent, isMobile = false }) => {
             {matchup.empty && <AlertTriangle size={16} color="#82CBC3" style={{ flexShrink: 0 }} />}
             {matchup.recommendation}
           </div>
-          <div style={{ marginTop: '0.45rem', marginBottom: matchup.empty ? '0.85rem' : '1rem', fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
+          <div style={{ marginTop: '0.45rem', marginBottom: matchup.empty ? '0.85rem' : '0.5rem', fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
             Data source: {matchup.data_source === 'opponent_game_history'
               ? 'scorebook game history'
               : matchup.data_source === 'opponent_team_json'
@@ -179,7 +179,18 @@ const MatchupPanel = ({ defaultOpponent, isMobile = false }) => {
                   ? 'opponent public game feed'
                 : 'none'}
             {matchup.empty && matchup.reason ? ` \u00b7 reason: ${matchup.reason}` : ''}
+            {!matchup.empty && matchup.opponent_ab > 0 ? ` \u00b7 ${matchup.opponent_ab} opp. AB on record` : ''}
           </div>
+          {!matchup.empty && matchup.batting_sample_limited && (
+            <div style={{
+              marginBottom: '0.85rem', padding: '0.4rem 0.65rem', borderRadius: '6px',
+              background: 'rgba(251,191,36,0.07)', border: '1px solid rgba(251,191,36,0.2)',
+              fontSize: 'var(--text-xs)', color: 'rgba(251,191,36,0.8)',
+              display: 'flex', alignItems: 'center', gap: '0.4rem',
+            }}>
+              ⚠️ Stat comparisons require 10+ opponent AB on record. Advantages shown are based on limited game-fragment data — treat as directional only.
+            </div>
+          )}
 
           {!matchup.empty && (
             <>
@@ -365,10 +376,19 @@ const PlayerSwotCard = ({ player, isMobile, isExpanded, onToggle }) => {
           />
           {/* Compact stat badges — always visible */}
           {pa > 0 ? (
-            <span style={{ display: 'inline-flex', gap: '0.3rem', flexWrap: 'wrap', minWidth: 0 }}>
+            <span style={{ display: 'inline-flex', gap: '0.3rem', flexWrap: 'wrap', minWidth: 0, alignItems: 'center' }}>
               <TipBadge label="AVG" value={avg} />
               <TipBadge label="OBP" value={obp} />
               {!isMobile && <TipBadge label="OPS" value={ops} />}
+              {pa < 5 && (
+                <span title={`Only ${pa} PA — stats not reliable yet`} style={{
+                  fontSize: '10px', color: 'var(--text-muted)', background: 'rgba(255,255,255,0.07)',
+                  border: '1px solid rgba(255,255,255,0.12)', borderRadius: '4px',
+                  padding: '1px 5px', lineHeight: 1.4,
+                }}>
+                  {pa} PA ⚠
+                </span>
+              )}
             </span>
           ) : (
             <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', fontStyle: 'italic', minWidth: 0 }}>No PAs</span>
