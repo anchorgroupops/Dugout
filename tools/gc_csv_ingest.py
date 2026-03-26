@@ -48,7 +48,7 @@ BAT = {
 BAT_ADV = {
     "qab": 29, "qab_pct": 30, "pa_per_bb": 31, "bb_per_k": 32, "c_pct": 33,
     "hhb": 34, "ld_pct": 35, "fb_pct": 36, "gb_pct": 37,
-    "babip": 38, "ba_risp": 39, "lob": 40, "two_out_rbi": 41,
+    "babip": 38, "ba_risp": 39, "bat_lob": 40, "two_out_rbi": 41,
     "xbh": 42, "tb": 43, "ps": 44, "ps_pa": 45,
     "two_s_three": 46, "two_s_three_pct": 47,
     "six_plus": 48, "six_plus_pct": 49,
@@ -67,13 +67,30 @@ PITCH = {
 # Pitching advanced (cols 81-117)
 PITCH_ADV = {
     "baa": 81,
+    "mph_fb": 82, "mph_ct": 83, "mph_cb": 84, "mph_sl": 85, "mph_ch": 86, "mph_os": 87,
     "p_ip": 88, "p_bf": 89,
+    "lt3_pct": 90, "loo": 91, "first_2out": 92, "one23_inn": 93, "lt13": 94,
     "fip": 95, "s_pct": 96, "fps_pct": 97,
-    "bb_inn": 101,
+    "fpso_pct": 98, "fpsw_pct": 99, "fpsh_pct": 100,
+    "bb_inn": 101, "zero_bb_inn": 102, "bbs": 103, "lobb": 104, "lobbs": 105, "sm_pct": 106,
     "k_bf": 107, "k_bb": 108,
-    "hhb_pct": 110, "go_ao": 111,
+    "weak_pct": 109, "hhb_pct": 110, "go_ao": 111, "p_hr": 112,
     "ld_pct": 113, "fb_pct": 114, "gb_pct": 115,
     "babip": 116, "ba_risp": 117,
+}
+
+# Pitching breakdown by pitch type (cols 118-173)
+PITCH_BRK = {
+    "fb": 118, "fbs": 119, "fbs_pct": 120, "fbsw_pct": 121, "fbsm_pct": 122,
+    "ch": 123, "chs": 124, "chs_pct": 125, "chsw_pct": 126, "chsm_pct": 127,
+    "rb": 128, "rbs": 129, "rbs_pct": 130, "rbsw_pct": 131, "rbsm_pct": 132, "mph_rb": 133,
+    "db": 134, "dbs": 135, "dbs_pct": 136, "dbsw_pct": 137, "dbsm_pct": 138, "mph_db": 139,
+    "sc": 140, "scs": 141, "scs_pct": 142, "scsw_pct": 143, "scsm_pct": 144, "mph_sc": 145,
+    "cb": 146, "cbs": 147, "cbs_pct": 148, "cbsw_pct": 149, "cbsm_pct": 150,
+    "dc": 151, "dcs": 152, "dcs_pct": 153, "dcsw_pct": 154, "dcsm_pct": 155, "mph_dc": 156,
+    "kb": 157, "kbs": 158, "kbs_pct": 159, "kbsw_pct": 160, "kbsm_pct": 161, "mph_kb": 162,
+    "kc": 163, "kcs": 164, "kcs_pct": 165, "kcsw_pct": 166, "kcsm_pct": 167, "mph_kc": 168,
+    "os": 169, "oss": 170, "oss_pct": 171, "ossw_pct": 172, "ossm_pct": 173,
 }
 
 # Fielding (cols 174-180)
@@ -190,7 +207,7 @@ def parse_player_row(row: list[str], core_set: set[str]) -> dict | None:
         "gb_pct": safe_float(ba_raw["gb_pct"]),
         "babip": ba_raw["babip"] if ba_raw["babip"] else None,
         "ba_risp": ba_raw["ba_risp"] if ba_raw["ba_risp"] else None,
-        "lob": safe_int(ba_raw["lob"]),
+        "lob": safe_int(ba_raw.get("bat_lob", "")),
         "two_out_rbi": safe_int(ba_raw["two_out_rbi"]),
         "xbh": safe_int(ba_raw["xbh"]),
         "tb": safe_int(ba_raw["tb"]),
@@ -245,25 +262,43 @@ def parse_player_row(row: list[str], core_set: set[str]) -> dict | None:
             "bf": safe_int(pitch_raw["bf"]),
             "np": safe_int(pitch_raw["np"]),
             "baa": safe_float(pa_raw["baa"]),
+            "mph_fb": pa_raw.get("mph_fb", "") or None,
+            "mph_ch": pa_raw.get("mph_ch", "") or None,
+            "mph_cb": pa_raw.get("mph_cb", "") or None,
             "p_ip": safe_float(pa_raw["p_ip"]),
             "p_bf": safe_float(pa_raw["p_bf"]),
+            "lt3_pct": safe_float(pa_raw.get("lt3_pct", "")),
             "fip": safe_float(pa_raw["fip"]),
             "s_pct": safe_float(pa_raw["s_pct"]),
             "fps_pct": safe_float(pa_raw["fps_pct"]),
+            "fpso_pct": safe_float(pa_raw.get("fpso_pct", "")),
+            "fpsw_pct": safe_float(pa_raw.get("fpsw_pct", "")),
+            "fpsh_pct": safe_float(pa_raw.get("fpsh_pct", "")),
             "bb_inn": safe_float(pa_raw["bb_inn"]),
+            "zero_bb_inn": safe_float(pa_raw.get("zero_bb_inn", "")),
+            "sm_pct": safe_float(pa_raw.get("sm_pct", "")),
             "k_bf": safe_float(pa_raw["k_bf"]),
             "k_bb": safe_float(pa_raw["k_bb"]),
+            "weak_pct": safe_float(pa_raw.get("weak_pct", "")),
             "hhb_pct": safe_float(pa_raw["hhb_pct"]),
             "go_ao": safe_float(pa_raw["go_ao"]),
+            "p_hr": safe_int(pa_raw.get("p_hr", "")),
             "ld_pct": safe_float(pa_raw["ld_pct"]),
             "fb_pct": safe_float(pa_raw["fb_pct"]),
             "gb_pct": safe_float(pa_raw["gb_pct"]),
             "babip": safe_float(pa_raw["babip"]),
             "ba_risp": safe_float(pa_raw["ba_risp"]),
         }
+
+        # --- Pitching Breakdown (by pitch type) ---
+        brk_raw = _parse_row_section(row, PITCH_BRK)
+        pitching_breakdown = {}
+        if _has_data(brk_raw):
+            pitching_breakdown = {k: (safe_float(v) if v else None) for k, v in brk_raw.items()}
     else:
         pitching = None
         pitching_advanced = None
+        pitching_breakdown = None
 
     # --- Fielding ---
     fld_raw = _parse_row_section(row, FIELD)
@@ -320,7 +355,7 @@ def parse_player_row(row: list[str], core_set: set[str]) -> dict | None:
         "batting_advanced": batting_advanced,
         "pitching": pitching,
         "pitching_advanced": pitching_advanced,
-        "pitching_breakdown": None,
+        "pitching_breakdown": pitching_breakdown if pitching else None,
         "fielding": fielding,
         "catching": catching,
         "innings_played": innings_played,
