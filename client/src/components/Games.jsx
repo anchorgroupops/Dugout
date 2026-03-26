@@ -141,6 +141,8 @@ const PlayerPitchingRow = ({ player }) => {
         <TipBadge label="ERA" value={player.era != null ? parseFloat(player.era).toFixed(2) : null} />
         <TipBadge label="WHIP" value={player.whip != null ? parseFloat(player.whip).toFixed(2) : null} />
         <TipBadge label="BAA" value={player.baa != null ? fmt3(player.baa) : null} />
+        <TipBadge label="WP" value={player.wp} />
+        <TipBadge label="BK" value={player.bk} />
         <TipBadge label="LOB" value={player.lob} />
       </div>
     </div>
@@ -189,6 +191,9 @@ const PlayerAdvPitchingRow = ({ player }) => {
         <TipBadge label="P/IP" value={player.p_ip != null ? parseFloat(player.p_ip).toFixed(1) : null} />
         <TipBadge label="P/BF" value={player.p_bf != null ? parseFloat(player.p_bf).toFixed(1) : null} />
         <TipBadge label="FPS%" value={player.fps_pct != null ? `${parseFloat(player.fps_pct).toFixed(1)}%` : null} />
+        <TipBadge label="FPSw%" value={player.fpsw_pct != null ? `${parseFloat(player.fpsw_pct).toFixed(1)}%` : null} />
+        <TipBadge label="FPSo%" value={player.fpso_pct != null ? `${parseFloat(player.fpso_pct).toFixed(1)}%` : null} />
+        <TipBadge label="FPSh%" value={player.fpsh_pct != null ? `${parseFloat(player.fpsh_pct).toFixed(1)}%` : null} />
         <TipBadge label="LOO" value={player.loo} />
         <TipBadge label="1st2Out" value={player.first_2out} />
         <TipBadge label="1-2-3" value={player.one23_inn} />
