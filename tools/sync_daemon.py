@@ -56,7 +56,27 @@ CONFIG_DIR = Path(__file__).parent.parent / "config"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 DEFAULT_FALLBACK_VOICE_ID = "EXAVITQu4vr4xnSDxMaL"
 _SECRET_CACHE: dict[str, str] | None = None
-_SYNC_STATUS: dict[str, str] = {"stage": "idle", "last_completed": ""}
+_SYNC_STATUS: dict = {"stage": "idle", "last_completed": "", "progress": 0}
+
+# Ordered sync stages with progress percentages and display labels
+_SYNC_STAGES = [
+    ("starting",           5,  "Starting"),
+    ("scraping_schedule", 15,  "Schedule"),
+    ("scraping_stats",    35,  "Stats"),
+    ("enriching",         60,  "Enriching"),
+    ("analyzing",         80,  "Analyzing"),
+    ("finalizing",        95,  "Finalizing"),
+]
+
+def _set_sync_stage(stage: str):
+    """Update sync status with stage name and computed progress percentage."""
+    _SYNC_STATUS["stage"] = stage
+    for s_name, s_pct, _ in _SYNC_STAGES:
+        if s_name == stage:
+            _SYNC_STATUS["progress"] = s_pct
+            return
+    if stage == "idle":
+        _SYNC_STATUS["progress"] = 0
 
 DEFAULT_CORS_ORIGINS = [
     "https://sharks.joelycannoli.com",
@@ -909,7 +929,7 @@ def run_sync_cycle():
     """Executes one full sync of schedule and stats, catching ALL exceptions."""
     try:
         logging.info("--- Starting Sync Cycle ---")
-        _SYNC_STATUS["stage"] = "starting"
+        _set_sync_stage("starting")
 
         # 0. Refresh opponent discovery from public org/team feeds.
         try:
@@ -924,7 +944,7 @@ def run_sync_cycle():
             logging.warning(f"[Sync] Opponent discovery skipped: {e}")
         
         # 1. Scrape Schedule
-        _SYNC_STATUS["stage"] = "scraping_schedule"
+        _set_sync_stage("scraping_schedule")
         logging.info("Scraping Schedule...")
         sched_scraper = ScheduleScraper()
         sched_scraper.scrape_schedule()
@@ -951,7 +971,7 @@ def run_sync_cycle():
             logging.warning(f"[Sync] Web box score ingest skipped: {e}")
         
         # 2. Scrape Stats
-        _SYNC_STATUS["stage"] = "scraping_stats"
+        _set_sync_stage("scraping_stats")
         logging.info("Scraping Live Stats...")
         try:
             from playwright.sync_api import sync_playwright
@@ -972,7 +992,7 @@ def run_sync_cycle():
 
         enriched_team_data = None
 
-        _SYNC_STATUS["stage"] = "enriching"
+        _set_sync_stage("enriching")
         # Write team_enriched.json (team_merged + app_stats + scorebook reconciliation)
         try:
             team_file = SHARKS_DIR / ("team_merged.json" if (SHARKS_DIR / "team_merged.json").exists() else "team.json")
@@ -994,7 +1014,7 @@ def run_sync_cycle():
         except Exception as e:
             logging.warning(f"team_enriched.json write skipped: {e}")
 
-        _SYNC_STATUS["stage"] = "analyzing"
+        _set_sync_stage("analyzing")
         # Re-run SWOT and lineup optimizer with enriched data
         try:
             from swot_analyzer import run_sharks_analysis
@@ -1052,6 +1072,8 @@ def run_sync_cycle():
         except Exception as e:
             logging.warning(f"[Sync] gc_csv_auto skipped: {e}")
 
+        _set_sync_stage("finalizing")
+
         # NotebookLM payload rebuild with all new data.
         try:
             from notebooklm_sync import prepare_notebooklm_payload
@@ -1070,7 +1092,7 @@ def run_sync_cycle():
         if isinstance(enriched_team_data, dict):
             _record_stats_db_snapshot(enriched_team_data, source="sync_cycle")
 
-        _SYNC_STATUS["stage"] = "idle"
+        _set_sync_stage("idle")
         _SYNC_STATUS["last_completed"] = datetime.now(ET).isoformat()
         logging.info("--- Sync Cycle Complete ---")
         return True
@@ -2078,8 +2100,9 @@ def _aggregate_stats_from_games():
 
 @app.route('/api/sync/status', methods=['GET'])
 def handle_sync_status():
-    """Return current sync daemon stage and last completion time."""
-    return jsonify(_SYNC_STATUS)
+    """Return current sync daemon stage, progress, and milestone info."""
+    milestones = [{"id": s, "pct": p, "label": l} for s, p, l in _SYNC_STAGES]
+    return jsonify({**_SYNC_STATUS, "milestones": milestones})
 
 
 @app.route('/api/health', methods=['GET'])

@@ -12,6 +12,28 @@ import Practice from './components/Practice';
 import Scouting from './components/Scouting';
 
 
+function SyncProgressBar({ progress, stage, milestones }) {
+  const activeIdx = milestones.findIndex(m => m.id === stage);
+  return (
+    <div className="sync-progress-wrap">
+      <div className="sync-progress-track">
+        <div className="sync-progress-fill" style={{ width: `${progress}%` }} />
+        {milestones.map((m, i) => {
+          const done = progress >= m.pct;
+          const active = i === activeIdx;
+          return (
+            <div key={m.id} className={`sync-milestone ${done ? 'done' : ''} ${active ? 'active' : ''}`} style={{ left: `${m.pct}%` }}>
+              <div className="sync-milestone-dot" />
+              <span className="sync-milestone-label">{m.label}</span>
+            </div>
+          );
+        })}
+      </div>
+      <div className="sync-progress-pct">{progress}%</div>
+    </div>
+  );
+}
+
 function App() {
   const [currentView, setCurrentView] = useState('scout');
   const { canInstall, triggerInstall } = usePWAInstall();
@@ -23,6 +45,8 @@ function App() {
   const [voiceError, setVoiceError] = useState('');
   const [staleSources, setStaleSources] = useState([]);
   const [syncStage, setSyncStage] = useState('idle');
+  const [syncProgress, setSyncProgress] = useState(0);
+  const [syncMilestones, setSyncMilestones] = useState([]);
   const [syncLoading, setSyncLoading] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [data, setData] = useState({
@@ -73,6 +97,9 @@ function App() {
         if (syncRes?.ok) {
           const sync = await syncRes.json();
           setSyncStage(sync.stage || 'idle');
+          setSyncProgress(sync.progress || 0);
+          if (sync.milestones?.length) setSyncMilestones(sync.milestones);
+          if (sync.stage && sync.stage !== 'idle') setSyncLoading(true);
         }
       } catch { /* ignore health/sync check failures */ }
     } catch (err) {
@@ -146,7 +173,8 @@ function App() {
 
   const handleManualSync = useCallback(async () => {
     setSyncLoading(true);
-    setSyncStatusText('Syncing... this may take 5-10 min');
+    setSyncProgress(0);
+    setSyncStatusText('Triggering sync...');
     try {
       const res = await fetch('https://anchorgroupops--softball-strategy-sharks-manual-sync.modal.run', {
         method: 'POST'
@@ -163,8 +191,8 @@ function App() {
         }
       } catch { /* ignore */ }
 
-      // Poll /api/health every 10s until data refreshes or 10 min timeout
-      const POLL_INTERVAL = 10000;
+      // Poll /api/sync/status for progress + /api/health for completion
+      const POLL_INTERVAL = 5000;
       const TIMEOUT = 10 * 60 * 1000;
       const startTime = Date.now();
 
@@ -174,18 +202,44 @@ function App() {
           if (elapsed >= TIMEOUT) {
             clearInterval(pollTimer);
             setSyncLoading(false);
+            setSyncProgress(0);
             setSyncStatusText('Sync timed out — data may still be updating');
             return;
           }
-          const hRes = await fetch('/api/health');
-          if (hRes.ok) {
+
+          // Poll sync status for progress
+          const sRes = await fetch('/api/sync/status').catch(() => null);
+          if (sRes?.ok) {
+            const s = await sRes.json();
+            setSyncStage(s.stage || 'idle');
+            setSyncProgress(s.progress || 0);
+            if (s.milestones?.length) setSyncMilestones(s.milestones);
+            setSyncStatusText(s.stage === 'idle' ? '' : s.stage.replace(/_/g, ' '));
+
+            // If stage went back to idle, sync is done
+            if (s.stage === 'idle' && elapsed > 5000) {
+              clearInterval(pollTimer);
+              setSyncLoading(false);
+              setSyncProgress(100);
+              setSyncStatusText('Sync complete');
+              fetchData();
+              setTimeout(() => { setSyncProgress(0); setSyncStatusText(''); }, 4000);
+              return;
+            }
+          }
+
+          // Also check health timestamp for completion
+          const hRes = await fetch('/api/health').catch(() => null);
+          if (hRes?.ok) {
             const h = await hRes.json();
             const newTimestamp = h.last_updated || h.timestamp || null;
             if (baseTimestamp && newTimestamp && newTimestamp !== baseTimestamp) {
               clearInterval(pollTimer);
               setSyncLoading(false);
-              setSyncStatusText('');
-              fetchData(); // refresh UI with new data
+              setSyncProgress(100);
+              setSyncStatusText('Sync complete');
+              fetchData();
+              setTimeout(() => { setSyncProgress(0); setSyncStatusText(''); }, 4000);
             }
           }
         } catch { /* ignore poll errors */ }
@@ -193,6 +247,7 @@ function App() {
     } catch (err) {
       console.error('Sync failed', err);
       setSyncLoading(false);
+      setSyncProgress(0);
       setSyncStatusText('Sync failed: ' + err.message);
     }
   }, [fetchData]);
@@ -301,9 +356,6 @@ function App() {
                 className={`sync-status-dot ${staleSources.length > 0 ? 'stale' : 'fresh'}`}
                 title={staleSources.length > 0 ? `Stale: ${staleSources.join(', ')}` : 'Data is fresh'}
               />
-              {syncStage !== 'idle' && (
-                <span className="sync-stage-tag">{syncStage}</span>
-              )}
               {!isOnline && (
                 <span className="sync-stage-tag offline" style={{ background: '#711d1c' }}>OFFLINE</span>
               )}
@@ -316,7 +368,6 @@ function App() {
                 title="Manual Sync"
               >
                 <RefreshCw size={22} className={syncLoading ? 'sync-spin' : ''} />
-                {syncStatusText && <span style={{ fontSize: '0.55rem', position: 'absolute', bottom: '-10px', whiteSpace: 'nowrap', color: 'var(--primary-color)' }}>{syncStatusText}</span>}
               </button>
               <button
                 className="mobile-action-btn"
@@ -328,6 +379,14 @@ function App() {
               </button>
             </div>
           </div>
+          {syncLoading && syncMilestones.length > 0 && (
+            <div className="mobile-sync-progress">
+              <SyncProgressBar progress={syncProgress} stage={syncStage} milestones={syncMilestones} />
+            </div>
+          )}
+          {!syncLoading && syncStatusText && (
+            <div className="mobile-sync-status">{syncStatusText}</div>
+          )}
         </nav>
       ) : (
         <nav className="navbar">
@@ -374,9 +433,12 @@ function App() {
               )}
               <button className={`sync-btn ${syncLoading ? 'sync-btn--active' : ''}`} onClick={handleManualSync} disabled={syncLoading} title="Trigger manual data refresh">
                 <RefreshCw size={16} className={syncLoading ? 'sync-spin' : ''} />
-                {syncLoading ? 'Syncing...' : syncStage !== 'idle' ? `Sync: ${syncStage}` : 'Manual Sync'}
+                {syncLoading ? 'Syncing...' : 'Manual Sync'}
               </button>
-              {syncStatusText && <span style={{ fontSize: '0.75rem', color: 'var(--primary-color)' }}>{syncStatusText}</span>}
+              {syncLoading && syncMilestones.length > 0 && (
+                <SyncProgressBar progress={syncProgress} stage={syncStage} milestones={syncMilestones} />
+              )}
+              {!syncLoading && syncStatusText && <span style={{ fontSize: '0.75rem', color: 'var(--primary-color)' }}>{syncStatusText}</span>}
               <button className="voice-btn" onClick={handleVoiceUpdate} disabled={voiceLoading} title="Play latest audio overview">
                 <Volume2 size={16} className={voiceLoading ? 'sync-spin' : ''} />
                 {voiceLoading ? 'Preparing...' : 'Voice Update'}
