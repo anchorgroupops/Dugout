@@ -34,6 +34,21 @@ export const getTodayEST = () => {
   }).format(new Date());
 };
 
+/** Format a date as a relative time string (e.g. "3 min ago", "2 hrs ago") */
+export const formatRelative = (dateStr) => {
+  if (!dateStr) return '';
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const sec = Math.floor(diff / 1000);
+  if (sec < 60) return 'just now';
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min} min ago`;
+  const hrs = Math.floor(min / 60);
+  if (hrs < 24) return `${hrs} hr${hrs > 1 ? 's' : ''} ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 7) return `${days} day${days > 1 ? 's' : ''} ago`;
+  return formatDateTime(dateStr);
+};
+
 /** Stat tooltip abbreviation map */
 export const STAT_GLOSSARY = {
   PA: 'Plate Appearances',
