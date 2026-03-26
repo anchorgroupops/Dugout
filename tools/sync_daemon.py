@@ -3006,8 +3006,9 @@ def _trigger_post_game_analysis():
 
 
 def run_api():
-    logging.info("Starting API server on port 5000...")
-    app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
+    port = int(os.environ.get("PORT", 5000))
+    logging.info(f"Starting API server on port {port}...")
+    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
 
 # ---------------------------------------------------------
 # DAEMON LOGIC
