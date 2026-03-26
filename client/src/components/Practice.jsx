@@ -148,11 +148,7 @@ const Practice = ({ team, schedule, isMobile = false }) => {
     setLoading(true);
     setError('');
     try {
-      let url = '/api/practice-insights';
-      if (players !== null) {
-        const csv = encodeURIComponent((players || []).join(','));
-        url = `/api/practice-insights?players=${csv}`;
-      }
+      const url = '/data/sharks/practice_insights.json';
       const res = await fetch(url);
       if (!res.ok) throw new Error(`practice insights status ${res.status}`);
       const data = await res.json();
