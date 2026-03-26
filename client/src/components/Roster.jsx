@@ -3,6 +3,18 @@ import { ChevronDown, ChevronUp } from 'lucide-react';
 import { TipBadge, PlayerName } from './StatTooltip';
 
 const fmt = (val) => (val !== null && val !== undefined ? String(val) : '\u2014');
+const fmtPct = (val) => {
+  if (val === null || val === undefined || val === '') return '\u2014';
+  const n = parseFloat(val);
+  return isNaN(n) ? '\u2014' : `${n.toFixed(1)}%`;
+};
+const fmt3 = (val) => {
+  if (val === null || val === undefined || val === '') return '\u2014';
+  // Already formatted like ".750"
+  if (typeof val === 'string' && val.startsWith('.')) return val;
+  const n = parseFloat(val);
+  return isNaN(n) ? '\u2014' : n.toFixed(3);
+};
 
 const getStrengthBadges = (player) => {
   const b = player.batting || {};
@@ -42,15 +54,28 @@ const ExpandedStats = ({ player }) => {
       <div style={sectionStyle}>
         <div className="section-label">Batting</div>
         <div style={rowStyle}>
-          <TipBadge label="AVG" value={fmt(b.avg ?? player.avg)} />
-          <TipBadge label="OBP" value={fmt(b.obp ?? player.obp)} />
-          <TipBadge label="OPS" value={fmt(b.ops ?? player.ops)} />
+          <TipBadge label="AVG" value={fmt3(b.avg ?? player.avg)} />
+          <TipBadge label="OBP" value={fmt3(b.obp ?? player.obp)} />
+          <TipBadge label="SLG" value={fmt3(b.slg ?? player.slg)} />
+          <TipBadge label="OPS" value={fmt3(b.ops ?? player.ops)} />
         </div>
         <div style={rowGapStyle}>
+          <TipBadge label="GP" value={fmt(b.gp)} />
+          <TipBadge label="PA" value={fmt(b.pa ?? player.pa)} />
+          <TipBadge label="AB" value={fmt(b.ab ?? player.ab)} />
           <TipBadge label="H" value={fmt(b.h ?? player.h)} />
+          <TipBadge label="2B" value={fmt(b['2b'] ?? b.doubles)} />
+          <TipBadge label="3B" value={fmt(b['3b'] ?? b.triples)} />
+          <TipBadge label="HR" value={fmt(b.hr)} />
+        </div>
+        <div style={rowGapStyle}>
           <TipBadge label="RBI" value={fmt(b.rbi ?? player.rbi)} />
           <TipBadge label="R" value={fmt(b.r ?? player.r)} />
+          <TipBadge label="BB" value={fmt(b.bb)} />
+          <TipBadge label="HBP" value={fmt(b.hbp)} />
+          <TipBadge label="SO" value={fmt(b.so)} />
           <TipBadge label="SB" value={fmt(b.sb ?? player.sb)} />
+          <TipBadge label="SAC" value={fmt(b.sac)} />
         </div>
       </div>
 
@@ -59,16 +84,22 @@ const ExpandedStats = ({ player }) => {
         <div style={sectionStyle}>
           <div className="section-label">Batting Advanced</div>
           <div style={rowStyle}>
-            <TipBadge label="BABIP" value={fmt(ba.babip)} />
-            <TipBadge label="QAB%" value={fmt(ba.qab_pct)} />
-            <TipBadge label="BB/K" value={fmt(ba.bb_k)} />
-            <TipBadge label="TB" value={fmt(ba.tb)} />
+            <TipBadge label="BABIP" value={fmt3(ba.babip)} />
+            <TipBadge label="BA/RISP" value={fmt3(ba.ba_risp)} />
+            <TipBadge label="QAB%" value={fmtPct(ba.qab_pct)} />
+            <TipBadge label="BB/K" value={fmt(ba.bb_k ?? ba.bb_per_k)} />
           </div>
           <div style={rowGapStyle}>
-            <TipBadge label="FB%" value={fmt(ba.fb_pct)} />
-            <TipBadge label="GB%" value={fmt(ba.gb_pct)} />
-            <TipBadge label="LD%" value={fmt(ba.ld_pct)} />
-            <TipBadge label="PS/PA" value={fmt(ba.ps_pa)} />
+            <TipBadge label="TB" value={fmt(ba.tb)} />
+            <TipBadge label="XBH" value={fmt(ba.xbh)} />
+            <TipBadge label="PS/PA" value={ba.ps_pa != null ? parseFloat(ba.ps_pa).toFixed(2) : '\u2014'} />
+            <TipBadge label="QAB" value={fmt(ba.qab)} />
+          </div>
+          <div style={rowGapStyle}>
+            <TipBadge label="FB%" value={fmtPct(ba.fb_pct)} />
+            <TipBadge label="GB%" value={fmtPct(ba.gb_pct)} />
+            <TipBadge label="LD%" value={fmtPct(ba.ld_pct)} />
+            <TipBadge label="C%" value={fmtPct(ba.c_pct)} />
           </div>
         </div>
       )}
@@ -111,9 +142,11 @@ const ExpandedStats = ({ player }) => {
           <div className="section-label">Catching</div>
           <div style={rowStyle}>
             <TipBadge label="INN" value={fmt(c.inn)} />
-            <TipBadge label="CS%" value={fmt(c.cs_pct)} />
+            <TipBadge label="CS%" value={fmtPct(c.cs_pct)} />
             <TipBadge label="PB" value={fmt(c.pb)} />
-            <TipBadge label="SB-ATT" value={fmt(c.sb_att)} />
+            <TipBadge label="SB" value={fmt(c.sb)} />
+            <TipBadge label="CS" value={fmt(c.cs)} />
+            <TipBadge label="PIK" value={fmt(c.pik)} />
           </div>
         </div>
       )}
