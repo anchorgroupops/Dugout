@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Dumbbell, RefreshCw, Users, Target } from 'lucide-react';
 import { TipBadge } from './StatTooltip';
 import { formatDateMMDDYYYY } from '../utils/formatDate';
+import OpponentFieldMap from './OpponentFieldMap';
 
 const sourceLabel = (src) => {
   if (src === 'practice_rsvp') return 'Current/next practice RSVP';
@@ -113,6 +114,27 @@ const Practice = ({ team, schedule, isMobile = false }) => {
   const [error, setError] = useState('');
   const [initialLoaded, setInitialLoaded] = useState(false);
   const debounceRef = useRef(null);
+
+  // ── Opponent field map: fetch matchup for the next scheduled game ──
+  const [nextMatchup, setNextMatchup] = useState(null);
+  useEffect(() => {
+    const nextGame = (schedule?.upcoming || [])[0];
+    if (!nextGame?.opponent) return;
+    const opponentName = nextGame.opponent;
+    // Fetch opponents list to resolve slug, then fetch matchup
+    fetch('/api/opponents')
+      .then(r => r.ok ? r.json() : [])
+      .then(opponents => {
+        const match = opponents.find(o =>
+          o.team_name.toLowerCase() === opponentName.toLowerCase() ||
+          o.slug === opponentName.toLowerCase().replace(/ /g, '_')
+        );
+        if (!match?.slug) return;
+        return fetch(`/api/matchup/${match.slug}`).then(r => r.ok ? r.json() : null);
+      })
+      .then(data => { if (data) setNextMatchup(data); })
+      .catch(() => {/* silent — non-critical */});
+  }, [schedule]);
 
   const availablePlayers = useMemo(() => [...(insights?.available_players || [])].sort((a, b) => a.localeCompare(b)), [insights]);
 
@@ -304,6 +326,13 @@ const Practice = ({ team, schedule, isMobile = false }) => {
           <div className="card-grid" style={{ marginBottom: 'var(--space-md)' }}>
             {(insights.needs || []).slice(0, isMobile ? 3 : undefined).map(need => <NeedCard key={need.key} need={need} />)}
           </div>
+
+          {/* ── Defensive Prep: opponent hit-zone heatmap for next game ── */}
+          {nextMatchup && !nextMatchup.empty && (
+            <div className="glass-panel" style={{ padding: isMobile ? 'var(--space-lg)' : '1rem 1.25rem', marginBottom: 'var(--space-md)' }}>
+              <OpponentFieldMap matchup={nextMatchup} isMobile={isMobile} />
+            </div>
+          )}
 
           {!isMobile && (
             <div className="glass-panel" style={{ padding: '1rem 1.25rem' }}>

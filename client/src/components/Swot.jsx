@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { AlertTriangle, TrendingUp, ShieldAlert, Target, ChevronDown, ChevronUp, Swords, Clock, Home, Plane, Zap, ThumbsDown, CheckCircle, AlertCircle, CircleDot, Shield, Eye } from 'lucide-react';
 import { getTodayEST, formatDateMMDDYYYY } from '../utils/formatDate';
 import { TipBadge, PlayerName } from './StatTooltip';
+import OpponentFieldMap from './OpponentFieldMap';
 
 const quadrantIcons = {
   'Strengths': { Icon: CheckCircle, color: 'var(--success)' },
@@ -67,7 +68,7 @@ const StatCompare = ({ label, ours, theirs, lowerIsBetter }) => {
   );
 };
 
-const MatchupPanel = ({ defaultOpponent }) => {
+const MatchupPanel = ({ defaultOpponent, isMobile = false }) => {
   const [opponents, setOpponents] = useState([]);
   const [selected, setSelected] = useState('');
   const [matchup, setMatchup] = useState(null);
@@ -270,6 +271,11 @@ const MatchupPanel = ({ defaultOpponent }) => {
                   </div>
                 </div>
               )}
+
+              {/* ── Opponent Field Tendencies (spray chart inference) ── */}
+              <div style={{ marginTop: '1rem', paddingTop: '0.75rem', borderTop: '1px solid var(--surface-border)' }}>
+                <OpponentFieldMap matchup={matchup} isMobile={isMobile} />
+              </div>
             </>
           )}
         </div>
@@ -517,10 +523,10 @@ const Swot = ({ swotData, roster, schedule, isMobile = false }) => {
                 {showMatchup ? 'Hide Matchup' : 'Show Matchup'}
               </button>
             </div>
-            {showMatchup && <div style={{ marginTop: '0.75rem' }}><MatchupPanel defaultOpponent={nextGame?.opponent} /></div>}
+            {showMatchup && <div style={{ marginTop: '0.75rem' }}><MatchupPanel defaultOpponent={nextGame?.opponent} isMobile={isMobile} /></div>}
           </div>
         ) : (
-          <MatchupPanel defaultOpponent={nextGame?.opponent} />
+          <MatchupPanel defaultOpponent={nextGame?.opponent} isMobile={isMobile} />
         )}
       </div>
 
