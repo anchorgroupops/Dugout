@@ -201,9 +201,9 @@ const MatchupPanel = ({ defaultOpponent, isMobile = false }) => {
                   <StatCompare label="AVG" ours={matchup.our_stats.batting.avg} theirs={matchup.their_stats.batting.avg} />
                   <StatCompare label="OBP" ours={matchup.our_stats.batting.obp} theirs={matchup.their_stats.batting.obp} />
                   <StatCompare label="OPS" ours={matchup.our_stats.batting.ops} theirs={matchup.their_stats.batting.ops} />
-                  <StatCompare label="QAB%" ours={matchup.our_stats.batting_advanced?.qab_pct ?? 0} theirs={matchup.their_stats.batting_advanced?.qab_pct ?? 0} />
-                  <StatCompare label="C%" ours={matchup.our_stats.batting_advanced?.c_pct ?? 0} theirs={matchup.their_stats.batting_advanced?.c_pct ?? 0} />
-                  <StatCompare label="LD%" ours={matchup.our_stats.batting_advanced?.ld_pct ?? 0} theirs={matchup.their_stats.batting_advanced?.ld_pct ?? 0} />
+                  <StatCompare label="QAB%" ours={matchup.our_stats.batting_advanced?.qab_pct} theirs={matchup.their_stats.batting_advanced?.qab_pct} />
+                  <StatCompare label="C%" ours={matchup.our_stats.batting_advanced?.c_pct} theirs={matchup.their_stats.batting_advanced?.c_pct} />
+                  <StatCompare label="LD%" ours={matchup.our_stats.batting_advanced?.ld_pct} theirs={matchup.their_stats.batting_advanced?.ld_pct} />
                   <StatCompare label="K%" ours={matchup.our_stats.batting.k_rate} theirs={matchup.their_stats.batting.k_rate} lowerIsBetter />
                   <StatCompare label="BB%" ours={matchup.our_stats.batting.bb_rate} theirs={matchup.their_stats.batting.bb_rate} />
                 </div>
