@@ -30,7 +30,29 @@ npm run dev
 
 Once you are ready for everyone to use it, you can deploy it to a public URL.
 
-1. **Deploy your web app** to your public URL (e.g., via Nginx or Vercel).
+### 🌐 Method A: Tailscale Funnel (Easiest)
+1. **Enable Funnel**: Visit your Tailscale console and enable Funnel for this node:
+   [Enable Funnel](https://login.tailscale.com/f/funnel?node=n4h6gpX3y511CNTRL)
+2. **Run Funnel**:
+   ```bash
+   tailscale funnel 5173
+   ```
+3. **Public URL**: You will receive a `tailscale.net` URL that works from anywhere.
+
+### 🏠 Method B: Raspberry Pi (On-Premise)
+Deploy to the Sharks' dedicated server (`dori-pi`):
+1. **Sync Assets**: Ensure the project is synced via Syncthing.
+2. **Launch Docker**:
+   ```bash
+   ssh joely@192.168.7.222 "cd Repos/Personal/Softball && docker-compose -f docker-compose.sharks.yml up -d --build"
+   ```
+3. **Internal URL**: `http://192.168.7.222:3000`
+
+### ☁️ Method C: Vercel (Cloud)
+1. **Run NPX**:
+   ```bash
+   npx vercel --prod
+   ```
 
 If you have access to a Mac with Xcode, you can build a true native iOS package.
 
