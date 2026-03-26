@@ -744,25 +744,34 @@ def analyze_matchup(our_team: dict, opponent_team: dict) -> dict:
         elif _n(them["batting"]["k_rate"]) < _n(us["batting"]["k_rate"]) - 0.05:
             their_advantages.append(f"Better contact rate (K%: {them['batting']['k_rate']} vs {us['batting']['k_rate']})")
 
-    # Advanced batting quality signals — also gated on batting sample
+    # Advanced batting quality signals — also gated on batting sample.
+    # IMPORTANT: these are derived metrics (not in standard scorebooks), so
+    # we require BOTH sides to have a real (> 0) value before comparing.
+    # A 0.0 opponent value means "no data collected", not "zero QABs".
     if batting_sample_ok:
-        if _n(us["batting_advanced"]["qab_pct"]) > _n(them["batting_advanced"]["qab_pct"]) + 0.08:
-            our_advantages.append(
-                f"Higher quality-at-bat rate (QAB%: {us['batting_advanced']['qab_pct']} vs {them['batting_advanced']['qab_pct']})"
-            )
-        elif _n(them["batting_advanced"]["qab_pct"]) > _n(us["batting_advanced"]["qab_pct"]) + 0.08:
-            their_advantages.append(
-                f"Higher quality-at-bat rate (QAB%: {them['batting_advanced']['qab_pct']} vs {us['batting_advanced']['qab_pct']})"
-            )
+        us_qab = _n(us["batting_advanced"]["qab_pct"])
+        them_qab = _n(them["batting_advanced"]["qab_pct"])
+        if us_qab > 0 and them_qab > 0:
+            if us_qab > them_qab + 0.08:
+                our_advantages.append(
+                    f"Higher quality-at-bat rate (QAB%: {us['batting_advanced']['qab_pct']} vs {them['batting_advanced']['qab_pct']})"
+                )
+            elif them_qab > us_qab + 0.08:
+                their_advantages.append(
+                    f"Higher quality-at-bat rate (QAB%: {them['batting_advanced']['qab_pct']} vs {us['batting_advanced']['qab_pct']})"
+                )
 
-        if _n(us["batting_advanced"]["c_pct"]) > _n(them["batting_advanced"]["c_pct"]) + 0.07:
-            our_advantages.append(
-                f"Better contact quality (C%: {us['batting_advanced']['c_pct']} vs {them['batting_advanced']['c_pct']})"
-            )
-        elif _n(them["batting_advanced"]["c_pct"]) > _n(us["batting_advanced"]["c_pct"]) + 0.07:
-            their_advantages.append(
-                f"Better contact quality (C%: {them['batting_advanced']['c_pct']} vs {us['batting_advanced']['c_pct']})"
-            )
+        us_cpct = _n(us["batting_advanced"]["c_pct"])
+        them_cpct = _n(them["batting_advanced"]["c_pct"])
+        if us_cpct > 0 and them_cpct > 0:
+            if us_cpct > them_cpct + 0.07:
+                our_advantages.append(
+                    f"Better contact quality (C%: {us['batting_advanced']['c_pct']} vs {them['batting_advanced']['c_pct']})"
+                )
+            elif them_cpct > us_cpct + 0.07:
+                their_advantages.append(
+                    f"Better contact quality (C%: {them['batting_advanced']['c_pct']} vs {us['batting_advanced']['c_pct']})"
+                )
 
     # Pitching comparison — only if both teams have meaningful innings
     if _n(us["pitching"]["ip"]) >= 3 and _n(them["pitching"]["ip"]) >= 3:
