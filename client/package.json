@@ -6,7 +6,7 @@
   "scripts": {
     "sync:data": "node scripts/sync_data.js",
     "predev": "npm run sync:data",
-    "dev": "vite",
+    "dev": "vite --host 0.0.0.0",
     "prebuild": "npm run sync:data",
     "build": "vite build",
     "lint": "eslint .",
