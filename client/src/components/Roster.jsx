@@ -137,19 +137,23 @@ const ExpandedStats = ({ player }) => {
       )}
 
       {/* Catching */}
-      {Object.keys(c).length > 0 && (
-        <div style={sectionStyle}>
-          <div className="section-label">Catching</div>
-          <div style={rowStyle}>
-            <TipBadge label="INN" value={fmt(c.inn)} />
-            <TipBadge label="CS%" value={fmtPct(c.cs_pct)} />
-            <TipBadge label="PB" value={fmt(c.pb)} />
-            <TipBadge label="SB" value={fmt(c.sb)} />
-            <TipBadge label="CS" value={fmt(c.cs)} />
-            <TipBadge label="PIK" value={fmt(c.pik)} />
+      {Object.keys(c).length > 0 && (() => {
+        const sbAtt = c.sb_att || (c.sb != null && c.cs != null ? `${c.sb}-${c.sb + c.cs}` : null);
+        return (
+          <div style={sectionStyle}>
+            <div className="section-label">Catching</div>
+            <div style={rowStyle}>
+              <TipBadge label="INN" value={fmt(c.inn)} />
+              <TipBadge label="SB-ATT" value={fmt(sbAtt)} />
+              <TipBadge label="CS%" value={fmtPct(c.cs_pct)} />
+              <TipBadge label="PB" value={fmt(c.pb)} />
+              <TipBadge label="SB" value={fmt(c.sb)} />
+              <TipBadge label="CS" value={fmt(c.cs)} />
+              <TipBadge label="PIK" value={fmt(c.pik)} />
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Innings Played */}
       {Object.keys(ip).length > 0 && (
