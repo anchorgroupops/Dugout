@@ -145,7 +145,7 @@ main {
   align-items: center;
   gap: 0.5rem;
   white-space: nowrap;
-  min-height: 40px;
+  min-height: var(--touch-min);
 }
 
 .nav-btn:hover {
