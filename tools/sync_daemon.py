@@ -2096,6 +2096,8 @@ def handle_team():
         SUPPLEMENT_KEYS = ["catching", "innings_played", "pitching_advanced", "pitching_breakdown"]
         ADV_SUPPLEMENT = ["babip", "ps", "ps_pa", "tb", "xbh", "two_out_rbi", "ba_risp",
                           "qab_pct", "lob", "two_s_three", "six_plus", "gidp", "gitp"]
+        PITCHING_SUPPLEMENT = ["gp", "gs", "sv", "svo", "bs", "bf", "np", "r", "kl",
+                               "hbp", "wp", "pik", "bk", "cs", "sb", "lob", "baa"]
         for player in team.get("roster", []):
             first = (player.get("first") or "").strip().lower()
             last = (player.get("last") or "").strip().lower()
@@ -2114,6 +2116,15 @@ def handle_team():
                 for k in ADV_SUPPLEMENT:
                     if adv.get(k) is None and base_adv.get(k) is not None:
                         adv[k] = base_adv[k]
+            # Supplement pitching block with extra fields from team.json (baa, gp, bf, np, etc.)
+            if isinstance(player.get("pitching"), dict) and isinstance(bp.get("pitching"), dict):
+                p_block = player["pitching"]
+                base_p = bp["pitching"]
+                for k in PITCHING_SUPPLEMENT:
+                    if p_block.get(k) is None and base_p.get(k) is not None:
+                        p_block[k] = base_p[k]
+            elif not player.get("pitching") and bp.get("pitching"):
+                player["pitching"] = bp["pitching"]
 
     # Sort roster alphabetically by first name for consistent display
     if isinstance(team.get("roster"), list):

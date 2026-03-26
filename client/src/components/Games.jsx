@@ -28,8 +28,11 @@ const normAdvBatting = (row) => {
 
 const fmt3 = (v) => {
   if (v == null || v === '') return null;
+  if (typeof v === 'string' && v.startsWith('.')) return v;
   const n = parseFloat(v);
-  return isNaN(n) ? null : n.toFixed(3);
+  if (isNaN(n)) return null;
+  const s = n.toFixed(3);
+  return (n >= 0 && n < 1) ? s.replace(/^0/, '') : s;
 };
 const fmtPct = (v) => {
   if (v == null || v === '') return null;
@@ -137,6 +140,7 @@ const PlayerPitchingRow = ({ player }) => {
         <TipBadge label="KL" value={player.kl} />
         <TipBadge label="ERA" value={player.era != null ? parseFloat(player.era).toFixed(2) : null} />
         <TipBadge label="WHIP" value={player.whip != null ? parseFloat(player.whip).toFixed(2) : null} />
+        <TipBadge label="BAA" value={player.baa != null ? fmt3(player.baa) : null} />
         <TipBadge label="LOB" value={player.lob} />
       </div>
     </div>
