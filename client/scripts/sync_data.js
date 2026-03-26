@@ -7,7 +7,7 @@ const __dirname = path.dirname(__filename);
 
 // Paths
 const sourceDir = path.resolve(__dirname, '../../data/sharks');
-const destDir = path.resolve(__dirname, '../public/data');
+const destDir = path.resolve(__dirname, '../public/data/sharks');
 
 // Ensure destination exists
 if (!fs.existsSync(destDir)) {
@@ -19,7 +19,8 @@ const filesToSync = [
   'team.json',
   'team_merged.json',
   'swot_analysis.json',
-  'lineups.json'
+  'lineups.json',
+  'practice_insights.json'
 ];
 
 console.log('Syncing GameChanger data to client/public/data...');
