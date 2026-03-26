@@ -1460,6 +1460,14 @@ def _build_games_feed(include_detail: bool = False) -> list[dict]:
                 gid = gdata.get("game_id") or gf.stem
                 if gid in indexed_ids:
                     continue
+                # Skip GC-scraped games with no actual stat data (future/unplayed games)
+                sharks_block = gdata.get("sharks") or {}
+                has_any_stats = any(
+                    isinstance(v, list) and len(v) > 0
+                    for v in sharks_block.values()
+                )
+                if not has_any_stats:
+                    continue
                 # Build a summary entry compatible with the dashboard GameCard
                 sc = gdata.get("score", {})
                 sh = sc.get("sharks") if isinstance(sc, dict) else None
@@ -1469,7 +1477,7 @@ def _build_games_feed(include_detail: bool = False) -> list[dict]:
                 result = ""
                 if sh is not None and op is not None:
                     result = "W" if sh > op else ("L" if sh < op else "T")
-                sharks_batting = (gdata.get("sharks") or {}).get("batting") or []
+                sharks_batting = sharks_block.get("batting") or []
                 totals: dict = {}
                 if sharks_batting:
                     def _s(lst, k):
@@ -1563,7 +1571,7 @@ def handle_game_detail(game_id):
     game_file = SHARKS_DIR / "games" / f"{game_id}.json"
     if not game_file.exists():
         return jsonify({"error": "Not found"}), 404
-    with open(game_file) as f:
+    with open(game_file, encoding='utf-8') as f:
         data = json.load(f)
 
     def _strip_team_totals_row(rows: list) -> list:
