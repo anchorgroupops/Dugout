@@ -1637,6 +1637,27 @@ def handle_game_detail(game_id):
     with open(game_file, encoding='utf-8') as f:
         data = json.load(f)
 
+    # Self-heal: if primary file lacks full stats (PDF format), supplement from GC UUID file by date
+    if "sharks" not in data and data.get("date"):
+        g_date = str(data["date"])[:10]
+        gc_dir = SHARKS_DIR / "games"
+        for gf in gc_dir.glob("game_*.json"):
+            try:
+                gdata = _read_json_file(gf, default={}) or {}
+                if str(gdata.get("date") or "")[:10] == g_date and "sharks" in gdata:
+                    data["sharks"] = gdata["sharks"]
+                    # Also copy score/result if missing
+                    if not data.get("result") and gdata.get("result"):
+                        data["result"] = gdata["result"]
+                    if not data.get("score") and gdata.get("score"):
+                        data["score"] = gdata["score"]
+                    if not data.get("score_str") and gdata.get("score_str"):
+                        data["score_str"] = gdata["score_str"]
+                    logging.debug(f"[GameDetail] Supplemented {game_id} with GC stats from {gf.name}")
+                    break
+            except Exception:
+                continue
+
     def _strip_team_totals_row(rows: list) -> list:
         """Remove the AG Grid pinned-bottom team totals row from a batting/adv list.
         The totals row has aria-rowindex=2 (now filtered by scraper i > 2) but may
