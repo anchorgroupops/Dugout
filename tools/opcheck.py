@@ -95,7 +95,14 @@ def run_opcheck(base_url: str, include_burst: bool = True) -> dict:
     line_r, lineups = _req_json(s, f"{base}/data/sharks/lineups.json")
     balanced = (((lineups or {}).get("balanced") or {}).get("lineup") or []) if isinstance(lineups, dict) else []
     lineup_nonzero = sum(1 for p in balanced[:9] if (p.get("pa", 0) or 0) > 0)
-    add("lineups_artifact", line_r.status_code == 200 and len(balanced) >= 9 and lineup_nonzero > 0, f"status={line_r.status_code} first9_pa>0={lineup_nonzero}")
+    # Fetch availability to know how many players are active; fewer than 9 available = warning only
+    avail_data = _req_json(s, f"{base}/api/availability")[1] or {}
+    active_count = sum(1 for v in avail_data.values() if v is not False)
+    # Pass if lineup exists and has as many players as active roster (or 9+)
+    lineup_ok = line_r.status_code == 200 and len(balanced) > 0 and (
+        len(balanced) >= min(9, active_count) and lineup_nonzero > 0
+    )
+    add("lineups_artifact", lineup_ok, f"status={line_r.status_code} lineup={len(balanced)} active={active_count} first9_pa>0={lineup_nonzero}")
 
     # Reconcile team batting totals vs parsed scorebooks (team should never undercount).
     gd_r, games_detail = _req_json(s, f"{base}/api/games?detail=1")

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Users, Activity, ListOrdered, Calendar, Trophy, Dumbbell, Volume2, Target, AlertTriangle, MoreHorizontal } from 'lucide-react';
+import { Users, Activity, RefreshCw, ListOrdered, Calendar, Trophy, Dumbbell, Volume2, Target, AlertTriangle, MoreHorizontal } from 'lucide-react';
 import { formatDateTime } from './utils/formatDate';
 import Roster from './components/Roster';
 import Swot from './components/Swot';
@@ -138,22 +138,60 @@ function App() {
     }
   }, []);
 
+  const [syncStatusText, setSyncStatusText] = useState('');
+
   const handleManualSync = useCallback(async () => {
-    if (!window.confirm("Trigger full end-to-end data refresh? (Scrape -> Analysis -> RAG)")) return;
     setSyncLoading(true);
+    setSyncStatusText('Syncing... this may take 5-10 min');
     try {
       const res = await fetch('https://anchorgroupops--softball-strategy-sharks-manual-sync.modal.run', {
         method: 'POST'
       });
       if (!res.ok) throw new Error('Sync trigger failed');
-      alert("Manual sync triggered successfully! Results will be available in ~5-10 minutes.");
+
+      // Capture the current health timestamp to detect fresh data
+      let baseTimestamp = null;
+      try {
+        const hRes = await fetch('/api/health');
+        if (hRes.ok) {
+          const h = await hRes.json();
+          baseTimestamp = h.last_updated || h.timestamp || null;
+        }
+      } catch { /* ignore */ }
+
+      // Poll /api/health every 10s until data refreshes or 10 min timeout
+      const POLL_INTERVAL = 10000;
+      const TIMEOUT = 10 * 60 * 1000;
+      const startTime = Date.now();
+
+      const pollTimer = setInterval(async () => {
+        try {
+          const elapsed = Date.now() - startTime;
+          if (elapsed >= TIMEOUT) {
+            clearInterval(pollTimer);
+            setSyncLoading(false);
+            setSyncStatusText('Sync timed out — data may still be updating');
+            return;
+          }
+          const hRes = await fetch('/api/health');
+          if (hRes.ok) {
+            const h = await hRes.json();
+            const newTimestamp = h.last_updated || h.timestamp || null;
+            if (baseTimestamp && newTimestamp && newTimestamp !== baseTimestamp) {
+              clearInterval(pollTimer);
+              setSyncLoading(false);
+              setSyncStatusText('');
+              fetchData(); // refresh UI with new data
+            }
+          }
+        } catch { /* ignore poll errors */ }
+      }, POLL_INTERVAL);
     } catch (err) {
       console.error('Sync failed', err);
-      alert("Sync failed: " + err.message);
-    } finally {
       setSyncLoading(false);
+      setSyncStatusText('Sync failed: ' + err.message);
     }
-  }, []);
+  }, [fetchData]);
 
   // All nav items for desktop
   const navItems = [
@@ -249,28 +287,37 @@ function App() {
           <div className="mobile-header">
             <div className="mobile-header-left">
               <img src="/sharks-logo-round.png" alt="Sharks" className="logo-avatar" />
-              <span className="brand" style={{ fontSize: '1.125rem' }}>Sharks</span>
+              <span className="brand" style={{ fontSize: '1.125rem' }}>
+                {(() => {
+                  const labels = { scout: 'Scout', swot: 'SWOT', lineups: 'Lineups', practice: 'Practice', roster: 'Roster', games: 'Games', league: 'League' };
+                  return labels[currentView] || 'Sharks';
+                })()}
+              </span>
               <span
                 className={`sync-status-dot ${staleSources.length > 0 ? 'stale' : 'fresh'}`}
                 title={staleSources.length > 0 ? `Stale: ${staleSources.join(', ')}` : 'Data is fresh'}
               />
+              {syncStage !== 'idle' && (
+                <span className="sync-stage-tag">{syncStage}</span>
+              )}
             </div>
             <div className="mobile-header-actions">
+              <button
+                className={`mobile-action-btn ${syncLoading ? 'sync-btn--active' : ''}`}
+                onClick={handleManualSync}
+                disabled={syncLoading}
+                title="Manual Sync"
+              >
+                <RefreshCw size={22} className={syncLoading ? 'sync-spin' : ''} />
+                {syncStatusText && <span style={{ fontSize: '0.55rem', position: 'absolute', bottom: '-10px', whiteSpace: 'nowrap', color: 'var(--primary-color)' }}>{syncStatusText}</span>}
+              </button>
               <button
                 className="mobile-action-btn"
                 onClick={handleVoiceUpdate}
                 disabled={voiceLoading}
                 title="Voice Update"
               >
-                <Volume2 size={20} />
-              </button>
-              <button
-                className="mobile-action-btn"
-                onClick={handleManualSync}
-                disabled={syncLoading}
-                title="Manual Sync"
-              >
-                <Activity size={20} className={syncLoading ? 'spin-smooth' : ''} />
+                <Volume2 size={22} className={voiceLoading ? 'sync-spin' : ''} />
               </button>
             </div>
           </div>
@@ -307,13 +354,14 @@ function App() {
               <p style={{ color: 'var(--text-muted)', fontSize: '1.1rem' }}>
                 {data.team ? `${data.team.league} \u2022 Last Updated: ${formatDateTime(data.team.last_updated)}` : 'Loading...'}
               </p>
-              <button className="voice-btn" onClick={handleVoiceUpdate} disabled={voiceLoading} title="Play latest audio overview">
-                <Volume2 size={16} />
-                {voiceLoading ? 'Preparing...' : 'Voice Update'}
-              </button>
-              <button className="sync-btn" onClick={handleManualSync} disabled={syncLoading} title="Trigger manual data refresh">
-                <Activity size={16} />
+              <button className={`sync-btn ${syncLoading ? 'sync-btn--active' : ''}`} onClick={handleManualSync} disabled={syncLoading} title="Trigger manual data refresh">
+                <RefreshCw size={16} className={syncLoading ? 'sync-spin' : ''} />
                 {syncLoading ? 'Syncing...' : syncStage !== 'idle' ? `Sync: ${syncStage}` : 'Manual Sync'}
+              </button>
+              {syncStatusText && <span style={{ fontSize: '0.75rem', color: 'var(--primary-color)' }}>{syncStatusText}</span>}
+              <button className="voice-btn" onClick={handleVoiceUpdate} disabled={voiceLoading} title="Play latest audio overview">
+                <Volume2 size={16} className={voiceLoading ? 'sync-spin' : ''} />
+                {voiceLoading ? 'Preparing...' : 'Voice Update'}
               </button>
             </div>
           </div>
