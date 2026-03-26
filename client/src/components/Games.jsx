@@ -167,6 +167,57 @@ const PlayerFieldingRow = ({ player }) => {
   );
 };
 
+const PlayerAdvPitchingRow = ({ player }) => {
+  const name = player.name || player.player;
+  const number = player.number || player.jersey;
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: '0.75rem',
+      padding: '0.5rem 0.75rem', borderRadius: '6px',
+      background: 'rgba(0,0,0,0.15)', flexWrap: 'wrap'
+    }}>
+      <div style={{ minWidth: '120px' }}>
+        <PlayerName name={name} number={number} size="sm" />
+      </div>
+      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+        <TipBadge label="IP" value={player.ip != null ? parseFloat(player.ip).toFixed(1) : null} />
+        <TipBadge label="S%" value={player.s_pct != null ? `${parseFloat(player.s_pct).toFixed(1)}%` : null} />
+        <TipBadge label="P/IP" value={player.p_ip != null ? parseFloat(player.p_ip).toFixed(1) : null} />
+        <TipBadge label="P/BF" value={player.p_bf != null ? parseFloat(player.p_bf).toFixed(1) : null} />
+        <TipBadge label="FPS%" value={player.fps_pct != null ? `${parseFloat(player.fps_pct).toFixed(1)}%` : null} />
+        <TipBadge label="LOO" value={player.loo} />
+        <TipBadge label="1st2Out" value={player.first_2out} />
+        <TipBadge label="1-2-3" value={player.one23_inn} />
+      </div>
+    </div>
+  );
+};
+
+const PlayerCatchingRow = ({ player }) => {
+  const name = player.name || player.player;
+  const number = player.number || player.jersey;
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: '0.75rem',
+      padding: '0.5rem 0.75rem', borderRadius: '6px',
+      background: 'rgba(0,0,0,0.15)', flexWrap: 'wrap'
+    }}>
+      <div style={{ minWidth: '120px' }}>
+        <PlayerName name={name} number={number} size="sm" />
+      </div>
+      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+        <TipBadge label="INN" value={player.inn != null ? parseFloat(player.inn).toFixed(1) : null} />
+        <TipBadge label="SB-ATT" value={player.sb_att} />
+        <TipBadge label="SB" value={player.sb} />
+        <TipBadge label="CS" value={player.cs} />
+        <TipBadge label="CS%" value={player.cs_pct != null ? `${parseFloat(player.cs_pct).toFixed(1)}%` : null} />
+        <TipBadge label="PB" value={player.pb} />
+        <TipBadge label="PIK" value={player.pik} />
+      </div>
+    </div>
+  );
+};
+
 const PlayerOppBattingRow = ({ player }) => {
   const b = normBatting(player);
   const name = player.name || player.player;
@@ -229,19 +280,24 @@ const TabBar = ({ tabs, active, onChange }) => (
 const GameDetailPanel = ({ gameDetail, source }) => {
   const [tab, setTab] = useState('batting');
 
-  const batting     = gameDetail.sharks_batting     || [];
-  const advBatting  = gameDetail.sharks_batting_advanced || [];
-  const pitching    = gameDetail.sharks_pitching    || [];
-  const fielding    = gameDetail.sharks_fielding    || [];
-  const oppBatting  = gameDetail.opponent_batting   || [];
-  const oppPitching = gameDetail.opponent_pitching  || [];
+  const batting        = gameDetail.sharks_batting           || [];
+  const advBatting     = gameDetail.sharks_batting_advanced  || [];
+  const pitching       = gameDetail.sharks_pitching          || [];
+  const advPitching    = gameDetail.sharks_pitching_advanced || [];
+  const fielding       = gameDetail.sharks_fielding          || [];
+  const catching       = gameDetail.sharks_catching          || [];
+  const oppBatting     = gameDetail.opponent_batting         || [];
+  const oppPitching    = gameDetail.opponent_pitching        || [];
 
   const tabs = [
-    batting.length   ? { id: 'batting',     label: 'Batting',      count: batting.length }    : null,
-    advBatting.length? { id: 'adv_batting', label: 'Adv. Batting', count: advBatting.length } : null,
-    pitching.length  ? { id: 'pitching',    label: 'Pitching',     count: pitching.length }   : null,
-    fielding.length  ? { id: 'fielding',    label: 'Fielding',     count: fielding.length }   : null,
-    oppBatting.length? { id: 'opp_batting', label: 'Opp Batting',  count: oppBatting.length } : null,
+    batting.length      ? { id: 'batting',      label: 'Batting',      count: batting.length }      : null,
+    advBatting.length   ? { id: 'adv_batting',  label: 'Adv. Batting', count: advBatting.length }   : null,
+    pitching.length     ? { id: 'pitching',     label: 'Pitching',     count: pitching.length }     : null,
+    advPitching.length  ? { id: 'adv_pitching', label: 'Adv. Pitch',   count: advPitching.length }  : null,
+    fielding.length     ? { id: 'fielding',     label: 'Fielding',     count: fielding.length }     : null,
+    catching.length     ? { id: 'catching',     label: 'Catching',     count: catching.length }     : null,
+    oppBatting.length   ? { id: 'opp_batting',  label: 'Opp Batting',  count: oppBatting.length }   : null,
+    oppPitching.length  ? { id: 'opp_pitching', label: 'Opp Pitching', count: oppPitching.length }  : null,
   ].filter(Boolean);
 
   // If no tabs available
@@ -262,11 +318,14 @@ const GameDetailPanel = ({ gameDetail, source }) => {
       {tabs.length > 1 && <TabBar tabs={tabs} active={activeTab} onChange={setTab} />}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-        {activeTab === 'batting' && batting.map((p, i) => <PlayerBattingRow key={i} player={p} />)}
-        {activeTab === 'adv_batting' && advBatting.map((p, i) => <PlayerAdvBattingRow key={i} player={p} />)}
-        {activeTab === 'pitching' && pitching.map((p, i) => <PlayerPitchingRow key={i} player={p} />)}
-        {activeTab === 'fielding' && fielding.map((p, i) => <PlayerFieldingRow key={i} player={p} />)}
-        {activeTab === 'opp_batting' && oppBatting.map((p, i) => <PlayerOppBattingRow key={i} player={p} />)}
+        {activeTab === 'batting'      && batting.map((p, i)     => <PlayerBattingRow key={i} player={p} />)}
+        {activeTab === 'adv_batting'  && advBatting.map((p, i)  => <PlayerAdvBattingRow key={i} player={p} />)}
+        {activeTab === 'pitching'     && pitching.map((p, i)    => <PlayerPitchingRow key={i} player={p} />)}
+        {activeTab === 'adv_pitching' && advPitching.map((p, i) => <PlayerAdvPitchingRow key={i} player={p} />)}
+        {activeTab === 'fielding'     && fielding.map((p, i)    => <PlayerFieldingRow key={i} player={p} />)}
+        {activeTab === 'catching'     && catching.map((p, i)    => <PlayerCatchingRow key={i} player={p} />)}
+        {activeTab === 'opp_batting'  && oppBatting.map((p, i)  => <PlayerOppBattingRow key={i} player={p} />)}
+        {activeTab === 'opp_pitching' && oppPitching.map((p, i) => <PlayerPitchingRow key={i} player={p} />)}
       </div>
 
       {source && (
