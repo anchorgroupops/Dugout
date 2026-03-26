@@ -2116,6 +2116,62 @@ def handle_sync_status():
     return jsonify({**_SYNC_STATUS, "milestones": milestones})
 
 
+_DEPLOY_STATUS: dict = {"status": "idle", "last_triggered": "", "last_completed": "", "error": ""}
+
+
+@app.route('/api/deploy', methods=['POST'])
+def handle_deploy_webhook():
+    """Webhook endpoint for GitHub Actions to trigger a pull + rebuild.
+
+    Secured with a bearer token set via DEPLOY_WEBHOOK_TOKEN env var.
+    If no token is configured, the endpoint is disabled for safety.
+    """
+    expected_token = os.getenv("DEPLOY_WEBHOOK_TOKEN", "").strip()
+    if not expected_token:
+        return jsonify({"error": "Deploy webhook not configured (DEPLOY_WEBHOOK_TOKEN not set)"}), 503
+
+    auth = request.headers.get("Authorization", "")
+    if auth != f"Bearer {expected_token}":
+        return jsonify({"error": "Unauthorized"}), 401
+
+    if _DEPLOY_STATUS["status"] == "deploying":
+        return jsonify({"status": "already_deploying", "since": _DEPLOY_STATUS["last_triggered"]}), 409
+
+    def _run_deploy():
+        _DEPLOY_STATUS["status"] = "deploying"
+        _DEPLOY_STATUS["last_triggered"] = datetime.now(ET).isoformat()
+        _DEPLOY_STATUS["error"] = ""
+        try:
+            import subprocess
+            script = Path(__file__).parent.parent / "scripts" / "deploy.sh"
+            result = subprocess.run(
+                ["bash", str(script)],
+                capture_output=True, text=True, timeout=600,
+                cwd=str(Path(__file__).parent.parent),
+            )
+            if result.returncode != 0:
+                _DEPLOY_STATUS["error"] = result.stderr[-500:] if result.stderr else "Unknown error"
+                logging.error(f"[Deploy] Failed: {result.stderr}")
+            else:
+                logging.info(f"[Deploy] Success: {result.stdout[-200:]}")
+            _DEPLOY_STATUS["last_completed"] = datetime.now(ET).isoformat()
+        except Exception as e:
+            _DEPLOY_STATUS["error"] = str(e)
+            logging.error(f"[Deploy] Exception: {e}")
+        finally:
+            _DEPLOY_STATUS["status"] = "idle"
+
+    deploy_thread = threading.Thread(target=_run_deploy, daemon=True)
+    deploy_thread.start()
+    return jsonify({"status": "triggered", "message": "Deploy started in background"}), 202
+
+
+@app.route('/api/deploy/status', methods=['GET'])
+def handle_deploy_status():
+    """Check the current deploy status."""
+    return jsonify(_DEPLOY_STATUS)
+
+
 @app.route('/api/health', methods=['GET'])
 def handle_health():
     """Return pipeline health with staleness detection for each data source.
