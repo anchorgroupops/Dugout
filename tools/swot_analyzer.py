@@ -20,6 +20,22 @@ OPPONENTS_DIR = DATA_DIR / "opponents"
 # These are calibrated for youth softball (Little League Majors, ages 10-12).
 # Adjust as season data builds a better baseline.
 
+# Minimum plate appearances before classifying a player's batting rates.
+# Prevents inflated stats from tiny samples (e.g., 1 AB → BA 1.000).
+MIN_QUALIFYING_BATTING_PA = 5
+
+# Minimum innings pitched before classifying pitching stats.
+# Requires at least 2 full innings for ERA/WHIP to be meaningful.
+MIN_QUALIFYING_PITCHING_IP = 2.0
+
+# Minimum AB required in opponent sample before comparing batting stats in matchup.
+# PDF scorebooks often only capture 1-2 innings of opponent batting (~7 AB),
+# which gives misleadingly low avg=0.0. Require 10+ AB for stat comparisons.
+MIN_AB_FOR_MATCHUP_COMPARISON = 10
+
+# Minimum PA to consider opponent "has real data" (avoids empty-vs-data false flag).
+MIN_PA_FOR_MATCHUP_NONEMPTY = 10
+
 HITTING_THRESHOLDS = {
     "ba":  {"strong": 0.350, "weak": 0.200},
     "obp": {"strong": 0.420, "weak": 0.280},
@@ -175,6 +191,13 @@ def classify_hitting(derived: dict) -> tuple[list[str], list[str]]:
     h = derived["hitting"]
     strengths, weaknesses = [], []
 
+    # Require a minimum sample before classifying rate stats.
+    # A player with 1 AB and 1 H has BA=1.000 — mathematically correct but
+    # statistically meaningless. Small samples distort SWOT rankings.
+    pa = h.get("pa", 0)
+    if pa < MIN_QUALIFYING_BATTING_PA:
+        return strengths, weaknesses
+
     labels = {
         "ba": ("High batting average", "Low batting average"),
         "obp": ("Gets on base frequently", "Struggles to reach base"),
@@ -207,8 +230,10 @@ def classify_pitching(derived: dict, raw_ip: float = 0.0) -> tuple[list[str], li
     p = derived["pitching"]
     strengths, weaknesses = [], []
 
-    # Only classify pitching for players with meaningful innings
-    if raw_ip < 1.0:
+    # Only classify pitching for players with meaningful innings.
+    # 1 IP of perfect pitching (0 ER, 0 H, 0 BB) would produce ERA=0 / WHIP=0,
+    # which are technically valid but not indicative of sustained dominance.
+    if raw_ip < MIN_QUALIFYING_PITCHING_IP:
         return strengths, weaknesses
 
     # ERA (lower is better)
@@ -663,8 +688,12 @@ def analyze_matchup(our_team: dict, opponent_team: dict) -> dict:
     us = _team_aggregates(our_team)
     them = _team_aggregates(opponent_team)
 
-    # Do not generate statistical analysis if the opponent lacks history
-    if them.get("batting", {}).get("pa", 0) < 5 and them.get("pitching", {}).get("ip", 0) < 2.0:
+    # Do not generate statistical analysis if the opponent lacks history.
+    # Raised from 5→10 PA: PDF scorebooks often only capture 1-2 innings of
+    # opponent batting (~13 PA, all walk-heavy), giving a spuriously low avg=0.0.
+    their_pa = int(them.get("batting", {}).get("pa") or 0)
+    their_ip = float(them.get("pitching", {}).get("ip") or 0.0)
+    if their_pa < MIN_PA_FOR_MATCHUP_NONEMPTY and their_ip < 2.0:
         return {
             "our_team": our_team.get("team_name", "Sharks"),
             "opponent": opponent_team.get("team_name", "Opponent"),
@@ -678,50 +707,62 @@ def analyze_matchup(our_team: dict, opponent_team: dict) -> dict:
             "recommendation": "Not enough historical data available for this opponent to calculate a stat-based matchup.",
         }
 
+    # Gate for batting stat comparisons — require meaningful AB sample.
+    # PDF game history often captures only a partial inning of opponent batting
+    # (avg=0.0 from 5-8 AB), causing false "Our Advantage: higher batting avg".
+    # Only compare batting rates when BOTH teams have ≥10 AB on record.
+    their_ab = int(them.get("batting", {}).get("ab") or 0)
+    us_ab    = int(us.get("batting", {}).get("ab") or 0)
+    batting_sample_ok = their_ab >= MIN_AB_FOR_MATCHUP_COMPARISON and us_ab >= MIN_AB_FOR_MATCHUP_COMPARISON
+
     our_advantages = []
     their_advantages = []
     key_matchups = []
 
-    # Batting comparison
-    if _n(us["batting"]["avg"]) > _n(them["batting"]["avg"]) + 0.030:
-        our_advantages.append(f"Higher team batting average ({us['batting']['avg']} vs {them['batting']['avg']})")
-    elif _n(them["batting"]["avg"]) > _n(us["batting"]["avg"]) + 0.030:
-        their_advantages.append(f"Higher team batting average ({them['batting']['avg']} vs {us['batting']['avg']})")
+    # Batting comparison — only when both teams have a meaningful AB sample.
+    # PDF scorebooks often only capture 1-2 innings of opponent batting (~7 AB,
+    # all 0 hits), giving avg=0.0 that creates false "Our Advantage" entries.
+    if batting_sample_ok:
+        if _n(us["batting"]["avg"]) > _n(them["batting"]["avg"]) + 0.030:
+            our_advantages.append(f"Higher team batting average ({us['batting']['avg']} vs {them['batting']['avg']})")
+        elif _n(them["batting"]["avg"]) > _n(us["batting"]["avg"]) + 0.030:
+            their_advantages.append(f"Higher team batting average ({them['batting']['avg']} vs {us['batting']['avg']})")
 
-    if _n(us["batting"]["obp"]) > _n(them["batting"]["obp"]) + 0.030:
-        our_advantages.append(f"Better on-base percentage ({us['batting']['obp']} vs {them['batting']['obp']})")
-    elif _n(them["batting"]["obp"]) > _n(us["batting"]["obp"]) + 0.030:
-        their_advantages.append(f"Better on-base percentage ({them['batting']['obp']} vs {us['batting']['obp']})")
+        if _n(us["batting"]["obp"]) > _n(them["batting"]["obp"]) + 0.030:
+            our_advantages.append(f"Better on-base percentage ({us['batting']['obp']} vs {them['batting']['obp']})")
+        elif _n(them["batting"]["obp"]) > _n(us["batting"]["obp"]) + 0.030:
+            their_advantages.append(f"Better on-base percentage ({them['batting']['obp']} vs {us['batting']['obp']})")
 
-    if _n(us["batting"]["ops"]) > _n(them["batting"]["ops"]) + 0.050:
-        our_advantages.append(f"Stronger overall hitting (OPS: {us['batting']['ops']} vs {them['batting']['ops']})")
-    elif _n(them["batting"]["ops"]) > _n(us["batting"]["ops"]) + 0.050:
-        their_advantages.append(f"Stronger overall hitting (OPS: {them['batting']['ops']} vs {us['batting']['ops']})")
+        if _n(us["batting"]["ops"]) > _n(them["batting"]["ops"]) + 0.050:
+            our_advantages.append(f"Stronger overall hitting (OPS: {us['batting']['ops']} vs {them['batting']['ops']})")
+        elif _n(them["batting"]["ops"]) > _n(us["batting"]["ops"]) + 0.050:
+            their_advantages.append(f"Stronger overall hitting (OPS: {them['batting']['ops']} vs {us['batting']['ops']})")
 
-    # K rate comparison (lower is better for batting team)
-    if _n(us["batting"]["k_rate"]) < _n(them["batting"]["k_rate"]) - 0.05:
-        our_advantages.append(f"Better contact rate (K%: {us['batting']['k_rate']} vs {them['batting']['k_rate']})")
-    elif _n(them["batting"]["k_rate"]) < _n(us["batting"]["k_rate"]) - 0.05:
-        their_advantages.append(f"Better contact rate (K%: {them['batting']['k_rate']} vs {us['batting']['k_rate']})")
+        # K rate comparison (lower is better for batting team)
+        if _n(us["batting"]["k_rate"]) < _n(them["batting"]["k_rate"]) - 0.05:
+            our_advantages.append(f"Better contact rate (K%: {us['batting']['k_rate']} vs {them['batting']['k_rate']})")
+        elif _n(them["batting"]["k_rate"]) < _n(us["batting"]["k_rate"]) - 0.05:
+            their_advantages.append(f"Better contact rate (K%: {them['batting']['k_rate']} vs {us['batting']['k_rate']})")
 
-    # Advanced batting quality signals
-    if _n(us["batting_advanced"]["qab_pct"]) > _n(them["batting_advanced"]["qab_pct"]) + 0.08:
-        our_advantages.append(
-            f"Higher quality-at-bat rate (QAB%: {us['batting_advanced']['qab_pct']} vs {them['batting_advanced']['qab_pct']})"
-        )
-    elif _n(them["batting_advanced"]["qab_pct"]) > _n(us["batting_advanced"]["qab_pct"]) + 0.08:
-        their_advantages.append(
-            f"Higher quality-at-bat rate (QAB%: {them['batting_advanced']['qab_pct']} vs {us['batting_advanced']['qab_pct']})"
-        )
+    # Advanced batting quality signals — also gated on batting sample
+    if batting_sample_ok:
+        if _n(us["batting_advanced"]["qab_pct"]) > _n(them["batting_advanced"]["qab_pct"]) + 0.08:
+            our_advantages.append(
+                f"Higher quality-at-bat rate (QAB%: {us['batting_advanced']['qab_pct']} vs {them['batting_advanced']['qab_pct']})"
+            )
+        elif _n(them["batting_advanced"]["qab_pct"]) > _n(us["batting_advanced"]["qab_pct"]) + 0.08:
+            their_advantages.append(
+                f"Higher quality-at-bat rate (QAB%: {them['batting_advanced']['qab_pct']} vs {us['batting_advanced']['qab_pct']})"
+            )
 
-    if _n(us["batting_advanced"]["c_pct"]) > _n(them["batting_advanced"]["c_pct"]) + 0.07:
-        our_advantages.append(
-            f"Better contact quality (C%: {us['batting_advanced']['c_pct']} vs {them['batting_advanced']['c_pct']})"
-        )
-    elif _n(them["batting_advanced"]["c_pct"]) > _n(us["batting_advanced"]["c_pct"]) + 0.07:
-        their_advantages.append(
-            f"Better contact quality (C%: {them['batting_advanced']['c_pct']} vs {us['batting_advanced']['c_pct']})"
-        )
+        if _n(us["batting_advanced"]["c_pct"]) > _n(them["batting_advanced"]["c_pct"]) + 0.07:
+            our_advantages.append(
+                f"Better contact quality (C%: {us['batting_advanced']['c_pct']} vs {them['batting_advanced']['c_pct']})"
+            )
+        elif _n(them["batting_advanced"]["c_pct"]) > _n(us["batting_advanced"]["c_pct"]) + 0.07:
+            their_advantages.append(
+                f"Better contact quality (C%: {them['batting_advanced']['c_pct']} vs {us['batting_advanced']['c_pct']})"
+            )
 
     # Pitching comparison — only if both teams have meaningful innings
     if _n(us["pitching"]["ip"]) >= 3 and _n(them["pitching"]["ip"]) >= 3:
@@ -782,6 +823,9 @@ def analyze_matchup(our_team: dict, opponent_team: dict) -> dict:
         "their_advantages": their_advantages or ["No clear statistical advantages (need more data)"],
         "key_matchups": key_matchups or ["Not enough data for cross-matchup analysis"],
         "recommendation": recs[0],
+        # Flag limited opponent sample for frontend caveat display
+        "batting_sample_limited": not batting_sample_ok,
+        "opponent_ab": their_ab,
     }
 
 
