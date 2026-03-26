@@ -52,6 +52,7 @@ N8N_WEBHOOK_URL = "https://n8n.joelycannoli.com/webhook/gc-alert"
 DATA_DIR = Path(__file__).parent.parent / "data"
 SHARKS_DIR = DATA_DIR / "sharks"
 LOG_DIR = Path(__file__).parent.parent / "logs"
+CONFIG_DIR = Path(__file__).parent.parent / "config"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 DEFAULT_FALLBACK_VOICE_ID = "EXAVITQu4vr4xnSDxMaL"
 _SECRET_CACHE: dict[str, str] | None = None
@@ -1023,6 +1024,42 @@ def run_sync_cycle():
         except Exception as e:
             logging.warning(f"[Sync] Practice planner skipped: {e}")
 
+        # Full-depth GC scrape: all stat tabs, both teams, every game.
+        try:
+            from gc_full_scraper import GCFullScraper
+            full_scraper = GCFullScraper()
+            full_result = full_scraper.run_full_sync()
+            logging.info(
+                "[Sync] gc_full_scraper: scraped=%s skipped=%s failed=%s team_stats=%s",
+                full_result.get("games_scraped", 0),
+                full_result.get("games_skipped", 0),
+                full_result.get("games_failed", 0),
+                full_result.get("team_stats_scraped", False),
+            )
+        except Exception as e:
+            logging.warning(f"[Sync] gc_full_scraper skipped: {e}")
+
+        # Automated CSV download + ingest.
+        try:
+            from gc_csv_auto import run_auto_csv
+            csv_result = run_auto_csv(headless=True, skip_ingest=False)
+            logging.info(
+                "[Sync] gc_csv_auto: downloaded=%s ingest_ok=%s path=%s",
+                csv_result.get("csv_downloaded"),
+                csv_result.get("ingest_success"),
+                csv_result.get("csv_path"),
+            )
+        except Exception as e:
+            logging.warning(f"[Sync] gc_csv_auto skipped: {e}")
+
+        # NotebookLM payload rebuild with all new data.
+        try:
+            from notebooklm_sync import prepare_notebooklm_payload
+            prepare_notebooklm_payload()
+            logging.info("[Sync] NotebookLM payload refreshed.")
+        except Exception as e:
+            logging.warning(f"[Sync] notebooklm_sync skipped: {e}")
+
         # Refresh pipeline coverage metrics artifact
         try:
             _write_pipeline_health_artifact()
@@ -1366,12 +1403,24 @@ def _build_games_feed(include_detail: bool = False) -> list[dict]:
     if index_path.exists():
         pdf_games = _read_json_file(index_path, default=[]) or []
 
-    # Load schedule W/L results
+    # Load schedule W/L results — also include upcoming games with past dates (self-healing)
+    today_str = datetime.now(ET).strftime("%Y-%m-%d")
     sched_results = []
     if schedule_file.exists():
         sched_data = _read_json_file(schedule_file, default={}) or {}
         for g in sched_data.get("past", []):
             if g.get("result"):
+                sched_results.append(g)
+        # Also include upcoming games that have since passed, even without result
+        # so they show up in the feed (result derived from GC data later)
+        for g in sched_data.get("upcoming", []):
+            g_date = (g.get("date") or "")[:10]
+            if g_date and g_date <= today_str and not any(
+                sr.get("date", "")[:10] == g_date and
+                _re.sub(r'[^a-z0-9]', '', (sr.get("opponent") or "").lower()) in
+                _re.sub(r'[^a-z0-9]', '', (g.get("opponent") or "").lower())
+                for sr in sched_results
+            ):
                 sched_results.append(g)
 
     def _slug(name: str) -> str:
@@ -1383,9 +1432,59 @@ def _build_games_feed(include_detail: bool = False) -> list[dict]:
         for sg in sched_results:
             sg_opp = _clean_opponent_name(sg.get("opponent", ""))
             if _slug(sg_opp) and (_slug(sg_opp) in opp_slug or opp_slug in _slug(sg_opp)):
-                game["result"] = sg.get("result", "")
-                game["score"] = sg.get("score", "")
+                if sg.get("result"):
+                    game["result"] = sg.get("result", "")
+                if sg.get("score"):
+                    game["score"] = sg.get("score", "")
                 break
+
+    # Load known game results override (tracked in git; authoritative for confirmed games)
+    known_results_file = CONFIG_DIR / "known_game_results.json"
+    if known_results_file.exists():
+        try:
+            known_data = _read_json_file(known_results_file, default={}) or {}
+            for kr in known_data.get("results", []):
+                kr_date = (kr.get("date") or "")[:10]
+                if not kr_date or not kr.get("result"):
+                    continue
+                for game in pdf_games:
+                    g_date = (game.get("date") or "")[:10]
+                    if g_date == kr_date and not game.get("result"):
+                        game["result"] = kr["result"]
+                        game["score"] = kr.get("score", "")
+                        logging.debug(f"[Feed] Applied known result {kr_date} {kr['result']} to {game.get('game_id')}")
+                        break
+        except Exception as _ke:
+            logging.debug(f"_build_games_feed known_results read error: {_ke}")
+
+    # Self-heal: backfill result/score for PDF games from GC UUID game files by date match
+    if games_dir.exists():
+        for game in pdf_games:
+            if game.get("result") and game.get("score"):
+                continue  # already enriched
+            g_date = (game.get("date") or "")[:10]
+            if not g_date:
+                continue
+            for gf in games_dir.glob("game_*.json"):
+                try:
+                    gdata = _read_json_file(gf, default={}) or {}
+                    if (gdata.get("date") or "")[:10] != g_date:
+                        continue
+                    # Verify it's a real GC game file (has sharks block or score)
+                    sc = gdata.get("score", {})
+                    sh = sc.get("sharks") if isinstance(sc, dict) else None
+                    op = sc.get("opponent") if isinstance(sc, dict) else None
+                    if sh is None or op is None:
+                        continue
+                    gc_result = "W" if sh > op else ("L" if sh < op else "T")
+                    gc_score_str = gdata.get("score_str") or f"{sh}-{op}"
+                    if not game.get("result"):
+                        game["result"] = gdata.get("result") or gc_result
+                    if not game.get("score"):
+                        game["score"] = gc_score_str
+                    break
+                except Exception:
+                    continue
 
     # Optional detail: attach full player batting data
     if include_detail:
@@ -1410,6 +1509,78 @@ def _build_games_feed(include_detail: bool = False) -> list[dict]:
                 "score": sg.get("score", ""),
                 "sharks_totals": None,
             })
+
+    # --- Also surface new-format games from gc_full_scraper_v2 not in index.json ---
+    indexed_ids = {g.get("game_id") for g in pdf_games}
+    if games_dir.exists():
+        for gf in sorted(games_dir.glob("*.json")):
+            if gf.name == "index.json":
+                continue
+            try:
+                gdata = _read_json_file(gf, default={}) or {}
+                if gdata.get("source") != "gc_full_scraper_v2":
+                    continue
+                gid = gdata.get("game_id") or gf.stem
+                if gid in indexed_ids:
+                    continue
+                # Skip GC-scraped games with no actual stat data (future/unplayed games)
+                sharks_block = gdata.get("sharks") or {}
+                has_any_stats = any(
+                    isinstance(v, list) and len(v) > 0
+                    for v in sharks_block.values()
+                )
+                if not has_any_stats:
+                    continue
+                # Build a summary entry compatible with the dashboard GameCard
+                sc = gdata.get("score", {})
+                sh = sc.get("sharks") if isinstance(sc, dict) else None
+                op = sc.get("opponent") if isinstance(sc, dict) else None
+                score_str = f"{sh}-{op}" if sh is not None and op is not None else ""
+                # Derive result from score
+                result = ""
+                if sh is not None and op is not None:
+                    result = "W" if sh > op else ("L" if sh < op else "T")
+                sharks_batting = sharks_block.get("batting") or []
+                totals: dict = {}
+                if sharks_batting:
+                    def _s(lst, k):
+                        try:
+                            return sum(int(r.get(k) or 0) for r in lst)
+                        except Exception:
+                            return 0
+                    totals = {
+                        "pa": _s(sharks_batting, "pa"),
+                        "ab": _s(sharks_batting, "ab"),
+                        "h":  _s(sharks_batting, "h"),
+                        "doubles": _s(sharks_batting, "doubles"),
+                        "triples": _s(sharks_batting, "triples"),
+                        "hr":  _s(sharks_batting, "hr"),
+                        "rbi": _s(sharks_batting, "rbi"),
+                        "r":   _s(sharks_batting, "r"),
+                        "bb":  _s(sharks_batting, "bb"),
+                        "hbp": _s(sharks_batting, "hbp"),
+                        "so":  _s(sharks_batting, "so"),
+                        "sb":  _s(sharks_batting, "sb"),
+                    }
+                pdf_games.append({
+                    "game_id":     gid,
+                    "date":        gdata.get("date", ""),
+                    "opponent":    gdata.get("opponent", ""),
+                    "sharks_side": gdata.get("sharks_side", ""),
+                    "result":      gdata.get("result", "") or result,
+                    "score":       gdata.get("score_str", score_str),
+                    "sharks_totals": totals or None,
+                    "source":      "gc_full_scraper_v2",
+                })
+                indexed_ids.add(gid)
+            except Exception as _e:
+                logging.debug(f"_build_games_feed new-format read error {gf.name}: {_e}")
+
+    # De-duplicate: prefer GC-scraped games over PDF games for the same date
+    gc_dates = {g["date"] for g in pdf_games if g.get("source") == "gc_full_scraper_v2" and g.get("date")}
+    pdf_games = [g for g in pdf_games if not (
+        g.get("source") != "gc_full_scraper_v2" and g.get("date") in gc_dates
+    )]
 
     pdf_games.sort(key=lambda x: x.get("date", ""), reverse=True)
     return pdf_games
@@ -1457,12 +1628,91 @@ def handle_league_players():
 
 @app.route('/api/games/<game_id>', methods=['GET'])
 def handle_game_detail(game_id):
-    """Return full detail for a single game."""
+    """Return full detail for a single game.
+    Normalises both legacy (sharks_batting) and new (sharks.batting) formats
+    so the dashboard always receives the shape it expects."""
     game_file = SHARKS_DIR / "games" / f"{game_id}.json"
     if not game_file.exists():
         return jsonify({"error": "Not found"}), 404
-    with open(game_file) as f:
-        return jsonify(json.load(f))
+    with open(game_file, encoding='utf-8') as f:
+        data = json.load(f)
+
+    # Self-heal: if primary file lacks full stats (PDF format), supplement from GC UUID file by date
+    if "sharks" not in data and data.get("date"):
+        g_date = str(data["date"])[:10]
+        gc_dir = SHARKS_DIR / "games"
+        for gf in gc_dir.glob("game_*.json"):
+            try:
+                gdata = _read_json_file(gf, default={}) or {}
+                if str(gdata.get("date") or "")[:10] == g_date and "sharks" in gdata:
+                    data["sharks"] = gdata["sharks"]
+                    # Also copy score/result if missing
+                    if not data.get("result") and gdata.get("result"):
+                        data["result"] = gdata["result"]
+                    if not data.get("score") and gdata.get("score"):
+                        data["score"] = gdata["score"]
+                    if not data.get("score_str") and gdata.get("score_str"):
+                        data["score_str"] = gdata["score_str"]
+                    logging.debug(f"[GameDetail] Supplemented {game_id} with GC stats from {gf.name}")
+                    break
+            except Exception:
+                continue
+
+    def _strip_team_totals_row(rows: list) -> list:
+        """Remove the AG Grid pinned-bottom team totals row from a batting/adv list.
+        The totals row has aria-rowindex=2 (now filtered by scraper i > 2) but may
+        survive in older scraped files.  Heuristic: the first row whose PA equals or
+        exceeds the sum of all subsequent rows' PA is a totals row, not a player."""
+        if not rows or len(rows) < 2:
+            return rows
+        try:
+            first_pa = int(rows[0].get("pa") or 0)
+            rest_pa  = sum(int(r.get("pa") or 0) for r in rows[1:])
+            # totals row PA == team total == sum of player PAs (allow ±1 rounding)
+            if first_pa > 0 and rest_pa > 0 and abs(first_pa - rest_pa) <= 1:
+                return rows[1:]
+        except Exception:
+            pass
+        return rows
+
+    # --- Backward-compat bridge: new format → legacy fields ---
+    # New format: data["sharks"] = {batting: [...], pitching: [...], ...}
+    # Legacy format: data["sharks_batting"] = [...]
+    if "sharks" in data and isinstance(data["sharks"], dict):
+        sharks_block = data["sharks"]
+        if "sharks_batting" not in data:
+            data["sharks_batting"] = _strip_team_totals_row(sharks_block.get("batting") or [])
+        if "sharks_pitching" not in data:
+            data["sharks_pitching"] = sharks_block.get("pitching") or []
+        if "sharks_fielding" not in data:
+            data["sharks_fielding"] = sharks_block.get("fielding") or []
+        # Enrich: expose all stat categories under explicit top-level keys
+        for key in ("batting_advanced", "pitching_advanced", "pitching_breakdown",
+                    "catching", "innings_played"):
+            if key not in data and key in sharks_block:
+                raw = sharks_block[key]
+                # Strip totals row from batting_advanced too
+                if key == "batting_advanced":
+                    raw = _strip_team_totals_row(raw or [])
+                data[f"sharks_{key}"] = raw
+
+    # --- Opponent stats bridge ---
+    if "opponent_stats" in data and isinstance(data["opponent_stats"], dict):
+        opp_block = data["opponent_stats"]
+        if "opponent_batting" not in data:
+            data["opponent_batting"] = opp_block.get("batting") or []
+        if "opponent_pitching" not in data:
+            data["opponent_pitching"] = opp_block.get("pitching") or []
+
+    # --- Score bridge: {sharks: 11, opponent: 10} → "11-10" string ---
+    if isinstance(data.get("score"), dict) and "score_str" not in data:
+        sc = data["score"]
+        sh = sc.get("sharks")
+        op = sc.get("opponent")
+        if sh is not None and op is not None:
+            data["score_str"] = f"{sh}-{op}"
+
+    return jsonify(data)
 
 
 @app.route('/api/standings', methods=['GET'])
@@ -1713,6 +1963,18 @@ def handle_matchup(opponent_slug):
         opp_game_stats = _aggregate_opponent_stats_from_games(opponent_slug)
         if opp_game_stats:
             opp_team["batting_stats"] = opp_game_stats
+            # Also inject batting into roster entries so _team_aggregates roster-first
+            # path can pick up stats (it checks roster[].batting before batting_stats[]).
+            roster = opp_team.get("roster", [])
+            if roster:
+                game_by_num = {str(g.get("number", "")).strip(): g for g in opp_game_stats if g.get("number")}
+                game_by_name = {g.get("name", "").strip().lower(): g for g in opp_game_stats if g.get("name")}
+                for rp in roster:
+                    rnum = str(rp.get("number", "")).strip()
+                    rname = (rp.get("name") or "").strip().lower()
+                    match = game_by_num.get(rnum) or game_by_name.get(rname)
+                    if match and not rp.get("batting"):
+                        rp["batting"] = {k: v for k, v in match.items() if k not in ("name", "number")}
             data_source = "opponent_game_history"
         elif isinstance(opp_team.get("public_game_metrics"), dict) and opp_team.get("public_game_metrics", {}).get("completed_games", 0) > 0:
             data_source = "opponent_public_games"
@@ -1742,12 +2004,14 @@ def handle_matchup(opponent_slug):
         elif not result.get("reason"):
             result["reason"] = "insufficient_data"
 
-    # Attach opponent roster for display
-    result["their_roster"] = [
+    # Attach opponent roster for display, sorted alphabetically by first name
+    their_roster = [
         {"name": p.get("name", f"{p.get('first','')} {p.get('last','')}".strip()),
          "number": p.get("number", "")}
         for p in opp_team.get("roster", [])
     ]
+    their_roster.sort(key=lambda p: (p.get("name") or "").strip().lower())
+    result["their_roster"] = their_roster
     return jsonify(result)
 
 
@@ -1899,6 +2163,60 @@ def handle_team():
     _merge_team_with_scorebook_stats(team)
     team["team_name"] = _canonical_team_name(team.get("team_name", "The Sharks"), "sharks")
 
+    # Supplement with richer stats from team.json (CSV-ingested) when fields are missing
+    # team.json has: catching, innings_played, pitching_advanced, pitching_breakdown, babip, etc.
+    base_team_file = SHARKS_DIR / "team.json"
+    if base_team_file.exists() and base_team_file != team_file:
+        base_team = _read_json_file(base_team_file, default={}) or {}
+        base_by_name = {}
+        for bp in base_team.get("roster", []):
+            first = (bp.get("first") or "").strip().lower()
+            last = (bp.get("last") or "").strip().lower()
+            num = str(bp.get("number") or "").strip()
+            if first:
+                base_by_name[f"{first} {last}".strip()] = bp
+            if num:
+                base_by_name[f"#{num}"] = bp
+        SUPPLEMENT_KEYS = ["catching", "innings_played", "pitching_advanced", "pitching_breakdown"]
+        ADV_SUPPLEMENT = ["babip", "ps", "ps_pa", "tb", "xbh", "two_out_rbi", "ba_risp",
+                          "qab_pct", "lob", "two_s_three", "six_plus", "gidp", "gitp"]
+        PITCHING_SUPPLEMENT = ["gp", "gs", "sv", "svo", "bs", "bf", "np", "r", "kl",
+                               "hbp", "wp", "pik", "bk", "cs", "sb", "lob", "baa"]
+        for player in team.get("roster", []):
+            first = (player.get("first") or "").strip().lower()
+            last = (player.get("last") or "").strip().lower()
+            num = str(player.get("number") or "").strip()
+            bp = base_by_name.get(f"{first} {last}".strip()) or base_by_name.get(f"#{num}")
+            if not bp:
+                continue
+            # Add missing top-level stat blocks
+            for key in SUPPLEMENT_KEYS:
+                if not player.get(key) and bp.get(key):
+                    player[key] = bp[key]
+            # Supplement batting_advanced with extra fields from CSV
+            if isinstance(player.get("batting_advanced"), dict) and isinstance(bp.get("batting_advanced"), dict):
+                adv = player["batting_advanced"]
+                base_adv = bp["batting_advanced"]
+                for k in ADV_SUPPLEMENT:
+                    if adv.get(k) is None and base_adv.get(k) is not None:
+                        adv[k] = base_adv[k]
+            # Supplement pitching block with extra fields from team.json (baa, gp, bf, np, etc.)
+            if isinstance(player.get("pitching"), dict) and isinstance(bp.get("pitching"), dict):
+                p_block = player["pitching"]
+                base_p = bp["pitching"]
+                for k in PITCHING_SUPPLEMENT:
+                    if p_block.get(k) is None and base_p.get(k) is not None:
+                        p_block[k] = base_p[k]
+            elif not player.get("pitching") and bp.get("pitching"):
+                player["pitching"] = bp["pitching"]
+
+    # Sort roster alphabetically by first name for consistent display
+    if isinstance(team.get("roster"), list):
+        team["roster"] = sorted(
+            team["roster"],
+            key=lambda p: (p.get("first") or p.get("name", "")).strip().lower()
+        )
+
     return jsonify(team)
 
 
@@ -1999,6 +2317,8 @@ def _core_roster_names(team: dict) -> list[str]:
         name = (p.get("name") or f"{p.get('first','')} {p.get('last','')}").strip()
         if name:
             names.append(name)
+    # Sort alphabetically by first name for consistent display
+    names.sort(key=lambda n: n.strip().lower())
     return names
 
 
@@ -2153,7 +2473,31 @@ def _load_voice_context() -> dict:
     swot = _read_json_file(SHARKS_DIR / "swot_analysis.json", default={}) or {}
     lineups = _read_json_file(SHARKS_DIR / "lineups.json", default={}) or {}
     schedule = _read_json_file(SHARKS_DIR / "schedule_manual.json", default={"upcoming": [], "past": []}) or {"upcoming": [], "past": []}
-    return {"team": team, "swot": swot, "lineups": lineups, "schedule": schedule}
+
+    # Build games list from schedule past + game JSON files for win/loss record
+    games = []
+    past_games = schedule.get("past", []) if isinstance(schedule, dict) else []
+    if isinstance(past_games, list):
+        games.extend(past_games)
+    # Also load game index for score-based W/L detection
+    games_index = _read_json_file(SHARKS_DIR / "games" / "index.json", default=[]) or []
+    if isinstance(games_index, list):
+        for gi in games_index:
+            if not isinstance(gi, dict):
+                continue
+            gid = gi.get("game_id", "")
+            game_detail = _read_json_file(SHARKS_DIR / "games" / f"{gid}.json", default=None)
+            if isinstance(game_detail, dict) and "score" in game_detail:
+                score = game_detail["score"]
+                s_score = score.get("sharks", 0)
+                o_score = score.get("opponent", 0)
+                if s_score > o_score:
+                    gi["result"] = "W"
+                elif o_score > s_score:
+                    gi["result"] = "L"
+                games.append(gi)
+
+    return {"team": team, "swot": swot, "lineups": lineups, "schedule": schedule, "games": games}
 
 
 # Phonetic pronunciation map for names the TTS engine mispronounces.
@@ -2169,7 +2513,10 @@ _PHONETIC_MAP = {
     "Maylani": "May-lah-nee",
     "Mikayla": "Mih-Kay-lah",
     "Juliette": "Julie-ett",
-    "Deliliah": "Deh-lie-lee-ah",
+    "Deliliah": "Duh-LYE-luh",
+    "Ember": "Em-ber",
+    "Lexi": "LEX-ee",
+    "Ruby": "ROO-bee",
     "NWVLL": "North West Volusia Little League",
     "PCLL": "Palm Coast Little League",
     "Stihlers": "Steelers",
@@ -2192,8 +2539,15 @@ def _build_voice_overview_text(ctx: dict) -> str:
     lineups = ctx.get("lineups", {}) if isinstance(ctx, dict) else {}
     schedule = ctx.get("schedule", {}) if isinstance(ctx, dict) else {}
 
-    team_name = team.get("team_name", "The Sharks")
-    record = str(team.get("record", "0-0"))
+    # Compute record from games data
+    games_list = ctx.get("games", [])
+    if isinstance(games_list, list):
+        wins = sum(1 for g in games_list if isinstance(g, dict) and g.get("result") == "W")
+        losses = sum(1 for g in games_list if isinstance(g, dict) and g.get("result") == "L")
+        record = f"{wins} and {losses}" if (wins + losses) > 0 else "oh and oh"
+    else:
+        record = "oh and oh"
+
     roster = [p for p in team.get("roster", []) if isinstance(p, dict) and p.get("core", True) is not False]
 
     def _player_name(p: dict) -> str:
@@ -2220,7 +2574,7 @@ def _build_voice_overview_text(ctx: dict) -> str:
 
     balanced = (lineups.get("balanced") or {}).get("lineup") or []
     top_order = ", ".join(
-        f"{_player_name(p)} number {p.get('number', '?')}"
+        f"{_player_name(p)}, jersey number {p.get('number', '?')}"
         for p in balanced[:3]
     ) or "lineup not generated"
 
@@ -2234,11 +2588,17 @@ def _build_voice_overview_text(ctx: dict) -> str:
         game = next_game[0]
         opp = _clean_opponent_name(str(game.get("opponent", "Opponent")))
         ha = "at home" if game.get("home_away") == "home" else "on the road"
-        next_game_text = f"Next up, the Sharks take on the {opp} {ha} on {game.get('date', 'a date to be determined')}! Let's go!"
+        game_date = game.get('date', '')
+        try:
+            dt = datetime.strptime(game_date, '%Y-%m-%d')
+            date_spoken = dt.strftime('%A, %B ') + str(dt.day)
+        except Exception:
+            date_spoken = game_date or 'a date to be determined'
+        next_game_text = f"Next up, the Sharks take on the {opp} {ha} on {date_spoken}! Let's go!"
 
     raw = (
-        f"Hey Sharks fans! Here's your {team_name} update! "
-        f"The team is sitting at {record} this season. "
+        f"Hey Sharks fans! Here's your latest Sharks update! "
+        f"The squad is {record} this season! "
         f"Leading the charge at the plate: {hitter_text}! "
         f"The team's biggest strength right now? {strengths_text}. "
         f"Area to focus on: {weaknesses_text}. "
@@ -2267,9 +2627,9 @@ def _synthesize_voice_update(text: str) -> bytes:
         "text": text,
         "model_id": model_id,
         "voice_settings": {
-            "stability": 0.22,
+            "stability": 0.15,
             "similarity_boost": 0.85,
-            "style": 0.45,
+            "style": 0.65,
             "use_speaker_boost": True,
         },
     }
@@ -2341,72 +2701,121 @@ def handle_opponent_discovery():
 @app.route('/api/practice-insights', methods=['GET', 'POST'])
 def handle_practice_insights():
     """Build tailored practice priorities from current team stats."""
-    team_file = SHARKS_DIR / "team_enriched.json"
-    if not team_file.exists():
-        team_file = SHARKS_DIR / ("team_merged.json" if (SHARKS_DIR / "team_merged.json").exists() else "team.json")
-    team = _read_json_file(team_file, default={}) or {}
-    if not isinstance(team, dict):
-        return jsonify({"error": "team_data_unavailable"}), 503
+    try:
+        team_file = SHARKS_DIR / "team_enriched.json"
+        if not team_file.exists():
+            team_file = SHARKS_DIR / ("team_merged.json" if (SHARKS_DIR / "team_merged.json").exists() else "team.json")
+        team = _read_json_file(team_file, default={}) or {}
+        if not isinstance(team, dict):
+            team = {}
 
-    _enrich_team_with_app_stats(team)
-    _merge_team_with_scorebook_stats(team)
-    team["team_name"] = _canonical_team_name(team.get("team_name", "The Sharks"), "sharks")
+        try:
+            _enrich_team_with_app_stats(team)
+        except Exception as e:
+            logging.warning(f"[PracticeInsights] app_stats enrichment skipped: {e}")
+        try:
+            _merge_team_with_scorebook_stats(team)
+        except Exception as e:
+            logging.warning(f"[PracticeInsights] scorebook merge skipped: {e}")
+        team["team_name"] = _canonical_team_name(team.get("team_name", "The Sharks"), "sharks")
 
-    default_players, default_source, practice_meta = _load_practice_rsvp_defaults(team)
-    core_names = _core_roster_names(team)
-    core_set = {n.lower() for n in core_names}
+        # Ensure roster exists as a list even if missing/malformed
+        if not isinstance(team.get("roster"), list):
+            team["roster"] = []
 
-    selected_names = []
-    if request.method == "POST":
-        body = request.get_json(silent=True) or {}
-        selected_names = [str(n).strip() for n in (body.get("players") or []) if str(n).strip()]
-    else:
-        csv = (request.args.get("players") or "").strip()
-        if csv:
-            selected_names = [p.strip() for p in csv.split(",") if p.strip()]
+        default_players, default_source, practice_meta = _load_practice_rsvp_defaults(team)
+        core_names = _core_roster_names(team)
+        core_set = {n.lower() for n in core_names}
 
-    if not selected_names:
-        selected_names = default_players
-    selected_names = [n for n in selected_names if n.lower() in core_set]
-    if not selected_names:
-        selected_names = core_names
+        selected_names = []
+        if request.method == "POST":
+            body = request.get_json(silent=True) or {}
+            if not isinstance(body, dict):
+                body = {}
+            players_raw = body.get("players") or []
+            if not isinstance(players_raw, list):
+                players_raw = []
+            selected_names = [str(n).strip() for n in players_raw if str(n).strip()]
+        else:
+            csv = (request.args.get("players") or "").strip()
+            if csv:
+                selected_names = [p.strip() for p in csv.split(",") if p.strip()]
 
-    needs = _build_practice_needs(team, selected_names)
-    if not needs:
-        needs = [{
-            "key": "general_fundamentals",
-            "title": "General Fundamentals",
-            "priority": 1,
-            "score": 1.0,
-            "focus_players": selected_names[:5],
-            "why": "Not enough player sample for stat-targeted specialization yet.",
-            "drills": [
-                {"name": "Throw-Catch-Footwork Circuit", "duration_min": 15, "goal": "Improve transfer speed and receiving mechanics."},
-                {"name": "Contact + Baserun Combo", "duration_min": 15, "goal": "Build consistent bat-to-ball and first-step aggression."},
-            ],
-        }]
+        if not selected_names:
+            selected_names = default_players if isinstance(default_players, list) else []
+        selected_names = [n for n in selected_names if n.lower() in core_set]
+        if not selected_names:
+            selected_names = core_names if isinstance(core_names, list) else []
 
-    recommended_plan = []
-    for need in needs[:3]:
-        for drill in need.get("drills", [])[:2]:
-            recommended_plan.append({
-                "need": need["title"],
-                "drill": drill["name"],
-                "duration_min": drill["duration_min"],
-                "goal": drill["goal"],
-                "focus_players": need.get("focus_players", []),
-            })
+        try:
+            needs = _build_practice_needs(team, selected_names)
+        except Exception as e:
+            logging.warning(f"[PracticeInsights] _build_practice_needs failed: {e}")
+            needs = []
+        if not needs:
+            needs = [{
+                "key": "general_fundamentals",
+                "title": "General Fundamentals",
+                "priority": 1,
+                "score": 1.0,
+                "focus_players": selected_names[:5],
+                "why": "Not enough player sample for stat-targeted specialization yet.",
+                "drills": [
+                    {"name": "Throw-Catch-Footwork Circuit", "duration_min": 15, "goal": "Improve transfer speed and receiving mechanics."},
+                    {"name": "Contact + Baserun Combo", "duration_min": 15, "goal": "Build consistent bat-to-ball and first-step aggression."},
+                ],
+            }]
 
-    return jsonify({
-        "generated_at": datetime.now(ET).isoformat(),
-        "team_name": team.get("team_name", "The Sharks"),
-        "default_player_source": default_source,
-        "practice_meta": practice_meta,
-        "selected_players": selected_names,
-        "available_players": core_names,
-        "needs": needs,
-        "recommended_plan": recommended_plan,
-    })
+        recommended_plan = []
+        for need in needs[:3]:
+            if not isinstance(need, dict):
+                continue
+            for drill in (need.get("drills") or [])[:2]:
+                if not isinstance(drill, dict):
+                    continue
+                recommended_plan.append({
+                    "need": need.get("title", ""),
+                    "drill": drill.get("name", ""),
+                    "duration_min": drill.get("duration_min", 10),
+                    "goal": drill.get("goal", ""),
+                    "focus_players": need.get("focus_players", []),
+                })
+
+        return jsonify({
+            "generated_at": datetime.now(ET).isoformat(),
+            "team_name": team.get("team_name", "The Sharks"),
+            "default_player_source": default_source,
+            "practice_meta": practice_meta if isinstance(practice_meta, dict) else {"date": None, "title": None},
+            "selected_players": selected_names,
+            "available_players": core_names,
+            "needs": needs,
+            "recommended_plan": recommended_plan,
+        })
+    except Exception as e:
+        logging.error(f"[PracticeInsights] Unhandled error: {e}")
+        return jsonify({
+            "error": "practice_insights_failed",
+            "detail": str(e),
+            "generated_at": datetime.now(ET).isoformat(),
+            "team_name": "The Sharks",
+            "default_player_source": "error",
+            "practice_meta": {"date": None, "title": None},
+            "selected_players": [],
+            "available_players": [],
+            "needs": [{
+                "key": "general_fundamentals",
+                "title": "General Fundamentals",
+                "priority": 1,
+                "score": 1.0,
+                "focus_players": [],
+                "why": "Practice data temporarily unavailable — run general fundamentals.",
+                "drills": [
+                    {"name": "Throw-Catch-Footwork Circuit", "duration_min": 15, "goal": "Improve transfer speed and receiving mechanics."},
+                    {"name": "Contact + Baserun Combo", "duration_min": 15, "goal": "Build consistent bat-to-ball and first-step aggression."},
+                ],
+            }],
+            "recommended_plan": [],
+        })
 
 
 @app.route('/api/stats-db/status', methods=['GET'])
@@ -2438,6 +2847,17 @@ def handle_regenerate_lineups():
         if lineups_file.exists():
             with open(lineups_file) as f:
                 lineups = json.load(f)
+        # Sanitize: separate strategy dicts from metadata strings so callers
+        # can safely iterate values calling .get() without crashing.
+        if isinstance(lineups, dict):
+            sanitized = {}
+            meta = {}
+            for k, v in lineups.items():
+                if isinstance(v, dict):
+                    sanitized[k] = v
+                else:
+                    meta[k] = v
+            lineups = {**sanitized, "_meta": meta}
         # Optionally regenerate SWOT too
         if data.get("swot"):
             from swot_analyzer import run_sharks_analysis

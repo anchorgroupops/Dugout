@@ -1,0 +1,615 @@
+"""
+Ingest GameChanger CSV season-stats export into the Sharks data pipeline.
+
+Reads the comprehensive 200-column GC CSV export and produces:
+  1. data/sharks/team.json   — full roster with all stat categories
+  2. data/sharks/app_stats.json — backward-compat batting/pitching/fielding arrays
+  3. data/sharks/season_stats.csv — copy of the source CSV
+
+Usage:
+    python tools/gc_csv_ingest.py --csv-path "Scorebooks/Other docs/Sharks Spring 2026 Stats (4).csv"
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+import shutil
+from datetime import datetime
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+from stats_normalizer import safe_float, safe_int
+
+ET = ZoneInfo("America/New_York")
+ROOT_DIR = Path(__file__).resolve().parent.parent
+DATA_DIR = ROOT_DIR / "data"
+SHARKS_DIR = DATA_DIR / "sharks"
+
+# ---------------------------------------------------------------------------
+# CSV column indices (from GC export, 0-indexed, row 1 = column names)
+# ---------------------------------------------------------------------------
+
+# Identity
+COL_NUMBER = 0
+COL_LAST = 1
+COL_FIRST = 2
+
+# Batting standard (cols 3-28)
+BAT = {
+    "gp": 3, "pa": 4, "ab": 5, "avg": 6, "obp": 7, "ops": 8, "slg": 9,
+    "h": 10, "1b": 11, "2b": 12, "3b": 13, "hr": 14, "rbi": 15, "r": 16,
+    "bb": 17, "so": 18, "kl": 19, "hbp": 20, "sac": 21, "sf": 22,
+    "roe": 23, "fc": 24, "sb": 25, "sb_pct": 26, "cs": 27, "pik": 28,
+}
+
+# Batting advanced (cols 29-53)
+BAT_ADV = {
+    "qab": 29, "qab_pct": 30, "pa_per_bb": 31, "bb_per_k": 32, "c_pct": 33,
+    "hhb": 34, "ld_pct": 35, "fb_pct": 36, "gb_pct": 37,
+    "babip": 38, "ba_risp": 39, "lob": 40, "two_out_rbi": 41,
+    "xbh": 42, "tb": 43, "ps": 44, "ps_pa": 45,
+    "two_s_three": 46, "two_s_three_pct": 47,
+    "six_plus": 48, "six_plus_pct": 49,
+    "ab_hr": 50, "gidp": 51, "gitp": 52, "ci": 53,
+}
+
+# Pitching standard (cols 54-80)
+PITCH = {
+    "ip": 54, "gp": 55, "gs": 56, "bf": 57, "np": 58,
+    "w": 59, "l": 60, "sv": 61, "svo": 62, "bs": 63, "sv_pct": 64,
+    "h": 65, "r": 66, "er": 67, "bb": 68, "so": 69, "kl": 70, "hbp": 71,
+    "era": 72, "whip": 73, "lob": 74, "bk": 75, "pik": 76,
+    "cs": 77, "sb": 78, "sb_pct": 79, "wp": 80,
+}
+
+# Pitching advanced (cols 81-117)
+PITCH_ADV = {
+    "baa": 81,
+    "p_ip": 88, "p_bf": 89,
+    "fip": 95, "s_pct": 96, "fps_pct": 97,
+    "bb_inn": 101,
+    "k_bf": 107, "k_bb": 108,
+    "hhb_pct": 110, "go_ao": 111,
+    "ld_pct": 113, "fb_pct": 114, "gb_pct": 115,
+    "babip": 116, "ba_risp": 117,
+}
+
+# Fielding (cols 174-180)
+FIELD = {
+    "tc": 174, "a": 175, "po": 176, "fpct": 177,
+    "e": 178, "dp": 179, "tp": 180,
+}
+
+# Catching (cols 181-188)
+CATCH = {
+    "inn": 181, "pb": 182, "sb": 183, "sb_att": 184,
+    "cs": 185, "cs_pct": 186, "pik": 187, "ci": 188,
+}
+
+# Innings played by position (cols 189-199)
+INNINGS = {
+    "p": 189, "c": 190, "first_base": 191, "second_base": 192,
+    "third_base": 193, "ss": 194, "lf": 195, "cf": 196,
+    "rf": 197, "sf": 198, "total": 199,
+}
+
+
+def _val(row: list[str], idx: int) -> str:
+    """Safe accessor for CSV row by column index."""
+    if idx < len(row):
+        v = row[idx].strip()
+        return v if v not in ("", "-", "—", "N/A") else ""
+    return ""
+
+
+def _load_core_players() -> set[str]:
+    manifest = SHARKS_DIR / "roster_manifest.json"
+    if not manifest.exists():
+        return set()
+    with open(manifest) as f:
+        data = json.load(f)
+    return {name.strip().lower() for name in data.get("core_players", [])}
+
+
+def _is_core(first: str, last: str, core_set: set[str]) -> bool:
+    full = f"{first} {last}".strip().lower()
+    return full in core_set
+
+
+def _parse_row_section(row: list[str], col_map: dict[str, int]) -> dict:
+    """Extract a dict from a CSV row using a column mapping."""
+    return {key: _val(row, idx) for key, idx in col_map.items()}
+
+
+def _has_data(section: dict) -> bool:
+    """Check if any value in the section is non-empty."""
+    return any(v != "" for v in section.values())
+
+
+def parse_player_row(row: list[str], core_set: set[str]) -> dict | None:
+    """Parse a single CSV row into a full player dict."""
+    number = _val(row, COL_NUMBER)
+    last = _val(row, COL_LAST)
+    first = _val(row, COL_FIRST)
+
+    # Skip totals/glossary/empty rows
+    if number == "Totals" or number == "Glossary":
+        return None
+    if not number and not first and not last:
+        return None
+
+    # --- Batting ---
+    bat_raw = _parse_row_section(row, BAT)
+    batting = {
+        "gp": safe_int(bat_raw["gp"]),
+        "pa": safe_int(bat_raw["pa"]),
+        "ab": safe_int(bat_raw["ab"]),
+        "avg": bat_raw["avg"] if bat_raw["avg"] else ".000",
+        "obp": bat_raw["obp"] if bat_raw["obp"] else ".000",
+        "ops": bat_raw["ops"] if bat_raw["ops"] else ".000",
+        "slg": bat_raw["slg"] if bat_raw["slg"] else ".000",
+        "h": safe_int(bat_raw["h"]),
+        "singles": safe_int(bat_raw["1b"]),
+        "doubles": safe_int(bat_raw["2b"]),
+        "triples": safe_int(bat_raw["3b"]),
+        "hr": safe_int(bat_raw["hr"]),
+        "rbi": safe_int(bat_raw["rbi"]),
+        "r": safe_int(bat_raw["r"]),
+        "bb": safe_int(bat_raw["bb"]),
+        "so": safe_int(bat_raw["so"]),
+        "kl": safe_int(bat_raw["kl"]),
+        "hbp": safe_int(bat_raw["hbp"]),
+        "sac": safe_int(bat_raw["sac"]),
+        "sf": safe_int(bat_raw["sf"]),
+        "roe": safe_int(bat_raw["roe"]),
+        "fc": safe_int(bat_raw["fc"]),
+        "sb": safe_int(bat_raw["sb"]),
+        "sb_pct": safe_float(bat_raw["sb_pct"]) if bat_raw["sb_pct"] else None,
+        "cs": safe_int(bat_raw["cs"]),
+        "pik": safe_int(bat_raw["pik"]),
+        "ci": safe_int(bat_raw.get("ci")) if bat_raw.get("ci") else None,
+    }
+
+    # --- Batting Advanced ---
+    ba_raw = _parse_row_section(row, BAT_ADV)
+    batting_advanced = {
+        "gp": batting["gp"],
+        "pa": batting["pa"],
+        "ab": batting["ab"],
+        "qab": safe_int(ba_raw["qab"]),
+        "qab_pct": safe_float(ba_raw["qab_pct"]),
+        "pa_per_bb": safe_float(ba_raw["pa_per_bb"]),
+        "bb_per_k": safe_float(ba_raw["bb_per_k"]),
+        "bb_k": safe_float(ba_raw["bb_per_k"]),  # alias
+        "c_pct": safe_float(ba_raw["c_pct"]),
+        "hhb": safe_int(ba_raw["hhb"]),
+        "ld_pct": safe_float(ba_raw["ld_pct"]),
+        "fb_pct": safe_float(ba_raw["fb_pct"]),
+        "gb_pct": safe_float(ba_raw["gb_pct"]),
+        "babip": ba_raw["babip"] if ba_raw["babip"] else None,
+        "ba_risp": ba_raw["ba_risp"] if ba_raw["ba_risp"] else None,
+        "lob": safe_int(ba_raw["lob"]),
+        "two_out_rbi": safe_int(ba_raw["two_out_rbi"]),
+        "xbh": safe_int(ba_raw["xbh"]),
+        "tb": safe_int(ba_raw["tb"]),
+        "ps": safe_int(ba_raw["ps"]),
+        "ps_pa": safe_float(ba_raw["ps_pa"]),
+        "two_s_three": safe_int(ba_raw["two_s_three"]),
+        "two_s_three_pct": safe_float(ba_raw["two_s_three_pct"]),
+        "six_plus": safe_int(ba_raw["six_plus"]),
+        "six_plus_pct": safe_float(ba_raw["six_plus_pct"]),
+        "ab_hr": ba_raw["ab_hr"] if ba_raw["ab_hr"] else None,
+        "gidp": safe_int(ba_raw["gidp"]),
+        "gitp": safe_int(ba_raw["gitp"]),
+    }
+
+    # --- Pitching ---
+    pitch_raw = _parse_row_section(row, PITCH)
+    ip_str = _val(row, PITCH["ip"])
+    has_pitching = ip_str != "" and ip_str != "0.0"
+
+    if has_pitching:
+        pitching = {
+            "ip": ip_str,
+            "gp": safe_int(pitch_raw["gp"]),
+            "gs": safe_int(pitch_raw["gs"]),
+            "bf": safe_int(pitch_raw["bf"]),
+            "np": safe_int(pitch_raw["np"]),
+            "w": safe_int(pitch_raw["w"]),
+            "l": safe_int(pitch_raw["l"]),
+            "sv": safe_int(pitch_raw["sv"]),
+            "svo": safe_int(pitch_raw["svo"]),
+            "bs": safe_int(pitch_raw["bs"]),
+            "h": safe_int(pitch_raw["h"]),
+            "r": safe_int(pitch_raw["r"]),
+            "er": safe_int(pitch_raw["er"]),
+            "bb": safe_int(pitch_raw["bb"]),
+            "so": safe_int(pitch_raw["so"]),
+            "kl": safe_int(pitch_raw["kl"]),
+            "hbp": safe_int(pitch_raw["hbp"]),
+            "era": safe_float(pitch_raw["era"]),
+            "whip": safe_float(pitch_raw["whip"]),
+            "lob": safe_int(pitch_raw["lob"]),
+            "bk": safe_int(pitch_raw["bk"]),
+            "pik": safe_int(pitch_raw["pik"]),
+            "cs": safe_int(pitch_raw["cs"]),
+            "sb": safe_int(pitch_raw["sb"]),
+            "wp": safe_int(pitch_raw["wp"]),
+            "baa": safe_float(_val(row, PITCH_ADV["baa"])),
+        }
+
+        pa_raw = _parse_row_section(row, PITCH_ADV)
+        pitching_advanced = {
+            "bf": safe_int(pitch_raw["bf"]),
+            "np": safe_int(pitch_raw["np"]),
+            "baa": safe_float(pa_raw["baa"]),
+            "p_ip": safe_float(pa_raw["p_ip"]),
+            "p_bf": safe_float(pa_raw["p_bf"]),
+            "fip": safe_float(pa_raw["fip"]),
+            "s_pct": safe_float(pa_raw["s_pct"]),
+            "fps_pct": safe_float(pa_raw["fps_pct"]),
+            "bb_inn": safe_float(pa_raw["bb_inn"]),
+            "k_bf": safe_float(pa_raw["k_bf"]),
+            "k_bb": safe_float(pa_raw["k_bb"]),
+            "hhb_pct": safe_float(pa_raw["hhb_pct"]),
+            "go_ao": safe_float(pa_raw["go_ao"]),
+            "ld_pct": safe_float(pa_raw["ld_pct"]),
+            "fb_pct": safe_float(pa_raw["fb_pct"]),
+            "gb_pct": safe_float(pa_raw["gb_pct"]),
+            "babip": safe_float(pa_raw["babip"]),
+            "ba_risp": safe_float(pa_raw["ba_risp"]),
+        }
+    else:
+        pitching = None
+        pitching_advanced = None
+
+    # --- Fielding ---
+    fld_raw = _parse_row_section(row, FIELD)
+    fielding = {
+        "tc": safe_int(fld_raw["tc"]),
+        "po": safe_int(fld_raw["po"]),
+        "a": safe_int(fld_raw["a"]),
+        "fpct": safe_float(fld_raw["fpct"]) if fld_raw["fpct"] else None,
+        "e": safe_int(fld_raw["e"]),
+        "dp": safe_int(fld_raw["dp"]),
+        "tp": safe_int(fld_raw["tp"]),
+    }
+
+    # --- Catching ---
+    cat_raw = _parse_row_section(row, CATCH)
+    has_catching = _val(row, CATCH["inn"]) not in ("", "0.0")
+    if has_catching:
+        catching = {
+            "inn": _val(row, CATCH["inn"]),
+            "pb": safe_int(cat_raw["pb"]),
+            "sb": safe_int(cat_raw["sb"]),
+            "cs": safe_int(cat_raw["cs"]),
+            "cs_pct": safe_float(cat_raw["cs_pct"]) if cat_raw["cs_pct"] else None,
+            "pik": safe_int(cat_raw["pik"]),
+            "ci": safe_int(cat_raw["ci"]),
+        }
+    else:
+        catching = None
+
+    # --- Innings Played ---
+    innings_played = {
+        "total": _val(row, INNINGS["total"]) or "0.0",
+        "p": _val(row, INNINGS["p"]) or "0.0",
+        "c": _val(row, INNINGS["c"]) or "0.0",
+        "first_base": _val(row, INNINGS["first_base"]) or "0.0",
+        "second_base": _val(row, INNINGS["second_base"]) or "0.0",
+        "third_base": _val(row, INNINGS["third_base"]) or "0.0",
+        "ss": _val(row, INNINGS["ss"]) or "0.0",
+        "lf": _val(row, INNINGS["lf"]) or "0.0",
+        "cf": _val(row, INNINGS["cf"]) or "0.0",
+        "rf": _val(row, INNINGS["rf"]) or "0.0",
+        "sf": _val(row, INNINGS["sf"]) or "0.0",
+    }
+
+    core = _is_core(first, last, core_set)
+
+    return {
+        "first": first,
+        "last": last,
+        "number": number,
+        "core": core,
+        "borrowed": not core,
+        "batting": batting,
+        "batting_advanced": batting_advanced,
+        "pitching": pitching,
+        "pitching_advanced": pitching_advanced,
+        "pitching_breakdown": None,
+        "fielding": fielding,
+        "catching": catching,
+        "innings_played": innings_played,
+        "games_played": batting["gp"],
+    }
+
+
+def _merge_players(existing: dict, new: dict) -> dict:
+    """Merge two player dicts with the same jersey number (sum counting stats, keep richer data)."""
+    merged = {**existing}
+    merged["games_played"] = existing.get("games_played", 0) + new.get("games_played", 0)
+
+    # Use the entry with a last name if the other doesn't have one
+    if not merged.get("last") and new.get("last"):
+        merged["last"] = new["last"]
+
+    # For batting, sum counting stats
+    eb = existing.get("batting", {})
+    nb = new.get("batting", {})
+    count_keys = ["gp", "pa", "ab", "h", "singles", "doubles", "triples", "hr",
+                  "rbi", "r", "bb", "so", "kl", "hbp", "sac", "sf", "roe", "fc", "sb", "cs", "pik"]
+    merged_bat = {}
+    for k in count_keys:
+        merged_bat[k] = safe_int(eb.get(k)) + safe_int(nb.get(k))
+
+    # Recalculate rate stats
+    ab = merged_bat["ab"]
+    h = merged_bat["h"]
+    bb = merged_bat["bb"]
+    hbp = merged_bat["hbp"]
+    pa = merged_bat["pa"]
+    tb = merged_bat["singles"] + 2 * merged_bat["doubles"] + 3 * merged_bat["triples"] + 4 * merged_bat["hr"]
+    merged_bat["avg"] = f".{int(round(h / ab * 1000)):03d}" if ab > 0 else ".000"
+    merged_bat["obp"] = f".{int(round((h + bb + hbp) / pa * 1000)):03d}" if pa > 0 else ".000"
+    merged_bat["slg"] = f".{int(round(tb / ab * 1000)):03d}" if ab > 0 else ".000"
+    obp_f = safe_float(merged_bat["obp"])
+    slg_f = safe_float(merged_bat["slg"])
+    merged_bat["ops"] = f".{int(round((obp_f + slg_f) * 1000)):03d}"
+    merged_bat["sb_pct"] = existing["batting"].get("sb_pct")
+    merged_bat["ci"] = existing["batting"].get("ci")
+    merged["batting"] = merged_bat
+
+    # For other sections, keep whichever is non-null / richer
+    for section in ["batting_advanced", "pitching", "pitching_advanced", "fielding", "catching", "innings_played"]:
+        e_sec = existing.get(section)
+        n_sec = new.get(section)
+        if n_sec and not e_sec:
+            merged[section] = n_sec
+        # else keep existing
+
+    return merged
+
+
+def parse_gc_csv(csv_path: Path) -> list[dict]:
+    """Parse GC CSV export into a list of player dicts."""
+    core_set = _load_core_players()
+    players_by_number: dict[str, dict] = {}
+    players_no_number: list[dict] = []
+
+    with open(csv_path, encoding="utf-8-sig", newline="") as f:
+        reader = csv.reader(f)
+        rows = list(reader)
+
+    # Row 0 = section labels, Row 1 = column names, Rows 2+ = data
+    for row in rows[2:]:
+        player = parse_player_row(row, core_set)
+        if player is None:
+            continue
+
+        num = player["number"]
+        if num:
+            if num in players_by_number:
+                # Merge duplicate jersey numbers (e.g., two #11 entries)
+                players_by_number[num] = _merge_players(players_by_number[num], player)
+            else:
+                players_by_number[num] = player
+        else:
+            players_no_number.append(player)
+
+    return list(players_by_number.values()) + players_no_number
+
+
+def build_team_json(roster: list[dict], csv_path: Path) -> dict:
+    """Build team.json-compatible structure from parsed roster."""
+    # Preserve existing team metadata if available
+    team_file = SHARKS_DIR / "team.json"
+    meta = {}
+    if team_file.exists():
+        with open(team_file) as f:
+            existing = json.load(f)
+        meta = {
+            "team_name": existing.get("team_name", "The Sharks"),
+            "league": existing.get("league", "PCLL Majors"),
+            "season": existing.get("season", "Spring 2026"),
+            "gc_team_url": existing.get("gc_team_url", ""),
+            "gc_team_id": existing.get("gc_team_id", ""),
+        }
+    else:
+        meta = {
+            "team_name": "The Sharks",
+            "league": "PCLL Majors",
+            "season": "Spring 2026",
+        }
+
+    meta["last_updated"] = datetime.now(ET).isoformat()
+    meta["source"] = f"gc_csv_export:{csv_path.name}"
+
+    # Calculate record from max GP
+    max_gp = max((p.get("games_played", 0) for p in roster), default=0)
+    meta["record"] = f"0-0 ({max_gp} GP)"
+
+    meta["roster"] = roster
+    return meta
+
+
+def build_app_stats_json(roster: list[dict]) -> dict:
+    """Build app_stats.json-compatible structure from parsed roster."""
+    batting = []
+    pitching = []
+    fielding = []
+
+    for p in roster:
+        first = p.get("first", "")
+        last = p.get("last", "")
+        number = p.get("number", "")
+        # app_stats uses abbreviated names: "E Hourahan"
+        initial = first[0] if first else ""
+        name = f"{initial} {last}".strip() if last else first
+
+        b = p.get("batting", {})
+        batting.append({
+            "name": name,
+            "number": number,
+            "gp": str(b.get("gp", 0)),
+            "pa": str(b.get("pa", 0)),
+            "ab": str(b.get("ab", 0)),
+            "avg": b.get("avg", ".000"),
+            "obp": b.get("obp", ".000"),
+            "ops": b.get("ops", ".000"),
+            "slg": b.get("slg", ".000"),
+            "h": str(b.get("h", 0)),
+            "1b": str(b.get("singles", 0)),
+            "2b": str(b.get("doubles", 0)),
+            "3b": str(b.get("triples", 0)),
+            "hr": str(b.get("hr", 0)),
+            "rbi": str(b.get("rbi", 0)),
+            "bb": str(b.get("bb", 0)),
+            "hbp": str(b.get("hbp", 0)),
+            "so": str(b.get("so", 0)),
+            "sb": str(b.get("sb", 0)),
+            "cs": str(b.get("cs", 0)),
+            # Advanced fields that _enrich_team_with_app_stats reads
+            "qab": str((p.get("batting_advanced") or {}).get("qab", 0)),
+            "qab_pct": str((p.get("batting_advanced") or {}).get("qab_pct", 0)),
+            "pa_per_bb": str((p.get("batting_advanced") or {}).get("pa_per_bb", 0)),
+            "bb_per_k": str((p.get("batting_advanced") or {}).get("bb_per_k", 0)),
+            "c_pct": str((p.get("batting_advanced") or {}).get("c_pct", 0)),
+            "hhb": str((p.get("batting_advanced") or {}).get("hhb", 0)),
+            "ld_pct": str((p.get("batting_advanced") or {}).get("ld_pct", 0)),
+        })
+
+        pit = p.get("pitching")
+        if pit:
+            pitching.append({
+                "name": name,
+                "number": number,
+                "ip": str(pit.get("ip", "0.0")),
+                "gp": str(pit.get("gp", 0)),
+                "gs": str(pit.get("gs", 0)),
+                "bf": str(pit.get("bf", 0)),
+                "np": str(pit.get("np", 0)),
+                "pitches": str(pit.get("np", 0)),
+                "w": str(pit.get("w", 0)),
+                "l": str(pit.get("l", 0)),
+                "sv": str(pit.get("sv", 0)),
+                "svo": str(pit.get("svo", 0)),
+                "h": str(pit.get("h", 0)),
+                "r": str(pit.get("r", 0)),
+                "er": str(pit.get("er", 0)),
+                "bb": str(pit.get("bb", 0)),
+                "so": str(pit.get("so", 0)),
+                "hbp": str(pit.get("hbp", 0)),
+                "era": str(pit.get("era", 0)),
+                "whip": str(pit.get("whip", 0)),
+                "wp": str(pit.get("wp", 0)),
+                "bk": str(pit.get("bk", 0)),
+                "lob": str(pit.get("lob", 0)),
+                "sb": str(pit.get("sb", 0)),
+                "cs": str(pit.get("cs", 0)),
+                "baa": str(pit.get("baa", 0)),
+                # Advanced fields
+                "k_bf": str((p.get("pitching_advanced") or {}).get("k_bf", 0)),
+                "k_bb": str((p.get("pitching_advanced") or {}).get("k_bb", 0)),
+                "bb_inn": str((p.get("pitching_advanced") or {}).get("bb_inn", 0)),
+                "fip": str((p.get("pitching_advanced") or {}).get("fip", 0)),
+                "babip": str((p.get("pitching_advanced") or {}).get("babip", 0)),
+            })
+
+        fld = p.get("fielding")
+        if fld:
+            fielding.append({
+                "name": name,
+                "number": number,
+                "tc": str(fld.get("tc", 0)),
+                "po": str(fld.get("po", 0)),
+                "a": str(fld.get("a", 0)),
+                "fpct": str(fld.get("fpct", 0)) if fld.get("fpct") is not None else "",
+                "e": str(fld.get("e", 0)),
+                "dp": str(fld.get("dp", 0)),
+                "tp": str(fld.get("tp", 0)),
+            })
+
+    return {
+        "last_updated": datetime.now(ET).isoformat(),
+        "source": "gc_csv_export",
+        "batting": batting,
+        "pitching": pitching,
+        "fielding": fielding,
+    }
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Ingest GC CSV season-stats export")
+    parser.add_argument(
+        "--csv-path",
+        type=str,
+        help="Path to the GC CSV export file (relative to project root or absolute)",
+    )
+    args = parser.parse_args()
+
+    # Resolve CSV path
+    if args.csv_path:
+        csv_path = Path(args.csv_path)
+        if not csv_path.is_absolute():
+            csv_path = ROOT_DIR / csv_path
+    else:
+        # Auto-discover from Scorebooks/Other docs
+        search_dir = ROOT_DIR / "Scorebooks" / "Other docs"
+        candidates = sorted(search_dir.glob("Sharks Spring 2026 Stats*.csv"))
+        if not candidates:
+            print("ERROR: No CSV found. Use --csv-path to specify.")
+            return
+        csv_path = candidates[-1]
+
+    if not csv_path.exists():
+        print(f"ERROR: CSV not found: {csv_path}")
+        return
+
+    print(f"Ingesting: {csv_path.name}")
+
+    # Parse
+    roster = parse_gc_csv(csv_path)
+    print(f"Parsed {len(roster)} players")
+
+    # Build outputs
+    team_json = build_team_json(roster, csv_path)
+    app_stats = build_app_stats_json(roster)
+
+    # Write team.json
+    team_out = SHARKS_DIR / "team.json"
+    with open(team_out, "w") as f:
+        json.dump(team_json, f, indent=2)
+    print(f"Wrote {team_out}")
+
+    # Write app_stats.json
+    app_out = SHARKS_DIR / "app_stats.json"
+    with open(app_out, "w") as f:
+        json.dump(app_stats, f, indent=2)
+    print(f"Wrote {app_out}")
+
+    # Copy CSV to season_stats.csv
+    season_out = SHARKS_DIR / "season_stats.csv"
+    shutil.copy2(csv_path, season_out)
+    print(f"Copied CSV -> {season_out}")
+
+    # Summary
+    core_count = sum(1 for p in roster if p.get("core"))
+    borrowed_count = sum(1 for p in roster if not p.get("core"))
+    pitchers = sum(1 for p in roster if p.get("pitching"))
+    max_gp = max((p.get("games_played", 0) for p in roster), default=0)
+    print(f"\nSummary: {core_count} core, {borrowed_count} borrowed, {pitchers} pitchers, {max_gp} GP max")
+
+    for p in roster:
+        gp = p.get("games_played", 0)
+        tag = "*" if p.get("core") else " "
+        pit = "P" if p.get("pitching") else " "
+        cat = "C" if p.get("catching") else " "
+        print(f"  {tag} #{p['number']:>3s} {p['first']:>12s} {p['last']:<15s} GP={gp}  {pit}{cat}")
+
+
+if __name__ == "__main__":
+    main()

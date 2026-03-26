@@ -3,6 +3,26 @@ import { ChevronDown, ChevronUp } from 'lucide-react';
 import { TipBadge, PlayerName } from './StatTooltip';
 
 const fmt = (val) => (val !== null && val !== undefined ? String(val) : '\u2014');
+const fmtPct = (val) => {
+  if (val === null || val === undefined || val === '') return '\u2014';
+  const n = parseFloat(val);
+  return isNaN(n) ? '\u2014' : `${n.toFixed(1)}%`;
+};
+const fmt3 = (val) => {
+  if (val === null || val === undefined || val === '') return '\u2014';
+  // Already formatted like ".750"
+  if (typeof val === 'string' && val.startsWith('.')) return val;
+  const n = parseFloat(val);
+  if (isNaN(n)) return '\u2014';
+  const s = n.toFixed(3);
+  // Strip leading zero for values 0 ≤ n < 1 (batting average convention: .400 not 0.400)
+  return (n >= 0 && n < 1) ? s.replace(/^0/, '') : s;
+};
+const fmt2 = (val) => {
+  if (val === null || val === undefined || val === '') return '\u2014';
+  const n = parseFloat(val);
+  return isNaN(n) ? '\u2014' : n.toFixed(2);
+};
 
 const getStrengthBadges = (player) => {
   const b = player.batting || {};
@@ -42,15 +62,28 @@ const ExpandedStats = ({ player }) => {
       <div style={sectionStyle}>
         <div className="section-label">Batting</div>
         <div style={rowStyle}>
-          <TipBadge label="AVG" value={fmt(b.avg ?? player.avg)} />
-          <TipBadge label="OBP" value={fmt(b.obp ?? player.obp)} />
-          <TipBadge label="OPS" value={fmt(b.ops ?? player.ops)} />
+          <TipBadge label="AVG" value={fmt3(b.avg ?? player.avg)} />
+          <TipBadge label="OBP" value={fmt3(b.obp ?? player.obp)} />
+          <TipBadge label="SLG" value={fmt3(b.slg ?? player.slg)} />
+          <TipBadge label="OPS" value={fmt3(b.ops ?? player.ops)} />
         </div>
         <div style={rowGapStyle}>
+          <TipBadge label="GP" value={fmt(b.gp)} />
+          <TipBadge label="PA" value={fmt(b.pa ?? player.pa)} />
+          <TipBadge label="AB" value={fmt(b.ab ?? player.ab)} />
           <TipBadge label="H" value={fmt(b.h ?? player.h)} />
+          <TipBadge label="2B" value={fmt(b['2b'] ?? b.doubles)} />
+          <TipBadge label="3B" value={fmt(b['3b'] ?? b.triples)} />
+          <TipBadge label="HR" value={fmt(b.hr)} />
+        </div>
+        <div style={rowGapStyle}>
           <TipBadge label="RBI" value={fmt(b.rbi ?? player.rbi)} />
           <TipBadge label="R" value={fmt(b.r ?? player.r)} />
+          <TipBadge label="BB" value={fmt(b.bb)} />
+          <TipBadge label="HBP" value={fmt(b.hbp)} />
+          <TipBadge label="SO" value={fmt(b.so)} />
           <TipBadge label="SB" value={fmt(b.sb ?? player.sb)} />
+          <TipBadge label="SAC" value={fmt(b.sac)} />
         </div>
       </div>
 
@@ -59,16 +92,22 @@ const ExpandedStats = ({ player }) => {
         <div style={sectionStyle}>
           <div className="section-label">Batting Advanced</div>
           <div style={rowStyle}>
-            <TipBadge label="BABIP" value={fmt(ba.babip)} />
-            <TipBadge label="QAB%" value={fmt(ba.qab_pct)} />
-            <TipBadge label="BB/K" value={fmt(ba.bb_k)} />
-            <TipBadge label="TB" value={fmt(ba.tb)} />
+            <TipBadge label="BABIP" value={fmt3(ba.babip)} />
+            <TipBadge label="BA/RISP" value={fmt3(ba.ba_risp)} />
+            <TipBadge label="QAB%" value={fmtPct(ba.qab_pct)} />
+            <TipBadge label="BB/K" value={fmt(ba.bb_k ?? ba.bb_per_k)} />
           </div>
           <div style={rowGapStyle}>
-            <TipBadge label="FB%" value={fmt(ba.fb_pct)} />
-            <TipBadge label="GB%" value={fmt(ba.gb_pct)} />
-            <TipBadge label="LD%" value={fmt(ba.ld_pct)} />
-            <TipBadge label="PS/PA" value={fmt(ba.ps_pa)} />
+            <TipBadge label="TB" value={fmt(ba.tb)} />
+            <TipBadge label="XBH" value={fmt(ba.xbh)} />
+            <TipBadge label="PS/PA" value={ba.ps_pa != null ? parseFloat(ba.ps_pa).toFixed(2) : '\u2014'} />
+            <TipBadge label="QAB" value={fmt(ba.qab)} />
+          </div>
+          <div style={rowGapStyle}>
+            <TipBadge label="FB%" value={fmtPct(ba.fb_pct)} />
+            <TipBadge label="GB%" value={fmtPct(ba.gb_pct)} />
+            <TipBadge label="LD%" value={fmtPct(ba.ld_pct)} />
+            <TipBadge label="C%" value={fmtPct(ba.c_pct)} />
           </div>
         </div>
       )}
@@ -79,15 +118,30 @@ const ExpandedStats = ({ player }) => {
           <div className="section-label">Pitching</div>
           <div style={rowStyle}>
             <TipBadge label="IP" value={fmt(p.ip)} />
-            <TipBadge label="ERA" value={fmt(p.era)} />
-            <TipBadge label="WHIP" value={fmt(p.whip)} />
-            <TipBadge label="SO" value={fmt(p.so)} />
+            <TipBadge label="ERA" value={fmt2(p.era)} />
+            <TipBadge label="WHIP" value={fmt2(p.whip)} />
+            <TipBadge label="BAA" value={fmt3(p.baa)} />
           </div>
           <div style={rowGapStyle}>
             <TipBadge label="W-L" value={`${fmt(p.w)}-${fmt(p.l)}`} />
-            <TipBadge label="BAA" value={fmt(p.baa)} />
+            <TipBadge label="GP" value={fmt(p.gp)} />
+            <TipBadge label="GS" value={fmt(p.gs)} />
+            <TipBadge label="SV" value={fmt(p.sv)} />
+          </div>
+          <div style={rowGapStyle}>
+            <TipBadge label="BF" value={fmt(p.bf)} />
             <TipBadge label="#P" value={fmt(p.np)} />
+            <TipBadge label="SO" value={fmt(p.so)} />
+            <TipBadge label="KL" value={fmt(p.kl)} />
             <TipBadge label="BB" value={fmt(p.bb)} />
+            <TipBadge label="HBP" value={fmt(p.hbp)} />
+          </div>
+          <div style={rowGapStyle}>
+            <TipBadge label="H" value={fmt(p.h)} />
+            <TipBadge label="R" value={fmt(p.r)} />
+            <TipBadge label="ER" value={fmt(p.er)} />
+            <TipBadge label="WP" value={fmt(p.wp)} />
+            <TipBadge label="PIK" value={fmt(p.pik)} />
           </div>
         </div>
       )}
@@ -97,26 +151,33 @@ const ExpandedStats = ({ player }) => {
         <div style={sectionStyle}>
           <div className="section-label">Fielding</div>
           <div style={rowStyle}>
-            <TipBadge label="FPCT" value={fmt(f.fpct)} />
+            <TipBadge label="FPCT" value={fmt3(f.fpct)} />
             <TipBadge label="TC" value={fmt(f.tc)} />
             <TipBadge label="PO" value={fmt(f.po)} />
+            <TipBadge label="A" value={fmt(f.a)} />
             <TipBadge label="E" value={fmt(f.e)} />
           </div>
         </div>
       )}
 
       {/* Catching */}
-      {Object.keys(c).length > 0 && (
-        <div style={sectionStyle}>
-          <div className="section-label">Catching</div>
-          <div style={rowStyle}>
-            <TipBadge label="INN" value={fmt(c.inn)} />
-            <TipBadge label="CS%" value={fmt(c.cs_pct)} />
-            <TipBadge label="PB" value={fmt(c.pb)} />
-            <TipBadge label="SB-ATT" value={fmt(c.sb_att)} />
+      {Object.keys(c).length > 0 && (() => {
+        const sbAtt = c.sb_att || (c.sb != null && c.cs != null ? `${c.sb}-${c.sb + c.cs}` : null);
+        return (
+          <div style={sectionStyle}>
+            <div className="section-label">Catching</div>
+            <div style={rowStyle}>
+              <TipBadge label="INN" value={fmt(c.inn)} />
+              <TipBadge label="SB-ATT" value={fmt(sbAtt)} />
+              <TipBadge label="CS%" value={fmtPct(c.cs_pct)} />
+              <TipBadge label="PB" value={fmt(c.pb)} />
+              <TipBadge label="SB" value={fmt(c.sb)} />
+              <TipBadge label="CS" value={fmt(c.cs)} />
+              <TipBadge label="PIK" value={fmt(c.pik)} />
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Innings Played */}
       {Object.keys(ip).length > 0 && (
@@ -148,7 +209,10 @@ const Roster = ({ team, availability, isMobile = false }) => {
   if (!team || !team.roster) return <div className="loader"></div>;
 
   const filteredRoster = team.roster.filter(p => p.core !== false);
-  const sortedRoster = [...filteredRoster].sort((a, b) => (a.first || "").localeCompare(b.first || ""));
+  const sortedRoster = [...filteredRoster].sort((a, b) => {
+    const cmp = (a.first || '').localeCompare(b.first || '');
+    return cmp !== 0 ? cmp : (a.last || '').localeCompare(b.last || '');
+  });
   const totalCount = filteredRoster.length;
 
   return (
@@ -257,9 +321,9 @@ const Roster = ({ team, availability, isMobile = false }) => {
               {/* Collapsed: compact summary with key stat badges */}
               {!isExpanded && (
                 <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                  <TipBadge label="AVG" value={fmt(b.avg ?? player.avg)} />
-                  <TipBadge label="OBP" value={fmt(b.obp ?? player.obp)} />
-                  <TipBadge label="OPS" value={fmt(b.ops ?? player.ops)} />
+                  <TipBadge label="AVG" value={fmt3(b.avg ?? player.avg)} />
+                  <TipBadge label="OBP" value={fmt3(b.obp ?? player.obp)} />
+                  <TipBadge label="OPS" value={fmt3(b.ops ?? player.ops)} />
                 </div>
               )}
 

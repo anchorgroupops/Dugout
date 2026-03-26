@@ -1,40 +1,74 @@
 import React, { useState, useEffect } from 'react';
-import { AlertTriangle, TrendingUp, ShieldAlert, Target, ChevronDown, ChevronUp, Swords, Clock, Home, Plane, Zap, ThumbsDown } from 'lucide-react';
+import { AlertTriangle, TrendingUp, ShieldAlert, Target, ChevronDown, ChevronUp, Swords, Clock, Home, Plane, Zap, ThumbsDown, CheckCircle, AlertCircle, CircleDot, Shield, Eye } from 'lucide-react';
 import { getTodayEST, formatDateMMDDYYYY } from '../utils/formatDate';
 import { TipBadge, PlayerName } from './StatTooltip';
+import OpponentFieldMap from './OpponentFieldMap';
 
-const SwotQuadrant = ({ title, items, color, icon }) => (
-  <div>
-    <h4 className="swot-label" style={{ color }}>
-      {icon} {title}
-    </h4>
-    {items?.length > 0 ? (
-      <ul style={{ paddingLeft: '1.2rem', fontSize: 'var(--text-sm)', color: 'var(--text-muted)', margin: 0 }}>
-        {items.map((s, i) => <li key={i} style={{ marginBottom: '2px' }}>{s}</li>)}
-      </ul>
-    ) : (
-      <p style={{ fontSize: 'var(--text-sm)', color: 'rgba(255,255,255,0.3)', fontStyle: 'italic', margin: 0 }}>Need more data</p>
-    )}
-  </div>
-);
+const quadrantIcons = {
+  'Strengths': { Icon: CheckCircle, color: 'var(--success)' },
+  'Weaknesses': { Icon: AlertCircle, color: 'var(--danger)' },
+  'Opportunities': { Icon: TrendingUp, color: '#3b9ede' },
+  'Threats': { Icon: ShieldAlert, color: '#c87533' },
+};
 
-const StatCompare = ({ label, ours, theirs, lowerIsBetter }) => {
-  const diff = lowerIsBetter ? theirs - ours : ours - theirs;
-  const color = diff > 0 ? 'var(--success)' : diff < 0 ? 'var(--danger)' : 'var(--text-muted)';
+const SwotQuadrant = ({ title, items, color, icon }) => {
+  const itemIcon = quadrantIcons[title] || null;
   return (
-    <div style={{
-      display: 'grid', gridTemplateColumns: '70px 60px 30px 60px', alignItems: 'center',
-      gap: '0.25rem', padding: '0.4rem 0', fontSize: 'var(--text-sm)'
-    }}>
-      <span style={{ color: 'var(--text-muted)', fontSize: 'var(--text-xs)', textTransform: 'uppercase' }}>{label}</span>
-      <span style={{ textAlign: 'right', fontWeight: '600', color }}>{ours}</span>
-      <span style={{ textAlign: 'center', color: 'rgba(255,255,255,0.2)', fontSize: 'var(--text-xs)' }}>vs</span>
-      <span style={{ fontWeight: '600', color: 'var(--text-muted)' }}>{theirs}</span>
+    <div>
+      <h4 className="swot-label" style={{ color }}>
+        {icon} {title}
+      </h4>
+      {items?.length > 0 ? (
+        <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', margin: 0, display: 'flex', flexDirection: 'column', gap: '3px' }}>
+          {items.map((s, i) => {
+            const ItemIcon = itemIcon?.Icon;
+            return (
+              <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: '0.4rem' }}>
+                {ItemIcon && <ItemIcon size={14} color={itemIcon.color} style={{ flexShrink: 0, marginTop: '2px' }} />}
+                <span>{s}</span>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <p style={{ fontSize: 'var(--text-sm)', color: 'rgba(255,255,255,0.3)', fontStyle: 'italic', margin: 0 }}>Need more data</p>
+      )}
     </div>
   );
 };
 
-const MatchupPanel = ({ defaultOpponent }) => {
+const fmtStat = (v) => {
+  if (v == null || v === '' || v === 0 || v === '0' || v === '0.0') return '\u2014';
+  const n = Number(v);
+  if (isNaN(n)) return v;
+  if (n === 0) return '\u2014';
+  // Rates between 0-1 → .xxx format; percentages/larger values → as-is
+  if (n > 0 && n < 1) return n.toFixed(3).replace(/^0/, '');
+  if (Number.isInteger(n)) return String(n);
+  return n.toFixed(2);
+};
+
+const StatCompare = ({ label, ours, theirs, lowerIsBetter }) => {
+  const oFmt = fmtStat(ours);
+  const tFmt = fmtStat(theirs);
+  const oNum = Number(ours || 0);
+  const tNum = Number(theirs || 0);
+  const diff = lowerIsBetter ? tNum - oNum : oNum - tNum;
+  const color = (oFmt === '\u2014' || tFmt === '\u2014') ? 'var(--text-muted)' : diff > 0 ? 'var(--success)' : diff < 0 ? 'var(--danger)' : 'var(--text-muted)';
+  return (
+    <div style={{
+      display: 'grid', gridTemplateColumns: 'minmax(0, 70px) minmax(0, 60px) 30px minmax(0, 60px)', alignItems: 'center',
+      gap: '0.25rem', padding: '0.4rem 0', fontSize: 'var(--text-sm)'
+    }}>
+      <span style={{ color: 'var(--text-muted)', fontSize: 'var(--text-xs)', textTransform: 'uppercase' }}>{label}</span>
+      <span style={{ textAlign: 'right', fontWeight: '600', color }}>{oFmt}</span>
+      <span style={{ textAlign: 'center', color: 'rgba(255,255,255,0.2)', fontSize: 'var(--text-xs)' }}>vs</span>
+      <span style={{ fontWeight: '600', color: 'var(--text-muted)' }}>{tFmt}</span>
+    </div>
+  );
+};
+
+const MatchupPanel = ({ defaultOpponent, isMobile = false }) => {
   const [opponents, setOpponents] = useState([]);
   const [selected, setSelected] = useState('');
   const [matchup, setMatchup] = useState(null);
@@ -149,6 +183,7 @@ const MatchupPanel = ({ defaultOpponent }) => {
 
           {!matchup.empty && (
             <>
+              <div style={{ overflowX: 'auto', maxWidth: '100%' }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', marginBottom: '1rem' }}>
                 <div>
                   <div className="section-label">Batting</div>
@@ -168,6 +203,7 @@ const MatchupPanel = ({ defaultOpponent }) => {
                   <StatCompare label="K/IP" ours={matchup.our_stats.pitching.k_per_ip} theirs={matchup.their_stats.pitching.k_per_ip} />
                   <StatCompare label="FPCT" ours={matchup.our_stats.fielding.fpct} theirs={matchup.their_stats.fielding.fpct} />
                 </div>
+              </div>
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
@@ -235,6 +271,11 @@ const MatchupPanel = ({ defaultOpponent }) => {
                   </div>
                 </div>
               )}
+
+              {/* ── Opponent Field Tendencies (spray chart inference) ── */}
+              <div style={{ marginTop: '1rem', paddingTop: '0.75rem', borderTop: '1px solid var(--surface-border)' }}>
+                <OpponentFieldMap matchup={matchup} isMobile={isMobile} />
+              </div>
             </>
           )}
         </div>
@@ -273,15 +314,28 @@ const UpcomingGameBanner = ({ next }) => {
   );
 };
 
+/** Map a SWOT text string to a skill-specific icon component */
+const getSkillIcon = (text) => {
+  const t = (text || '').toLowerCase();
+  if (/bat|hit|contact|slug|avg|obp|ops/.test(t)) return CircleDot;
+  if (/field|defense|glove|catch/.test(t)) return Shield;
+  if (/speed|base|run|steal/.test(t)) return Zap;
+  if (/pitch|throw|control|strike/.test(t)) return Target;
+  if (/eye|walk|discipline|patient/.test(t)) return Eye;
+  return TrendingUp;
+};
+
 /** Compact player card with collapsible detail */
 const PlayerSwotCard = ({ player, isMobile, isExpanded, onToggle }) => {
   const hitting = player.derivedStats?.hitting || {};
   const pa = Number(hitting.pa || 0);
-  const avg = Number(hitting.ba || 0).toFixed(3).replace(/^0/, '');
-  const obp = Number(hitting.obp || 0).toFixed(3).replace(/^0/, '');
-  const ops = Number(hitting.ops || 0).toFixed(3).replace(/^0/, '');
-  const kRate = `${Math.round(Number(hitting.k_rate || 0) * 100)}%`;
-  const bbRate = `${Math.round(Number(hitting.bb_rate || 0) * 100)}%`;
+  const fmtRate = (v) => { const n = Number(v || 0); return n === 0 ? '\u2014' : n.toFixed(3).replace(/^0/, ''); };
+  const fmtPct = (v) => { const n = Number(v || 0); return n === 0 ? '\u2014' : `${Math.round(n * 100)}%`; };
+  const avg = fmtRate(hitting.ba);
+  const obp = fmtRate(hitting.obp);
+  const ops = fmtRate(hitting.ops);
+  const kRate = fmtPct(hitting.k_rate);
+  const bbRate = fmtPct(hitting.bb_rate);
 
   const strengths = player.swot?.strengths || [];
   const weaknesses = player.swot?.weaknesses || [];
@@ -297,6 +351,7 @@ const PlayerSwotCard = ({ player, isMobile, isExpanded, onToggle }) => {
       {/* Collapsed header: name, number, key badges, trait icons */}
       <div style={{
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        overflow: 'hidden',
         marginBottom: isExpanded ? '0.75rem' : 0,
         paddingBottom: isExpanded ? '0.5rem' : 0,
         borderBottom: isExpanded ? '1px solid var(--surface-border)' : 'none'
@@ -310,26 +365,32 @@ const PlayerSwotCard = ({ player, isMobile, isExpanded, onToggle }) => {
           />
           {/* Compact stat badges — always visible */}
           {pa > 0 ? (
-            <span style={{ display: 'inline-flex', gap: '0.3rem', flexWrap: 'wrap' }}>
+            <span style={{ display: 'inline-flex', gap: '0.3rem', flexWrap: 'wrap', minWidth: 0 }}>
               <TipBadge label="AVG" value={avg} />
               <TipBadge label="OBP" value={obp} />
               {!isMobile && <TipBadge label="OPS" value={ops} />}
             </span>
           ) : (
-            <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', fontStyle: 'italic' }}>No PAs</span>
+            <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', fontStyle: 'italic', minWidth: 0 }}>No PAs</span>
           )}
-          {/* Trait icons for quick scanning */}
-          <span style={{ display: 'inline-flex', gap: '0.25rem', alignItems: 'center' }}>
-            {hasStrengths && (
-              <span title={`Strengths: ${strengths.length}`} style={{ color: 'var(--success)', display: 'inline-flex', alignItems: 'center' }}>
-                <Zap size={14} />
-              </span>
-            )}
-            {hasWeaknesses && (
-              <span title={`Areas for growth: ${weaknesses.length}`} style={{ color: 'var(--danger)', display: 'inline-flex', alignItems: 'center' }}>
-                <ThumbsDown size={14} />
-              </span>
-            )}
+          {/* Skill-specific trait icons for quick scanning */}
+          <span style={{ display: 'inline-flex', gap: '0.25rem', alignItems: 'center', minWidth: 0 }}>
+            {hasStrengths && strengths.slice(0, 3).map((s, i) => {
+              const SkillIcon = getSkillIcon(s);
+              return (
+                <span key={`s-${i}`} title={s} style={{ color: 'var(--success)', display: 'inline-flex', alignItems: 'center' }}>
+                  <SkillIcon size={14} />
+                </span>
+              );
+            })}
+            {hasWeaknesses && weaknesses.slice(0, 3).map((w, i) => {
+              const SkillIcon = getSkillIcon(w);
+              return (
+                <span key={`w-${i}`} title={w} style={{ color: 'var(--danger)', display: 'inline-flex', alignItems: 'center' }}>
+                  <SkillIcon size={14} />
+                </span>
+              );
+            })}
           </span>
         </div>
         {isExpanded ? <ChevronUp size={18} color="var(--text-muted)" /> : <ChevronDown size={18} color="var(--text-muted)" />}
@@ -357,7 +418,7 @@ const PlayerSwotCard = ({ player, isMobile, isExpanded, onToggle }) => {
           {/* Full SWOT quadrants */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
             <SwotQuadrant title="Strengths" items={strengths} color="var(--success)" icon={<TrendingUp size={13} />} />
-            <SwotQuadrant title="Areas for Growth" items={weaknesses} color="var(--danger)" icon={<AlertTriangle size={13} />} />
+            <SwotQuadrant title="Weaknesses" items={weaknesses} color="var(--danger)" icon={<AlertTriangle size={13} />} />
             <SwotQuadrant title="Opportunities" items={player.swot?.opportunities} color="#3b9ede" icon={<Target size={13} />} />
             <SwotQuadrant title="Threats" items={player.swot?.threats} color="var(--warning)" icon={<ShieldAlert size={13} />} />
           </div>
@@ -416,7 +477,7 @@ const Swot = ({ swotData, roster, schedule, isMobile = false }) => {
             </h3>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.85rem' }}>
               <SwotQuadrant title="Strengths" items={(teamSwot.strengths || []).slice(0, 4)} color="var(--success)" icon={<TrendingUp size={14} />} />
-              <SwotQuadrant title="Areas for Growth" items={(teamSwot.weaknesses || []).slice(0, 4)} color="var(--danger)" icon={<AlertTriangle size={14} />} />
+              <SwotQuadrant title="Weaknesses" items={(teamSwot.weaknesses || []).slice(0, 4)} color="var(--danger)" icon={<AlertTriangle size={14} />} />
               <SwotQuadrant title="Opportunities" items={(teamSwot.opportunities || []).slice(0, 4)} color="#3b9ede" icon={<Target size={14} />} />
               <SwotQuadrant title="Threats" items={(teamSwot.threats || []).slice(0, 4)} color="var(--warning)" icon={<ShieldAlert size={14} />} />
             </div>
@@ -428,7 +489,7 @@ const Swot = ({ swotData, roster, schedule, isMobile = false }) => {
             </h3>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1.25rem' }}>
               <SwotQuadrant title="Strengths" items={teamSwot.strengths} color="var(--success)" icon={<TrendingUp size={14} />} />
-              <SwotQuadrant title="Areas for Growth" items={teamSwot.weaknesses} color="var(--danger)" icon={<AlertTriangle size={14} />} />
+              <SwotQuadrant title="Weaknesses" items={teamSwot.weaknesses} color="var(--danger)" icon={<AlertTriangle size={14} />} />
               <SwotQuadrant title="Opportunities" items={teamSwot.opportunities} color="#3b9ede" icon={<Target size={14} />} />
               <SwotQuadrant title="Threats" items={teamSwot.threats} color="var(--warning)" icon={<ShieldAlert size={14} />} />
             </div>
@@ -462,10 +523,10 @@ const Swot = ({ swotData, roster, schedule, isMobile = false }) => {
                 {showMatchup ? 'Hide Matchup' : 'Show Matchup'}
               </button>
             </div>
-            {showMatchup && <div style={{ marginTop: '0.75rem' }}><MatchupPanel defaultOpponent={nextGame?.opponent} /></div>}
+            {showMatchup && <div style={{ marginTop: '0.75rem' }}><MatchupPanel defaultOpponent={nextGame?.opponent} isMobile={isMobile} /></div>}
           </div>
         ) : (
-          <MatchupPanel defaultOpponent={nextGame?.opponent} />
+          <MatchupPanel defaultOpponent={nextGame?.opponent} isMobile={isMobile} />
         )}
       </div>
 

@@ -138,8 +138,10 @@ def slot_players(sorted_players: list[dict]) -> list[dict]:
     # Find best leadoff candidate: highest OBP + speed combo
     # Apply regression to mean for small samples (< 8 PA) to prevent 3-PA
     # players with 1.000 OBP from outranking proven hitters.
+    # Hard minimum: only players with >= 5 PA are eligible for leadoff.
     LEAGUE_AVG_OBP = 0.380  # youth softball league average
     MIN_PA_FULL_WEIGHT = 8  # PA threshold for full stat trust
+    MIN_PA_LEADOFF = 5      # Hard minimum PA to be leadoff-eligible
     leadoff_scores = []
     for i, p in enumerate(pool):
         hitting = normalize_player_batting(p)
@@ -157,7 +159,12 @@ def slot_players(sorted_players: list[dict]) -> list[dict]:
         speed = sb / max(pa, 1)
         # qab_pct is 0-100 scale from GC; normalize to 0-1 for scoring
         qab_pct = min(hitting_adv.get("qab_pct", 0.0), 100.0) / 100.0
-        leadoff_scores.append((i, obp * 0.60 + speed * 0.25 + qab_pct * 0.15))
+        score = obp * 0.60 + speed * 0.25 + qab_pct * 0.15
+        # Players below the minimum PA threshold get a large penalty so they
+        # cannot leapfrog proven hitters into the leadoff spot.
+        if pa < MIN_PA_LEADOFF:
+            score *= 0.50
+        leadoff_scores.append((i, score))
 
     leadoff_scores.sort(key=lambda x: x[1], reverse=True)
     leadoff_idx = leadoff_scores[0][0]
