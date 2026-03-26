@@ -1402,12 +1402,24 @@ def _build_games_feed(include_detail: bool = False) -> list[dict]:
     if index_path.exists():
         pdf_games = _read_json_file(index_path, default=[]) or []
 
-    # Load schedule W/L results
+    # Load schedule W/L results — also include upcoming games with past dates (self-healing)
+    today_str = datetime.now(ET).strftime("%Y-%m-%d")
     sched_results = []
     if schedule_file.exists():
         sched_data = _read_json_file(schedule_file, default={}) or {}
         for g in sched_data.get("past", []):
             if g.get("result"):
+                sched_results.append(g)
+        # Also include upcoming games that have since passed, even without result
+        # so they show up in the feed (result derived from GC data later)
+        for g in sched_data.get("upcoming", []):
+            g_date = (g.get("date") or "")[:10]
+            if g_date and g_date <= today_str and not any(
+                sr.get("date", "")[:10] == g_date and
+                _re.sub(r'[^a-z0-9]', '', (sr.get("opponent") or "").lower()) in
+                _re.sub(r'[^a-z0-9]', '', (g.get("opponent") or "").lower())
+                for sr in sched_results
+            ):
                 sched_results.append(g)
 
     def _slug(name: str) -> str:
@@ -1419,9 +1431,40 @@ def _build_games_feed(include_detail: bool = False) -> list[dict]:
         for sg in sched_results:
             sg_opp = _clean_opponent_name(sg.get("opponent", ""))
             if _slug(sg_opp) and (_slug(sg_opp) in opp_slug or opp_slug in _slug(sg_opp)):
-                game["result"] = sg.get("result", "")
-                game["score"] = sg.get("score", "")
+                if sg.get("result"):
+                    game["result"] = sg.get("result", "")
+                if sg.get("score"):
+                    game["score"] = sg.get("score", "")
                 break
+
+    # Self-heal: backfill result/score for PDF games from GC UUID game files by date match
+    if games_dir.exists():
+        for game in pdf_games:
+            if game.get("result") and game.get("score"):
+                continue  # already enriched
+            g_date = (game.get("date") or "")[:10]
+            if not g_date:
+                continue
+            for gf in games_dir.glob("game_*.json"):
+                try:
+                    gdata = _read_json_file(gf, default={}) or {}
+                    if (gdata.get("date") or "")[:10] != g_date:
+                        continue
+                    # Verify it's a real GC game file (has sharks block or score)
+                    sc = gdata.get("score", {})
+                    sh = sc.get("sharks") if isinstance(sc, dict) else None
+                    op = sc.get("opponent") if isinstance(sc, dict) else None
+                    if sh is None or op is None:
+                        continue
+                    gc_result = "W" if sh > op else ("L" if sh < op else "T")
+                    gc_score_str = gdata.get("score_str") or f"{sh}-{op}"
+                    if not game.get("result"):
+                        game["result"] = gdata.get("result") or gc_result
+                    if not game.get("score"):
+                        game["score"] = gc_score_str
+                    break
+                except Exception:
+                    continue
 
     # Optional detail: attach full player batting data
     if include_detail:
