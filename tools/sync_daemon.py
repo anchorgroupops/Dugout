@@ -1023,6 +1023,42 @@ def run_sync_cycle():
         except Exception as e:
             logging.warning(f"[Sync] Practice planner skipped: {e}")
 
+        # Full-depth GC scrape: all stat tabs, both teams, every game.
+        try:
+            from gc_full_scraper import GCFullScraper
+            full_scraper = GCFullScraper()
+            full_result = full_scraper.run_full_sync()
+            logging.info(
+                "[Sync] gc_full_scraper: scraped=%s skipped=%s failed=%s team_stats=%s",
+                full_result.get("games_scraped", 0),
+                full_result.get("games_skipped", 0),
+                full_result.get("games_failed", 0),
+                full_result.get("team_stats_scraped", False),
+            )
+        except Exception as e:
+            logging.warning(f"[Sync] gc_full_scraper skipped: {e}")
+
+        # Automated CSV download + ingest.
+        try:
+            from gc_csv_auto import run_auto_csv
+            csv_result = run_auto_csv(headless=True, skip_ingest=False)
+            logging.info(
+                "[Sync] gc_csv_auto: downloaded=%s ingest_ok=%s path=%s",
+                csv_result.get("csv_downloaded"),
+                csv_result.get("ingest_success"),
+                csv_result.get("csv_path"),
+            )
+        except Exception as e:
+            logging.warning(f"[Sync] gc_csv_auto skipped: {e}")
+
+        # NotebookLM payload rebuild with all new data.
+        try:
+            from notebooklm_sync import prepare_notebooklm_payload
+            prepare_notebooklm_payload()
+            logging.info("[Sync] NotebookLM payload refreshed.")
+        except Exception as e:
+            logging.warning(f"[Sync] notebooklm_sync skipped: {e}")
+
         # Refresh pipeline coverage metrics artifact
         try:
             _write_pipeline_health_artifact()
@@ -1411,6 +1447,70 @@ def _build_games_feed(include_detail: bool = False) -> list[dict]:
                 "sharks_totals": None,
             })
 
+    # --- Also surface new-format games from gc_full_scraper_v2 not in index.json ---
+    indexed_ids = {g.get("game_id") for g in pdf_games}
+    if games_dir.exists():
+        for gf in sorted(games_dir.glob("*.json")):
+            if gf.name == "index.json":
+                continue
+            try:
+                gdata = _read_json_file(gf, default={}) or {}
+                if gdata.get("source") != "gc_full_scraper_v2":
+                    continue
+                gid = gdata.get("game_id") or gf.stem
+                if gid in indexed_ids:
+                    continue
+                # Build a summary entry compatible with the dashboard GameCard
+                sc = gdata.get("score", {})
+                sh = sc.get("sharks") if isinstance(sc, dict) else None
+                op = sc.get("opponent") if isinstance(sc, dict) else None
+                score_str = f"{sh}-{op}" if sh is not None and op is not None else ""
+                # Derive result from score
+                result = ""
+                if sh is not None and op is not None:
+                    result = "W" if sh > op else ("L" if sh < op else "T")
+                sharks_batting = (gdata.get("sharks") or {}).get("batting") or []
+                totals: dict = {}
+                if sharks_batting:
+                    def _s(lst, k):
+                        try:
+                            return sum(int(r.get(k) or 0) for r in lst)
+                        except Exception:
+                            return 0
+                    totals = {
+                        "pa": _s(sharks_batting, "pa"),
+                        "ab": _s(sharks_batting, "ab"),
+                        "h":  _s(sharks_batting, "h"),
+                        "doubles": _s(sharks_batting, "doubles"),
+                        "triples": _s(sharks_batting, "triples"),
+                        "hr":  _s(sharks_batting, "hr"),
+                        "rbi": _s(sharks_batting, "rbi"),
+                        "r":   _s(sharks_batting, "r"),
+                        "bb":  _s(sharks_batting, "bb"),
+                        "hbp": _s(sharks_batting, "hbp"),
+                        "so":  _s(sharks_batting, "so"),
+                        "sb":  _s(sharks_batting, "sb"),
+                    }
+                pdf_games.append({
+                    "game_id":     gid,
+                    "date":        gdata.get("date", ""),
+                    "opponent":    gdata.get("opponent", ""),
+                    "sharks_side": gdata.get("sharks_side", ""),
+                    "result":      gdata.get("result", "") or result,
+                    "score":       gdata.get("score_str", score_str),
+                    "sharks_totals": totals or None,
+                    "source":      "gc_full_scraper_v2",
+                })
+                indexed_ids.add(gid)
+            except Exception as _e:
+                logging.debug(f"_build_games_feed new-format read error {gf.name}: {_e}")
+
+    # De-duplicate: prefer GC-scraped games over PDF games for the same date
+    gc_dates = {g["date"] for g in pdf_games if g.get("source") == "gc_full_scraper_v2" and g.get("date")}
+    pdf_games = [g for g in pdf_games if not (
+        g.get("source") != "gc_full_scraper_v2" and g.get("date") in gc_dates
+    )]
+
     pdf_games.sort(key=lambda x: x.get("date", ""), reverse=True)
     return pdf_games
 
@@ -1457,12 +1557,70 @@ def handle_league_players():
 
 @app.route('/api/games/<game_id>', methods=['GET'])
 def handle_game_detail(game_id):
-    """Return full detail for a single game."""
+    """Return full detail for a single game.
+    Normalises both legacy (sharks_batting) and new (sharks.batting) formats
+    so the dashboard always receives the shape it expects."""
     game_file = SHARKS_DIR / "games" / f"{game_id}.json"
     if not game_file.exists():
         return jsonify({"error": "Not found"}), 404
     with open(game_file) as f:
-        return jsonify(json.load(f))
+        data = json.load(f)
+
+    def _strip_team_totals_row(rows: list) -> list:
+        """Remove the AG Grid pinned-bottom team totals row from a batting/adv list.
+        The totals row has aria-rowindex=2 (now filtered by scraper i > 2) but may
+        survive in older scraped files.  Heuristic: the first row whose PA equals or
+        exceeds the sum of all subsequent rows' PA is a totals row, not a player."""
+        if not rows or len(rows) < 2:
+            return rows
+        try:
+            first_pa = int(rows[0].get("pa") or 0)
+            rest_pa  = sum(int(r.get("pa") or 0) for r in rows[1:])
+            # totals row PA == team total == sum of player PAs (allow ±1 rounding)
+            if first_pa > 0 and rest_pa > 0 and abs(first_pa - rest_pa) <= 1:
+                return rows[1:]
+        except Exception:
+            pass
+        return rows
+
+    # --- Backward-compat bridge: new format → legacy fields ---
+    # New format: data["sharks"] = {batting: [...], pitching: [...], ...}
+    # Legacy format: data["sharks_batting"] = [...]
+    if "sharks" in data and isinstance(data["sharks"], dict):
+        sharks_block = data["sharks"]
+        if "sharks_batting" not in data:
+            data["sharks_batting"] = _strip_team_totals_row(sharks_block.get("batting") or [])
+        if "sharks_pitching" not in data:
+            data["sharks_pitching"] = sharks_block.get("pitching") or []
+        if "sharks_fielding" not in data:
+            data["sharks_fielding"] = sharks_block.get("fielding") or []
+        # Enrich: expose all stat categories under explicit top-level keys
+        for key in ("batting_advanced", "pitching_advanced", "pitching_breakdown",
+                    "catching", "innings_played"):
+            if key not in data and key in sharks_block:
+                raw = sharks_block[key]
+                # Strip totals row from batting_advanced too
+                if key == "batting_advanced":
+                    raw = _strip_team_totals_row(raw or [])
+                data[f"sharks_{key}"] = raw
+
+    # --- Opponent stats bridge ---
+    if "opponent_stats" in data and isinstance(data["opponent_stats"], dict):
+        opp_block = data["opponent_stats"]
+        if "opponent_batting" not in data:
+            data["opponent_batting"] = opp_block.get("batting") or []
+        if "opponent_pitching" not in data:
+            data["opponent_pitching"] = opp_block.get("pitching") or []
+
+    # --- Score bridge: {sharks: 11, opponent: 10} → "11-10" string ---
+    if isinstance(data.get("score"), dict) and "score_str" not in data:
+        sc = data["score"]
+        sh = sc.get("sharks")
+        op = sc.get("opponent")
+        if sh is not None and op is not None:
+            data["score_str"] = f"{sh}-{op}"
+
+    return jsonify(data)
 
 
 @app.route('/api/standings', methods=['GET'])
@@ -1912,6 +2070,42 @@ def handle_team():
     _enrich_team_with_app_stats(team)
     _merge_team_with_scorebook_stats(team)
     team["team_name"] = _canonical_team_name(team.get("team_name", "The Sharks"), "sharks")
+
+    # Supplement with richer stats from team.json (CSV-ingested) when fields are missing
+    # team.json has: catching, innings_played, pitching_advanced, pitching_breakdown, babip, etc.
+    base_team_file = SHARKS_DIR / "team.json"
+    if base_team_file.exists() and base_team_file != team_file:
+        base_team = _read_json_file(base_team_file, default={}) or {}
+        base_by_name = {}
+        for bp in base_team.get("roster", []):
+            first = (bp.get("first") or "").strip().lower()
+            last = (bp.get("last") or "").strip().lower()
+            num = str(bp.get("number") or "").strip()
+            if first:
+                base_by_name[f"{first} {last}".strip()] = bp
+            if num:
+                base_by_name[f"#{num}"] = bp
+        SUPPLEMENT_KEYS = ["catching", "innings_played", "pitching_advanced", "pitching_breakdown"]
+        ADV_SUPPLEMENT = ["babip", "ps", "ps_pa", "tb", "xbh", "two_out_rbi", "ba_risp",
+                          "qab_pct", "lob", "two_s_three", "six_plus", "gidp", "gitp"]
+        for player in team.get("roster", []):
+            first = (player.get("first") or "").strip().lower()
+            last = (player.get("last") or "").strip().lower()
+            num = str(player.get("number") or "").strip()
+            bp = base_by_name.get(f"{first} {last}".strip()) or base_by_name.get(f"#{num}")
+            if not bp:
+                continue
+            # Add missing top-level stat blocks
+            for key in SUPPLEMENT_KEYS:
+                if not player.get(key) and bp.get(key):
+                    player[key] = bp[key]
+            # Supplement batting_advanced with extra fields from CSV
+            if isinstance(player.get("batting_advanced"), dict) and isinstance(bp.get("batting_advanced"), dict):
+                adv = player["batting_advanced"]
+                base_adv = bp["batting_advanced"]
+                for k in ADV_SUPPLEMENT:
+                    if adv.get(k) is None and base_adv.get(k) is not None:
+                        adv[k] = base_adv[k]
 
     # Sort roster alphabetically by first name for consistent display
     if isinstance(team.get("roster"), list):

@@ -3,31 +3,71 @@ import { Calendar, ChevronDown, ChevronUp, Home, Plane, Clock } from 'lucide-rea
 import { getTodayEST, formatDateMMDDYYYY } from '../utils/formatDate';
 import { TipBadge, PlayerName } from './StatTooltip';
 
+// ─── Normalisation helpers ───────────────────────────────────────────────────
+// GC-scraped rows are flat { name, pa, ab, h, ... }
+// Legacy PDF rows are      { name, pos, batting: { pa, ab, h, ... } }
+// Normalise to always return { name, number, pos, at_bats_raw, batting, pitching, fielding, ... }
+
+const normBatting = (row) => {
+  if (!row) return {};
+  if (row.batting && typeof row.batting === 'object') return row.batting;
+  // Flat GC format — extract known batting keys
+  const BATTING_KEYS = ['pa','ab','h','singles','doubles','triples','hr','rbi','r','bb','hbp','sac','sf','so','kl','avg','obp','slg','ops','sb'];
+  const b = {};
+  BATTING_KEYS.forEach(k => { if (row[k] != null) b[k] = row[k]; });
+  return b;
+};
+
+const normAdvBatting = (row) => {
+  if (!row) return null;
+  const ADV_KEYS = ['pa','tb','xbh','ba_risp','babip','ps','ps_pa','qab','two_out_rbi','hhb','qab_pct','bb_per_k','ld_pct','fb_pct','gb_pct','c_pct'];
+  const b = {};
+  ADV_KEYS.forEach(k => { if (row[k] != null) b[k] = row[k]; });
+  return Object.keys(b).length ? b : null;
+};
+
+const fmt3 = (v) => {
+  if (v == null || v === '') return null;
+  const n = parseFloat(v);
+  return isNaN(n) ? null : n.toFixed(3);
+};
+const fmtPct = (v) => {
+  if (v == null || v === '') return null;
+  const n = parseFloat(v);
+  return isNaN(n) ? null : `${(n * 100).toFixed(1)}%`;
+};
+
+// ─── Player row components ────────────────────────────────────────────────────
 const PlayerBattingRow = ({ player }) => {
-  const b = player.batting || {};
+  const b = normBatting(player);
+  const name = player.name || player.player;
+  const number = player.number || player.jersey;
+  const pos = player.pos;
   return (
     <div style={{
-      display: 'flex',
-      alignItems: 'center',
-      gap: '0.75rem',
-      padding: '0.5rem 0.75rem',
-      borderRadius: '6px',
-      background: 'rgba(0,0,0,0.15)',
-      flexWrap: 'wrap'
+      display: 'flex', alignItems: 'center', gap: '0.75rem',
+      padding: '0.5rem 0.75rem', borderRadius: '6px',
+      background: 'rgba(0,0,0,0.15)', flexWrap: 'wrap'
     }}>
       <div style={{ minWidth: '120px' }}>
-        <PlayerName name={player.name} number={player.number} size="sm" />
-        {player.pos && <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginLeft: '0.4rem' }}>({player.pos})</span>}
+        <PlayerName name={name} number={number} size="sm" />
+        {pos && <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginLeft: '0.4rem' }}>({pos})</span>}
       </div>
       <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
         <TipBadge label="PA" value={b.pa} />
         <TipBadge label="AB" value={b.ab} />
         <TipBadge label="H" value={b.h} />
+        <TipBadge label="2B" value={b.doubles} />
+        <TipBadge label="3B" value={b.triples} />
+        <TipBadge label="HR" value={b.hr} />
         <TipBadge label="BB" value={b.bb} />
         <TipBadge label="HBP" value={b.hbp} />
         <TipBadge label="SO" value={b.so} />
-        <TipBadge label="AVG" value={b.avg != null ? b.avg.toFixed(3) : null} />
-        <TipBadge label="OBP" value={b.obp != null ? b.obp.toFixed(3) : null} />
+        <TipBadge label="RBI" value={b.rbi} />
+        <TipBadge label="R" value={b.r} />
+        <TipBadge label="SB" value={b.sb} />
+        <TipBadge label="AVG" value={fmt3(b.avg)} />
+        <TipBadge label="OBP" value={fmt3(b.obp)} />
       </div>
       {player.at_bats_raw?.length > 0 && (
         <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', fontStyle: 'italic' }}>
@@ -38,27 +78,234 @@ const PlayerBattingRow = ({ player }) => {
   );
 };
 
-const ResultBadge = ({ result, score }) => {
-  if (!result) return null;
-  const isWin = result === 'W';
-  const parts = (score || '').split('-');
-  const sharksScore = isWin ? Math.max(...parts.map(Number)) : Math.min(...parts.map(Number));
-  const oppScore = isWin ? Math.min(...parts.map(Number)) : Math.max(...parts.map(Number));
+const PlayerAdvBattingRow = ({ player }) => {
+  const b = normAdvBatting(player);
+  if (!b) return null;
+  const name = player.name || player.player;
+  const number = player.number || player.jersey;
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-      <span className={`result-badge ${isWin ? 'result-badge--win' : 'result-badge--loss'}`}>{result}</span>
-      {score && <span style={{ fontSize: 'var(--text-base)', fontWeight: '700', color: '#fff' }}>{sharksScore}\u2013{oppScore}</span>}
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: '0.75rem',
+      padding: '0.5rem 0.75rem', borderRadius: '6px',
+      background: 'rgba(0,0,0,0.15)', flexWrap: 'wrap'
+    }}>
+      <div style={{ minWidth: '120px' }}>
+        <PlayerName name={name} number={number} size="sm" />
+      </div>
+      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+        <TipBadge label="PA" value={b.pa} />
+        <TipBadge label="TB" value={b.tb} />
+        <TipBadge label="XBH" value={b.xbh} />
+        <TipBadge label="QAB" value={b.qab} />
+        <TipBadge label="QAB%" value={fmtPct(b.qab_pct != null ? b.qab_pct / 100 : null) ?? (b.qab != null && b.pa ? `${((b.qab / b.pa) * 100).toFixed(1)}%` : null)} />
+        <TipBadge label="PS/PA" value={b.ps_pa != null ? parseFloat(b.ps_pa).toFixed(2) : null} />
+        <TipBadge label="BABIP" value={fmt3(b.babip)} />
+        <TipBadge label="BA/RISP" value={fmt3(b.ba_risp)} />
+        <TipBadge label="LD%" value={fmtPct(b.ld_pct != null ? b.ld_pct / 100 : null)} />
+        <TipBadge label="GB%" value={fmtPct(b.gb_pct != null ? b.gb_pct / 100 : null)} />
+        <TipBadge label="FB%" value={fmtPct(b.fb_pct != null ? b.fb_pct / 100 : null)} />
+        <TipBadge label="HHB" value={b.hhb} />
+        <TipBadge label="2-Out RBI" value={b.two_out_rbi} />
+      </div>
     </div>
   );
 };
 
-const GameCard = ({ game, onExpand, isExpanded, detail, isMobile = false }) => {
+const PlayerPitchingRow = ({ player }) => {
+  const name = player.name || player.player;
+  const number = player.number || player.jersey;
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: '0.75rem',
+      padding: '0.5rem 0.75rem', borderRadius: '6px',
+      background: 'rgba(0,0,0,0.15)', flexWrap: 'wrap'
+    }}>
+      <div style={{ minWidth: '120px' }}>
+        <PlayerName name={name} number={number} size="sm" />
+      </div>
+      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+        <TipBadge label="IP" value={player.ip != null ? parseFloat(player.ip).toFixed(1) : null} />
+        <TipBadge label="GS" value={player.gs} />
+        <TipBadge label="BF" value={player.bf} />
+        <TipBadge label="#P" value={player.np} />
+        <TipBadge label="H" value={player.h} />
+        <TipBadge label="R" value={player.r} />
+        <TipBadge label="ER" value={player.er} />
+        <TipBadge label="BB" value={player.bb} />
+        <TipBadge label="HBP" value={player.hbp} />
+        <TipBadge label="SO" value={player.so} />
+        <TipBadge label="KL" value={player.kl} />
+        <TipBadge label="ERA" value={player.era != null ? parseFloat(player.era).toFixed(2) : null} />
+        <TipBadge label="WHIP" value={player.whip != null ? parseFloat(player.whip).toFixed(2) : null} />
+        <TipBadge label="LOB" value={player.lob} />
+      </div>
+    </div>
+  );
+};
+
+const PlayerFieldingRow = ({ player }) => {
+  const name = player.name || player.player;
+  const number = player.number || player.jersey;
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: '0.75rem',
+      padding: '0.5rem 0.75rem', borderRadius: '6px',
+      background: 'rgba(0,0,0,0.15)', flexWrap: 'wrap'
+    }}>
+      <div style={{ minWidth: '120px' }}>
+        <PlayerName name={name} number={number} size="sm" />
+      </div>
+      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+        <TipBadge label="TC" value={player.tc} />
+        <TipBadge label="PO" value={player.po} />
+        <TipBadge label="A" value={player.a} />
+        <TipBadge label="E" value={player.e} />
+        <TipBadge label="FPCT" value={player.fpct != null ? parseFloat(player.fpct).toFixed(3) : null} />
+        <TipBadge label="DP" value={player.dp} />
+      </div>
+    </div>
+  );
+};
+
+const PlayerOppBattingRow = ({ player }) => {
+  const b = normBatting(player);
+  const name = player.name || player.player;
+  const number = player.number || player.jersey;
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: '0.75rem',
+      padding: '0.5rem 0.75rem', borderRadius: '6px',
+      background: 'rgba(248, 113, 113, 0.05)', flexWrap: 'wrap',
+      border: '1px solid rgba(248, 113, 113, 0.1)'
+    }}>
+      <div style={{ minWidth: '120px' }}>
+        <PlayerName name={name} number={number} size="sm" />
+      </div>
+      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+        <TipBadge label="PA" value={b.pa} />
+        <TipBadge label="AB" value={b.ab} />
+        <TipBadge label="H" value={b.h} />
+        <TipBadge label="2B" value={b.doubles} />
+        <TipBadge label="HR" value={b.hr} />
+        <TipBadge label="BB" value={b.bb} />
+        <TipBadge label="SO" value={b.so} />
+        <TipBadge label="RBI" value={b.rbi} />
+        <TipBadge label="AVG" value={fmt3(b.avg)} />
+        <TipBadge label="OBP" value={fmt3(b.obp)} />
+      </div>
+    </div>
+  );
+};
+
+// ─── Result badge ─────────────────────────────────────────────────────────────
+const ResultBadge = ({ result }) => {
+  if (!result) return null;
+  const isWin = result === 'W';
+  return <span className={`result-badge ${isWin ? 'result-badge--win' : 'result-badge--loss'}`}>{result}</span>;
+};
+
+// ─── Tab bar ──────────────────────────────────────────────────────────────────
+const TabBar = ({ tabs, active, onChange }) => (
+  <div style={{
+    display: 'flex', gap: '0.25rem', flexWrap: 'wrap',
+    marginBottom: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.08)',
+    paddingBottom: '0.5rem'
+  }}>
+    {tabs.map(t => (
+      <button key={t.id} onClick={() => onChange(t.id)} style={{
+        padding: '0.25rem 0.75rem', borderRadius: '4px', border: 'none',
+        cursor: 'pointer', fontSize: 'var(--text-xs)', fontWeight: active === t.id ? '700' : '500',
+        background: active === t.id ? 'rgba(4,101,104,0.35)' : 'rgba(255,255,255,0.06)',
+        color: active === t.id ? 'var(--primary-color)' : 'var(--text-muted)',
+        transition: 'all 0.15s',
+      }}>
+        {t.label}{t.count != null ? ` (${t.count})` : ''}
+      </button>
+    ))}
+  </div>
+);
+
+// ─── Expanded detail panel ────────────────────────────────────────────────────
+const GameDetailPanel = ({ gameDetail, source }) => {
+  const [tab, setTab] = useState('batting');
+
+  const batting     = gameDetail.sharks_batting     || [];
+  const advBatting  = gameDetail.sharks_batting_advanced || [];
+  const pitching    = gameDetail.sharks_pitching    || [];
+  const fielding    = gameDetail.sharks_fielding    || [];
+  const oppBatting  = gameDetail.opponent_batting   || [];
+  const oppPitching = gameDetail.opponent_pitching  || [];
+
+  const tabs = [
+    batting.length   ? { id: 'batting',     label: 'Batting',      count: batting.length }    : null,
+    advBatting.length? { id: 'adv_batting', label: 'Adv. Batting', count: advBatting.length } : null,
+    pitching.length  ? { id: 'pitching',    label: 'Pitching',     count: pitching.length }   : null,
+    fielding.length  ? { id: 'fielding',    label: 'Fielding',     count: fielding.length }   : null,
+    oppBatting.length? { id: 'opp_batting', label: 'Opp Batting',  count: oppBatting.length } : null,
+  ].filter(Boolean);
+
+  // If no tabs available
+  if (tabs.length === 0) {
+    return (
+      <div style={{ padding: '1rem', color: 'var(--text-muted)', fontStyle: 'italic', fontSize: 'var(--text-sm)' }}>
+        No stat detail available for this game.
+      </div>
+    );
+  }
+
+  // Auto-select first available tab if current tab is gone
+  const validTabIds = tabs.map(t => t.id);
+  const activeTab = validTabIds.includes(tab) ? tab : validTabIds[0];
+
+  return (
+    <div>
+      {tabs.length > 1 && <TabBar tabs={tabs} active={activeTab} onChange={setTab} />}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+        {activeTab === 'batting' && batting.map((p, i) => <PlayerBattingRow key={i} player={p} />)}
+        {activeTab === 'adv_batting' && advBatting.map((p, i) => <PlayerAdvBattingRow key={i} player={p} />)}
+        {activeTab === 'pitching' && pitching.map((p, i) => <PlayerPitchingRow key={i} player={p} />)}
+        {activeTab === 'fielding' && fielding.map((p, i) => <PlayerFieldingRow key={i} player={p} />)}
+        {activeTab === 'opp_batting' && oppBatting.map((p, i) => <PlayerOppBattingRow key={i} player={p} />)}
+      </div>
+
+      {source && (
+        <div style={{ marginTop: '0.75rem', fontSize: 'var(--text-xs)', color: 'rgba(255,255,255,0.25)', fontStyle: 'italic' }}>
+          Source: {source}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ─── GameCard ─────────────────────────────────────────────────────────────────
+const GameCard = ({ game, onExpand, isExpanded, gameDetail, isMobile = false }) => {
   const t = game.sharks_totals || {};
   const isHome = game.sharks_side === 'home';
   const dateStr = game.date ? formatDateMMDDYYYY(game.date) : 'Unknown Date';
+  const isWin = game.result === 'W';
+  const scoreStr = game.score || game.score_str || '';
+
+  // Parse score respecting result direction
+  let sharksScore = null, oppScore = null;
+  if (scoreStr) {
+    const parts = scoreStr.split('-').map(Number);
+    if (parts.length === 2) {
+      if (game.result === 'W') { sharksScore = Math.max(...parts); oppScore = Math.min(...parts); }
+      else if (game.result === 'L') { sharksScore = Math.min(...parts); oppScore = Math.max(...parts); }
+      else { [sharksScore, oppScore] = parts; }
+    }
+  }
+
+  const canExpand = !isMobile && (game.sharks_totals || game.source === 'gc_full_scraper_v2');
 
   return (
-    <div className="glass-panel" style={{ padding: isMobile ? 'var(--space-lg)' : '1.25rem', cursor: isMobile ? 'default' : 'pointer' }} onClick={onExpand}>
+    <div
+      className="glass-panel"
+      style={{ padding: isMobile ? 'var(--space-lg)' : '1.25rem', cursor: canExpand ? 'pointer' : 'default' }}
+      onClick={canExpand ? onExpand : undefined}
+    >
+      {/* Header row */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem' }}>
         <div style={{ flex: 1 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem', flexWrap: 'wrap' }}>
@@ -71,90 +318,50 @@ const GameCard = ({ game, onExpand, isExpanded, detail, isMobile = false }) => {
           </div>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem' }}>
             <h3 style={{ fontSize: isMobile ? 'var(--text-base)' : '1.1rem', margin: 0 }}>vs. {game.opponent}</h3>
-            {game.result && game.score && (() => {
-              const isWin = game.result === 'W';
-              const parts = (game.score || '').split('-');
-              const sharksScore = isWin ? Math.max(...parts.map(Number)) : Math.min(...parts.map(Number));
-              const oppScore = isWin ? Math.min(...parts.map(Number)) : Math.max(...parts.map(Number));
-              return (
-                <span style={{
-                  fontSize: isMobile ? '1.5rem' : '1.75rem',
-                  fontWeight: '800',
-                  color: isWin ? 'var(--success-color, #4ade80)' : 'var(--danger-color, #f87171)',
-                  letterSpacing: '1px',
-                  lineHeight: 1,
-                  whiteSpace: 'nowrap',
-                }}>{sharksScore}\u2013{oppScore}</span>
-              );
-            })()}
+            {sharksScore != null && (
+              <span style={{
+                fontSize: isMobile ? '1.5rem' : '1.75rem',
+                fontWeight: '800',
+                color: isWin ? 'var(--success-color, #4ade80)' : 'var(--danger-color, #f87171)',
+                letterSpacing: '1px',
+                lineHeight: 1,
+                whiteSpace: 'nowrap',
+              }}>{sharksScore}\u2013{oppScore}</span>
+            )}
           </div>
         </div>
-        {!isMobile && game.sharks_totals && (isExpanded ? <ChevronUp size={18} color="var(--text-muted)" /> : <ChevronDown size={18} color="var(--text-muted)" />)}
+        {canExpand && (isExpanded ? <ChevronUp size={18} color="var(--text-muted)" /> : <ChevronDown size={18} color="var(--text-muted)" />)}
       </div>
 
-      {game.sharks_totals && <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-        <TipBadge label="PA" value={t.pa} />
-        <TipBadge label="H" value={t.h} />
-        {!isMobile && <TipBadge label="AB" value={t.ab} />}
-        {!isMobile && <TipBadge label="2B" value={t.doubles || 0} />}
-        {!isMobile && <TipBadge label="HR" value={t.hr || 0} />}
-        {!isMobile && <TipBadge label="BB" value={t.bb} />}
-        {!isMobile && <TipBadge label="HBP" value={t.hbp} />}
-        {!isMobile && <TipBadge label="SO" value={t.so} />}
-        <TipBadge label="AVG" value={t.avg != null ? t.avg.toFixed(3) : null} />
-      </div>}
+      {/* Summary stat badges */}
+      {game.sharks_totals && (
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <TipBadge label="PA" value={t.pa} />
+          <TipBadge label="H" value={t.h} />
+          {!isMobile && <TipBadge label="AB" value={t.ab} />}
+          {!isMobile && <TipBadge label="2B" value={t.doubles || 0} />}
+          {!isMobile && <TipBadge label="HR" value={t.hr || 0} />}
+          {!isMobile && <TipBadge label="BB" value={t.bb} />}
+          {!isMobile && <TipBadge label="HBP" value={t.hbp != null ? t.hbp : 0} />}
+          {!isMobile && <TipBadge label="SO" value={t.so} />}
+          <TipBadge label="AVG" value={t.avg != null ? parseFloat(t.avg).toFixed(3) : null} />
+        </div>
+      )}
 
-      {!isMobile && isExpanded && detail && (
+      {/* Expanded detail */}
+      {!isMobile && isExpanded && gameDetail && (
         <div style={{ marginTop: '1rem', borderTop: '1px solid var(--surface-border)', paddingTop: '1rem' }}>
-          <div className="section-label">Sharks Batting</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-            {detail.map((p, i) => <PlayerBattingRow key={i} player={p} />)}
-          </div>
-          <div style={{ marginTop: '0.75rem', fontSize: 'var(--text-xs)', color: 'rgba(255,255,255,0.3)', fontStyle: 'italic' }}>
-            Source: {game.pdf_file || 'scorebook PDF'}
-          </div>
+          <GameDetailPanel
+            gameDetail={gameDetail}
+            source={game.pdf_file || game.source || null}
+          />
         </div>
       )}
     </div>
   );
 };
 
-const UpcomingGameBanner = ({ schedule }) => {
-  if (!schedule?.upcoming?.length) return null;
-  const today = getTodayEST();
-  const next = schedule.upcoming
-    .filter(g => g.date >= today)
-    .sort((a, b) => a.date.localeCompare(b.date))[0];
-  if (!next) return null;
-
-  const dateStr = formatDateMMDDYYYY(next.date);
-  const isHome = next.home_away === 'home';
-
-  return (
-    <div className="glass-panel" style={{
-      padding: '1rem 1.5rem', marginBottom: '1.5rem',
-      borderColor: 'rgba(4, 101, 104, 0.32)',
-      background: 'rgba(4, 101, 104, 0.06)'
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-        <Clock size={18} color="var(--primary-color)" />
-        <span className="section-label" style={{ marginBottom: 0 }}>Next Game</span>
-        <span className={`home-away-pill ${isHome ? 'home-away-pill--home' : 'home-away-pill--away'}`}>
-          {isHome ? <Home size={10} /> : <Plane size={10} />}
-          {isHome ? 'HOME' : 'AWAY'}
-        </span>
-        <span style={{ fontWeight: '700', fontSize: 'var(--text-base)' }}>vs. {next.opponent}</span>
-        <span style={{ color: 'var(--text-muted)', fontSize: 'var(--text-sm)' }}>
-          {dateStr}{next.time ? ` \u00b7 ${next.time}` : ''}
-        </span>
-        {next.location && next.location !== 'TBD' && (
-          <span style={{ color: 'var(--text-muted)', fontSize: 'var(--text-sm)' }}>@ {next.location}</span>
-        )}
-      </div>
-    </div>
-  );
-};
-
+// ─── Upcoming schedule ────────────────────────────────────────────────────────
 const ScheduleRow = ({ game }) => {
   const isHome = game.home_away === 'home';
   const dateStr = game.date ? formatDateMMDDYYYY(game.date) : '\u2014';
@@ -173,7 +380,11 @@ const ScheduleRow = ({ game }) => {
         {isHome ? 'H' : 'A'}
       </span>
       <span style={{ flex: 1, fontWeight: isNext ? '700' : '500', fontSize: 'var(--text-sm)' }}>
-        {isNext && <span style={{ color: 'var(--primary-color)', marginRight: '0.4rem', fontSize: 'var(--text-xs)', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.5px' }}>NEXT \u25b6</span>}
+        {isNext && (
+          <span style={{ color: 'var(--primary-color)', marginRight: '0.4rem', fontSize: 'var(--text-xs)', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+            NEXT &#9654;
+          </span>
+        )}
         vs. {game.opponent}
       </span>
       {game.time && <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>{game.time}</span>}
@@ -181,6 +392,7 @@ const ScheduleRow = ({ game }) => {
   );
 };
 
+// ─── Main Games component ─────────────────────────────────────────────────────
 const Games = ({ gamesData, schedule, isMobile = false }) => {
   const [expanded, setExpanded] = useState(null);
   const [details, setDetails] = useState({});
@@ -191,7 +403,7 @@ const Games = ({ gamesData, schedule, isMobile = false }) => {
       const res = await fetch(`/api/games/${gameId}`);
       if (res.ok) {
         const data = await res.json();
-        setDetails(prev => ({ ...prev, [gameId]: data.sharks_batting || [] }));
+        setDetails(prev => ({ ...prev, [gameId]: data }));
       }
     } catch (e) {
       console.error('Failed to fetch game detail', e);
@@ -225,14 +437,10 @@ const Games = ({ gamesData, schedule, isMobile = false }) => {
       {upcoming.length > 0 && (
         <div className="glass-panel" style={{ padding: isMobile ? 'var(--space-lg)' : '1.25rem', marginBottom: isMobile ? 'var(--space-md)' : '2rem' }}>
           <div className="section-label" style={{
-            color: 'var(--primary-color)',
-            fontSize: 'var(--text-base)',
-            fontWeight: '800',
-            letterSpacing: '0.5px',
-            textTransform: 'uppercase',
+            color: 'var(--primary-color)', fontSize: 'var(--text-base)',
+            fontWeight: '800', letterSpacing: '0.5px', textTransform: 'uppercase',
             borderBottom: '2px solid rgba(4, 101, 104, 0.3)',
-            paddingBottom: '0.5rem',
-            marginBottom: '0.75rem',
+            paddingBottom: '0.5rem', marginBottom: '0.75rem',
           }}>Upcoming Schedule ({upcoming.length} games)</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
             {upcoming.map((g, i) => <ScheduleRow key={i} game={g} />)}
@@ -240,12 +448,8 @@ const Games = ({ gamesData, schedule, isMobile = false }) => {
         </div>
       )}
 
-      {/* Visual divider between upcoming and past */}
       {upcoming.length > 0 && sorted.length > 0 && (
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: '1rem',
-          margin: '1.5rem 0 1rem',
-        }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', margin: '1.5rem 0 1rem' }}>
           <div style={{ flex: 1, height: '1px', background: 'linear-gradient(to right, transparent, rgba(255,255,255,0.1), transparent)' }} />
         </div>
       )}
@@ -253,13 +457,9 @@ const Games = ({ gamesData, schedule, isMobile = false }) => {
       {sorted.length > 0 ? (
         <>
           <div className="section-label" style={{
-            color: 'var(--text-muted)',
-            fontSize: 'var(--text-sm)',
-            fontWeight: '600',
-            letterSpacing: '0.3px',
-            textTransform: 'uppercase',
-            opacity: 0.6,
-            marginBottom: '0.75rem',
+            color: 'var(--text-muted)', fontSize: 'var(--text-sm)',
+            fontWeight: '600', letterSpacing: '0.3px', textTransform: 'uppercase',
+            opacity: 0.6, marginBottom: '0.75rem',
           }}>Past Games ({sorted.length})</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
             {sorted.map(game => (
@@ -267,11 +467,9 @@ const Games = ({ gamesData, schedule, isMobile = false }) => {
                 key={game.game_id}
                 game={game}
                 isExpanded={expanded === game.game_id}
-                detail={details[game.game_id]}
+                gameDetail={details[game.game_id] || null}
                 isMobile={isMobile}
-                onExpand={() => {
-                  if (!isMobile && game.sharks_totals) handleExpand(game.game_id);
-                }}
+                onExpand={() => handleExpand(game.game_id)}
               />
             ))}
           </div>
