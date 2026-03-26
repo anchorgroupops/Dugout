@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Users, Activity, RefreshCw, ListOrdered, Calendar, Trophy, Dumbbell, Volume2, Target, AlertTriangle, MoreHorizontal, Download, Globe, GlobeLock } from 'lucide-react';
-import { formatDateTime } from './utils/formatDate';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { Users, Activity, RefreshCw, ListOrdered, Calendar, Trophy, Dumbbell, Volume2, Target, AlertTriangle, MoreHorizontal, Download, Globe, GlobeLock, Clock } from 'lucide-react';
+import { formatDateTime, formatRelative } from './utils/formatDate';
 import { usePWAInstall } from './utils/usePWAInstall';
 import { useOnlineStatus } from './utils/useOnlineStatus';
 import Roster from './components/Roster';
@@ -460,6 +460,13 @@ function App() {
           <div className="stale-banner">
             <AlertTriangle size={16} />
             <span>Data may be stale: {staleSources.join(', ')}</span>
+          </div>
+        )}
+
+        {data.team?.last_updated && (
+          <div className="last-updated-tag">
+            <Clock size={12} />
+            <span>Updated {formatRelative(data.team.last_updated)}</span>
           </div>
         )}
 
