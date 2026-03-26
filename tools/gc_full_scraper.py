@@ -757,32 +757,70 @@ class GCFullScraper:
         return game_doc
 
     def _toggle_to_opponent(self, opponent_name: str) -> bool:
-        """Attempt to switch the game-stats view to the opponent team."""
+        """Attempt to switch the game-stats view to the opponent team.
+
+        GC game-stats pages show two team tabs at the top.  The Sharks tab
+        is active by default; we need to click the other one.  Four
+        strategies are tried in order so that any structural change on the
+        GC side is more likely to be caught by one of them.
+        """
         page = self._page
-        try:
-            # GC typically shows a team selector dropdown or tabs with team names
-            # Try clicking a button/tab that matches opponent name fragment
-            opp_words = [w for w in opponent_name.split() if len(w) > 2]
-            for word in opp_words:
-                loc = page.locator("button, [role='tab'], [role='button']").filter(
-                    has_text=re.compile(word, re.I)
-                ).first
-                if loc.count() > 0 and loc.is_visible():
+        # Stat-category tabs we must NOT accidentally click instead of a team tab
+        _STAT_TABS = {"batting", "pitching", "fielding", "hitting", "stats"}
+
+        def _click_and_confirm(loc) -> bool:
+            try:
+                if loc.count() > 0 and loc.is_visible(timeout=3000):
                     loc.click()
-                    page.wait_for_timeout(600)
+                    page.wait_for_timeout(900)
+                    return True
+            except Exception:
+                pass
+            return False
+
+        try:
+            # ── Strategy 1: word-match opponent name in any [role=tab] element ──
+            # Use all word fragments including 2-char tokens (e.g. "Jays", "Sox")
+            opp_words = [w for w in re.split(r"[\s\-_]+", opponent_name) if len(w) >= 2]
+            for word in opp_words:
+                loc = page.locator("[role='tab']").filter(
+                    has_text=re.compile(re.escape(word), re.I)
+                ).first
+                if _click_and_confirm(loc):
+                    _log(f"  Toggled to opponent via word-match '{word}'")
                     return True
 
-            # Generic fallback: look for "Away" or "Visiting" team selector
-            for label in ("Away", "Visiting", "Guest", "Opponent"):
-                loc = page.get_by_role("tab", name=label, exact=False).first
-                if loc.count() == 0:
-                    loc = page.get_by_role("button", name=label, exact=False).first
-                if loc.count() > 0 and loc.is_visible():
-                    loc.click()
-                    page.wait_for_timeout(600)
-                    return True
+            # ── Strategy 2: click any aria-selected=false tab that isn't a stat tab ──
+            inactive = page.locator("[role='tab'][aria-selected='false']")
+            for i in range(inactive.count()):
+                tab = inactive.nth(i)
+                label = (tab.inner_text() or "").strip().lower()
+                if label and label not in _STAT_TABS:
+                    if _click_and_confirm(tab):
+                        _log(f"  Toggled to opponent via inactive tab '{label}'")
+                        return True
+
+            # ── Strategy 3: if exactly 2 tabs visible, click the second one ──
+            all_tabs = page.locator("[role='tab']")
+            if all_tabs.count() == 2:
+                second = all_tabs.nth(1)
+                label = (second.inner_text() or "").strip().lower()
+                if label not in _STAT_TABS:
+                    if _click_and_confirm(second):
+                        _log("  Toggled to opponent via second-tab heuristic")
+                        return True
+
+            # ── Strategy 4: generic home/away label buttons ──
+            for label in ("Away", "Visiting", "Visitor", "Guest", "Opponent"):
+                for role in ("tab", "button"):
+                    loc = page.get_by_role(role, name=label, exact=False).first
+                    if _click_and_confirm(loc):
+                        _log(f"  Toggled to opponent via generic label '{label}'")
+                        return True
+
         except Exception as e:
             _log(f"  [WARN] Toggle to opponent failed: {e}")
+        _log("  [WARN] All toggle strategies exhausted — opponent stats unavailable")
         return False
 
     # ------------------------------------------------------------------
