@@ -801,3 +801,34 @@ input[type="checkbox"]:checked::after {
     min-height: var(--touch-min);
   }
 }
+
+/* ─── PWA Specific Styles ─── */
+
+.offline-banner {
+  background: var(--danger) !important;
+  color: white !important;
+  border-color: rgba(255, 255, 255, 0.2) !important;
+  animation: slideUp 0.3s ease-out;
+}
+
+.sync-stage-tag.offline {
+  background: #711d1c;
+  color: white;
+  border-color: #9d2d2c;
+  animation: none;
+}
+
+.install-item {
+  border-top: 1px solid var(--surface-border);
+  margin-top: 0.5rem;
+  background: rgba(130, 203, 195, 0.05);
+}
+
+.install-item:active {
+  background: var(--primary-glow);
+}
+
+@keyframes slideDown {
+  from { transform: translateY(-100%); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}

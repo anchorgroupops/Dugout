@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Users, Activity, RefreshCw, ListOrdered, Calendar, Trophy, Dumbbell, Volume2, Target, AlertTriangle, MoreHorizontal } from 'lucide-react';
+import { Users, Activity, RefreshCw, ListOrdered, Calendar, Trophy, Dumbbell, Volume2, Target, AlertTriangle, MoreHorizontal, Download, Globe, GlobeLock } from 'lucide-react';
 import { formatDateTime } from './utils/formatDate';
+import { usePWAInstall } from './utils/usePWAInstall';
+import { useOnlineStatus } from './utils/useOnlineStatus';
 import Roster from './components/Roster';
 import Swot from './components/Swot';
 import Lineup from './components/Lineup';
@@ -12,6 +14,8 @@ import Scouting from './components/Scouting';
 
 function App() {
   const [currentView, setCurrentView] = useState('scout');
+  const { canInstall, triggerInstall } = usePWAInstall();
+  const isOnline = useOnlineStatus();
   const [isMobile, setIsMobile] = useState(
     typeof window !== 'undefined' ? window.innerWidth <= 768 : false
   );
@@ -300,6 +304,9 @@ function App() {
               {syncStage !== 'idle' && (
                 <span className="sync-stage-tag">{syncStage}</span>
               )}
+              {!isOnline && (
+                <span className="sync-stage-tag offline" style={{ background: '#711d1c' }}>OFFLINE</span>
+              )}
             </div>
             <div className="mobile-header-actions">
               <button
@@ -354,6 +361,17 @@ function App() {
               <p style={{ color: 'var(--text-muted)', fontSize: '1.1rem' }}>
                 {data.team ? `${data.team.league} \u2022 Last Updated: ${formatDateTime(data.team.last_updated)}` : 'Loading...'}
               </p>
+              {canInstall && (
+                <button 
+                  className="voice-btn" 
+                  onClick={triggerInstall} 
+                  style={{ background: 'var(--accent-color)', color: 'var(--background-color)' }}
+                  title="Install the app for offline use"
+                >
+                  <Download size={16} />
+                  Install App
+                </button>
+              )}
               <button className={`sync-btn ${syncLoading ? 'sync-btn--active' : ''}`} onClick={handleManualSync} disabled={syncLoading} title="Trigger manual data refresh">
                 <RefreshCw size={16} className={syncLoading ? 'sync-spin' : ''} />
                 {syncLoading ? 'Syncing...' : syncStage !== 'idle' ? `Sync: ${syncStage}` : 'Manual Sync'}
@@ -368,6 +386,13 @@ function App() {
         )}
 
         {voiceError && <p className="voice-error">{voiceError}</p>}
+        
+        {!isOnline && (
+          <div className="stale-banner offline-banner" style={{ background: 'var(--danger)', color: 'white', borderColor: 'rgba(255,255,255,0.2)' }}>
+            <GlobeLock size={16} />
+            <span>Currently working offline. Some features like Manual Sync and Voice Update are unavailable.</span>
+          </div>
+        )}
 
         {staleSources.length > 0 && (
           <div className="stale-banner">
@@ -400,6 +425,19 @@ function App() {
                   {item.label}
                 </button>
               ))}
+              {canInstall && (
+                <button
+                  className="more-menu-item install-item"
+                  style={{ color: 'var(--accent-color)', fontWeight: 'bold' }}
+                  onClick={() => {
+                    triggerInstall();
+                    setMoreMenuOpen(false);
+                  }}
+                >
+                  <Download size={20} />
+                  Install App (Offline)
+                </button>
+              )}
             </div>
           )}
           <nav className="bottom-nav">
