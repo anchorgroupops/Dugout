@@ -5,15 +5,25 @@ This document describes how to launch the Sharks Softball Dashboard as an iOS ap
 ## 🚀 Option 1: The Immediate Launch (PWA)
 This is the fastest way to get the app on your phone. It feels exactly like a native app and works immediately.
 
-1.  **Deploy your web app** to your public URL (e.g., via Nginx or Vercel).
-2.  Open **Safari** on your iPhone.
-3.  Navigate to your dashboard URL.
-4.  Tap the **Share** button (Square with Up Arrow) in the bottom navigation bar.
-5.  Scroll down to find and tap **"Add to Home Screen"**.
-6.  Tap **Add** in the top right corner.
-7.  The "Sharks" icon will now appear on your home screen. When launched, it will open in **standalone mode** (no browser address bar).
+1.  **Expose Dev Server**: Ensure `package.json` has `vite --host` (I've already updated this).
+2.  **Start Dev Server**:
+    ```bash
+    cd client
+    npm run dev
+    ```
+3.  **Local URL**: Open Safari on your iPad and enter the following IP address (ensure the iPad is on the same WiFi):
+    - **Local LAN**: `http://192.168.7.158:5173`
+    - **Tailscale**: `http://100.119.215.43:5173` 
+4.  **Add to Home Screen**:
+    - Tap the **Share** button (Square with Up Arrow) in Safari.
+    - Scroll down to find and tap **"Add to Home Screen"**.
+    - Tap **Add** in the top right corner.
+    - The "Sharks" icon will now appear on your home screen. When launched, it will open in **standalone mode** (no browser address bar).
 
-## 🛠️ Option 2: The Native Build (Capacitor)
+## 🛠️ Option 2: Production Launch (Standalone Deployment)
+Once you are ready for everyone to use it, you can deploy it to a public URL.
+
+1.  **Deploy your web app** to your public URL (e.g., via Nginx or Vercel).
 If you have access to a Mac with Xcode, you can build a true native iOS package.
 
 1.  **Sync Web Assets**: Ensure your latest code is built and synced to the native project:
