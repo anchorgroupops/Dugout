@@ -14,3 +14,6 @@ tools/frida-server
 .claude/worktrees/
 # Runtime logs (generated on Pi, not source-controlled)
 logs/
+# Scratch files
+install.log
+list.txt

@@ -1,27 +1,27 @@
-# Task Plan: Softball
+# Task Plan: PWA Conversion for Sharks Softball Analyzer
 
-## Phase 0: Initialization
+## Objective
+Convert the Sharks Softball Analyzer web application into a Progressive Web App (PWA) with offline capabilities and an installation prompt.
 
-- [x] Initial Task Breakdown
-- [x] Register Spoke in `hub-spokes-map.md`
-- [x] Re-Discovery: Planning, Strategy & Training
-- [x] Operational Check (Opcheck) - 2026-03-23
-- [ ] Final Confirmation from User
+## Phases
 
-## Phase 1: B - Blueprint
+### Phase 1: Preparation & Audit
+- [x] Task 1.1: Install `pwa-patterns` skill (Manually shimmed due to installer path issues)
+- [x] Task 1.2: Audit React/Vite codebase for PWA readiness
+- [x] Task 1.3: Map existing brand guidelines to PWA manifest
+- [x] Task 1.4: Refactor `client/vite.config.js` with Workbox strategies (CacheFirst/NetworkFirst)
+- [x] Task 1.5: Create `usePWAInstall` and `useOnlineStatus` hooks
+- [ ] Task 1.6: Finalize UI integration in `App.jsx`
 
-- [ ] Define Strategy Data Schema (Rosters, Drills, Lineups)
-- [ ] Finalize Blueprint
+### Phase 2: Core PWA Assets
+- Web App Manifest: Configured with Anchor Team colors (#046568 / #F7ECE1)
+- Service Worker: Custom Workbox strategies (CacheFirst for assets, NetworkFirst for API)
 
-## Phase 2: L - Link
+### Phase 3: Engagement & Hooks
+- UI Hooks: `usePWAInstall` and `useOnlineStatus` implemented
+- Install Prompt: Button added to mobile menu and desktop header
+- [ ] Register the Service Worker in `index.html` or `main.tsx`.
 
-- [ ] Verify API connections (e.g., Notion for strategy, Google Sheets for tracking)
-
-## Phase 3: A - Architect
-
-- [ ] Write Technical SOPs
-- [ ] Build deterministic Tools
-
-## Phase 4: S - Stylize
-
-## Phase 5: T - Trigger
+### Phase 4: Validation
+- [ ] Verify manifest and service worker in a browser environment (simulated or real).
+- [ ] Final SWOT analysis of the PWA implementation.

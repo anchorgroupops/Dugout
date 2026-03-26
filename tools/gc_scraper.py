@@ -44,6 +44,9 @@ GC_TEAM_ID = os.getenv("GC_TEAM_ID", "NuGgx6WvP7TO")
 GC_SEASON_SLUG = os.getenv("GC_SEASON_SLUG", "2026-spring-sharks")
 GC_STATS_URL = f"{GC_BASE_URL}/teams/{GC_TEAM_ID}/{GC_SEASON_SLUG}/season-stats"
 
+# Headless mode: set GC_HEADLESS=false in .env to watch the browser
+GC_HEADLESS = os.getenv("GC_HEADLESS", "true").lower() != "false"
+
 # ---------- Column mappings for each stat category ---------- #
 # Maps raw GC column header -> clean JSON key name
 
@@ -218,7 +221,7 @@ class GameChangerScraper:
         return "UNKNOWN"
 
     def _complete_login_flow(self):
-        """Handle current GC login UX (email step -> password step)."""
+        """Handle current GC login UX (email step -> password step -> optional OTP)."""
         print("[GC] Entering credentials...")
 
         try:
@@ -226,37 +229,84 @@ class GameChangerScraper:
             email_field = self.page.get_by_label("Email", exact=False).or_(
                 self.page.locator('input[name="email"], input[type="email"]')
             ).first
-            
+
             email_field.wait_for(state="visible", timeout=15000)
             email_field.fill(self.email)
-            
+
             # Look for Continue button
             continue_btn = self.page.get_by_role("button", name=re.compile("Continue|Sign in", re.I)).first
             if continue_btn.count() > 0:
                 continue_btn.click()
             else:
                 email_field.press("Enter")
-            
+
             # Step 2: password gate
             pwd_field = self.page.get_by_label("Password", exact=False).or_(
                 self.page.locator('input[name="password"], input[type="password"]')
             ).first
-            
+
             pwd_field.wait_for(state="visible", timeout=15000)
             pwd_field.fill(self.password)
-            
+
             sign_in_btn = self.page.get_by_role("button", name=re.compile("Sign in|Continue", re.I)).first
             if sign_in_btn.count() > 0:
                 sign_in_btn.click()
             else:
                 pwd_field.press("Enter")
-                
+
             # Wait for navigation away from login
             self.page.wait_for_load_state("networkidle", timeout=30000)
-            
+
+            # Step 3: OTP / MFA gate (GC sends a 6-digit email code)
+            self._handle_otp_if_needed()
+
         except Exception as e:
             self._capture_diagnostics("login_flow_error")
             raise RuntimeError(f"[GC] Error during login flow: {e}")
+
+    def _handle_otp_if_needed(self):
+        """Detect and complete GC's email OTP challenge if present."""
+        # Look for an OTP/verification code input
+        otp_field = self.page.locator(
+            'input[autocomplete="one-time-code"], '
+            'input[name="code"], '
+            'input[placeholder*="code" i], '
+            'input[placeholder*="verification" i]'
+        ).first
+
+        if otp_field.count() == 0:
+            # Also try text-based detection
+            page_text = self.page.inner_text("body")
+            if not any(kw in page_text.lower() for kw in ["verification code", "check your email", "enter code", "one-time"]):
+                return  # No OTP prompt detected
+            # Try a generic number input fallback
+            otp_field = self.page.locator('input[type="number"], input[type="text"][maxlength="6"]').first
+
+        if otp_field.count() == 0:
+            print("[GC] No OTP field found, proceeding...")
+            return
+
+        print("[GC] 🔑 OTP/MFA prompt detected!")
+
+        # Check for pre-configured OTP in env
+        otp_code = os.getenv("GC_OTP", "").strip()
+        if otp_code:
+            print(f"[GC] Using GC_OTP from environment: {otp_code}")
+            otp_field.fill(otp_code)
+            # Submit
+            submit_btn = self.page.get_by_role("button", name=re.compile("Verify|Continue|Submit|Confirm", re.I)).first
+            if submit_btn.count() > 0:
+                submit_btn.click()
+            else:
+                otp_field.press("Enter")
+            self.page.wait_for_load_state("networkidle", timeout=30000)
+            print("[GC] ✓ OTP submitted.")
+        else:
+            print("[GC] ⚠️  No GC_OTP set in .env. Waiting 90s for manual entry...")
+            print("[GC]    → Set GC_OTP=<code> in .env and re-run, OR enter the code manually now.")
+            self.page.wait_for_timeout(90000)
+            print("[GC] Resuming after OTP wait...")
+
 
     def _heal_locator(self, target_text: str, role: str = "button") -> Any:
         """Self-healing locator factory. Tries multiple strategies to find an element."""
@@ -380,101 +430,133 @@ class GameChangerScraper:
     #  Core: Extract a single stat table from the current view
     # ------------------------------------------------------------------ #
     def _extract_table(self) -> list[dict]:
-        """
-        Extract the stats table currently visible on the GC page.
-        Returns a list of dicts: [{"player": "...", "#": "...", "COL1": val, ...}, ...]
-        """
-        js_extract = """
-        (() => {
-            // GC renders tables with role="table" or standard <table> elements.
-            // Attempt multiple selectors.
-            const tables = document.querySelectorAll('table, [role="table"]');
-            if (!tables.length) return JSON.stringify([]);
-            
-            // Use the first (main) stats table
-            const table = tables[0];
-            
-            // Get headers from <th> or [role="columnheader"]
-            let headers = [];
-            const thEls = table.querySelectorAll('thead th, [role="columnheader"]');
-            if (thEls.length) {
-                headers = Array.from(thEls).map(th => th.textContent.trim());
-            }
-            
-            // Get rows from <tbody> <tr> or [role="row"]
-            const rows = [];
-            const trEls = table.querySelectorAll('tbody tr, [role="row"]');
-            trEls.forEach(tr => {
-                const cells = tr.querySelectorAll('td, [role="cell"], [role="gridcell"]');
-                if (cells.length === 0) return;
-                const row = {};
-                cells.forEach((cell, i) => {
-                    const key = (headers[i] || `col${i}`);
-                    row[key] = cell.textContent.trim();
-                });
-                // Only include rows that look like player data (have some text)
-                if (Object.values(row).some(v => v && v.length > 0)) {
-                    rows.push(row);
+        """Extract data from a table or ag-grid."""
+        return self.page.evaluate("""
+            () => {
+                const results = [];
+                const gridRoot = document.querySelector('.ag-root-wrapper');
+                
+                if (gridRoot) {
+                    // 1. ag-grid extraction (Header labels are often mapped to col-id)
+                    const headerCells = Array.from(gridRoot.querySelectorAll('.ag-header-cell'));
+                    const colMap = headerCells.map(cell => {
+                        const label = cell.querySelector('.ag-header-cell-label')?.innerText.trim();
+                        const colId = cell.getAttribute('col-id');
+                        return { label, colId };
+                    }).filter(c => c.label);
+
+                    const rows = Array.from(gridRoot.querySelectorAll('.ag-row'));
+                    rows.forEach(row => {
+                        const obj = {};
+                        colMap.forEach(col => {
+                            const cell = row.querySelector(`.ag-cell[col-id="${col.colId}"]`);
+                            if (cell) {
+                                obj[col.label] = cell.innerText.trim();
+                            }
+                        });
+                        
+                        // Specialized player name lookup
+                        const playerLink = row.querySelector('a.ag-cell-info, [class*="player-name"]');
+                        if (playerLink) {
+                            obj['Player'] = playerLink.innerText.trim();
+                            const href = playerLink.getAttribute('href') || '';
+                            if (href.includes('/players/')) {
+                                obj['_gc_id'] = href.split('/').pop();
+                            }
+                        }
+
+                        if (Object.keys(obj).length > 0) results.push(obj);
+                    });
+                    if (results.length > 0) return results;
                 }
-            });
-            return JSON.stringify(rows);
-        })()
-        """
-        raw = self.page.evaluate(js_extract)
-        try:
-            return json.loads(raw) if raw else []
-        except json.JSONDecodeError:
-            print(f"[GC] Warning: Could not parse table JSON")
-            return []
+                
+                // 2. Fallback to standard table
+                const table = document.querySelector('table, [role="table"]');
+                if (table) {
+                    const headers = Array.from(table.querySelectorAll('th, .ag-header-cell-label'))
+                        .map(th => th.innerText.trim())
+                        .filter(h => h !== '');
+                    const rows = Array.from(table.querySelectorAll('tbody tr, .ag-row'));
+                    return rows.map(row => {
+                        const cells = Array.from(row.querySelectorAll('td, .ag-cell'));
+                        const obj = {};
+                        headers.forEach((h, i) => { if (cells[i]) obj[h] = cells[i].innerText.trim(); });
+                        return obj;
+                    });
+                }
+                return [];
+            }
+        """)
 
     def _click_tab(self, tab_text: str) -> bool:
         """Click a tab/button with self-healing capabilities."""
+        print(f"[GC] Attempting to click tab: {tab_text}")
         try:
-            # Try roles first: tab then button
+            # 1. Try specific GC chooser class (discovered via inspection)
+            # This selector matches the specific buttons on the stats page
+            target_sel = f'.TabViewChooserItem__tabViewChooserItem:has-text("{tab_text}")'
+            loc = self.page.locator(target_sel).first
+            if loc.count() > 0:
+                loc.click(timeout=3000)
+                self.page.wait_for_timeout(2000)
+                print(f"[GC]   ✓ Clicked '{tab_text}' via chooser class")
+                return True
+
+            # 2. Try the sub-tab dropdown (Standard, Advanced, etc.)
+            if tab_text in ["Standard", "Advanced", "Breakdown", "Catching", "Innings Played"]:
+                dropdown = self.page.locator('.StatsDropdownViewChooser__textButton').first
+                if dropdown.is_visible():
+                    dropdown.click()
+                    self.page.wait_for_timeout(500)
+                    # Options are titles in labels
+                    option = self.page.locator(f"label[title*='{tab_text}'], text='{tab_text}'").first
+                    if option.count() > 0:
+                        option.click()
+                        self.page.wait_for_timeout(2000)
+                        print(f"[GC]   ✓ Selected '{tab_text}' from dropdown")
+                        return True
+
+            # 3. Fallback to general roles
             for role in ["tab", "button", "link"]:
                 btn = self._heal_locator(tab_text, role=role)
                 if btn:
                     btn.click()
-                    self.page.wait_for_timeout(1000)
+                    self.page.wait_for_timeout(2000)
+                    print(f"[GC]   ✓ Clicked '{tab_text}' via common {role}")
                     return True
             
-            print(f"[GC] [WARN] Self-healing could not find tab/button/link labeled '{tab_text}'")
+            print(f"[GC]   [WARN] Could not find tab '{tab_text}'")
             self._capture_diagnostics(f"click_tab_failed_{tab_text}")
+            return False
                 
         except Exception as e:
-            print(f"[GC] Error clicking tab '{tab_text}': {e}")
-        return False
+            print(f"[GC] [ERROR] Tab click failed for '{tab_text}': {e}")
+            return False
 
     # ------------------------------------------------------------------ #
     #  Scrape W-L record from schedule page
     # ------------------------------------------------------------------ #
     def scrape_record(self) -> str:
-        """Scrape the team W-L record from the schedule page. Returns e.g. '2-1'."""
-        schedule_url = f"{GC_BASE_URL}/teams/{self.team_id}/{self.season_slug}/schedule"
+        """Scrape the team W-L-T record. Heuristic based on common GC header elements."""
         try:
-            self.page.goto(schedule_url, wait_until="domcontentloaded", timeout=60000)
-            self.page.wait_for_timeout(2000)
-            # GC shows record on the schedule page — look for text like "2-1" or "W-L"
-            # Try to find a record element (common patterns: "Record: 2-1", "2-1 (W-L)")
-            record_text = self.page.evaluate("""
-            (() => {
-                // Try to find record in page text
-                const all = document.querySelectorAll('*');
-                for (const el of all) {
-                    if (el.children.length === 0) {
-                        const t = el.textContent.trim();
-                        if (/^\\d+-\\d+$/.test(t) || /Record.*\\d+-\\d+/.test(t)) {
-                            return t.match(/\\d+-\\d+/)?.[0] || null;
-                        }
-                    }
+            # Check for standard record patterns in text blocks
+            record_match = self.page.evaluate("""
+                () => {
+                    const text = document.body.innerText;
+                    const matches = text.match(/(\\d+-\\d+-\\d+)/) || text.match(/(\\d+-\\d+)/);
+                    return matches ? matches[0] : null;
                 }
-                return null;
-            })()
             """)
-            if record_text and re.match(r'^\d+-\d+', record_text):
-                return record_text
+            if record_match: return record_match
+            
+            # Secondary check specifically in headers
+            header = self.page.locator('header').first
+            if header.count() > 0:
+                t = header.inner_text()
+                m = re.search(r'(\d+-\d+(-\d+)?)', t)
+                if m: return m.group(1)
         except Exception as e:
-            print(f"[GC] Could not scrape record: {e}")
+            print(f"[GC] [WARN] Record scrape failed: {e}")
         return "0-0"
 
     # ------------------------------------------------------------------ #
@@ -600,12 +682,21 @@ class GameChangerScraper:
             raise RuntimeError("[GC] Not logged in. Call login() first.")
 
         print(f"[GC] Navigating to stats page: {self.stats_url}")
-        self.page.goto(self.stats_url, wait_until="domcontentloaded", timeout=60000)
-        self.page.wait_for_timeout(3000)
+        self.page.goto(self.stats_url, wait_until="networkidle", timeout=60000)
+        
+        # Mandatory wait for UI to render
+        try:
+            print("[GC] Waiting for stats UI (TabViewChooserItem) to appear...")
+            self.page.wait_for_selector(".TabViewChooserItem__tabViewChooserItem", timeout=30000)
+            print("[GC] ✓ Stats UI detected.")
+        except Exception:
+            print("[GC] [WARN] Stats UI (.TabViewChooserItem__tabViewChooserItem) not found. Attempting fallback wait...")
+            self.page.wait_for_timeout(5000)
+            self._capture_diagnostics("stats_ui_missing")
 
         # Dismiss any popups (follow team dialog etc.)
         try:
-            maybe_later = self.page.locator('button:has-text("Maybe later")').first
+            maybe_later = self.page.locator('button:has-text("Maybe later"), button:has-text("No thanks")').first
             if maybe_later.count() > 0:
                 maybe_later.click()
                 self.page.wait_for_timeout(1000)
