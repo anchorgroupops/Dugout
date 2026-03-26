@@ -407,7 +407,7 @@ const GameCard = ({ game, onExpand, isExpanded, gameDetail, isMobile = false }) 
           {!isMobile && <TipBadge label="BB" value={t.bb} />}
           {!isMobile && <TipBadge label="HBP" value={t.hbp != null ? t.hbp : 0} />}
           {!isMobile && <TipBadge label="SO" value={t.so} />}
-          <TipBadge label="AVG" value={t.avg != null ? parseFloat(t.avg).toFixed(3) : null} />
+          <TipBadge label="AVG" value={t.avg != null ? fmt3(t.avg) : null} />
         </div>
       )}
 
