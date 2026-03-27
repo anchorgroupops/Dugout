@@ -298,6 +298,35 @@ def run(scorebooks_dir: Path = SCOREBOOKS_DIR, games_dir: Path = GAMES_DIR):
               f"{game['sharks_totals']['h']}H/{game['sharks_totals']['ab']}AB)")
         results.append(game)
 
+    # Enrich games with scores from known_game_results.json
+    known_results_file = Path(__file__).parent.parent / "config" / "known_game_results.json"
+    known_by_date = {}
+    try:
+        if known_results_file.exists():
+            with open(known_results_file) as f:
+                kr = json.load(f)
+            for r in kr.get("results", []):
+                if isinstance(r, dict) and r.get("date"):
+                    known_by_date[r["date"]] = r
+    except Exception:
+        pass
+
+    for game in results:
+        kr = known_by_date.get(game.get("date"))
+        if kr and kr.get("result"):
+            game["result"] = kr["result"]
+            if kr.get("score"):
+                parts = str(kr["score"]).split("-")
+                if len(parts) == 2:
+                    try:
+                        game["score"] = {"sharks": int(parts[0]), "opponent": int(parts[1])}
+                    except ValueError:
+                        game["score_raw"] = kr["score"]
+            # Re-write the enriched game JSON
+            out_path = games_dir / f"{game['game_id']}.json"
+            with open(out_path, "w") as f:
+                json.dump(game, f, indent=2)
+
     # Write combined index for the API
     index_path = games_dir / "index.json"
     index = [
@@ -307,6 +336,8 @@ def run(scorebooks_dir: Path = SCOREBOOKS_DIR, games_dir: Path = GAMES_DIR):
             "opponent": g["opponent"],
             "sharks_side": g["sharks_side"],
             "sharks_totals": g["sharks_totals"],
+            **({"result": g["result"]} if "result" in g else {}),
+            **({"score": g["score"]} if "score" in g else {}),
         }
         for g in sorted(results, key=lambda x: x.get("date") or "")
     ]
