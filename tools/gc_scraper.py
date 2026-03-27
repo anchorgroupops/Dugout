@@ -10,6 +10,7 @@ STAT CATEGORIES SCRAPED:
 REQUIRES: pip install playwright && playwright install chromium
 REQUIRES: GC_EMAIL and GC_PASSWORD in .env
 """
+from __future__ import annotations
 
 import argparse
 import json
@@ -209,15 +210,32 @@ class GameChangerScraper:
             return "LOGIN_REQUIRED"
         if "challenge" in url or "verif" in url:
             return "CHALLENGED"
-        
-        # Check for specific elements
+
+        # Check for login form
         if self.page.locator('input[name="email"], input[type="email"]').count() > 0:
             return "LOGIN_REQUIRED"
-        
-        # Check if we are on the stats page or team page
+
+        # Check if we are on a team/stats page — but verify actual auth content.
+        # GC serves the SAME URL to unauthenticated users with a public "Download the app"
+        # promo banner instead of the stats grid. Check for that to avoid a false positive.
         if "/teams/" in url or "stats" in url:
+            try:
+                # Sign-in button in nav → unauthenticated
+                if self.page.locator(
+                    '[data-testid="desktop-sign-in-button"], '
+                    '[data-testid="mobile-sign-in-button"]'
+                ).count() > 0:
+                    return "LOGIN_REQUIRED"
+                # App promo banner → unauthenticated public view
+                if self.page.locator(
+                    '.AppInstructionsBanner__wrapper, '
+                    '.TeamAppInstructions__container'
+                ).count() > 0:
+                    return "LOGIN_REQUIRED"
+            except Exception:
+                pass
             return "AUTHENTICATED"
-            
+
         return "UNKNOWN"
 
     def _complete_login_flow(self):
