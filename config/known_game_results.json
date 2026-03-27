@@ -1,0 +1,37 @@
+{
+  "_comment": "Authoritative game results. Used by sync_daemon to supplement missing W/L data. Keyed by date (YYYY-MM-DD). Only add games with confirmed results.",
+  "results": [
+    {
+      "date": "2026-02-19",
+      "opponent": "TBD",
+      "result": "L",
+      "score": "13-20",
+      "home_away": "away",
+      "verified": true
+    },
+    {
+      "date": "2026-03-03",
+      "opponent": "Peppers",
+      "result": "L",
+      "score": "9-20",
+      "home_away": "home",
+      "verified": true
+    },
+    {
+      "date": "2026-03-07",
+      "opponent": "Riptide Rebels",
+      "result": "W",
+      "score": "11-10",
+      "home_away": "home",
+      "verified": true
+    },
+    {
+      "date": "2026-03-23",
+      "opponent": "Ravens - Major SB Spring 2026",
+      "result": "W",
+      "score": "16-7",
+      "home_away": "away",
+      "verified": true
+    }
+  ]
+}

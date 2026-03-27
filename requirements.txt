@@ -1,0 +1,12 @@
+playwright==1.42.0
+python-dotenv
+requests
+pinecone
+google-generativeai
+flask
+flask-cors
+gunicorn==22.0.0
+pdfplumber
+tzdata
+fastapi[standard]
+uvicorn
