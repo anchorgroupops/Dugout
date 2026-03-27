@@ -9,7 +9,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy scraping tools
 COPY tools/ ./tools/
-COPY data/ ./data/
+
+# Create data directory (mounted as volume at runtime)
+RUN mkdir -p /app/data
 
 # Run the sync daemon
 CMD ["python", "tools/sync_daemon.py"]
