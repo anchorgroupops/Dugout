@@ -1,17 +1,26 @@
 FROM mcr.microsoft.com/playwright/python:v1.42.0-jammy
 
-# Set working directory
+# Suppress .pyc files and force stdout/stderr flushing
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
 WORKDIR /app
 
-# Install Python dependencies
-COPY requirements.txt .
+# Install Python dependencies first (layer-cached until requirements.txt changes)
+COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy scraping tools
+# Copy only the tools needed at runtime (not data/logs/docs/secrets)
 COPY tools/ ./tools/
+COPY config/ ./config/
 
-# Create data directory (mounted as volume at runtime)
-RUN mkdir -p /app/data
+# Create runtime directories (populated by mounted volumes)
+RUN mkdir -p /app/data /app/logs
 
-# Run the sync daemon
+# Drop root: run as a dedicated unprivileged user
+RUN groupadd -r sharks && useradd -r -g sharks -d /app -s /sbin/nologin sharks \
+    && chown -R sharks:sharks /app
+USER sharks
+
+# Default: sync daemon. Override with `command:` in docker-compose for gunicorn
 CMD ["python", "tools/sync_daemon.py"]

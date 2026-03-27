@@ -2,6 +2,11 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
+// Allow Docker builds to skip the sync step (data is mounted at runtime)
+if (process.env.VITE_SKIP_DATA_SYNC === '1') {
+  process.exit(0);
+}
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
