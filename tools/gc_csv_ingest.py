@@ -163,10 +163,10 @@ def parse_player_row(row: list[str], core_set: set[str]) -> dict | None:
         "gp": safe_int(bat_raw["gp"]),
         "pa": safe_int(bat_raw["pa"]),
         "ab": safe_int(bat_raw["ab"]),
-        "avg": bat_raw["avg"] if bat_raw["avg"] else ".000",
-        "obp": bat_raw["obp"] if bat_raw["obp"] else ".000",
-        "ops": bat_raw["ops"] if bat_raw["ops"] else ".000",
-        "slg": bat_raw["slg"] if bat_raw["slg"] else ".000",
+        "avg": safe_float(bat_raw["avg"]),
+        "obp": safe_float(bat_raw["obp"]),
+        "ops": safe_float(bat_raw["ops"]),
+        "slg": safe_float(bat_raw["slg"]),
         "h": safe_int(bat_raw["h"]),
         "singles": safe_int(bat_raw["1b"]),
         "doubles": safe_int(bat_raw["2b"]),
@@ -205,8 +205,8 @@ def parse_player_row(row: list[str], core_set: set[str]) -> dict | None:
         "ld_pct": safe_float(ba_raw["ld_pct"]),
         "fb_pct": safe_float(ba_raw["fb_pct"]),
         "gb_pct": safe_float(ba_raw["gb_pct"]),
-        "babip": ba_raw["babip"] if ba_raw["babip"] else None,
-        "ba_risp": ba_raw["ba_risp"] if ba_raw["ba_risp"] else None,
+        "babip": safe_float(ba_raw["babip"]),
+        "ba_risp": safe_float(ba_raw["ba_risp"]),
         "lob": safe_int(ba_raw.get("bat_lob", "")),
         "two_out_rbi": safe_int(ba_raw["two_out_rbi"]),
         "xbh": safe_int(ba_raw["xbh"]),
@@ -388,12 +388,10 @@ def _merge_players(existing: dict, new: dict) -> dict:
     hbp = merged_bat["hbp"]
     pa = merged_bat["pa"]
     tb = merged_bat["singles"] + 2 * merged_bat["doubles"] + 3 * merged_bat["triples"] + 4 * merged_bat["hr"]
-    merged_bat["avg"] = f".{int(round(h / ab * 1000)):03d}" if ab > 0 else ".000"
-    merged_bat["obp"] = f".{int(round((h + bb + hbp) / pa * 1000)):03d}" if pa > 0 else ".000"
-    merged_bat["slg"] = f".{int(round(tb / ab * 1000)):03d}" if ab > 0 else ".000"
-    obp_f = safe_float(merged_bat["obp"])
-    slg_f = safe_float(merged_bat["slg"])
-    merged_bat["ops"] = f".{int(round((obp_f + slg_f) * 1000)):03d}"
+    merged_bat["avg"] = round(h / ab, 3) if ab > 0 else 0.0
+    merged_bat["obp"] = round((h + bb + hbp) / pa, 3) if pa > 0 else 0.0
+    merged_bat["slg"] = round(tb / ab, 3) if ab > 0 else 0.0
+    merged_bat["ops"] = round(merged_bat["obp"] + merged_bat["slg"], 3)
     merged_bat["sb_pct"] = existing["batting"].get("sb_pct")
     merged_bat["ci"] = existing["batting"].get("ci")
     merged["batting"] = merged_bat
@@ -508,10 +506,10 @@ def build_app_stats_json(roster: list[dict]) -> dict:
             "gp": str(b.get("gp", 0)),
             "pa": str(b.get("pa", 0)),
             "ab": str(b.get("ab", 0)),
-            "avg": b.get("avg", ".000"),
-            "obp": b.get("obp", ".000"),
-            "ops": b.get("ops", ".000"),
-            "slg": b.get("slg", ".000"),
+            "avg": safe_float(b.get("avg", 0)),
+            "obp": safe_float(b.get("obp", 0)),
+            "ops": safe_float(b.get("ops", 0)),
+            "slg": safe_float(b.get("slg", 0)),
             "h": str(b.get("h", 0)),
             "1b": str(b.get("singles", 0)),
             "2b": str(b.get("doubles", 0)),

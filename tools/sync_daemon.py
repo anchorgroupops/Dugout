@@ -435,6 +435,60 @@ def _enrich_team_with_app_stats(team_data: dict) -> dict:
     return team_data
 
 
+def _supplement_enriched_from_base(team_data: dict):
+    """Supplement enriched team data with fields from base team.json that enrichment didn't cover.
+
+    After _enrich_team_with_app_stats replaces batting and maps 12 batting_advanced fields,
+    some fields from the original CSV (babip, ba_risp, ps, tb, xbh, etc.) can be lost.
+    This reads the base team.json and fills in any missing values.
+    """
+    base_file = SHARKS_DIR / "team.json"
+    if not base_file.exists():
+        return
+    try:
+        with open(base_file) as f:
+            base_team = json.load(f)
+    except Exception:
+        return
+
+    base_by_num = {}
+    for bp in base_team.get("roster", []):
+        num = str(bp.get("number", "")).strip()
+        if num:
+            base_by_num[num] = bp
+
+    ADV_SUPPLEMENT = ["babip", "ps", "ps_pa", "tb", "xbh", "two_out_rbi", "ba_risp",
+                      "lob", "two_s_three", "two_s_three_pct", "six_plus", "six_plus_pct",
+                      "gidp", "gitp"]
+    SECTION_SUPPLEMENT = ["catching", "innings_played", "pitching_advanced", "pitching_breakdown"]
+
+    for player in team_data.get("roster", []):
+        num = str(player.get("number", "")).strip()
+        bp = base_by_num.get(num)
+        if not bp:
+            continue
+        # Fill missing top-level stat sections
+        for key in SECTION_SUPPLEMENT:
+            if not player.get(key) and bp.get(key):
+                player[key] = bp[key]
+        # Fill missing batting_advanced fields
+        if isinstance(player.get("batting_advanced"), dict) and isinstance(bp.get("batting_advanced"), dict):
+            adv = player["batting_advanced"]
+            base_adv = bp["batting_advanced"]
+            for k in ADV_SUPPLEMENT:
+                if adv.get(k) is None and base_adv.get(k) is not None:
+                    adv[k] = base_adv[k]
+        # Fill missing pitching fields
+        if isinstance(player.get("pitching"), dict) and isinstance(bp.get("pitching"), dict):
+            p_block = player["pitching"]
+            base_p = bp["pitching"]
+            for k in ["gp", "gs", "sv", "svo", "bs", "bf", "np", "r", "kl", "hbp", "wp", "pik", "bk", "cs", "sb", "lob", "baa"]:
+                if p_block.get(k) is None and base_p.get(k) is not None:
+                    p_block[k] = base_p[k]
+        elif not player.get("pitching") and bp.get("pitching"):
+            player["pitching"] = bp["pitching"]
+
+
 def _aggregate_opponent_stats_from_games(opponent_slug: str) -> list:
     """Aggregate opponent_batting stats from scorebook game JSON files for a given opponent.
     Returns flattened batting_stats[] rows (ab/h/bb...) for direct use in matchup aggregator."""
@@ -1002,6 +1056,8 @@ def run_sync_cycle():
                 team_data = json.load(f)
             _enrich_team_with_app_stats(team_data)
             _, reconcile_meta = _merge_team_with_scorebook_stats(team_data)
+            # Supplement batting_advanced with fields from base team.json that enrichment didn't cover
+            _supplement_enriched_from_base(team_data)
             anomaly_findings = _validate_and_write_stat_anomalies(team_data)
             enriched_team_data = team_data
             enriched_file = SHARKS_DIR / "team_enriched.json"
