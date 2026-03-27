@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Dumbbell, RefreshCw, Users, Target } from 'lucide-react';
 import { TipBadge } from './StatTooltip';
 import { formatDateMMDDYYYY } from '../utils/formatDate';
@@ -144,7 +144,7 @@ const Practice = ({ team, schedule, isMobile = false }) => {
     return team.roster.filter(p => p.core !== false).map(p => `${p.first || ''} ${p.last || ''}`.trim()).filter(Boolean);
   }, [team]);
 
-  const fetchInsights = async (players = null) => {
+  const fetchInsights = async () => {
     setLoading(true);
     setError('');
     try {
@@ -198,11 +198,7 @@ const Practice = ({ team, schedule, isMobile = false }) => {
   const selectAll = () => setSelected(availablePlayers);
   const clearAll = () => setSelected([]);
 
-  const applySelection = useCallback(async () => {
-    await fetchInsights(selected);
-  }, [selected]);
-
-  // Auto-tailor: debounce 500ms after selected players change, then call applySelection
+  // Auto-tailor: debounce 500ms after selected players change
   const isFirstRender = useRef(true);
   useEffect(() => {
     // Skip the very first render and skip while initial data is loading
