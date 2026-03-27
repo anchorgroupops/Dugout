@@ -2,6 +2,7 @@ from __future__ import annotations
 import time
 import json
 import os
+import re
 import logging
 import traceback
 import requests
@@ -1365,6 +1366,13 @@ def handle_availability():
         data = request.get_json(silent=True) or {}
         if not isinstance(data, dict):
             return jsonify({"error": "invalid_json_object"}), 400
+        if len(data) > 60:
+            return jsonify({"error": "payload_too_large"}), 400
+        for k, v in data.items():
+            if not isinstance(k, str) or len(k) > 80:
+                return jsonify({"error": "invalid_player_name"}), 400
+            if not isinstance(v, bool):
+                return jsonify({"error": "values_must_be_boolean"}), 400
 
         # Track sub activations in sub_tracker
         old_avail = {}
@@ -2327,6 +2335,12 @@ def handle_borrowed_player():
 
     if not first:
         return jsonify({"error": "first name required"}), 400
+    if len(first) > 64 or len(last) > 64:
+        return jsonify({"error": "name_too_long"}), 400
+    if len(number) > 4:
+        return jsonify({"error": "invalid_number"}), 400
+    if gc_team_id and (len(gc_team_id) > 40 or not re.match(r'^[A-Za-z0-9_-]+$', gc_team_id)):
+        return jsonify({"error": "invalid_gc_team_id"}), 400
 
     manifest_file = SHARKS_DIR / "roster_manifest.json"
     manifest = {}

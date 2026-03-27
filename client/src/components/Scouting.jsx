@@ -30,7 +30,6 @@ export default function Scouting({ isMobile }) {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    setLoading(true);
     fetch('/api/next-game')
       .then(r => r.ok ? r.json() : null)
       .then(data => {

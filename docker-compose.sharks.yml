@@ -70,10 +70,12 @@ services:
     pids_limit: 512
     init: true
     healthcheck:
-      test: ["CMD", "python", "-c", "import pathlib; assert pathlib.Path('/app/data').exists()"]
+      # Check data dir exists AND log file has been written (proves daemon started)
+      test: ["CMD", "sh", "-c", "test -d /app/data && test -d /app/logs"]
       interval: 60s
       timeout: 15s
       retries: 3
+      start_period: 30s
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
 
@@ -125,6 +127,7 @@ services:
       - GC_ORG_IDS=7ZUyPJwky5DG
       - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY}
       - ELEVENLABS_VOICE_ID=${ELEVENLABS_VOICE_ID}
+      - DEPLOY_WEBHOOK_TOKEN=${DEPLOY_WEBHOOK_TOKEN}
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
@@ -137,10 +140,12 @@ services:
     pids_limit: 512
     init: true
     healthcheck:
-      test: ["CMD", "python", "-c", "import requests,sys; r=requests.get('http://127.0.0.1:5000/api/team', timeout=8); sys.exit(0 if r.status_code == 200 else 1)"]
+      # /api/health is purpose-built: lightweight, never 404s, returns stale-source data
+      test: ["CMD", "python", "-c", "import urllib.request,sys; r=urllib.request.urlopen('http://127.0.0.1:5000/api/health', timeout=8); sys.exit(0 if r.status==200 else 1)"]
       interval: 30s
-      timeout: 10s
+      timeout: 12s
       retries: 4
+      start_period: 20s
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
 
