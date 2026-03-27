@@ -1,12 +1,25 @@
+# Core scraper — locked to match Playwright base image
 playwright==1.42.0
-python-dotenv
-requests
-pinecone
-google-generativeai
-flask
-flask-cors
+
+# Web framework + WSGI server
+flask>=3.0,<4
+flask-cors>=4.0,<7
 gunicorn==22.0.0
-pdfplumber
-tzdata
-fastapi[standard]
-uvicorn
+
+# HTTP client (security-sensitive: CVEs in <2.31)
+requests>=2.32,<3
+
+# PDF parsing
+pdfplumber>=0.11,<1
+
+# AI / vector APIs
+google-generativeai>=0.8,<1
+pinecone>=5.0,<6
+
+# FastAPI (used by modal_app.py)
+fastapi[standard]>=0.110,<1
+uvicorn>=0.29,<1
+
+# Utilities
+python-dotenv>=1.0,<2
+tzdata>=2024.1
