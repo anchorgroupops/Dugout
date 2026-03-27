@@ -3,6 +3,7 @@ Lineup Optimizer for Softball
 Generates optimal batting orders based on player stats and PCLL rules.
 Enforces mandatory play requirements (1 AB + 6 defensive outs per player).
 """
+from __future__ import annotations
 
 import json
 import random

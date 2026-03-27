@@ -199,7 +199,7 @@ class GameChangerScraper:
             self.page.screenshot(path=str(screenshot_path), full_page=True)
             with open(html_path, "w", encoding="utf-8") as f:
                 f.write(self.page.content())
-            print(f"[GC] 📸 Diagnostics saved: {screenshot_path.name}")
+            print(f"[GC] [IMG] Diagnostics saved: {screenshot_path.name}")
         except Exception as e:
             print(f"[GC] [WARN] Could not capture diagnostics: {e}")
 
@@ -304,7 +304,7 @@ class GameChangerScraper:
             print("[GC] No OTP field found, proceeding...")
             return
 
-        print("[GC] 🔑 OTP/MFA prompt detected!")
+        print("[GC] [OTP] OTP/MFA prompt detected!")
 
         # Check for pre-configured OTP in env
         otp_code = os.getenv("GC_OTP", "").strip()
@@ -318,11 +318,11 @@ class GameChangerScraper:
             else:
                 otp_field.press("Enter")
             self.page.wait_for_load_state("networkidle", timeout=30000)
-            print("[GC] ✓ OTP submitted.")
+            print("[GC] [OK] OTP submitted.")
         else:
-            print("[GC] ⚠️  No GC_OTP set in .env. Waiting 90s for manual entry...")
-            print("[GC]    → Set GC_OTP=<code> in .env and re-run, OR enter the code manually now.")
-            self.page.wait_for_timeout(90000)
+            print("[GC] [WARN]  No GC_OTP set in .env. Waiting 180s for manual entry...")
+            print("[GC]    → Enter the code in the browser window NOW. You have 3 minutes.")
+            self.page.wait_for_timeout(180000)
             print("[GC] Resuming after OTP wait...")
 
 
@@ -517,7 +517,7 @@ class GameChangerScraper:
             if loc.count() > 0:
                 loc.click(timeout=3000)
                 self.page.wait_for_timeout(2000)
-                print(f"[GC]   ✓ Clicked '{tab_text}' via chooser class")
+                print(f"[GC]   [OK] Clicked '{tab_text}' via chooser class")
                 return True
 
             # 2. Try the sub-tab dropdown (Standard, Advanced, etc.)
@@ -531,7 +531,7 @@ class GameChangerScraper:
                     if option.count() > 0:
                         option.click()
                         self.page.wait_for_timeout(2000)
-                        print(f"[GC]   ✓ Selected '{tab_text}' from dropdown")
+                        print(f"[GC]   [OK] Selected '{tab_text}' from dropdown")
                         return True
 
             # 3. Fallback to general roles
@@ -540,7 +540,7 @@ class GameChangerScraper:
                 if btn:
                     btn.click()
                     self.page.wait_for_timeout(2000)
-                    print(f"[GC]   ✓ Clicked '{tab_text}' via common {role}")
+                    print(f"[GC]   [OK] Clicked '{tab_text}' via common {role}")
                     return True
             
             print(f"[GC]   [WARN] Could not find tab '{tab_text}'")
@@ -675,7 +675,7 @@ class GameChangerScraper:
                 out_file = games_dir / f"{url_slug}.json"
                 with open(out_file, "w") as f:
                     json.dump(game_data, f, indent=2)
-                print(f"[GC] ✓ Saved box score: {out_file.name} ({len(box_players)} players)")
+                print(f"[GC] [OK] Saved box score: {out_file.name} ({len(box_players)} players)")
                 games.append(game_data)
 
                 self.page.wait_for_timeout(2000)
@@ -706,7 +706,7 @@ class GameChangerScraper:
         try:
             print("[GC] Waiting for stats UI (TabViewChooserItem) to appear...")
             self.page.wait_for_selector(".TabViewChooserItem__tabViewChooserItem", timeout=30000)
-            print("[GC] ✓ Stats UI detected.")
+            print("[GC] [OK] Stats UI detected.")
         except Exception:
             print("[GC] [WARN] Stats UI (.TabViewChooserItem__tabViewChooserItem) not found. Attempting fallback wait...")
             self.page.wait_for_timeout(5000)

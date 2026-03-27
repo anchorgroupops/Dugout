@@ -3,6 +3,10 @@ import subprocess
 from pathlib import Path
 
 import modal
+from dotenv import load_dotenv
+
+# Load .env so _runtime_secret() has credentials at deploy time
+load_dotenv(Path(__file__).parent.parent / ".env")
 
 app = modal.App("softball-strategy-sharks")
 
@@ -12,7 +16,7 @@ VOLUME_MOUNT = "/vol/softball-gc"
 sharks_image = (
     modal.Image.debian_slim()
     .pip_install(
-        "playwright==1.42.0",
+        "playwright==1.49.0",
         "python-dotenv",
         "requests",
         "pinecone",
@@ -31,6 +35,7 @@ def _runtime_secret() -> modal.Secret:
         "GC_PASSWORD",
         "GC_TEAM_ID",
         "GC_SEASON_SLUG",
+        "GC_ORG_IDS",
         "PINECONE_API_KEY",
         "GEMINI_API_KEY",
         "GOOGLE_API_KEY",
@@ -57,9 +62,9 @@ def _run_step(label: str, args: list[str], env: dict[str, str]) -> None:
     )
     if proc.stdout:
         print(proc.stdout)
+    if proc.stderr:
+        print(proc.stderr)
     if proc.returncode != 0:
-        if proc.stderr:
-            print(proc.stderr)
         raise RuntimeError(f"{label} failed with exit code {proc.returncode}")
     print(f"[Modal] Completed step: {label}")
 

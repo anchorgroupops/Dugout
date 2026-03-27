@@ -1,3 +1,4 @@
+from __future__ import annotations
 import time
 import json
 import os
@@ -2564,30 +2565,33 @@ def _load_voice_context() -> dict:
     lineups = _read_json_file(SHARKS_DIR / "lineups.json", default={}) or {}
     schedule = _read_json_file(SHARKS_DIR / "schedule_manual.json", default={"upcoming": [], "past": []}) or {"upcoming": [], "past": []}
 
-    # Build games list from schedule past + game JSON files for win/loss record
-    games = []
-    past_games = schedule.get("past", []) if isinstance(schedule, dict) else []
-    if isinstance(past_games, list):
-        games.extend(past_games)
-    # Also load game index for score-based W/L detection
-    games_index = _read_json_file(SHARKS_DIR / "games" / "index.json", default=[]) or []
-    if isinstance(games_index, list):
-        for gi in games_index:
-            if not isinstance(gi, dict):
-                continue
-            gid = gi.get("game_id", "")
-            game_detail = _read_json_file(SHARKS_DIR / "games" / f"{gid}.json", default=None)
-            if isinstance(game_detail, dict) and "score" in game_detail:
-                score = game_detail["score"]
-                s_score = score.get("sharks", 0)
-                o_score = score.get("opponent", 0)
-                if s_score > o_score:
-                    gi["result"] = "W"
-                elif o_score > s_score:
-                    gi["result"] = "L"
-                games.append(gi)
+    # Build deduplicated games list using the authoritative feed (uses known_game_results.json)
+    games = _build_games_feed()
 
     return {"team": team, "swot": swot, "lineups": lineups, "schedule": schedule, "games": games}
+
+
+def _tts_stat(v) -> str:
+    """Convert a decimal stat like 0.778 to a spoken form like 'seven seventy-eight'."""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return str(v)
+    # Format to 3 decimal places, strip leading zero: 0.778 -> ".778" -> "778"
+    s = f"{f:.3f}"  # e.g. "0.778"
+    if s.startswith("0."):
+        digits = s[2:]  # "778"
+    elif s.startswith("-0."):
+        digits = s[3:]
+    else:
+        return str(round(f, 3))
+    # Speak as two parts: first digit and last two, e.g. "7 seventy-eight" -> "seven seventy-eight"
+    if len(digits) == 3:
+        hundreds = int(digits[0])
+        tens_ones = int(digits[1:])
+        hundreds_words = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"]
+        return f"{hundreds_words[hundreds]} {tens_ones:02d}" if tens_ones > 0 else hundreds_words[hundreds]
+    return digits
 
 
 # Phonetic pronunciation map for names the TTS engine mispronounces.
@@ -2610,6 +2614,7 @@ _PHONETIC_MAP = {
     "NWVLL": "North West Volusia Little League",
     "PCLL": "Palm Coast Little League",
     "Stihlers": "Steelers",
+    "Riptide": "Rip-tide",
 }
 
 
@@ -2653,7 +2658,7 @@ def _build_voice_overview_text(ctx: dict) -> str:
         reverse=True,
     )[:3]
     hitter_text = ", ".join(
-        f"{_player_name(p)} with an on-base of {normalize_batting_row(p).get('obp', 0.0):.3f}"
+        f"{_player_name(p)}, on-base percentage {_tts_stat(normalize_batting_row(p).get('obp', 0.0))}"
         for p in top_hitters
     ) or "no clear hitting leaders yet"
 
