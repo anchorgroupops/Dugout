@@ -138,7 +138,7 @@ function computeZoneWeights(stats, advStats) {
   return result;
 }
 
-/** Interpolate from teal (cold) to red (hot) */
+/** Interpolate from teal (cold) to red (hot) — default heat palette */
 function heatColor(t) {
   // t: 0..1
   if (t < 0.33) {
@@ -161,6 +161,45 @@ function heatColor(t) {
   return `rgba(${r},${g},${b},${0.65 + p * 0.25})`;
 }
 
+/** Type-specific palette: GB=earthy brown, LD=gold, FB=sky blue */
+function typeColor(t, hitType) {
+  const alpha = 0.2 + t * 0.7;
+  if (hitType === 'gb') {
+    return `rgba(${Math.round(100 + t * 120)},${Math.round(60 + t * 65)},${Math.round(15 + t * 10)},${alpha})`;
+  }
+  if (hitType === 'ld') {
+    return `rgba(${Math.round(180 + t * 60)},${Math.round(140 + t * 60)},${Math.round(10)},${alpha})`;
+  }
+  if (hitType === 'fb') {
+    return `rgba(${Math.round(30 + t * 60)},${Math.round(100 + t * 100)},${Math.round(190 + t * 50)},${alpha})`;
+  }
+  return heatColor(t);
+}
+
+/**
+ * Re-weight zones to emphasise a specific hit type.
+ * 'all' returns unchanged weights; 'gb'/'ld'/'fb' amplifies the relevant zones.
+ */
+function applyHitTypeBias(weights, hitType) {
+  if (hitType === 'all') return weights;
+  const w = { ...weights };
+  if (hitType === 'gb') {
+    ['if3', 'ifm', 'if1', 'home'].forEach(id => { w[id] = Math.min(1, (w[id] ?? 0) * 1.8); });
+    ['lf', 'lc', 'cf', 'rc', 'rf'].forEach(id => { w[id] = (w[id] ?? 0) * 0.4; });
+  } else if (hitType === 'ld') {
+    ['lc', 'rc'].forEach(id => { w[id] = Math.min(1, (w[id] ?? 0) * 2.0); });
+    ['cf'].forEach(id => { w[id] = Math.min(1, (w[id] ?? 0) * 1.5); });
+    ['lf', 'rf'].forEach(id => { w[id] = (w[id] ?? 0) * 0.7; });
+    ['home', 'if3', 'if1', 'ifm'].forEach(id => { w[id] = (w[id] ?? 0) * 0.5; });
+  } else if (hitType === 'fb') {
+    ['lf', 'lc', 'cf', 'rc', 'rf'].forEach(id => { w[id] = Math.min(1, (w[id] ?? 0) * 1.8); });
+    ['if3', 'ifm', 'if1', 'home'].forEach(id => { w[id] = (w[id] ?? 0) * 0.3; });
+  }
+  const maxW = Math.max(...Object.values(w), 0.001);
+  Object.keys(w).forEach(id => { w[id] = w[id] / maxW; });
+  return w;
+}
+
 const fmt3 = (v) => {
   if (v == null || v === '') return '—';
   const n = parseFloat(v);
@@ -170,7 +209,7 @@ const fmt3 = (v) => {
 };
 
 // ─── Field SVG ──────────────────────────────────────────────────────────────
-const FieldSVG = ({ zoneWeights, onHover, hoveredZone }) => (
+const FieldSVG = ({ zoneWeights, onHover, hoveredZone, hitType = 'all' }) => (
   <svg viewBox="0 0 200 185" style={{ width: '100%', maxWidth: 300, display: 'block', margin: '0 auto' }}>
     {/* Sky / warning track */}
     <rect x="0" y="0" width="200" height="185" fill="rgba(0,0,0,0.3)" rx="4" />
@@ -180,14 +219,15 @@ const FieldSVG = ({ zoneWeights, onHover, hoveredZone }) => (
       fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="4" />
 
     {/* Zone overlays */}
-    {ZONES.map(({ id, label, points }) => {
+    {ZONES.map(({ id, points }) => {
       const t = zoneWeights[id] ?? 0;
       const isHovered = hoveredZone === id;
+      const fill = hitType === 'all' ? heatColor(t) : typeColor(t, hitType);
       return (
         <polygon
           key={id}
           points={points}
-          fill={heatColor(t)}
+          fill={fill}
           stroke={isHovered ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.12)'}
           strokeWidth={isHovered ? 1.5 : 0.5}
           style={{ cursor: 'default', transition: 'fill 0.3s' }}
@@ -268,9 +308,19 @@ const PlayerThreatRow = ({ player }) => {
   );
 };
 
+// ─── Hit type filter button strip ────────────────────────────────────────────
+const HIT_TYPES = [
+  { id: 'all', label: 'All' },
+  { id: 'gb',  label: 'GB' },
+  { id: 'ld',  label: 'LD' },
+  { id: 'fb',  label: 'FB' },
+];
+
 // ─── Main component ──────────────────────────────────────────────────────────
 export default function OpponentFieldMap({ matchup, isMobile = false }) {
   const [hoveredZone, setHoveredZone] = useState(null);
+  const [selectedPlayer, setSelectedPlayer] = useState('');  // '' = team totals
+  const [hitType, setHitType] = useState('all');
 
   if (!matchup || matchup.empty) return null;
 
@@ -286,7 +336,15 @@ export default function OpponentFieldMap({ matchup, isMobile = false }) {
     return b.h != null || b.avg != null || b.pa != null;
   });
 
-  const zoneWeights = computeZoneWeights(batting, advBatting);
+  // Per-player stat override when a player is selected
+  const activePlayer = selectedPlayer
+    ? playersWithStats.find(p => (p.name || `${p.first || ''} ${p.last || ''}`.trim()) === selectedPlayer)
+    : null;
+  const activeBatting    = activePlayer?.batting          || batting;
+  const activeAdvBatting = activePlayer?.batting_advanced || advBatting;
+
+  const rawWeights  = computeZoneWeights(activeBatting, activeAdvBatting);
+  const zoneWeights = applyHitTypeBias(rawWeights, hitType);
 
   // Zone legend
   const topZones = ZONES
@@ -294,16 +352,70 @@ export default function OpponentFieldMap({ matchup, isMobile = false }) {
     .sort((a, b) => b.w - a.w)
     .slice(0, 3);
 
-  const totalHits = batting.h ?? 0;
+  const totalHits = activeBatting.h ?? 0;
   const hasData = totalHits > 0;
 
   return (
     <div style={{ marginTop: '1rem' }}>
       {/* Section header */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem', flexWrap: 'wrap' }}>
         <span style={{ fontSize: '1rem' }}>🎯</span>
         <span className="section-label" style={{ marginBottom: 0 }}>Opponent Field Tendencies</span>
         <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginLeft: 'auto' }}>{opponent}</span>
+      </div>
+
+      {/* Controls: hit type filter + player filter */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
+        {/* Hit type toggle */}
+        <div style={{ display: 'flex', gap: '0.25rem' }}>
+          {HIT_TYPES.map(({ id, label }) => (
+            <button
+              key={id}
+              onClick={() => setHitType(id)}
+              style={{
+                padding: '2px 9px',
+                borderRadius: '4px',
+                border: `1px solid ${hitType === id ? 'var(--primary-color)' : 'rgba(255,255,255,0.15)'}`,
+                background: hitType === id ? 'rgba(4,101,104,0.22)' : 'rgba(255,255,255,0.04)',
+                color: hitType === id ? 'var(--primary-color)' : 'var(--text-muted)',
+                fontSize: 'var(--text-xs)',
+                fontWeight: hitType === id ? '700' : '400',
+                cursor: 'pointer',
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {/* Player filter — only shown when roster stats exist */}
+        {playersWithStats.length > 1 && (
+          <select
+            value={selectedPlayer}
+            onChange={e => { setSelectedPlayer(e.target.value); }}
+            style={{
+              padding: '2px 6px',
+              borderRadius: '4px',
+              background: 'rgba(0,0,0,0.3)',
+              border: '1px solid var(--surface-border)',
+              color: 'var(--text-main)',
+              fontSize: 'var(--text-xs)',
+              cursor: 'pointer',
+            }}
+          >
+            <option value="">Team total</option>
+            {playersWithStats
+              .sort((a, b) => {
+                const na = a.name || `${a.last || ''} ${a.first || ''}`.trim();
+                const nb = b.name || `${b.last || ''} ${b.first || ''}`.trim();
+                return na.localeCompare(nb);
+              })
+              .map(p => {
+                const name = p.name || `${p.first || ''} ${p.last || ''}`.trim();
+                return <option key={name} value={name}>{name}</option>;
+              })}
+          </select>
+        )}
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '1rem' }}>
@@ -316,6 +428,7 @@ export default function OpponentFieldMap({ matchup, isMobile = false }) {
                 zoneWeights={zoneWeights}
                 onHover={!isMobile ? setHoveredZone : undefined}
                 hoveredZone={hoveredZone}
+                hitType={hitType}
               />
               {/* Hot zone legend */}
               <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'center' }}>
@@ -347,14 +460,16 @@ export default function OpponentFieldMap({ matchup, isMobile = false }) {
           </div>
           {playersWithStats.length > 0 ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
-              {playersWithStats
-                .sort((a, b) => {
-                  const avgA = parseFloat((a.batting || {}).avg ?? a.avg ?? 0);
-                  const avgB = parseFloat((b.batting || {}).avg ?? b.avg ?? 0);
-                  return avgB - avgA;
-                })
-                .slice(0, 3)
-                .map((p, i) => <PlayerThreatRow key={i} player={p} />)
+              {(activePlayer
+                ? [activePlayer]
+                : playersWithStats
+                    .sort((a, b) => {
+                      const avgA = parseFloat((a.batting || {}).avg ?? a.avg ?? 0);
+                      const avgB = parseFloat((b.batting || {}).avg ?? b.avg ?? 0);
+                      return avgB - avgA;
+                    })
+                    .slice(0, 3)
+              ).map((p, i) => <PlayerThreatRow key={i} player={p} />)
               }
             </div>
           ) : (
@@ -374,7 +489,7 @@ export default function OpponentFieldMap({ matchup, isMobile = false }) {
               background: 'rgba(4,101,104,0.12)', border: '1px solid rgba(4,101,104,0.25)',
               fontSize: 'var(--text-xs)', color: 'var(--text-muted)',
             }}>
-              💡 {buildDefensiveTip(batting, advBatting, topZones)}
+              💡 {buildDefensiveTip(activeBatting, activeAdvBatting, topZones)}
             </div>
           )}
         </div>
