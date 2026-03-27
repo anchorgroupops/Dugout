@@ -1,12 +1,16 @@
 version: "3.8"
 
 # Sharks Softball Dashboard
-# Auto-deploys via Watchtower pulling from GHCR.
-# Push to main → GitHub Actions builds images → Watchtower pulls & restarts.
+# Supports two deploy modes:
+#   1. GHCR + Watchtower (auto): images pulled from ghcr.io, Watchtower auto-updates
+#   2. Local build (manual): docker compose build && docker compose up -d
 
 services:
   sharks_dashboard:
     image: ghcr.io/anchorgroupops/sharks-dashboard:latest
+    build:
+      context: ./client
+      dockerfile: Dockerfile
     container_name: sharks_dashboard
     restart: unless-stopped
     depends_on:
@@ -38,6 +42,9 @@ services:
 
   sharks_sync:
     image: ghcr.io/anchorgroupops/sharks-api:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.scraper
     container_name: sharks_sync
     restart: unless-stopped
     environment:
@@ -72,6 +79,9 @@ services:
 
   sharks_api:
     image: ghcr.io/anchorgroupops/sharks-api:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.scraper
     container_name: sharks_api
     restart: unless-stopped
     command:
