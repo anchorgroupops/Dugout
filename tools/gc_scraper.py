@@ -251,8 +251,8 @@ class GameChangerScraper:
             email_field.wait_for(state="visible", timeout=15000)
             email_field.fill(self.email)
 
-            # Look for Continue button
-            continue_btn = self.page.get_by_role("button", name=re.compile("Continue|Sign in", re.I)).first
+            # Look for Continue/Next button (GC may use different labels across versions)
+            continue_btn = self.page.get_by_role("button", name=re.compile(r"Continue|Sign.?[Ii]n|Log.?[Ii]n|Next", re.I)).first
             if continue_btn.count() > 0:
                 continue_btn.click()
             else:
@@ -266,7 +266,7 @@ class GameChangerScraper:
             pwd_field.wait_for(state="visible", timeout=15000)
             pwd_field.fill(self.password)
 
-            sign_in_btn = self.page.get_by_role("button", name=re.compile("Sign in|Continue", re.I)).first
+            sign_in_btn = self.page.get_by_role("button", name=re.compile(r"Sign.?[Ii]n|Log.?[Ii]n|Continue|Submit", re.I)).first
             if sign_in_btn.count() > 0:
                 sign_in_btn.click()
             else:
@@ -368,6 +368,12 @@ class GameChangerScraper:
             headless=GC_HEADLESS,
             args=["--no-sandbox", "--disable-dev-shm-usage"]
         )
+        # Common context kwargs: consistent viewport + locale reduce bot-detection triggers
+        _ctx_kwargs = {
+            "user_agent": user_agent,
+            "viewport": {"width": 1280, "height": 800},
+            "locale": "en-US",
+        }
 
         if context_dir:
             context_path = Path(context_dir)
@@ -376,7 +382,7 @@ class GameChangerScraper:
             self.context = playwright.chromium.launch_persistent_context(
                 user_data_dir=str(context_path),
                 headless=GC_HEADLESS,
-                user_agent=user_agent
+                **_ctx_kwargs,
             )
             self.browser = self.context
         else:
@@ -384,11 +390,11 @@ class GameChangerScraper:
                 print(f"[GC] Loading session from {auth_file.name}")
                 self.context = self.browser.new_context(
                     storage_state=str(auth_file),
-                    user_agent=user_agent
+                    **_ctx_kwargs,
                 )
             else:
                 print("[GC] Creating new clean context")
-                self.context = self.browser.new_context(user_agent=user_agent)
+                self.context = self.browser.new_context(**_ctx_kwargs)
 
         self.page = self.context.pages[0] if self.context.pages else self.context.new_page()
 
@@ -510,19 +516,30 @@ class GameChangerScraper:
         """Click a tab/button with self-healing capabilities."""
         print(f"[GC] Attempting to click tab: {tab_text}")
         try:
-            # 1. Try specific GC chooser class (discovered via inspection)
-            # This selector matches the specific buttons on the stats page
-            target_sel = f'.TabViewChooserItem__tabViewChooserItem:has-text("{tab_text}")'
-            loc = self.page.locator(target_sel).first
-            if loc.count() > 0:
-                loc.click(timeout=3000)
-                self.page.wait_for_timeout(2000)
-                print(f"[GC]   [OK] Clicked '{tab_text}' via chooser class")
-                return True
+            # 1. Try specific GC chooser class (multi-pattern — CSS modules change on each GC deploy)
+            for _class_pat in [
+                '.TabViewChooserItem__tabViewChooserItem',
+                '[class*="TabViewChooser"]',
+                '[class*="tabViewChooser"]',
+                '[class*="StatsTab"]',
+            ]:
+                loc = self.page.locator(f'{_class_pat}:has-text("{tab_text}")').first
+                if loc.count() > 0:
+                    try:
+                        loc.click(timeout=3000)
+                        self.page.wait_for_timeout(2000)
+                        print(f"[GC]   [OK] Clicked '{tab_text}' via {_class_pat}")
+                        return True
+                    except Exception:
+                        continue
 
             # 2. Try the sub-tab dropdown (Standard, Advanced, etc.)
             if tab_text in ["Standard", "Advanced", "Breakdown", "Catching", "Innings Played"]:
-                dropdown = self.page.locator('.StatsDropdownViewChooser__textButton').first
+                dropdown = self.page.locator(
+                    '.StatsDropdownViewChooser__textButton, '
+                    '[class*="StatsDropdown"][class*="Button"], '
+                    '[class*="DropdownViewChooser"]'
+                ).first
                 if dropdown.is_visible():
                     dropdown.click()
                     self.page.wait_for_timeout(500)
@@ -702,13 +719,26 @@ class GameChangerScraper:
         print(f"[GC] Navigating to stats page: {self.stats_url}")
         self.page.goto(self.stats_url, wait_until="networkidle", timeout=60000)
         
-        # Mandatory wait for UI to render
-        try:
-            print("[GC] Waiting for stats UI (TabViewChooserItem) to appear...")
-            self.page.wait_for_selector(".TabViewChooserItem__tabViewChooserItem", timeout=30000)
-            print("[GC] [OK] Stats UI detected.")
-        except Exception:
-            print("[GC] [WARN] Stats UI (.TabViewChooserItem__tabViewChooserItem) not found. Attempting fallback wait...")
+        # Mandatory wait for UI to render — try multiple selector patterns
+        _STATS_TAB_SELS = [
+            ".TabViewChooserItem__tabViewChooserItem",
+            "[class*='TabViewChooser']",
+            "[class*='tabViewChooser']",
+            "[class*='StatsTab']",
+            "[role='tab']",
+        ]
+        _found_stats_ui = False
+        for _sel in _STATS_TAB_SELS:
+            try:
+                print(f"[GC] Waiting for stats UI ({_sel})...")
+                self.page.wait_for_selector(_sel, timeout=12000)
+                print(f"[GC] [OK] Stats UI detected via {_sel}.")
+                _found_stats_ui = True
+                break
+            except Exception:
+                continue
+        if not _found_stats_ui:
+            print("[GC] [WARN] No stats UI selector matched. Attempting fallback wait...")
             self.page.wait_for_timeout(5000)
             self._capture_diagnostics("stats_ui_missing")
 
