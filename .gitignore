@@ -10,6 +10,9 @@ credentials/
 *.key
 dist/
 tools/frida-server
+tools/frida-server.xz
+# Generated dev-mode PWA service worker (Vite VitePWA devOptions)
+client/dev-dist/
 # Claude Code internal agent state — never commit
 .claude/worktrees/
 # Runtime logs (generated on Pi, not source-controlled)

@@ -394,7 +394,7 @@ const GameCard = ({ game, onExpand, isExpanded, gameDetail, isMobile = false }) 
                 letterSpacing: '1px',
                 lineHeight: 1,
                 whiteSpace: 'nowrap',
-              }}>{sharksScore}\u2013{oppScore}</span>
+              }}>{sharksScore}{'\u2013'}{oppScore}</span>
             )}
           </div>
         </div>

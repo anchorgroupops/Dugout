@@ -3,6 +3,7 @@ SWOT Analyzer for Softball
 Deterministic rules-based SWOT analysis engine for individual players and teams.
 Reads player stats from data/ and generates SWOT classifications.
 """
+from __future__ import annotations
 
 import json
 from pathlib import Path
@@ -705,6 +706,37 @@ def _n(v):
     return 0 if v is None else v
 
 
+def _generate_basic_matchups(us: dict, them: dict) -> list[str]:
+    """Generate matchup intel from batting-only data when pitching stats are unavailable."""
+    insights = []
+    their_bb = _n(them.get("batting", {}).get("bb", 0))
+    their_pa = _n(them.get("batting", {}).get("pa", 0))
+    their_ab = _n(them.get("batting", {}).get("ab", 0))
+    their_k = _n(them.get("batting", {}).get("k", 0))
+    their_sb = _n(them.get("batting", {}).get("sb", 0))
+    their_obp = _n(them.get("batting", {}).get("obp", 0))
+    their_avg = _n(them.get("batting", {}).get("avg", 0))
+
+    if their_pa > 0:
+        walk_rate = their_bb / their_pa
+        if walk_rate > 0.25:
+            insights.append("They draw a lot of walks — pitcher must throw strikes and avoid free passes")
+    if their_ab > 0 and their_k >= 0:
+        k_rate = their_k / their_ab if their_ab > 0 else 0
+        if k_rate > 0.35:
+            insights.append("Opponent has poor contact rate so far — attack the zone early and often")
+        elif their_avg > 0.350:
+            insights.append("They're making solid contact — don't give them anything easy to hit")
+    if their_sb > 0:
+        insights.append("They have stolen bases on record — keep runners honest with quick releases")
+    if their_obp > 0.400:
+        insights.append("Their on-base percentage is high — minimize walks and stay ahead in counts")
+
+    if not insights:
+        insights.append("Limited data available — watch live tendencies in the first inning to establish patterns")
+    return insights
+
+
 def analyze_matchup(our_team: dict, opponent_team: dict) -> dict:
     """Compare two teams and generate matchup insights."""
     us = _team_aggregates(our_team)
@@ -850,9 +882,9 @@ def analyze_matchup(our_team: dict, opponent_team: dict) -> dict:
         "reason": None,
         "our_stats": us,
         "their_stats": them,
-        "our_advantages": our_advantages or ["No clear statistical advantages (need more data)"],
-        "their_advantages": their_advantages or ["No clear statistical advantages (need more data)"],
-        "key_matchups": key_matchups or ["Not enough data for cross-matchup analysis"],
+        "our_advantages": our_advantages or ["Limited data — focus on execution and fundamentals"],
+        "their_advantages": their_advantages or ["Limited data — scout live tendencies early in the game"],
+        "key_matchups": key_matchups or _generate_basic_matchups(us, them),
         "recommendation": recs[0],
         # Flag limited opponent sample for frontend caveat display
         "batting_sample_limited": not batting_sample_ok,

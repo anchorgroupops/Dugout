@@ -10,7 +10,7 @@
     },
     {
       "name": "Flask API (sync_daemon)",
-      "runtimeExecutable": "py",
+      "runtimeExecutable": "python3",
       "runtimeArgs": ["sync_daemon.py"],
       "cwd": "tools",
       "port": 5001,

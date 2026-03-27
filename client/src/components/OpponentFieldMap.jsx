@@ -328,19 +328,6 @@ export default function OpponentFieldMap({ matchup, isMobile = false }) {
                   </span>
                 ))}
               </div>
-              {/* Team aggregate stats */}
-              <div style={{ marginTop: '0.75rem', display: 'flex', gap: '0.4rem', flexWrap: 'wrap', justifyContent: 'center' }}>
-                {batting.avg != null && <TipBadge label="AVG" value={fmt3(batting.avg)} />}
-                {batting.obp != null && <TipBadge label="OBP" value={fmt3(batting.obp)} />}
-                {batting.ops != null && <TipBadge label="OPS" value={fmt3(batting.ops)} />}
-                {batting.h   != null && <TipBadge label="H"   value={batting.h} />}
-                {batting.hr  != null && <TipBadge label="HR"  value={batting.hr} />}
-                {batting.sb  != null && <TipBadge label="SB"  value={batting.sb} />}
-                {(batting.k_rate ?? batting.k_rate) != null &&
-                  <TipBadge label="K%" value={`${((batting.k_rate ?? 0) * 100).toFixed(0)}%`} />}
-                {batting.bb_rate != null &&
-                  <TipBadge label="BB%" value={`${(batting.bb_rate * 100).toFixed(0)}%`} />}
-              </div>
             </>
           ) : (
             <div style={{
@@ -351,29 +338,6 @@ export default function OpponentFieldMap({ matchup, isMobile = false }) {
               No batting data yet.<br />Chart will populate after first game.
             </div>
           )}
-          {/* GB/FB/LD pct bars if available */}
-          {(advBatting.gb_pct || advBatting.fb_pct || advBatting.ld_pct) ? (
-            <div style={{ marginTop: '0.75rem' }}>
-              {[
-                { label: 'GB%', val: advBatting.gb_pct, color: '#4ade80' },
-                { label: 'FB%', val: advBatting.fb_pct, color: '#60a5fa' },
-                { label: 'LD%', val: advBatting.ld_pct, color: '#f59e0b' },
-              ].filter(x => x.val > 0).map(({ label, val, color }) => {
-                const pct = val > 1 ? val : val * 100;
-                return (
-                  <div key={label} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '3px' }}>
-                    <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', width: 28 }}>{label}</span>
-                    <div style={{ flex: 1, height: 6, background: 'rgba(255,255,255,0.1)', borderRadius: 3 }}>
-                      <div style={{ width: `${Math.min(100, pct)}%`, height: '100%', background: color, borderRadius: 3 }} />
-                    </div>
-                    <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', width: 35, textAlign: 'right' }}>
-                      {pct.toFixed(0)}%
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          ) : null}
         </div>
 
         {/* Right: Player threat list */}
@@ -389,7 +353,7 @@ export default function OpponentFieldMap({ matchup, isMobile = false }) {
                   const avgB = parseFloat((b.batting || {}).avg ?? b.avg ?? 0);
                   return avgB - avgA;
                 })
-                .slice(0, isMobile ? 5 : 9)
+                .slice(0, 3)
                 .map((p, i) => <PlayerThreatRow key={i} player={p} />)
               }
             </div>
