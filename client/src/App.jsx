@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Users, Activity, RefreshCw, ListOrdered, Calendar, Trophy, Dumbbell, Volume2, Target, AlertTriangle, MoreHorizontal, Download, Globe, GlobeLock, Clock } from 'lucide-react';
 import { formatDateTime, formatRelative } from './utils/formatDate';
 import { usePWAInstall } from './utils/usePWAInstall';

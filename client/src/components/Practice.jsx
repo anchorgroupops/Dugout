@@ -169,7 +169,7 @@ const Practice = ({ team, schedule, isMobile = false }) => {
         setSelected(data.selected_players || []);
       }
     } catch (e) {
-      console.error(e);
+      console.error('Failed to load practice insights', e);
       setError('Failed to load practice insights');
     } finally {
       setLoading(false);

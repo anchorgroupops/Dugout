@@ -2,6 +2,7 @@ from __future__ import annotations
 import time
 import json
 import os
+import re
 import logging
 import traceback
 import requests
@@ -1154,6 +1155,17 @@ PRACTICE_NEED_DRILLS = {
 }
 
 
+_SLUG_RE = re.compile(r'^[A-Za-z0-9_-]{1,80}$')
+
+
+def _validate_path_slug(value: str, label: str = "slug"):
+    """Return None if valid, else a (response, status) error tuple."""
+    if not value or not _SLUG_RE.match(value):
+        logging.warning(f"[Security] Rejected invalid {label}: {value!r}")
+        return jsonify({"error": "invalid_parameter"}), 400
+    return None
+
+
 def _normalized_request_host() -> str:
     host = (request.headers.get("X-Forwarded-Host") or request.host or "").split(",")[0].strip().lower()
     if not host:
@@ -1365,6 +1377,13 @@ def handle_availability():
         data = request.get_json(silent=True) or {}
         if not isinstance(data, dict):
             return jsonify({"error": "invalid_json_object"}), 400
+        if len(data) > 60:
+            return jsonify({"error": "payload_too_large"}), 400
+        for k, v in data.items():
+            if not isinstance(k, str) or len(k) > 80:
+                return jsonify({"error": "invalid_player_name"}), 400
+            if not isinstance(v, bool):
+                return jsonify({"error": "values_must_be_boolean"}), 400
 
         # Track sub activations in sub_tracker
         old_avail = {}
@@ -1654,11 +1673,18 @@ def handle_game_detail(game_id):
     """Return full detail for a single game.
     Normalises both legacy (sharks_batting) and new (sharks.batting) formats
     so the dashboard always receives the shape it expects."""
+    err = _validate_path_slug(game_id, "game_id")
+    if err:
+        return err
     game_file = SHARKS_DIR / "games" / f"{game_id}.json"
     if not game_file.exists():
         return jsonify({"error": "Not found"}), 404
-    with open(game_file, encoding='utf-8') as f:
-        data = json.load(f)
+    try:
+        with open(game_file, encoding='utf-8') as f:
+            data = json.load(f)
+    except Exception as e:
+        logging.error(f"[GameDetail] Failed to read {game_id}: {e}")
+        return jsonify({"error": "game_data_unavailable"}), 503
 
     # Self-heal: if primary file lacks full stats (PDF format), supplement from GC UUID file by date
     if "sharks" not in data and data.get("date"):
@@ -1867,11 +1893,18 @@ def handle_opponents():
 @app.route('/api/opponents/<slug>', methods=['GET'])
 def handle_opponent_detail(slug):
     """Return full data for a single opponent team."""
+    err = _validate_path_slug(slug, "opponent_slug")
+    if err:
+        return err
     team_file = DATA_DIR / "opponents" / slug / "team.json"
     if not team_file.exists():
         return jsonify({"error": "Not found"}), 404
-    with open(team_file) as f:
-        team = json.load(f)
+    try:
+        with open(team_file) as f:
+            team = json.load(f)
+    except Exception as e:
+        logging.error(f"[OpponentDetail] Failed to read {slug}: {e}")
+        return jsonify({"error": "opponent_data_unavailable"}), 503
     team["team_name"] = _canonical_team_name(team.get("team_name", slug), slug)
     return jsonify(team)
 
@@ -1946,6 +1979,9 @@ def handle_next_game():
 @app.route('/api/matchup/<opponent_slug>', methods=['GET'])
 def handle_matchup(opponent_slug):
     """Run matchup analysis: Sharks vs a specific opponent."""
+    err = _validate_path_slug(opponent_slug, "opponent_slug")
+    if err:
+        return err
     from swot_analyzer import analyze_matchup, load_team
     our_team = load_team(SHARKS_DIR, prefer_merged=True)
     if not our_team:
@@ -2225,6 +2261,9 @@ def handle_health():
 @app.route('/api/h2h/<opponent_slug>', methods=['GET'])
 def handle_h2h(opponent_slug):
     """Return head-to-head game history and W-L summary against an opponent."""
+    err = _validate_path_slug(opponent_slug, "opponent_slug")
+    if err:
+        return err
     try:
         from stats_db import get_h2h_summary
         summary = get_h2h_summary(opponent_slug)
@@ -2327,6 +2366,12 @@ def handle_borrowed_player():
 
     if not first:
         return jsonify({"error": "first name required"}), 400
+    if len(first) > 64 or len(last) > 64:
+        return jsonify({"error": "name_too_long"}), 400
+    if len(number) > 4:
+        return jsonify({"error": "invalid_number"}), 400
+    if gc_team_id and (len(gc_team_id) > 40 or not re.match(r'^[A-Za-z0-9_-]+$', gc_team_id)):
+        return jsonify({"error": "invalid_gc_team_id"}), 400
 
     manifest_file = SHARKS_DIR / "roster_manifest.json"
     manifest = {}

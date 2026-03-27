@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Calendar, ChevronDown, ChevronUp, Home, Plane, Clock } from 'lucide-react';
 import { getTodayEST, formatDateMMDDYYYY } from '../utils/formatDate';
 import { TipBadge, PlayerName } from './StatTooltip';

@@ -1,0 +1,55 @@
+# Secrets and credentials — never in build context
+.env
+.env.*
+*.env
+APIs.csv
+APIs\ -\ Sheet1\ (6).csv
+bootstrap-secrets.ps1
+setup_ai_hive.ps1
+
+# Runtime-mounted volumes — not baked into image
+data/
+logs/
+
+# Development artifacts
+.claude/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# Scorebooks (mounted at runtime; PDFs are large)
+Scorebooks/
+
+# Playwright auth state (sensitive session tokens)
+playwright_auth/
+
+# Editor/OS artifacts
+.DS_Store
+*.swp
+*.swo
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Docs/notes (no value in container)
+docs/
+Inspa/
+Practices/
+architecture/
+project-memory/
+findings.md
+progress.md
+gemini.md
+task_plan.md
+README.md
+smoke-all.ps1
+nginx_full.conf
