@@ -10,6 +10,7 @@ STAT CATEGORIES SCRAPED:
 REQUIRES: pip install playwright && playwright install chromium
 REQUIRES: GC_EMAIL and GC_PASSWORD in .env
 """
+from __future__ import annotations
 
 import argparse
 import json

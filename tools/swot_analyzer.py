@@ -3,6 +3,7 @@ SWOT Analyzer for Softball
 Deterministic rules-based SWOT analysis engine for individual players and teams.
 Reads player stats from data/ and generates SWOT classifications.
 """
+from __future__ import annotations
 
 import json
 from pathlib import Path

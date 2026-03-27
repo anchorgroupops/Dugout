@@ -3,6 +3,7 @@ Practice Plan Generator for Softball
 Maps identified weaknesses from SWOT analysis to targeted drills.
 Generates structured practice plans in the user's existing format.
 """
+from __future__ import annotations
 
 import argparse
 import hashlib
