@@ -463,9 +463,25 @@ def build_team_json(roster: list[dict], csv_path: Path) -> dict:
     meta["last_updated"] = datetime.now(ET).isoformat()
     meta["source"] = f"gc_csv_export:{csv_path.name}"
 
-    # Calculate record from max GP
+    # Calculate record from known_game_results.json (authoritative source)
     max_gp = max((p.get("games_played", 0) for p in roster), default=0)
-    meta["record"] = f"0-0 ({max_gp} GP)"
+    known_results_file = Path(__file__).parent.parent / "config" / "known_game_results.json"
+    wins, losses = 0, 0
+    try:
+        if known_results_file.exists():
+            with open(known_results_file) as f:
+                kr = json.load(f)
+            for r in kr.get("results", []):
+                if r.get("result") == "W":
+                    wins += 1
+                elif r.get("result") == "L":
+                    losses += 1
+    except Exception:
+        pass
+    if wins + losses > 0:
+        meta["record"] = f"{wins}-{losses} ({max_gp} GP)"
+    else:
+        meta["record"] = f"0-0 ({max_gp} GP)"
 
     meta["roster"] = roster
     return meta

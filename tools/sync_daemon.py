@@ -2340,6 +2340,24 @@ def handle_team():
             elif not player.get("pitching") and bp.get("pitching"):
                 player["pitching"] = bp["pitching"]
 
+    # Update record from known_game_results.json (authoritative source)
+    try:
+        known_results = _read_json_file(CONFIG_DIR / "known_game_results.json", default={}) or {}
+        results_list = known_results.get("results") or []
+        wins = sum(1 for r in results_list if isinstance(r, dict) and r.get("result") == "W")
+        losses = sum(1 for r in results_list if isinstance(r, dict) and r.get("result") == "L")
+        if wins + losses > 0:
+            # Preserve GP from existing record if present
+            gp_match = ""
+            old_record = team.get("record", "")
+            if "GP" in old_record:
+                import re as _re
+                m = _re.search(r'\((\d+ GP)\)', old_record)
+                gp_match = f" ({m.group(1)})" if m else ""
+            team["record"] = f"{wins}-{losses}{gp_match}"
+    except Exception:
+        pass
+
     # Sort roster alphabetically by first name for consistent display
     if isinstance(team.get("roster"), list):
         team["roster"] = sorted(
