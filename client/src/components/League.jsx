@@ -131,7 +131,7 @@ const League = ({ isMobile = false }) => {
                   {isSharks ? '\uD83E\uDD88 ' : `${i + 1}. `}{formatTeamName(team)}
                 </div>
                 <div style={{ marginTop: '0.2rem', fontSize: 'var(--text-xs)', color: isSharks ? 'var(--text-main)' : 'var(--text-muted)', fontWeight: isSharks ? '600' : '400' }}>
-                  {team.w}-{team.l} \u00b7 {team.record} \u00b7 {team.pct != null ? (team.pct === 1 ? '1.000' : team.pct.toFixed(3)) : '\u2014'}
+                  {team.w}-{team.l} {'\u00b7'} {team.record} {'\u00b7'} {team.pct != null ? (team.pct === 1 ? '1.000' : team.pct.toFixed(3)) : '\u2014'}
                 </div>
               </div>
             );
