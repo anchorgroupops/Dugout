@@ -533,18 +533,17 @@ const Games = ({ gamesData, schedule, isMobile = false }) => {
       )}
 
       {upcoming.length > 0 && sorted.length > 0 && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', margin: '2rem 0 1.25rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', margin: '2rem 0 1.5rem' }}>
+          <div style={{ flex: 1, height: '2px', background: 'linear-gradient(to right, transparent, rgba(255,255,255,0.15), transparent)' }} />
+          <span style={{ fontSize: 'var(--text-sm)', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+            Past Games ({sorted.length})
+          </span>
           <div style={{ flex: 1, height: '2px', background: 'linear-gradient(to right, transparent, rgba(255,255,255,0.15), transparent)' }} />
         </div>
       )}
 
       {sorted.length > 0 ? (
         <>
-          <div className="section-label" style={{
-            color: 'var(--text-muted)', fontSize: 'var(--text-sm)',
-            fontWeight: '600', letterSpacing: '0.3px', textTransform: 'uppercase',
-            opacity: 0.6, marginBottom: '0.75rem',
-          }}>Past Games ({sorted.length})</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
             {sorted.map(game => (
               <GameCard

@@ -2421,6 +2421,14 @@ def handle_team():
             key=lambda p: (p.get("first") or p.get("name", "")).strip().lower()
         )
 
+    # Always set last_updated from team file mtime so frontend timestamp refreshes after sync
+    try:
+        team["last_updated"] = datetime.fromtimestamp(
+            team_file.stat().st_mtime, tz=ET
+        ).isoformat()
+    except Exception:
+        pass
+
     return jsonify(team)
 
 
