@@ -1916,10 +1916,21 @@ def handle_scoreboard():
         display_status = "live"
     elif status == "completed":
         display_status = "final"
-    elif status in ("scheduled", "pregame"):
+    elif status in ("scheduled", "pregame", ""):
+        # Empty status = GC knows about the game but it hasn't started
         display_status = "pregame"
     else:
-        display_status = status
+        display_status = "pregame"
+
+    # Derive date and time from start_ts
+    game_date_str = today_str
+    game_time_str = ""
+    try:
+        game_dt = datetime.fromisoformat(start_ts.replace("Z", "+00:00")).astimezone(ET)
+        game_date_str = game_dt.date().isoformat()
+        game_time_str = game_dt.strftime("%I:%M %p").lstrip("0")
+    except Exception:
+        pass
 
     result = {
         "status": display_status,
@@ -1932,6 +1943,8 @@ def handle_scoreboard():
         "inning_half": inning_half,
         "linescore": linescore,
         "start_ts": start_ts,
+        "date": game_date_str,
+        "time": game_time_str,
         "game_status_raw": status,
         "fetched_at": now.isoformat(),
     }
@@ -1974,7 +1987,7 @@ def handle_scoreboard():
             sched = _read_json_file(sched_file, default={}) or {}
             for sg in sched.get("upcoming", []):
                 if (sg.get("date") or "")[:10] == today_str:
-                    result["scheduled_time"] = sg.get("time", "")
+                    result["time"] = sg.get("time", "") or result.get("time", "")
                     if not result.get("home_away"):
                         result["home_away"] = sg.get("home_away", "")
                     result["opponent"] = _clean_opponent_name(sg.get("opponent", result["opponent"]))
