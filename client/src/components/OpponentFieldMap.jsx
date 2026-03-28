@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { TipBadge } from './StatTooltip';
 
 /**
@@ -273,7 +273,7 @@ function generateDots(zoneWeights, totalHits) {
 
 // ─── Field SVG with scatter dots ────────────────────────────────────────────
 const FieldSVG = ({ zoneWeights, totalHits = 0, hitType = 'all' }) => {
-  const dots = generateDots(zoneWeights, totalHits);
+  const dots = useMemo(() => generateDots(zoneWeights, totalHits), [zoneWeights, totalHits]);
 
   return (
     <svg viewBox="0 0 200 185" style={{ width: '100%', maxWidth: 300, display: 'block', margin: '0 auto' }}>

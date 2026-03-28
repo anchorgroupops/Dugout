@@ -260,8 +260,10 @@ const PlayerOppBattingRow = ({ player }) => {
 // ─── Result badge ─────────────────────────────────────────────────────────────
 const ResultBadge = ({ result }) => {
   if (!result) return null;
-  const isWin = result === 'W';
-  return <span className={`result-badge ${isWin ? 'result-badge--win' : 'result-badge--loss'}`}>{isWin ? 'WIN' : 'LOSS'}</span>;
+  const upper = result.toUpperCase();
+  if (upper === 'W') return <span className="result-badge result-badge--win">WIN</span>;
+  if (upper === 'T') return <span className="result-badge result-badge--tie">TIE</span>;
+  return <span className="result-badge result-badge--loss">LOSS</span>;
 };
 
 // ─── Tab bar ──────────────────────────────────────────────────────────────────
