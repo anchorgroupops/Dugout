@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Radio, Home, Plane, Clock, Trophy, RefreshCw } from 'lucide-react';
+import { Radio, Home, Plane, Clock, Trophy, RefreshCw, ExternalLink } from 'lucide-react';
 import { formatDateMMDDYYYY } from '../utils/formatDate';
 import { PlayerName } from './StatTooltip';
 
@@ -219,17 +219,38 @@ const Scoreboard = ({ isMobile = false }) => {
             fontWeight: '800', letterSpacing: '1px',
           }}>FINAL</span>
         )}
-        <button
-          onClick={fetchScoreboard}
-          style={{
-            marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.3rem',
-            background: 'transparent', border: 'none', color: 'var(--text-muted)',
-            cursor: 'pointer', fontSize: 'var(--text-xs)', padding: '0.25rem',
-          }}
-          title="Refresh scoreboard"
-        >
-          <RefreshCw size={14} />
-        </button>
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          {data.gc_game_id && (
+            <a
+              href={`https://web.gc.com/teams/NuGgx6WvP7TO/2026-spring-sharks/schedule/${data.gc_game_id}/plays`}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                display: 'flex', alignItems: 'center', gap: '0.3rem',
+                background: 'var(--primary-glow)', color: 'var(--primary-color)',
+                border: '1px solid rgba(4, 101, 104, 0.27)',
+                padding: '0.35rem 0.65rem', borderRadius: '6px',
+                fontSize: 'var(--text-xs)', fontWeight: '600',
+                textDecoration: 'none', minHeight: 'var(--touch-min)',
+              }}
+              title="Open in GameChanger"
+            >
+              <ExternalLink size={12} />
+              GC
+            </a>
+          )}
+          <button
+            onClick={fetchScoreboard}
+            style={{
+              display: 'flex', alignItems: 'center', gap: '0.3rem',
+              background: 'transparent', border: 'none', color: 'var(--text-muted)',
+              cursor: 'pointer', fontSize: 'var(--text-xs)', padding: '0.25rem',
+            }}
+            title="Refresh scoreboard"
+          >
+            <RefreshCw size={14} />
+          </button>
+        </div>
       </div>
 
       {/* Main Scoreboard Card */}

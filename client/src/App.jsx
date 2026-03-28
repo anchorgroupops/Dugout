@@ -37,7 +37,7 @@ function SyncProgressBar({ progress, stage, milestones }) {
 }
 
 function App() {
-  const [currentView, setCurrentView] = useState('scout');
+  const [currentView, setCurrentView] = useState('scoreboard');
   const { canInstall, triggerInstall } = usePWAInstall();
   const isOnline = useOnlineStatus();
   const [isMobile, setIsMobile] = useState(
