@@ -83,7 +83,7 @@ const BatterRow = ({ player, idx }) => {
 };
 
 
-const Scoreboard = ({ isMobile = false }) => {
+const Scoreboard = ({ isMobile = false, team, schedule }) => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -172,6 +172,8 @@ const Scoreboard = ({ isMobile = false }) => {
   if (isUpcoming) {
     const dateStr = data.date ? formatDateMMDDYYYY(data.date) : '';
     const isHome = data.home_away === 'home';
+    const record = team?.record || '';
+    const recentGames = (schedule?.past || []).slice(0, 5);
     return (
       <div>
         <h2 className="view-title" style={{ margin: '0 0 var(--space-md)' }}>
@@ -192,6 +194,28 @@ const Scoreboard = ({ isMobile = false }) => {
           <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>
             {dateStr}{data.time ? ` \u00b7 ${data.time}` : ''}
           </p>
+          {record && (
+            <p style={{ fontSize: 'var(--text-sm)', color: 'var(--primary-color)', fontWeight: '700', marginTop: '0.75rem' }}>
+              Season Record: {record}
+            </p>
+          )}
+          {recentGames.length > 0 && (
+            <div style={{ marginTop: '1rem', display: 'flex', justifyContent: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginRight: '0.25rem' }}>Recent:</span>
+              {recentGames.map((g, i) => {
+                const r = (g.result || '').toUpperCase();
+                const bgColor = r === 'W' ? 'rgba(46, 160, 67, 0.2)' : r === 'L' ? 'rgba(218, 54, 51, 0.2)' : r === 'T' ? 'rgba(255,220,120,0.15)' : 'rgba(255,255,255,0.06)';
+                const textColor = r === 'W' ? 'var(--success)' : r === 'L' ? 'var(--danger)' : r === 'T' ? 'rgba(255,220,120,0.85)' : 'var(--text-muted)';
+                return (
+                  <span key={i} style={{
+                    background: bgColor, color: textColor,
+                    padding: '2px 8px', borderRadius: '4px',
+                    fontSize: 'var(--text-xs)', fontWeight: '700',
+                  }}>{r || '?'} {g.score || ''}</span>
+                );
+              })}
+            </div>
+          )}
           <p style={{ fontSize: 'var(--text-xs)', color: 'rgba(255,255,255,0.3)', marginTop: '1rem' }}>
             Live scores will appear here once the game starts in GameChanger.
           </p>
