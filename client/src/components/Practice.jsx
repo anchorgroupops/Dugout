@@ -144,7 +144,7 @@ const Practice = ({ team, schedule, isMobile = false }) => {
     return team.roster.filter(p => p.core !== false).map(p => `${p.first || ''} ${p.last || ''}`.trim()).filter(Boolean);
   }, [team]);
 
-  const fetchInsights = async () => {
+  const fetchInsights = async (preserveSelection = false) => {
     setLoading(true);
     setError('');
     try {
@@ -157,7 +157,6 @@ const Practice = ({ team, schedule, isMobile = false }) => {
       if (!initialLoaded) {
         const allPlayers = data.available_players || [];
         if (coreRosterNames.length > 0) {
-          // Select every available player that is a core roster member
           const coreSet = new Set(coreRosterNames);
           const defaultSelected = allPlayers.filter(n => coreSet.has(n));
           setSelected(defaultSelected.length > 0 ? defaultSelected : allPlayers);
@@ -165,9 +164,8 @@ const Practice = ({ team, schedule, isMobile = false }) => {
           setSelected(allPlayers);
         }
         setInitialLoaded(true);
-      } else {
-        setSelected(data.selected_players || []);
       }
+      // If preserveSelection is true (user toggled checkboxes), keep current selection
     } catch (e) {
       console.error('Failed to load practice insights', e);
       setError('Failed to load practice insights');
@@ -210,7 +208,7 @@ const Practice = ({ team, schedule, isMobile = false }) => {
 
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
-      fetchInsights(selected);
+      fetchInsights(true);
     }, 500);
 
     return () => {

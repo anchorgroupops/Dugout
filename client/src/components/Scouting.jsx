@@ -92,19 +92,20 @@ export default function Scouting({ isMobile }) {
           marginBottom: '0.6rem',
         }}>
           <div style={{
-            width: isMobile ? 40 : 52,
-            height: isMobile ? 40 : 52,
+            width: isMobile ? 44 : 56,
+            height: isMobile ? 44 : 56,
             borderRadius: '50%',
-            background: 'linear-gradient(135deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02))',
-            border: '2px solid rgba(255,255,255,0.12)',
+            background: 'linear-gradient(135deg, rgba(179, 74, 57, 0.25), rgba(220, 70, 70, 0.12))',
+            border: '2px solid rgba(179, 74, 57, 0.35)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            fontSize: isMobile ? '1rem' : '1.3rem',
-            fontWeight: '700',
-            color: 'var(--primary-color)',
+            fontSize: isMobile ? '1.2rem' : '1.5rem',
+            fontWeight: '800',
+            color: 'var(--danger)',
             fontFamily: 'var(--font-heading)',
             flexShrink: 0,
+            letterSpacing: '-0.02em',
           }}>
             {nextGame.opponent?.charAt(0) || '?'}
           </div>

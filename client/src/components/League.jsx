@@ -158,6 +158,15 @@ const League = ({ isMobile = false }) => {
         })}
       </div>
 
+      {/* ── Opponent Scouting Section ── */}
+      {(divisionRivals.length > 0 || otherOpponents.length > 0) && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', margin: '2rem 0 1.5rem' }}>
+          <div style={{ flex: 1, height: '2px', background: 'linear-gradient(to right, transparent, rgba(255,255,255,0.15), transparent)' }} />
+          <span style={{ fontSize: 'var(--text-sm)', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>Opponent Scouting</span>
+          <div style={{ flex: 1, height: '2px', background: 'linear-gradient(to right, transparent, rgba(255,255,255,0.15), transparent)' }} />
+        </div>
+      )}
+
       {/* Opponent Scouting — PCLL Division Rivals */}
       {divisionRivals.length > 0 && (
         <>

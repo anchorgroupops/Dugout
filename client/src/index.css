@@ -423,11 +423,12 @@ input[type="checkbox"]:checked::after {
 }
 
 .result-badge {
-  padding: 4px 12px;
+  padding: 4px 14px;
   border-radius: 20px;
   font-size: var(--text-xs);
   font-weight: 800;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
 }
 
 .result-badge--win {
