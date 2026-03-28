@@ -404,16 +404,10 @@ export default function OpponentFieldMap({ matchup, isMobile = false }) {
   const activeBatting    = activePlayer?.batting          || batting;
   const activeAdvBatting = activePlayer?.batting_advanced || advBatting;
 
-  const zoneWeights = useMemo(
-    () => applyHitTypeBias(computeZoneWeights(activeBatting, activeAdvBatting), hitType),
-    [activeBatting, activeAdvBatting, hitType]
-  );
+  const zoneWeights = applyHitTypeBias(computeZoneWeights(activeBatting, activeAdvBatting), hitType);
 
   // Zone legend
-  const topZones = useMemo(
-    () => ZONES.map(z => ({ ...z, w: zoneWeights[z.id] })).sort((a, b) => b.w - a.w).slice(0, 3),
-    [zoneWeights]
-  );
+  const topZones = ZONES.map(z => ({ ...z, w: zoneWeights[z.id] })).sort((a, b) => b.w - a.w).slice(0, 3);
 
   const totalHits = activeBatting.h ?? 0;
 
