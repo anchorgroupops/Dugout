@@ -315,7 +315,7 @@ function App() {
     );
 
     switch(currentView) {
-      case 'scoreboard': return <Scoreboard isMobile={isMobile} />;
+      case 'scoreboard': return <Scoreboard isMobile={isMobile} team={data.team} schedule={data.schedule} />;
       case 'scout': return <Scouting isMobile={isMobile} />;
       case 'roster': return (
         <Roster
