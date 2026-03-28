@@ -62,15 +62,27 @@ function App() {
   const audioRef = useRef(null);
   const audioUrlRef = useRef('');
 
+  const fetchWithRetry = useCallback(async (url, retries = 2) => {
+    for (let i = 0; i <= retries; i++) {
+      try {
+        const res = await fetch(url);
+        if (res.ok || i === retries) return res;
+      } catch (e) {
+        if (i === retries) throw e;
+      }
+      await new Promise(r => setTimeout(r, 300 * (i + 1)));
+    }
+  }, []);
+
   const fetchData = useCallback(async () => {
     try {
       const [teamRes, swotRes, lineupsRes, availRes, gamesRes, scheduleRes] = await Promise.all([
-        fetch('/api/team'),
-        fetch('/data/sharks/swot_analysis.json'),
-        fetch('/data/sharks/lineups.json'),
-        fetch('/api/availability'),
-        fetch('/api/games'),
-        fetch('/api/schedule')
+        fetchWithRetry('/api/team'),
+        fetchWithRetry('/data/sharks/swot_analysis.json'),
+        fetchWithRetry('/data/sharks/lineups.json'),
+        fetchWithRetry('/api/availability'),
+        fetchWithRetry('/api/games'),
+        fetchWithRetry('/api/schedule')
       ]);
 
       if (!teamRes.ok) throw new Error('Failed to load team data');

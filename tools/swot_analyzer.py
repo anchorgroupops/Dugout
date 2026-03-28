@@ -383,16 +383,34 @@ def analyze_team(team_data: dict) -> dict:
     team_strengths = [f"{k} ({v} players)" for k, v in strength_types.most_common(3)]
     team_weaknesses = [f"{k} ({v} players)" for k, v in weakness_types.most_common(3)]
 
+    # Build dynamic threats list
+    k_vulnerable = [p for p in player_analyses if any('strikeout' in t.lower() for t in p['swot']['threats'])]
+    team_threats = []
+    if k_vulnerable:
+        team_threats.append(f"{len(k_vulnerable)} player{'s' if len(k_vulnerable) != 1 else ''} vulnerable to strikeout pitchers")
+    # Aggregate all threat text from players
+    all_threats = []
+    for pa in player_analyses:
+        all_threats.extend(pa["swot"]["threats"])
+    if all_threats:
+        threat_types = Counter(t.split("(")[0].strip() for t in all_threats)
+        for k, v in threat_types.most_common(2):
+            if k not in [t.split("(")[0].strip() for t in team_threats]:
+                team_threats.append(f"{k} ({v} player{'s' if v != 1 else ''})")
+    if not team_threats:
+        team_threats = ["No specific threats identified — keep building momentum"]
+
+    growth_count = len([p for p in player_analyses if len(p['swot']['weaknesses']) > 2])
+    team_opportunities = []
+    if growth_count > 0:
+        team_opportunities.append(f"{growth_count} player{'s' if growth_count != 1 else ''} with multiple areas for growth")
+    team_opportunities.append("Targeted practice plans can address common weaknesses")
+
     team_swot = {
         "strengths": team_strengths or ["Insufficient data for team strengths"],
         "weaknesses": team_weaknesses or ["Insufficient data for team weaknesses"],
-        "opportunities": [
-            f"{len([p for p in player_analyses if len(p['swot']['weaknesses']) > 2])} players with multiple areas for growth",
-            "Targeted practice plans can address common weaknesses",
-        ],
-        "threats": [
-            f"{len([p for p in player_analyses if any('strikeout' in t.lower() for t in p['swot']['threats'])])} players vulnerable to strikeout pitchers",
-        ],
+        "opportunities": team_opportunities,
+        "threats": team_threats,
     }
 
     return {

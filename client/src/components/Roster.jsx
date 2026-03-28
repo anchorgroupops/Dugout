@@ -210,17 +210,27 @@ const Roster = ({ team, availability, isMobile = false }) => {
 
   const filteredRoster = team.roster.filter(p => p.core !== false);
   const sortedRoster = [...filteredRoster].sort((a, b) => {
+    // Sort available (active) players first
+    const nameA = `${a.first || ''} ${a.last || ''}`.trim();
+    const nameB = `${b.first || ''} ${b.last || ''}`.trim();
+    const activeA = availability ? availability[nameA] !== false : true;
+    const activeB = availability ? availability[nameB] !== false : true;
+    if (activeA !== activeB) return activeA ? -1 : 1;
     const cmp = (a.first || '').localeCompare(b.first || '');
     return cmp !== 0 ? cmp : (a.last || '').localeCompare(b.last || '');
   });
   const totalCount = filteredRoster.length;
+  const activeCount = sortedRoster.filter(p => {
+    const name = `${p.first || ''} ${p.last || ''}`.trim();
+    return availability ? availability[name] !== false : true;
+  }).length;
 
   return (
     <div>
       <h2 className="view-title">
         Active Roster <span style={{ fontSize: 'var(--text-base)', color: 'var(--text-muted)', fontWeight: 'normal' }}>({sortedRoster.length} Players)</span>
         <span style={{ marginLeft: 'auto', fontSize: 'var(--text-sm)', color: 'var(--text-muted)', fontWeight: '600' }}>
-          Sharks Only ({totalCount})
+          {activeCount} Available
         </span>
       </h2>
 

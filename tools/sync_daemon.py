@@ -2753,11 +2753,23 @@ def _build_voice_overview_text(ctx: dict) -> str:
     lineups = ctx.get("lineups", {}) if isinstance(ctx, dict) else {}
     schedule = ctx.get("schedule", {}) if isinstance(ctx, dict) else {}
 
-    # Compute record from games data
+    # Compute record from games data — deduplicate by date to avoid double-counting
     games_list = ctx.get("games", [])
     if isinstance(games_list, list):
-        wins = sum(1 for g in games_list if isinstance(g, dict) and g.get("result") == "W")
-        losses = sum(1 for g in games_list if isinstance(g, dict) and g.get("result") == "L")
+        seen_dates = set()
+        wins = 0
+        losses = 0
+        for g in games_list:
+            if not isinstance(g, dict) or not g.get("result"):
+                continue
+            g_date = (g.get("date") or "")[:10]
+            if g_date in seen_dates:
+                continue
+            seen_dates.add(g_date)
+            if g["result"] == "W":
+                wins += 1
+            elif g["result"] == "L":
+                losses += 1
         record = f"{wins} and {losses}" if (wins + losses) > 0 else "oh and oh"
     else:
         record = "oh and oh"

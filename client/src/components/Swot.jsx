@@ -12,7 +12,6 @@ const quadrantIcons = {
 };
 
 const SwotQuadrant = ({ title, items, color, icon }) => {
-  const itemIcon = quadrantIcons[title] || null;
   return (
     <div>
       <h4 className="swot-label" style={{ color }}>
@@ -21,10 +20,10 @@ const SwotQuadrant = ({ title, items, color, icon }) => {
       {items?.length > 0 ? (
         <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', margin: 0, display: 'flex', flexDirection: 'column', gap: '3px' }}>
           {items.map((s, i) => {
-            const ItemIcon = itemIcon?.Icon;
+            const SkillIcon = getSkillIcon(s);
             return (
               <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: '0.4rem' }}>
-                {ItemIcon && <ItemIcon size={14} color={itemIcon.color} style={{ flexShrink: 0, marginTop: '2px' }} />}
+                <SkillIcon size={14} color={color} style={{ flexShrink: 0, marginTop: '2px' }} />
                 <span>{s}</span>
               </div>
             );
@@ -551,18 +550,19 @@ const Swot = ({ swotData, roster, schedule, isMobile = false }) => {
       </div>
 
       {/* ──── 3. Player cards — collapsible ──── */}
-      <div className="card-grid">
+      <div className="card-grid" style={!isMobile ? { gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' } : undefined}>
         {playersWithSwot.map(player => {
           const key = `${player.number}-${player.last}`;
           const isExpanded = expandedPlayer === key;
           return (
-            <PlayerSwotCard
-              key={key}
-              player={player}
-              isMobile={isMobile}
-              isExpanded={isExpanded}
-              onToggle={() => setExpandedPlayer(isExpanded ? null : key)}
-            />
+            <div key={key} style={!isMobile && isExpanded ? { gridColumn: '1 / -1' } : undefined}>
+              <PlayerSwotCard
+                player={player}
+                isMobile={isMobile}
+                isExpanded={isExpanded}
+                onToggle={() => setExpandedPlayer(isExpanded ? null : key)}
+              />
+            </div>
           );
         })}
       </div>

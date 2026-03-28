@@ -175,20 +175,31 @@ const Lineup = ({
             )}
           </div>
 
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: '0.5rem',
-            background: currentStrategy.compliant ? 'rgba(35, 134, 54, 0.1)' : 'rgba(218, 54, 51, 0.1)',
-            color: currentStrategy.compliant ? 'var(--success)' : 'var(--danger)',
-            padding: isMobile ? '0.45rem 0.75rem' : '0.5rem 1rem', borderRadius: '20px', fontWeight: '600', fontSize: isMobile ? 'var(--text-xs)' : 'var(--text-sm)',
-            border: `1px solid ${currentStrategy.compliant ? 'rgba(35, 134, 54, 0.3)' : 'rgba(218, 54, 51, 0.3)'}`
-          }}>
-            <ShieldCheck size={isMobile ? 14 : 18} />
-            {currentStrategy.compliant ? 'PCLL Compliant' : 'Rule Violation'}
-          </div>
+          {!currentStrategy.compliant && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: '0.5rem',
+              background: 'rgba(218, 54, 51, 0.1)',
+              color: 'var(--danger)',
+              padding: isMobile ? '0.45rem 0.75rem' : '0.5rem 1rem', borderRadius: '20px', fontWeight: '600', fontSize: isMobile ? 'var(--text-xs)' : 'var(--text-sm)',
+              border: '1px solid rgba(218, 54, 51, 0.3)'
+            }}>
+              <ShieldCheck size={isMobile ? 14 : 18} />
+              Rule Violation
+            </div>
+          )}
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-          {currentStrategy.lineup.map((player, idx) => {
+          {[...currentStrategy.lineup].sort((a, b) => {
+            const aIn = isAvailable(a) ? 0 : 1;
+            const bIn = isAvailable(b) ? 0 : 1;
+            if (aIn !== bIn) return aIn - bIn;
+            // Within each group, borrowed (subs) go after core
+            const aSub = a.borrowed ? 1 : 0;
+            const bSub = b.borrowed ? 1 : 0;
+            if (aSub !== bSub) return aSub - bSub;
+            return (a.slot || 99) - (b.slot || 99);
+          }).map((player, idx) => {
             const name = `${player.first || ''} ${player.last || ''}`.trim() || player.name || '\u2014';
             const avail = isAvailable(player);
             const hasStats = (player.pa || 0) > 0;

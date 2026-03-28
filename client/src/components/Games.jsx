@@ -261,7 +261,7 @@ const PlayerOppBattingRow = ({ player }) => {
 const ResultBadge = ({ result }) => {
   if (!result) return null;
   const isWin = result === 'W';
-  return <span className={`result-badge ${isWin ? 'result-badge--win' : 'result-badge--loss'}`}>{result}</span>;
+  return <span className={`result-badge ${isWin ? 'result-badge--win' : 'result-badge--loss'}`}>{isWin ? 'WIN' : 'LOSS'}</span>;
 };
 
 // ─── Tab bar ──────────────────────────────────────────────────────────────────
@@ -354,11 +354,11 @@ const GameCard = ({ game, onExpand, isExpanded, gameDetail, isMobile = false }) 
   const isWin = game.result === 'W';
   const scoreStr = game.score || game.score_str || '';
 
-  // Parse score respecting result direction
+  // Parse score respecting result direction (handle both hyphen and en-dash)
   let sharksScore = null, oppScore = null;
   if (scoreStr) {
-    const parts = scoreStr.split('-').map(Number);
-    if (parts.length === 2) {
+    const parts = scoreStr.split(/[-\u2013]/).map(Number);
+    if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
       if (game.result === 'W') { sharksScore = Math.max(...parts); oppScore = Math.min(...parts); }
       else if (game.result === 'L') { sharksScore = Math.min(...parts); oppScore = Math.max(...parts); }
       else { [sharksScore, oppScore] = parts; }
@@ -367,10 +367,26 @@ const GameCard = ({ game, onExpand, isExpanded, gameDetail, isMobile = false }) 
 
   const canExpand = !isMobile && (game.sharks_totals || game.source === 'gc_full_scraper_v2');
 
+  const cardTint = game.result === 'W'
+    ? 'rgba(35, 134, 54, 0.06)'
+    : game.result === 'L'
+      ? 'rgba(220, 70, 70, 0.06)'
+      : undefined;
+  const cardBorder = game.result === 'W'
+    ? '1px solid rgba(35, 134, 54, 0.2)'
+    : game.result === 'L'
+      ? '1px solid rgba(220, 70, 70, 0.2)'
+      : undefined;
+
   return (
     <div
       className="glass-panel"
-      style={{ padding: isMobile ? 'var(--space-lg)' : '1.25rem', cursor: canExpand ? 'pointer' : 'default' }}
+      style={{
+        padding: isMobile ? 'var(--space-lg)' : '1.25rem',
+        cursor: canExpand ? 'pointer' : 'default',
+        background: cardTint,
+        border: cardBorder,
+      }}
       onClick={canExpand ? onExpand : undefined}
     >
       {/* Header row */}
@@ -445,7 +461,7 @@ const ScheduleRow = ({ game }) => {
       <span style={{ minWidth: '110px', fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>{dateStr}</span>
       <span className={`home-away-pill ${isHome ? 'home-away-pill--home' : 'home-away-pill--away'}`}>
         {isHome ? <Home size={9} /> : <Plane size={9} />}
-        {isHome ? 'H' : 'A'}
+        {isHome ? 'HOME' : 'AWAY'}
       </span>
       <span style={{ flex: 1, fontWeight: isNext ? '700' : '500', fontSize: 'var(--text-sm)' }}>
         {isNext && (
@@ -517,8 +533,8 @@ const Games = ({ gamesData, schedule, isMobile = false }) => {
       )}
 
       {upcoming.length > 0 && sorted.length > 0 && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', margin: '1.5rem 0 1rem' }}>
-          <div style={{ flex: 1, height: '1px', background: 'linear-gradient(to right, transparent, rgba(255,255,255,0.1), transparent)' }} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', margin: '2rem 0 1.25rem' }}>
+          <div style={{ flex: 1, height: '2px', background: 'linear-gradient(to right, transparent, rgba(255,255,255,0.15), transparent)' }} />
         </div>
       )}
 
