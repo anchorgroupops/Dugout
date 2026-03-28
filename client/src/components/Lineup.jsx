@@ -190,7 +190,24 @@ const Lineup = ({
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-          {[...currentStrategy.lineup].sort((a, b) => {
+          {(() => {
+            // Merge optimizer lineup with any missing core roster players
+            const lineupPlayers = [...currentStrategy.lineup];
+            if (team?.roster) {
+              const lineupNames = new Set(lineupPlayers.map(p =>
+                `${p.first || ''} ${p.last || ''}`.trim().toLowerCase()
+              ));
+              team.roster
+                .filter(p => p.core !== false && !p.borrowed)
+                .forEach(p => {
+                  const name = `${p.first || ''} ${p.last || ''}`.trim().toLowerCase();
+                  if (name && !lineupNames.has(name)) {
+                    lineupPlayers.push({ ...p, slot: 999 }); // append at end
+                  }
+                });
+            }
+            return lineupPlayers;
+          })().sort((a, b) => {
             const aIn = isAvailable(a) ? 0 : 1;
             const bIn = isAvailable(b) ? 0 : 1;
             if (aIn !== bIn) return aIn - bIn;
@@ -203,7 +220,7 @@ const Lineup = ({
             const name = `${player.first || ''} ${player.last || ''}`.trim() || player.name || '\u2014';
             const avail = isAvailable(player);
             const hasStats = (player.pa || 0) > 0;
-            const roleLabel = slotLabel(player.slot);
+            const roleLabel = slotLabel(idx + 1);
             return (
               <div key={`${player.number}-${idx}`} style={{
                 display: 'flex', alignItems: 'center', padding: '0.85rem 1rem',
@@ -213,7 +230,7 @@ const Lineup = ({
                 opacity: avail ? 1 : 0.65,
                 gap: isMobile ? '0.5rem' : '0.75rem', flexWrap: 'wrap'
               }}>
-                <div style={{ width: isMobile ? '22px' : '28px', fontWeight: 'bold', color: 'var(--text-muted)', fontSize: 'var(--text-sm)' }}>{player.slot}.</div>
+                <div style={{ width: isMobile ? '22px' : '28px', fontWeight: 'bold', color: 'var(--text-muted)', fontSize: 'var(--text-sm)' }}>{idx + 1}.</div>
 
                 {/* Name first, then number */}
                 <div style={{ flex: 1, minWidth: isMobile ? '100px' : '120px', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>

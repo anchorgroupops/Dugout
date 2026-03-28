@@ -10,6 +10,7 @@ import Games from './components/Games';
 import League from './components/League';
 import Practice from './components/Practice';
 import Scouting from './components/Scouting';
+import ErrorBoundary from './components/ErrorBoundary';
 
 
 function SyncProgressBar({ progress, stage, milestones }) {
@@ -374,12 +375,11 @@ function App() {
             </div>
             <div className="mobile-header-actions">
               <button
-                className={`mobile-action-btn ${syncLoading ? 'sync-btn--active' : ''}`}
-                onClick={handleManualSync}
-                disabled={syncLoading}
-                title="Manual Sync"
+                className="mobile-action-btn"
+                onClick={fetchData}
+                title="Refresh Data"
               >
-                <RefreshCw size={22} className={syncLoading ? 'sync-spin' : ''} />
+                <RefreshCw size={22} />
               </button>
               <button
                 className="mobile-action-btn"
@@ -482,7 +482,9 @@ function App() {
           </div>
         )}
 
-        {renderContent()}
+        <ErrorBoundary key={currentView}>
+          {renderContent()}
+        </ErrorBoundary>
       </main>
 
       {/* ─── Mobile Bottom Navigation ─── */}

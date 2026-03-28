@@ -208,62 +208,126 @@ const fmt3 = (v) => {
   return (n >= 0 && n < 1) ? s.replace(/^0/, '') : s;
 };
 
-// ─── Field SVG ──────────────────────────────────────────────────────────────
-const FieldSVG = ({ zoneWeights, onHover, hoveredZone, hitType = 'all' }) => (
-  <svg viewBox="0 0 200 185" style={{ width: '100%', maxWidth: 300, display: 'block', margin: '0 auto' }}>
-    {/* Sky / warning track */}
-    <rect x="0" y="0" width="200" height="185" fill="rgba(0,0,0,0.3)" rx="4" />
+/**
+ * Simple seeded PRNG for deterministic dot placement.
+ * Returns a function that yields values in [0, 1).
+ */
+function seededRng(seed) {
+  let s = seed;
+  return () => {
+    s = (s * 16807 + 0) % 2147483647;
+    return (s - 1) / 2147483646;
+  };
+}
 
-    {/* Warning track arc */}
-    <path d="M 5,5 A 140,140 0 0 1 195,5 L 195,95 A 110,110 0 0 0 5,95 Z"
-      fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="4" />
+/**
+ * Check if point (px, py) is inside polygon defined by array of [x,y].
+ */
+function pointInPolygon(px, py, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i];
+    const [xj, yj] = poly[j];
+    if ((yi > py) !== (yj > py) && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
 
-    {/* Zone overlays */}
-    {ZONES.map(({ id, points }) => {
-      const t = zoneWeights[id] ?? 0;
-      const isHovered = hoveredZone === id;
-      const fill = hitType === 'all' ? heatColor(t) : typeColor(t, hitType);
-      return (
-        <polygon
-          key={id}
-          points={points}
-          fill={fill}
-          stroke={isHovered ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.12)'}
-          strokeWidth={isHovered ? 1.5 : 0.5}
-          style={{ cursor: 'default', transition: 'fill 0.3s' }}
-          onMouseEnter={() => onHover && onHover(id)}
-          onMouseLeave={() => onHover && onHover(null)}
-        />
-      );
-    })}
+/**
+ * Generate scatter dots within each zone proportional to its weight.
+ * totalHits controls overall density; zone weight scales dot count.
+ */
+function generateDots(zoneWeights, totalHits) {
+  const dots = [];
+  const rng = seededRng(42);
+  const baseDots = Math.max(3, Math.min(totalHits, 40)); // cap density
 
-    {/* Zone labels */}
-    {ZONES.map(({ id, label, points }) => {
-      const pts = points.split(' ').map(p => p.split(',').map(Number));
-      const cx = pts.reduce((s, p) => s + p[0], 0) / pts.length;
-      const cy = pts.reduce((s, p) => s + p[1], 0) / pts.length;
-      return (
-        <text key={id} x={cx} y={cy + 3} textAnchor="middle"
-          fontSize="7" fill="rgba(255,255,255,0.55)" fontWeight="600"
-          style={{ pointerEvents: 'none', userSelect: 'none' }}>
-          {label}
-        </text>
-      );
-    })}
+  ZONES.forEach(({ id, points }) => {
+    const w = zoneWeights[id] ?? 0;
+    const count = Math.round(baseDots * w);
+    if (count === 0) return;
 
-    {/* Infield diamond (orientation guide) */}
-    <polygon points="100,95 75,120 100,145 125,120"
-      fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth="0.8" />
+    const poly = points.split(' ').map(p => p.split(',').map(Number));
+    // Bounding box
+    const xs = poly.map(p => p[0]);
+    const ys = poly.map(p => p[1]);
+    const minX = Math.min(...xs), maxX = Math.max(...xs);
+    const minY = Math.min(...ys), maxY = Math.max(...ys);
 
-    {/* Pitcher circle */}
-    <circle cx="100" cy="118" r="6"
-      fill="rgba(255,255,255,0.06)" stroke="rgba(255,255,255,0.18)" strokeWidth="0.7" />
+    let placed = 0;
+    let attempts = 0;
+    while (placed < count && attempts < count * 20) {
+      attempts++;
+      const px = minX + rng() * (maxX - minX);
+      const py = minY + rng() * (maxY - minY);
+      if (pointInPolygon(px, py, poly)) {
+        dots.push({ x: px, y: py, zone: id, weight: w });
+        placed++;
+      }
+    }
+  });
+  return dots;
+}
 
-    {/* Home plate */}
-    <polygon points="100,165 94,170 94,176 106,176 106,170"
-      fill="rgba(255,255,255,0.3)" />
-  </svg>
-);
+// ─── Field SVG with scatter dots ────────────────────────────────────────────
+const FieldSVG = ({ zoneWeights, totalHits = 0, hitType = 'all' }) => {
+  const dots = generateDots(zoneWeights, totalHits);
+
+  return (
+    <svg viewBox="0 0 200 185" style={{ width: '100%', maxWidth: 300, display: 'block', margin: '0 auto' }}>
+      {/* Background */}
+      <rect x="0" y="0" width="200" height="185" fill="rgba(0,0,0,0.3)" rx="4" />
+
+      {/* Outfield arc */}
+      <path d="M 10,10 Q 100,-15 190,10" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="1.5" />
+
+      {/* Zone boundaries (subtle) */}
+      {ZONES.map(({ id, points }) => (
+        <polygon key={id} points={points}
+          fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="0.4" />
+      ))}
+
+      {/* Zone labels */}
+      {ZONES.map(({ id, label, points }) => {
+        const pts = points.split(' ').map(p => p.split(',').map(Number));
+        const cx = pts.reduce((s, p) => s + p[0], 0) / pts.length;
+        const cy = pts.reduce((s, p) => s + p[1], 0) / pts.length;
+        return (
+          <text key={id} x={cx} y={cy + 3} textAnchor="middle"
+            fontSize="6" fill="rgba(255,255,255,0.25)" fontWeight="600"
+            style={{ pointerEvents: 'none', userSelect: 'none' }}>
+            {label}
+          </text>
+        );
+      })}
+
+      {/* Scatter dots */}
+      {dots.map((d, i) => {
+        const color = hitType === 'all' ? heatColor(d.weight) : typeColor(d.weight, hitType);
+        return (
+          <circle key={i} cx={d.x} cy={d.y} r={2.2}
+            fill={color} stroke="rgba(255,255,255,0.3)" strokeWidth="0.4"
+            style={{ filter: d.weight > 0.7 ? 'drop-shadow(0 0 2px rgba(230,100,50,0.6))' : 'none' }}
+          />
+        );
+      })}
+
+      {/* Infield diamond */}
+      <polygon points="100,95 75,120 100,145 125,120"
+        fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth="0.8" />
+
+      {/* Pitcher circle */}
+      <circle cx="100" cy="118" r="5"
+        fill="rgba(255,255,255,0.06)" stroke="rgba(255,255,255,0.18)" strokeWidth="0.7" />
+
+      {/* Home plate */}
+      <polygon points="100,165 94,170 94,176 106,176 106,170"
+        fill="rgba(255,255,255,0.3)" />
+    </svg>
+  );
+};
 
 // ─── Threat badge for a single player ─────────────────────────────────────
 const PlayerThreatRow = ({ player }) => {
@@ -318,7 +382,6 @@ const HIT_TYPES = [
 
 // ─── Main component ──────────────────────────────────────────────────────────
 export default function OpponentFieldMap({ matchup, isMobile = false }) {
-  const [hoveredZone, setHoveredZone] = useState(null);
   const [selectedPlayer, setSelectedPlayer] = useState('');  // '' = team totals
   const [hitType, setHitType] = useState('all');
 
@@ -360,7 +423,7 @@ export default function OpponentFieldMap({ matchup, isMobile = false }) {
       {/* Section header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem', flexWrap: 'wrap' }}>
         <span style={{ fontSize: '1rem' }}>🎯</span>
-        <span className="section-label" style={{ marginBottom: 0 }}>Opponent Field Tendencies</span>
+        <span className="section-label" style={{ marginBottom: 0 }}>Opponent Spray Chart</span>
         <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginLeft: 'auto' }}>{opponent}</span>
       </div>
 
@@ -426,18 +489,19 @@ export default function OpponentFieldMap({ matchup, isMobile = false }) {
             <>
               <FieldSVG
                 zoneWeights={zoneWeights}
-                onHover={!isMobile ? setHoveredZone : undefined}
-                hoveredZone={hoveredZone}
+                totalHits={totalHits}
                 hitType={hitType}
               />
-              {/* Hot zone legend */}
-              <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'center' }}>
+              {/* Legend: hot zones */}
+              <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center' }}>
+                <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Hot zones:</span>
                 {topZones.map(z => (
                   <span key={z.id} style={{
                     fontSize: 'var(--text-xs)', color: 'var(--text-muted)',
-                    background: heatColor(z.w), padding: '2px 8px', borderRadius: '4px',
+                    display: 'inline-flex', alignItems: 'center', gap: '3px',
                   }}>
-                    ▲ {z.label}
+                    <svg width="8" height="8"><circle cx="4" cy="4" r="3.5" fill={heatColor(z.w)} stroke="rgba(255,255,255,0.3)" strokeWidth="0.5" /></svg>
+                    {z.label}
                   </span>
                 ))}
               </div>
