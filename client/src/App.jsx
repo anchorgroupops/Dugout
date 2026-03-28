@@ -41,7 +41,14 @@ function App() {
   const { canInstall, triggerInstall } = usePWAInstall();
   const isOnline = useOnlineStatus();
   const [isMobile, setIsMobile] = useState(
-    typeof window !== 'undefined' ? window.innerWidth <= 768 : false
+    typeof window !== 'undefined'
+      ? window.innerWidth <= 768 || (window.innerWidth <= 1024 && window.innerHeight <= 500)
+      : false
+  );
+  const [isLandscape, setIsLandscape] = useState(
+    typeof window !== 'undefined'
+      ? window.innerWidth > window.innerHeight && window.innerHeight <= 500
+      : false
   );
   const [voiceLoading, setVoiceLoading] = useState(false);
   const [voiceError, setVoiceError] = useState('');
@@ -121,7 +128,7 @@ function App() {
       console.error("Data fetch error", err);
       setData(prev => ({ ...prev, loading: false, error: err.message }));
     }
-  }, []);
+  }, [fetchWithRetry]);
 
   useEffect(() => {
     fetchData();
@@ -130,7 +137,12 @@ function App() {
   }, [fetchData]);
 
   useEffect(() => {
-    const onResize = () => setIsMobile(window.innerWidth <= 768);
+    const onResize = () => {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      setIsMobile(w <= 768 || (w <= 1024 && h <= 500));
+      setIsLandscape(w > h && h <= 500);
+    };
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
@@ -315,16 +327,17 @@ function App() {
     );
 
     switch(currentView) {
-      case 'scoreboard': return <Scoreboard isMobile={isMobile} team={data.team} schedule={data.schedule} />;
-      case 'scout': return <Scouting isMobile={isMobile} />;
+      case 'scoreboard': return <Scoreboard isMobile={isMobile} isLandscape={isLandscape} team={data.team} schedule={data.schedule} />;
+      case 'scout': return <Scouting isMobile={isMobile} isLandscape={isLandscape} />;
       case 'roster': return (
         <Roster
           team={data.team}
           availability={data.availability}
           isMobile={isMobile}
+          isLandscape={isLandscape}
         />
       );
-      case 'swot': return <Swot swotData={data.swot} roster={data.team?.roster} schedule={data.schedule} isMobile={isMobile} />;
+      case 'swot': return <Swot swotData={data.swot} roster={data.team?.roster} schedule={data.schedule} isMobile={isMobile} isLandscape={isLandscape} />;
       case 'lineups': return (
         <Lineup
           team={data.team}
@@ -332,18 +345,20 @@ function App() {
           availability={data.availability}
           schedule={data.schedule}
           isMobile={isMobile}
+          isLandscape={isLandscape}
           onAvailabilityChange={(newAvail) => setData(prev => ({ ...prev, availability: newAvail }))}
           onDataRefresh={fetchData}
           onRegenerate={(newLineups) => setData(prev => ({ ...prev, lineups: newLineups }))}
         />
       );
-      case 'games': return <Games gamesData={data.games} schedule={data.schedule} isMobile={isMobile} />;
-      case 'league': return <League isMobile={isMobile} />;
+      case 'games': return <Games gamesData={data.games} schedule={data.schedule} isMobile={isMobile} isLandscape={isLandscape} />;
+      case 'league': return <League isMobile={isMobile} isLandscape={isLandscape} />;
       case 'practice': return (
         <Practice
           team={data.team}
           schedule={data.schedule}
           isMobile={isMobile}
+          isLandscape={isLandscape}
         />
       );
       default: return (
@@ -363,7 +378,7 @@ function App() {
   })();
 
   return (
-    <>
+    <div data-landscape={isLandscape ? '' : undefined} className={isLandscape ? 'landscape-mode' : ''}>
       {/* ─── Top Navigation ─── */}
       {isMobile ? (
         <nav className="navbar navbar-mobile">
@@ -558,7 +573,7 @@ function App() {
           </nav>
         </>
       )}
-    </>
+    </div>
   );
 }
 

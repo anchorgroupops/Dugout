@@ -1,15 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { AlertTriangle, TrendingUp, ShieldAlert, Target, ChevronDown, ChevronUp, Swords, Clock, Home, Plane, Zap, ThumbsDown, CheckCircle, AlertCircle, CircleDot, Shield, Eye } from 'lucide-react';
+import { AlertTriangle, TrendingUp, ShieldAlert, Target, ChevronDown, ChevronUp, Swords, Clock, Home, Plane, Zap, CircleDot, Shield, Eye } from 'lucide-react';
 import { getTodayEST, formatDateMMDDYYYY } from '../utils/formatDate';
 import { TipBadge, PlayerName } from './StatTooltip';
 import OpponentFieldMap from './OpponentFieldMap';
-
-const quadrantIcons = {
-  'Strengths': { Icon: CheckCircle, color: 'var(--success)' },
-  'Weaknesses': { Icon: AlertCircle, color: 'var(--danger)' },
-  'Opportunities': { Icon: TrendingUp, color: '#3b9ede' },
-  'Threats': { Icon: ShieldAlert, color: '#c87533' },
-};
 
 const SwotQuadrant = ({ title, items, color, icon }) => {
   return (
@@ -447,7 +440,7 @@ const PlayerSwotCard = ({ player, isMobile, isExpanded, onToggle }) => {
   );
 };
 
-const Swot = ({ swotData, roster, schedule, isMobile = false }) => {
+const Swot = ({ swotData, roster, schedule, isMobile = false, isLandscape = false }) => {
   const [expandedPlayer, setExpandedPlayer] = useState(null);
   const [showMatchup, setShowMatchup] = useState(!isMobile);
   if (!swotData) return <p>Loading SWOT Analysis...</p>;
@@ -490,15 +483,15 @@ const Swot = ({ swotData, roster, schedule, isMobile = false }) => {
       {/* ──── 1. Team-level SWOT — most prominent, shown FIRST ──── */}
       {teamSwot && (
         isMobile ? (
-          <div className="glass-panel" style={{ marginBottom: 'var(--space-md)', padding: 'var(--space-lg)', borderColor: 'var(--primary-glow)' }}>
-            <h3 style={{ marginBottom: '1rem', color: 'var(--primary-color)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <ShieldAlert size={20} /> Team Analysis
+          <div className="glass-panel" style={{ marginBottom: isLandscape ? 'var(--space-xs)' : 'var(--space-md)', padding: isLandscape ? 'var(--space-sm)' : 'var(--space-lg)', borderColor: 'var(--primary-glow)' }}>
+            <h3 style={{ marginBottom: isLandscape ? '0.5rem' : '1rem', color: 'var(--primary-color)', display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: isLandscape ? 'var(--text-sm)' : undefined }}>
+              <ShieldAlert size={isLandscape ? 16 : 20} /> Team Analysis
             </h3>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.85rem' }}>
-              <SwotQuadrant title="Strengths" items={(teamSwot.strengths || []).slice(0, 4)} color="var(--success)" icon={<TrendingUp size={14} />} />
-              <SwotQuadrant title="Weaknesses" items={(teamSwot.weaknesses || []).slice(0, 4)} color="var(--danger)" icon={<AlertTriangle size={14} />} />
-              <SwotQuadrant title="Opportunities" items={(teamSwot.opportunities || []).slice(0, 4)} color="#3b9ede" icon={<Target size={14} />} />
-              <SwotQuadrant title="Threats" items={(teamSwot.threats || []).slice(0, 4)} color="var(--warning)" icon={<ShieldAlert size={14} />} />
+            <div style={{ display: 'grid', gridTemplateColumns: isLandscape ? 'repeat(4, 1fr)' : '1fr 1fr', gap: isLandscape ? '0.5rem' : '0.85rem' }}>
+              <SwotQuadrant title="Strengths" items={(teamSwot.strengths || []).slice(0, isLandscape ? 3 : 4)} color="var(--success)" icon={<TrendingUp size={14} />} />
+              <SwotQuadrant title="Weaknesses" items={(teamSwot.weaknesses || []).slice(0, isLandscape ? 3 : 4)} color="var(--danger)" icon={<AlertTriangle size={14} />} />
+              <SwotQuadrant title="Opportunities" items={(teamSwot.opportunities || []).slice(0, isLandscape ? 3 : 4)} color="#3b9ede" icon={<Target size={14} />} />
+              <SwotQuadrant title="Threats" items={(teamSwot.threats || []).slice(0, isLandscape ? 3 : 4)} color="var(--warning)" icon={<ShieldAlert size={14} />} />
             </div>
           </div>
         ) : (
@@ -550,7 +543,7 @@ const Swot = ({ swotData, roster, schedule, isMobile = false }) => {
       </div>
 
       {/* ──── 3. Player cards — collapsible ──── */}
-      <div className="card-grid" style={!isMobile ? { gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' } : undefined}>
+      <div className="card-grid" style={!isMobile ? { gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' } : isLandscape ? { gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))' } : undefined}>
         {playersWithSwot.map(player => {
           const key = `${player.number}-${player.last}`;
           const isExpanded = expandedPlayer === key;

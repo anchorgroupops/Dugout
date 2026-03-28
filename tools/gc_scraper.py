@@ -48,6 +48,52 @@ GC_STATS_URL = f"{GC_BASE_URL}/teams/{GC_TEAM_ID}/{GC_SEASON_SLUG}/season-stats"
 # Headless mode: set GC_HEADLESS=false in .env to watch the browser
 GC_HEADLESS = os.getenv("GC_HEADLESS", "true").lower() != "false"
 
+# Auth cooldown: prevent rapid-fire 2FA code emails when session is expired.
+# After a login failure, wait this many hours before retrying authenticated scraping.
+AUTH_COOLDOWN_HOURS = float(os.getenv("AUTH_COOLDOWN_HOURS", "2"))
+_AUTH_COOLDOWN_FILE = DATA_DIR / ".auth_cooldown"
+
+
+def set_auth_cooldown(reason: str = ""):
+    """Record that auth failed — prevents retries for AUTH_COOLDOWN_HOURS."""
+    try:
+        _AUTH_COOLDOWN_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _AUTH_COOLDOWN_FILE.write_text(
+            json.dumps({"failed_at": datetime.now(ET).isoformat(), "reason": reason}),
+            encoding="utf-8",
+        )
+        print(f"[GC] Auth cooldown set for {AUTH_COOLDOWN_HOURS}h: {reason}")
+    except Exception as e:
+        print(f"[GC] [WARN] Could not write cooldown file: {e}")
+
+
+def clear_auth_cooldown():
+    """Remove cooldown after a successful login."""
+    try:
+        if _AUTH_COOLDOWN_FILE.exists():
+            _AUTH_COOLDOWN_FILE.unlink()
+    except Exception:
+        pass
+
+
+def is_auth_on_cooldown() -> bool:
+    """Check if we're in an auth cooldown period (recent login failure)."""
+    if not _AUTH_COOLDOWN_FILE.exists():
+        return False
+    try:
+        data = json.loads(_AUTH_COOLDOWN_FILE.read_text(encoding="utf-8"))
+        failed_at = datetime.fromisoformat(data["failed_at"])
+        elapsed = (datetime.now(ET) - failed_at).total_seconds() / 3600
+        if elapsed < AUTH_COOLDOWN_HOURS:
+            print(f"[GC] Auth on cooldown ({elapsed:.1f}h / {AUTH_COOLDOWN_HOURS}h). "
+                  f"Reason: {data.get('reason', 'unknown')}")
+            return True
+        # Cooldown expired — clean up
+        _AUTH_COOLDOWN_FILE.unlink(missing_ok=True)
+    except Exception:
+        pass
+    return False
+
 # ---------- Column mappings for each stat category ---------- #
 # Maps raw GC column header -> clean JSON key name
 
@@ -85,6 +131,7 @@ PITCHING_ADV_MAP = {
     "0BBINN": "zero_bb_inn", "FIP": "fip", "K/BF": "k_bf", "K/BB": "k_bb",
     "BB/INN": "bb_inn", "BA/RISP": "ba_risp", "BABIP": "babip",
     "LD%": "ld_pct", "GB%": "gb_pct", "FB%": "fb_pct", "HHB%": "hhb_pct",
+    "WEAK%": "weak_pct", "GO/AO": "go_ao", "P/HR": "p_hr",
     "SM%": "sm_pct", "BBS": "bbs", "LOBBS": "lobbs", "LOBB": "lobb",
 }
 
@@ -96,9 +143,13 @@ PITCHING_BRK_MAP = {
     "SC": "sc", "SCS": "scs", "SCS%": "scs_pct", "SCSM%": "scsm_pct", "SCSW%": "scsw_pct",
     "RB": "rb", "RBS": "rbs", "RBS%": "rbs_pct", "RBSM%": "rbsm_pct", "RBSW%": "rbsw_pct",
     "DB": "db", "DBS": "dbs", "DBS%": "dbs_pct", "DBSM%": "dbsm_pct", "DBSW%": "dbsw_pct",
-    "DC": "dc", "DCS": "dcs",
+    "DC": "dc", "DCS": "dcs", "DCS%": "dcs_pct", "DCSM%": "dcsm_pct", "DCSW%": "dcsw_pct",
+    "KB": "kb", "KBS": "kbs", "KBS%": "kbs_pct", "KBSM%": "kbsm_pct", "KBSW%": "kbsw_pct",
+    "KC": "kc", "KCS": "kcs", "KCS%": "kcs_pct", "KCSM%": "kcsm_pct", "KCSW%": "kcsw_pct",
+    "OS": "os_pitch", "OSS": "oss", "OSS%": "oss_pct", "OSSM%": "ossm_pct", "OSSW%": "ossw_pct",
     "MPHFB": "mph_fb", "MPHCH": "mph_ch", "MPHCB": "mph_cb",
     "MPHSC": "mph_sc", "MPHRB": "mph_rb", "MPHDB": "mph_db",
+    "MPHDC": "mph_dc", "MPHKB": "mph_kb", "MPHKC": "mph_kc",
 }
 
 FIELDING_STD_MAP = {
@@ -309,7 +360,7 @@ class GameChangerScraper:
         # Check for pre-configured OTP in env
         otp_code = os.getenv("GC_OTP", "").strip()
         if otp_code:
-            print(f"[GC] Using GC_OTP from environment: {otp_code}")
+            print(f"[GC] Using GC_OTP from environment: {'*' * len(otp_code)}")
             otp_field.fill(otp_code)
             # Submit
             submit_btn = self.page.get_by_role("button", name=re.compile("Verify|Continue|Submit|Confirm", re.I)).first
@@ -320,6 +371,13 @@ class GameChangerScraper:
             self.page.wait_for_load_state("networkidle", timeout=30000)
             print("[GC] [OK] OTP submitted.")
         else:
+            # Running non-interactively (daemon mode): set cooldown instead of blocking 180s
+            if os.getenv("SYNC_DAEMON_MODE", "").strip():
+                set_auth_cooldown("2FA code required but running in daemon mode (no GC_OTP set)")
+                raise RuntimeError(
+                    "[GC] 2FA code required. Set GC_OTP env var with the code from fly386@gmail.com, "
+                    "or run save_session.py interactively. Auth cooldown activated."
+                )
             print("[GC] [WARN]  No GC_OTP set in .env. Waiting 180s for manual entry...")
             print("[GC]    → Enter the code in the browser window NOW. You have 3 minutes.")
             self.page.wait_for_timeout(180000)
@@ -354,6 +412,13 @@ class GameChangerScraper:
 
     def login(self, playwright, force_refresh: bool = False):
         """Log in to GameChanger via browser automation using persistent sessions."""
+        # Check cooldown BEFORE attempting login to avoid triggering 2FA codes
+        if is_auth_on_cooldown() and not force_refresh:
+            raise RuntimeError(
+                "[GC] Auth on cooldown — skipping login to avoid triggering 2FA codes. "
+                "Cooldown clears automatically or set GC_OTP env var and re-run."
+            )
+
         self._validate_credentials()
         self.playwright = playwright
 
@@ -364,10 +429,6 @@ class GameChangerScraper:
         context_dir = os.getenv("GC_PLAYWRIGHT_CONTEXT_DIR", "").strip()
         user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
-        self.browser = playwright.chromium.launch(
-            headless=GC_HEADLESS,
-            args=["--no-sandbox", "--disable-dev-shm-usage"]
-        )
         # Common context kwargs: consistent viewport + locale reduce bot-detection triggers
         _ctx_kwargs = {
             "user_agent": user_agent,
@@ -376,6 +437,7 @@ class GameChangerScraper:
         }
 
         if context_dir:
+            # Persistent context manages its own browser — don't launch a separate one
             context_path = Path(context_dir)
             context_path.mkdir(parents=True, exist_ok=True)
             print(f"[GC] Using persistent context at {context_path}")
@@ -386,6 +448,10 @@ class GameChangerScraper:
             )
             self.browser = self.context
         else:
+            self.browser = playwright.chromium.launch(
+                headless=GC_HEADLESS,
+                args=["--no-sandbox", "--disable-dev-shm-usage"]
+            )
             if auth_file.exists() and not force_refresh:
                 print(f"[GC] Loading session from {auth_file.name}")
                 self.context = self.browser.new_context(
@@ -427,12 +493,14 @@ class GameChangerScraper:
                 print("[GC] [HEAL] Auth failed with cached state, trying fresh login...")
                 self.close()
                 return self.login(playwright, force_refresh=True)
-            
+
             self._capture_diagnostics("auth_failed")
             print(f"[GC] Current URL: {self.page.url}")
+            set_auth_cooldown(f"Login failed, state={final_state}")
             raise RuntimeError(f"[GC] Authentication failed. State: {final_state}")
 
         print(f"[GC] Authenticated. Current URL: {self.page.url}")
+        clear_auth_cooldown()
 
         # Save session for next time (even if using persistent context, helps on Modal)
         if not context_dir:
@@ -485,7 +553,7 @@ class GameChangerScraper:
                             obj['Player'] = playerLink.innerText.trim();
                             const href = playerLink.getAttribute('href') || '';
                             if (href.includes('/players/')) {
-                                obj['_gc_id'] = href.split('/').pop();
+                                obj['_gc_id'] = href.split('/').filter(Boolean).pop();
                             }
                         }
 
@@ -779,7 +847,7 @@ class GameChangerScraper:
                 print(f"[GC]   [WARN] No data found for {major_tab}/{sub_tab}")
                 continue
 
-                print(f"[GC]   [OK] Got {len(rows)} rows")
+            print(f"[GC]   [OK] Got {len(rows)} rows")
 
             for row in rows:
                 # Identify player: first column is usually "Player" or the player name

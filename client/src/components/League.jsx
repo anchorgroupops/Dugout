@@ -6,7 +6,7 @@ import { TipBadge } from './StatTooltip';
 const PCLL_RIVAL_SLUGS = ['peppers', 'riptide'];
 const isDivisionRival = (slug) => PCLL_RIVAL_SLUGS.some(r => String(slug || '').toLowerCase().includes(r));
 
-const League = ({ isMobile = false }) => {
+const League = ({ isMobile = false, isLandscape = false }) => {
   const [standings, setStandings] = useState(null);
   const [opponents, setOpponents] = useState([]);
   const [expanded, setExpanded] = useState(null);
@@ -86,7 +86,7 @@ const League = ({ isMobile = false }) => {
       </h2>
 
       {/* Standings table */}
-      <div className="glass-panel" style={{ padding: isMobile ? 'var(--space-lg)' : '1.5rem', marginBottom: '2rem' }}>
+      <div className="glass-panel" style={{ padding: isLandscape ? 'var(--space-sm)' : isMobile ? 'var(--space-lg)' : '1.5rem', marginBottom: isLandscape ? '1rem' : '2rem' }}>
         <div className="section-label">Standings</div>
 
         {standings?.as_of && (
@@ -99,7 +99,7 @@ const League = ({ isMobile = false }) => {
           <div style={{ color: 'var(--text-muted)', fontSize: 'var(--text-sm)', padding: '0.5rem' }}>Loading standings...</div>
         )}
 
-        {!isMobile && (
+        {(!isMobile || isLandscape) && (
           <div style={{
             display: 'grid', gridTemplateColumns: '1fr 60px 60px 70px',
             gap: '0.5rem', padding: '0.3rem 0.5rem',
@@ -114,7 +114,7 @@ const League = ({ isMobile = false }) => {
 
         {standingRows.map((team, i) => {
           const isSharks = team.slug === 'sharks';
-          if (isMobile) {
+          if (isMobile && !isLandscape) {
             return (
               <div key={team.slug} style={{
                 padding: '0.625rem 0.75rem',

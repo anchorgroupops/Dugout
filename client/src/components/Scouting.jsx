@@ -22,7 +22,7 @@ const BulletCard = ({ title, items, color, icon, emptyText }) => (
   </div>
 );
 
-export default function Scouting({ isMobile }) {
+export default function Scouting({ isMobile, isLandscape = false }) {
   const [nextGame, setNextGame] = useState(null);
   const [matchup, setMatchup] = useState(null);
   const [h2h, setH2h] = useState(null);
@@ -160,7 +160,7 @@ export default function Scouting({ isMobile }) {
         </div>
       ) : matchup ? (
         <>
-          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 'var(--space-sm)' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: (isMobile && !isLandscape) ? '1fr' : '1fr 1fr', gap: 'var(--space-sm)' }}>
             <BulletCard
               title="Their Strengths"
               items={matchup.their_advantages}

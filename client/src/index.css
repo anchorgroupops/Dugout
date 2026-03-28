@@ -984,3 +984,202 @@ input[type="checkbox"]:checked::after {
   from { transform: translateY(-100%); opacity: 0; }
   to { transform: translateY(0); opacity: 1; }
 }
+
+/* ─── Landscape Mobile (phone rotated sideways) ─── */
+@media (orientation: landscape) and (max-height: 500px) {
+  :root {
+    --bottom-nav-height: 48px;
+  }
+
+  main {
+    padding: var(--space-sm) var(--space-lg);
+    padding-bottom: calc(var(--bottom-nav-height) + var(--space-sm));
+  }
+
+  .navbar {
+    padding: 0.35rem 1rem;
+  }
+
+  .brand {
+    font-size: 1rem;
+    gap: 0.35rem;
+  }
+
+  .logo-avatar {
+    width: 32px;
+    height: 32px;
+  }
+
+  /* Hide desktop nav in landscape mobile */
+  .nav-links {
+    display: none;
+  }
+
+  .glass-panel {
+    border-radius: 10px;
+    padding: var(--space-sm);
+    margin-bottom: var(--space-xs);
+  }
+
+  .view-title {
+    font-size: var(--text-base);
+    margin-bottom: var(--space-xs);
+  }
+
+  /* Slimmer bottom nav in landscape — full fixed positioning since max-width:768 may not match */
+  .bottom-nav {
+    display: flex;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 200;
+    background: rgba(8, 14, 30, 0.96);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-top: 1px solid var(--surface-border);
+    height: var(--bottom-nav-height);
+    padding: 0.15rem 0;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    justify-content: space-around;
+    align-items: stretch;
+  }
+
+  .bottom-nav-item {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1px;
+    padding: 0.15rem 0;
+    min-height: 40px;
+    font-size: 0.55rem;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    position: relative;
+    transition: color 0.2s;
+  }
+
+  .bottom-nav-item.active {
+    color: var(--primary-color);
+  }
+
+  .bottom-nav-item svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .bottom-nav-item.active::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    height: 2px;
+    width: 24px;
+    border-radius: 0 0 3px 3px;
+    background: var(--primary-color);
+  }
+
+  /* More menu in landscape */
+  .more-menu-overlay {
+    display: block;
+    position: fixed;
+    bottom: var(--bottom-nav-height);
+    left: 0;
+    right: 0;
+    top: 0;
+    z-index: 199;
+  }
+
+  .more-menu {
+    display: block;
+    bottom: var(--bottom-nav-height);
+    padding: 0.5rem 0;
+  }
+
+  .more-menu-item {
+    padding: 0.5rem 1rem;
+    min-height: 36px;
+    font-size: var(--text-xs);
+  }
+
+  .more-menu-overlay {
+    display: block;
+    bottom: var(--bottom-nav-height);
+  }
+
+  /* Compact player avatars in landscape */
+  .player-avatar {
+    width: 32px;
+    height: 32px;
+    font-size: 0.75rem;
+  }
+
+  .mobile-header-left {
+    gap: 0.35rem;
+  }
+
+  .mobile-action-btn {
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    border-radius: 8px;
+  }
+
+  /* Sync progress compact */
+  .mobile-sync-progress {
+    padding: 0 1rem 0.2rem 1rem;
+  }
+
+  /* Card grid: 2 columns in landscape */
+  .card-grid {
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: var(--space-sm);
+  }
+
+  /* Stat badges compact */
+  .stat-badge {
+    padding: 0.3rem 0.5rem;
+    min-width: 40px;
+  }
+
+  /* Section labels compact */
+  .section-label {
+    margin-bottom: var(--space-xs);
+    font-size: 0.65rem;
+  }
+
+  .stale-banner {
+    padding: 0.4rem 0.75rem;
+    margin-bottom: var(--space-xs);
+    font-size: var(--text-xs);
+  }
+
+  .last-updated-tag {
+    margin-bottom: var(--space-xs);
+    font-size: 0.6rem;
+    padding: 0.15rem 0.5rem;
+  }
+
+  /* Hero meta row - compact */
+  .hero-meta-row {
+    gap: 0.35rem;
+  }
+
+  .voice-btn, .sync-btn {
+    font-size: 0.65rem;
+    padding: 0.35rem 0.65rem;
+    min-height: 36px;
+  }
+
+  /* Loader smaller */
+  .loader {
+    width: 28px;
+    height: 28px;
+    margin: 1rem auto;
+  }
+}

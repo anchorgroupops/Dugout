@@ -94,7 +94,7 @@ const SessionItem = ({ item, index }) => (
   </div>
 );
 
-const Practice = ({ team, schedule, isMobile = false }) => {
+const Practice = ({ team, schedule, isMobile = false, isLandscape = false }) => {
   const [insights, setInsights] = useState(null);
   const [selected, setSelected] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -139,7 +139,7 @@ const Practice = ({ team, schedule, isMobile = false }) => {
     return [...all].sort((a, b) => a.localeCompare(b));
   }, [insights, coreRosterNames]);
 
-  const fetchInsights = async (preserveSelection = false) => {
+  const fetchInsights = async () => {
     setLoading(true);
     setError('');
     try {
@@ -203,7 +203,7 @@ const Practice = ({ team, schedule, isMobile = false }) => {
 
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
-      fetchInsights(true);
+      fetchInsights();
     }, 500);
 
     return () => {
@@ -270,7 +270,7 @@ const Practice = ({ team, schedule, isMobile = false }) => {
           </div>
         </div>
 
-        <div style={{ marginTop: '0.75rem', display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(190px, 1fr))', gap: '0.4rem' }}>
+        <div style={{ marginTop: '0.75rem', display: 'grid', gridTemplateColumns: isLandscape ? 'repeat(auto-fill, minmax(160px, 1fr))' : isMobile ? '1fr' : 'repeat(auto-fill, minmax(190px, 1fr))', gap: isLandscape ? '0.3rem' : '0.4rem' }}>
           {availablePlayers.map(name => (
             <label key={name} style={{
               display: 'flex', alignItems: 'center', gap: '0.5rem', background: selected.includes(name) ? 'rgba(4, 101, 104, 0.11)' : 'rgba(255,255,255,0.03)',

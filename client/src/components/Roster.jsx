@@ -203,7 +203,7 @@ const ExpandedStats = ({ player }) => {
   );
 };
 
-const Roster = ({ team, availability, isMobile = false }) => {
+const Roster = ({ team, availability, isMobile = false, isLandscape = false }) => {
   const [expandedPlayer, setExpandedPlayer] = useState(null);
 
   if (!team || !team.roster) return <div className="loader"></div>;
@@ -219,7 +219,6 @@ const Roster = ({ team, availability, isMobile = false }) => {
     const cmp = (a.first || '').localeCompare(b.first || '');
     return cmp !== 0 ? cmp : (a.last || '').localeCompare(b.last || '');
   });
-  const totalCount = filteredRoster.length;
   const activeCount = sortedRoster.filter(p => {
     const name = `${p.first || ''} ${p.last || ''}`.trim();
     return availability ? availability[name] !== false : true;
@@ -234,7 +233,7 @@ const Roster = ({ team, availability, isMobile = false }) => {
         </span>
       </h2>
 
-      <div className="card-grid">
+      <div className="card-grid" style={isLandscape ? { gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))' } : undefined}>
         {sortedRoster.map(player => {
           const playerKey = `${player.number}-${player.last}`;
           const isExpanded = expandedPlayer === playerKey;
@@ -249,7 +248,7 @@ const Roster = ({ team, availability, isMobile = false }) => {
               key={playerKey}
               className={`glass-panel ${isActive ? '' : 'inactive-player'}`}
               style={{
-                padding: 'var(--space-lg)',
+                padding: isLandscape ? 'var(--space-sm)' : 'var(--space-lg)',
                 position: 'relative',
                 overflow: 'hidden',
                 cursor: 'pointer',
