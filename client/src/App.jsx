@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Users, Activity, RefreshCw, ListOrdered, Calendar, Trophy, Dumbbell, Volume2, Target, AlertTriangle, MoreHorizontal, Download, Globe, GlobeLock, Clock } from 'lucide-react';
+import { Users, Activity, RefreshCw, ListOrdered, Calendar, Trophy, Dumbbell, Volume2, Target, AlertTriangle, MoreHorizontal, Download, Globe, GlobeLock, Clock, Radio } from 'lucide-react';
 import { formatDateTime, formatRelative } from './utils/formatDate';
 import { usePWAInstall } from './utils/usePWAInstall';
 import { useOnlineStatus } from './utils/useOnlineStatus';
@@ -10,6 +10,7 @@ import Games from './components/Games';
 import League from './components/League';
 import Practice from './components/Practice';
 import Scouting from './components/Scouting';
+import Scoreboard from './components/Scoreboard';
 import ErrorBoundary from './components/ErrorBoundary';
 
 
@@ -62,6 +63,7 @@ function App() {
   });
   const audioRef = useRef(null);
   const audioUrlRef = useRef('');
+  const syncPollRef = useRef(null);
 
   const fetchWithRetry = useCallback(async (url, retries = 2) => {
     for (let i = 0; i <= retries; i++) {
@@ -141,6 +143,9 @@ function App() {
       if (audioUrlRef.current) {
         URL.revokeObjectURL(audioUrlRef.current);
       }
+      if (syncPollRef.current) {
+        clearInterval(syncPollRef.current);
+      }
     };
   }, []);
 
@@ -209,11 +214,13 @@ function App() {
       const TIMEOUT = 10 * 60 * 1000;
       const startTime = Date.now();
 
-      const pollTimer = setInterval(async () => {
+      if (syncPollRef.current) clearInterval(syncPollRef.current);
+      syncPollRef.current = setInterval(async () => {
         try {
           const elapsed = Date.now() - startTime;
           if (elapsed >= TIMEOUT) {
-            clearInterval(pollTimer);
+            clearInterval(syncPollRef.current);
+            syncPollRef.current = null;
             setSyncLoading(false);
             setSyncProgress(0);
             setSyncStatusText('Sync timed out — data may still be updating');
@@ -231,7 +238,8 @@ function App() {
 
             // If stage went back to idle, sync is done
             if (s.stage === 'idle' && elapsed > 5000) {
-              clearInterval(pollTimer);
+              clearInterval(syncPollRef.current);
+              syncPollRef.current = null;
               setSyncLoading(false);
               setSyncProgress(100);
               setSyncStatusText('Sync complete');
@@ -247,7 +255,8 @@ function App() {
             const h = await hRes.json();
             const newTimestamp = h.last_updated || h.timestamp || null;
             if (baseTimestamp && newTimestamp && newTimestamp !== baseTimestamp) {
-              clearInterval(pollTimer);
+              clearInterval(syncPollRef.current);
+              syncPollRef.current = null;
               setSyncLoading(false);
               setSyncProgress(100);
               setSyncStatusText('Sync complete');
@@ -267,6 +276,7 @@ function App() {
 
   // All nav items for desktop
   const navItems = [
+    { id: 'scoreboard', label: 'Live', icon: <Radio size={18} /> },
     { id: 'scout', label: 'Scout', icon: <Target size={18} /> },
     { id: 'swot', label: 'SWOT', icon: <Activity size={18} /> },
     { id: 'roster', label: 'Roster', icon: <Users size={18} /> },
@@ -277,16 +287,16 @@ function App() {
   ];
 
   // Mobile: 4 primary bottom tabs + "More" overflow
-  // Elevated: SWOT + Practice to primary (most used on the field)
-  // Demoted: Roster + Games to overflow (reference tabs)
+  // Live scoreboard gets primary position for game-day dugout use
   const primaryNavItems = [
+    { id: 'scoreboard', label: 'Live', icon: <Radio size={22} /> },
     { id: 'scout', label: 'Scout', icon: <Target size={22} /> },
-    { id: 'swot', label: 'SWOT', icon: <Activity size={22} /> },
     { id: 'lineups', label: 'Lineups', icon: <ListOrdered size={22} /> },
     { id: 'practice', label: 'Practice', icon: <Dumbbell size={22} /> },
   ];
 
   const overflowNavItems = [
+    { id: 'swot', label: 'SWOT', icon: <Activity size={20} /> },
     { id: 'roster', label: 'Roster', icon: <Users size={20} /> },
     { id: 'games', label: 'Games', icon: <Calendar size={20} /> },
     { id: 'league', label: 'League', icon: <Trophy size={20} /> },
@@ -305,6 +315,7 @@ function App() {
     );
 
     switch(currentView) {
+      case 'scoreboard': return <Scoreboard isMobile={isMobile} />;
       case 'scout': return <Scouting isMobile={isMobile} />;
       case 'roster': return (
         <Roster
@@ -361,7 +372,7 @@ function App() {
               <img src="/sharks-logo-round.png" alt="Sharks" className="logo-avatar" />
               <span className="brand" style={{ fontSize: '1.125rem' }}>
                 {(() => {
-                  const labels = { scout: 'Scout', swot: 'SWOT', lineups: 'Lineups', practice: 'Practice', roster: 'Roster', games: 'Games', league: 'League' };
+                  const labels = { scoreboard: 'Live', scout: 'Scout', swot: 'SWOT', lineups: 'Lineups', practice: 'Practice', roster: 'Roster', games: 'Games', league: 'League' };
                   return labels[currentView] || 'Sharks';
                 })()}
               </span>
@@ -436,7 +447,7 @@ function App() {
                 <button 
                   className="voice-btn" 
                   onClick={triggerInstall} 
-                  style={{ background: 'var(--accent-color)', color: 'var(--background-color)' }}
+                  style={{ background: 'var(--primary-color)', color: 'var(--bg-color)' }}
                   title="Install the app for offline use"
                 >
                   <Download size={16} />
@@ -511,7 +522,7 @@ function App() {
               {canInstall && (
                 <button
                   className="more-menu-item install-item"
-                  style={{ color: 'var(--accent-color)', fontWeight: 'bold' }}
+                  style={{ color: 'var(--primary-color)', fontWeight: 'bold' }}
                   onClick={() => {
                     triggerInstall();
                     setMoreMenuOpen(false);

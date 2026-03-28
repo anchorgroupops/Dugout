@@ -1820,6 +1820,171 @@ def handle_game_detail(game_id):
     return jsonify(data)
 
 
+@app.route('/api/scoreboard', methods=['GET'])
+def handle_scoreboard():
+    """Return live/recent scoreboard data from the GC public API.
+
+    Checks for in-progress or today's game, returns score, inning, and
+    game status so the frontend can render a real-time scoreboard.
+    Falls back to schedule_manual.json for context when no API data."""
+    team_id = os.getenv("GC_TEAM_ID", "NuGgx6WvP7TO")
+    gc_api_base = "https://api.team-manager.gc.com"
+
+    now = datetime.now(ET)
+    today_str = now.strftime("%Y-%m-%d")
+
+    # 1. Fetch games list from GC public API
+    games = []
+    try:
+        resp = requests.get(
+            f"{gc_api_base}/public/teams/{team_id}/games",
+            timeout=10,
+        )
+        if resp.ok:
+            games = resp.json() if isinstance(resp.json(), list) else []
+    except Exception as e:
+        logging.warning(f"[Scoreboard] GC API fetch failed: {e}")
+
+    # 2. Find in-progress game first, then today's game
+    live_game = None
+    today_game = None
+    for g in games:
+        status = str(g.get("game_status", "")).lower()
+        start_ts = str(g.get("start_ts", ""))
+        game_date = ""
+        try:
+            game_dt = datetime.fromisoformat(start_ts.replace("Z", "+00:00")).astimezone(ET)
+            game_date = game_dt.date().isoformat()
+        except Exception:
+            pass
+
+        if status in ("in_progress", "active", "live"):
+            live_game = g
+            break
+        if game_date == today_str and not today_game:
+            today_game = g
+
+    target_game = live_game or today_game
+
+    # 3. Build response
+    if not target_game:
+        # Fallback: use schedule to show next game info
+        sched_file = SHARKS_DIR / "schedule_manual.json"
+        if sched_file.exists():
+            try:
+                sched = _read_json_file(sched_file, default={}) or {}
+                for sg in sched.get("upcoming", []):
+                    if sg.get("is_game") and (sg.get("date") or "") >= today_str:
+                        opponent = _clean_opponent_name(sg.get("opponent", ""))
+                        return jsonify({
+                            "status": "upcoming",
+                            "opponent": opponent,
+                            "date": sg.get("date"),
+                            "time": sg.get("time"),
+                            "home_away": sg.get("home_away"),
+                            "message": "No game in progress",
+                        })
+            except Exception:
+                pass
+        return jsonify({"status": "no_game", "message": "No game scheduled today"})
+
+    # Parse the target game
+    gc_game_id = str(target_game.get("id", ""))
+    status = str(target_game.get("game_status", "")).lower()
+    score_obj = target_game.get("score") or {}
+    opp_info = target_game.get("opponent_team") or {}
+    opp_name = (opp_info.get("name") or "Opponent").strip()
+    home_away = str(target_game.get("home_away", "")).lower()
+    start_ts = str(target_game.get("start_ts", ""))
+
+    # Determine score mapping: GC API uses "team" and "opponent_team"
+    team_score = _safe_int(str(score_obj.get("team", 0)))
+    opp_score = _safe_int(str(score_obj.get("opponent_team", 0)))
+
+    # If we're the away team, the "team" score is us; if home, same
+    # GC API always returns "team" as the team you queried for
+    sharks_score = team_score
+    opponent_score = opp_score
+
+    # Inning/period info from the game data
+    inning = target_game.get("current_inning") or target_game.get("inning")
+    inning_half = target_game.get("inning_half") or target_game.get("half")
+    linescore = target_game.get("linescore") or target_game.get("line_score")
+
+    # Determine display status
+    if status in ("in_progress", "active", "live"):
+        display_status = "live"
+    elif status == "completed":
+        display_status = "final"
+    elif status in ("scheduled", "pregame"):
+        display_status = "pregame"
+    else:
+        display_status = status
+
+    result = {
+        "status": display_status,
+        "gc_game_id": gc_game_id,
+        "opponent": opp_name,
+        "home_away": home_away,
+        "sharks_score": sharks_score,
+        "opponent_score": opponent_score,
+        "inning": inning,
+        "inning_half": inning_half,
+        "linescore": linescore,
+        "start_ts": start_ts,
+        "game_status_raw": status,
+        "fetched_at": now.isoformat(),
+    }
+
+    # 4. Try to get richer box-score data from local game files
+    try:
+        game_date = ""
+        try:
+            game_dt = datetime.fromisoformat(start_ts.replace("Z", "+00:00")).astimezone(ET)
+            game_date = game_dt.date().isoformat()
+        except Exception:
+            game_date = today_str
+        games_dir = SHARKS_DIR / "games"
+        if games_dir.exists():
+            for gf in games_dir.glob("*.json"):
+                if gf.name == "index.json":
+                    continue
+                try:
+                    gdata = _read_json_file(gf, default={}) or {}
+                    if (gdata.get("gc_game_id") == gc_game_id or
+                        (gdata.get("date") or "")[:10] == game_date):
+                        result["sharks_batting"] = gdata.get("sharks_batting") or []
+                        result["opponent_batting"] = gdata.get("opponent_batting") or []
+                        local_score = gdata.get("score")
+                        if isinstance(local_score, dict):
+                            if local_score.get("sharks") is not None:
+                                result["sharks_score"] = _safe_int(str(local_score["sharks"]))
+                            if local_score.get("opponent") is not None:
+                                result["opponent_score"] = _safe_int(str(local_score["opponent"]))
+                        break
+                except Exception:
+                    continue
+    except Exception as e:
+        logging.debug(f"[Scoreboard] Local game enrichment failed: {e}")
+
+    # 5. Schedule context (time, home/away from our schedule)
+    sched_file = SHARKS_DIR / "schedule_manual.json"
+    if sched_file.exists():
+        try:
+            sched = _read_json_file(sched_file, default={}) or {}
+            for sg in sched.get("upcoming", []):
+                if (sg.get("date") or "")[:10] == today_str:
+                    result["scheduled_time"] = sg.get("time", "")
+                    if not result.get("home_away"):
+                        result["home_away"] = sg.get("home_away", "")
+                    result["opponent"] = _clean_opponent_name(sg.get("opponent", result["opponent"]))
+                    break
+        except Exception:
+            pass
+
+    return jsonify(result)
+
+
 @app.route('/api/standings', methods=['GET'])
 def handle_standings():
     """Return PCLL league standings."""
