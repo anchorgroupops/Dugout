@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 
 ET = ZoneInfo("America/New_York")
 from pathlib import Path
-from gc_scraper import GameChangerScraper
+from gc_scraper import GameChangerScraper, is_auth_on_cooldown
 from gc_schedule import ScheduleScraper
 from stats_normalizer import (
     CANONICAL_BATTING_FIELDS,
@@ -999,11 +999,20 @@ def run_sync_cycle():
         except Exception as e:
             logging.warning(f"[Sync] Opponent discovery skipped: {e}")
         
-        # 1. Scrape Schedule
+        # Check auth cooldown — if GC login recently failed (2FA required),
+        # skip all authenticated scrapers to avoid flooding fly386@gmail.com with codes.
+        _auth_available = not is_auth_on_cooldown()
+        if not _auth_available:
+            logging.warning("[Sync] Auth on cooldown — skipping all authenticated GC scrapers this cycle.")
+
+        # 1. Scrape Schedule (requires auth)
         _set_sync_stage("scraping_schedule")
-        logging.info("Scraping Schedule...")
-        sched_scraper = ScheduleScraper()
-        sched_scraper.scrape_schedule()
+        if _auth_available:
+            logging.info("Scraping Schedule...")
+            sched_scraper = ScheduleScraper()
+            sched_scraper.scrape_schedule()
+        else:
+            logging.info("[Sync] Schedule scrape skipped (auth cooldown).")
 
         # 1b. Secondary game ingest path (mobile-web box scores -> data/sharks/games/*.json).
         # Keeps scorebook-derived reconciliation alive even when GC app selectors drift.
@@ -1026,18 +1035,21 @@ def run_sync_cycle():
         except Exception as e:
             logging.warning(f"[Sync] Web box score ingest skipped: {e}")
         
-        # 2. Scrape Stats
+        # 2. Scrape Stats (requires auth)
         _set_sync_stage("scraping_stats")
-        logging.info("Scraping Live Stats...")
-        try:
-            from playwright.sync_api import sync_playwright
+        if _auth_available:
+            logging.info("Scraping Live Stats...")
+            try:
+                from playwright.sync_api import sync_playwright
 
-            with sync_playwright() as pw:
-                stat_scraper = GameChangerScraper()
-                stat_scraper.login(pw)
-                stat_scraper.scrape_team_stats()
-        except Exception as e:
-            logging.warning(f"[Sync] Live stat scrape failed; continuing with fallback data: {e}")
+                with sync_playwright() as pw:
+                    stat_scraper = GameChangerScraper()
+                    stat_scraper.login(pw)
+                    stat_scraper.scrape_team_stats()
+            except Exception as e:
+                logging.warning(f"[Sync] Live stat scrape failed; continuing with fallback data: {e}")
+        else:
+            logging.info("[Sync] Live stat scrape skipped (auth cooldown).")
 
         # Merge multi-team stats if available
         try:
@@ -1102,33 +1114,36 @@ def run_sync_cycle():
         except Exception as e:
             logging.warning(f"[Sync] Practice planner skipped: {e}")
 
-        # Full-depth GC scrape: all stat tabs, both teams, every game.
-        try:
-            from gc_full_scraper import GCFullScraper
-            full_scraper = GCFullScraper()
-            full_result = full_scraper.run_full_sync()
-            logging.info(
-                "[Sync] gc_full_scraper: scraped=%s skipped=%s failed=%s team_stats=%s",
-                full_result.get("games_scraped", 0),
-                full_result.get("games_skipped", 0),
-                full_result.get("games_failed", 0),
-                full_result.get("team_stats_scraped", False),
-            )
-        except Exception as e:
-            logging.warning(f"[Sync] gc_full_scraper skipped: {e}")
+        # Full-depth GC scrape: all stat tabs, both teams, every game (requires auth).
+        if _auth_available:
+            try:
+                from gc_full_scraper import GCFullScraper
+                full_scraper = GCFullScraper()
+                full_result = full_scraper.run_full_sync()
+                logging.info(
+                    "[Sync] gc_full_scraper: scraped=%s skipped=%s failed=%s team_stats=%s",
+                    full_result.get("games_scraped", 0),
+                    full_result.get("games_skipped", 0),
+                    full_result.get("games_failed", 0),
+                    full_result.get("team_stats_scraped", False),
+                )
+            except Exception as e:
+                logging.warning(f"[Sync] gc_full_scraper skipped: {e}")
 
-        # Automated CSV download + ingest.
-        try:
-            from gc_csv_auto import run_auto_csv
-            csv_result = run_auto_csv(headless=True, skip_ingest=False)
-            logging.info(
-                "[Sync] gc_csv_auto: downloaded=%s ingest_ok=%s path=%s",
-                csv_result.get("csv_downloaded"),
-                csv_result.get("ingest_success"),
-                csv_result.get("csv_path"),
-            )
-        except Exception as e:
-            logging.warning(f"[Sync] gc_csv_auto skipped: {e}")
+            # Automated CSV download + ingest (requires auth).
+            try:
+                from gc_csv_auto import run_auto_csv
+                csv_result = run_auto_csv(headless=True, skip_ingest=False)
+                logging.info(
+                    "[Sync] gc_csv_auto: downloaded=%s ingest_ok=%s path=%s",
+                    csv_result.get("csv_downloaded"),
+                    csv_result.get("ingest_success"),
+                    csv_result.get("csv_path"),
+                )
+            except Exception as e:
+                logging.warning(f"[Sync] gc_csv_auto skipped: {e}")
+        else:
+            logging.info("[Sync] gc_full_scraper + gc_csv_auto skipped (auth cooldown).")
 
         _set_sync_stage("finalizing")
 
@@ -1155,10 +1170,10 @@ def run_sync_cycle():
         logging.info("--- Sync Cycle Complete ---")
         return True
     except Exception as e:
-         msg = f"Fatal Error in sync cycle: {e}\n{traceback.format_exc()}"
-         logging.error(msg)
-         send_alert(f"Sync Daemon encountered a critical crash: {str(e)}")
-         return False
+        msg = f"Fatal Error in sync cycle: {e}\n{traceback.format_exc()}"
+        logging.error(msg)
+        send_alert(f"Sync Daemon encountered a critical crash: {str(e)}")
+        return False
 
 # ---------------------------------------------------------
 # API SERVER (Flask)
@@ -3446,6 +3461,9 @@ def run_api():
 # ---------------------------------------------------------
 # ... (rest of the file stays same, but main starts the thread)
 def main():
+    # Signal to scrapers that we're running non-interactively
+    os.environ["SYNC_DAEMON_MODE"] = "1"
+
     logging.info("======================================")
     logging.info(" SHARKS REAL-TIME SYNC DAEMON STARTED ")
     logging.info("======================================")

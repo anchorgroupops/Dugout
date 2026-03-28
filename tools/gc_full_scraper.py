@@ -61,21 +61,15 @@ from gc_scraper import (
     FIELDING_INN_MAP,
     STAT_VIEWS,
     _safe_val,
+    is_auth_on_cooldown,
+    set_auth_cooldown,
+    clear_auth_cooldown,
 )
 
 SOURCE_TAG = "gc_full_scraper_v2"
 
-# Tab order: (major_tab_name, sub_tab_name, col_map, json_key)
-GAME_STAT_VIEWS = [
-    ("Batting",  "Standard",       BATTING_STD_MAP,    "batting"),
-    ("Batting",  "Advanced",       BATTING_ADV_MAP,    "batting_advanced"),
-    ("Pitching", "Standard",       PITCHING_STD_MAP,   "pitching"),
-    ("Pitching", "Advanced",       PITCHING_ADV_MAP,   "pitching_advanced"),
-    ("Pitching", "Breakdown",      PITCHING_BRK_MAP,   "pitching_breakdown"),
-    ("Fielding", "Standard",       FIELDING_STD_MAP,   "fielding"),
-    ("Fielding", "Catching",       FIELDING_CATCH_MAP, "catching"),
-    ("Fielding", "Innings Played", FIELDING_INN_MAP,   "innings_played"),
-]
+# Reuse the canonical stat view list from gc_scraper to stay DRY
+GAME_STAT_VIEWS = STAT_VIEWS
 
 
 def _log(msg: str) -> None:
@@ -126,6 +120,10 @@ class GCFullScraper:
     # ------------------------------------------------------------------
     def login(self, playwright) -> "Page":
         """Login to GC and return the active page. Reuses saved auth state when possible."""
+        if is_auth_on_cooldown():
+            raise RuntimeError(
+                "[GCFull] Auth on cooldown — skipping to avoid triggering 2FA codes."
+            )
         if not self.email or not self.password:
             raise ValueError("[GCFull] Missing credentials. Set GC_EMAIL and GC_PASSWORD in .env")
 
@@ -173,6 +171,7 @@ class GCFullScraper:
         _log(f"Post-login state: {final}")
         if final != "AUTHENTICATED":
             self._capture_diag("login_failed")
+            set_auth_cooldown(f"GCFull login failed, state={final}")
             raise RuntimeError(
                 f"[GCFull] Authentication failed. State: {final}\n"
                 f"  URL: {self._page.url}\n"
@@ -181,6 +180,7 @@ class GCFullScraper:
             )
 
         # Save auth for reuse
+        clear_auth_cooldown()
         self._context.storage_state(path=str(auth_file))
         _log("Session saved.")
         return self._page
@@ -231,15 +231,21 @@ class GCFullScraper:
                 # If running non-interactively, read from GC_2FA_CODE env var
                 otp = os.getenv("GC_2FA_CODE", "").strip()
                 if not otp:
-                    _log("[2FA] Enter the code (or set GC_2FA_CODE env var): ", )
+                    # In daemon mode, set cooldown and abort instead of blocking
+                    if os.getenv("SYNC_DAEMON_MODE", "").strip():
+                        set_auth_cooldown("2FA required in GCFull but no GC_2FA_CODE set (daemon mode)")
+                        raise RuntimeError("[GCFull] 2FA required — cooldown activated. "
+                                           "Set GC_2FA_CODE or run save_session.py interactively.")
+                    _log("[2FA] Enter the code (or set GC_2FA_CODE env var):")
                     try:
                         otp = input("[2FA] Code: ").strip()
                     except EOFError:
+                        set_auth_cooldown("2FA required but EOFError (non-interactive)")
                         raise RuntimeError("[GCFull] 2FA required but no code provided. "
                                            "Re-run with GC_2FA_CODE=<code> env var.")
                 if otp:
                     code_field.fill(otp)
-                    _log(f"[2FA] Code entered: {otp}")
+                    _log("[2FA] Code entered.")
 
             pwd_field = self._page.locator('input[type="password"], input[name="password"]').first
             pwd_field.wait_for(state="visible", timeout=15000)
@@ -265,6 +271,7 @@ class GCFullScraper:
         except Exception as exc:
             _log(f"[ERROR] Login flow error: {exc}")
             self._capture_diag("login_error")
+            set_auth_cooldown(f"GCFull login flow error: {exc}")
             raise
 
     def _capture_diag(self, label: str) -> None:
@@ -925,6 +932,7 @@ class GCFullScraper:
             except Exception as e:
                 summary["errors"].append(f"Login failed: {e}")
                 _log(f"[ERROR] Login failed: {e}")
+                self.close()
                 return summary
 
             # Discover schedule

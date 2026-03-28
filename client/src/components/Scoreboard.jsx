@@ -37,53 +37,56 @@ const LivePulse = () => (
   </span>
 );
 
-const ScoreBox = ({ label, score, isUs, isLive }) => (
+const ScoreBox = ({ label, score, isUs, compact = false }) => (
   <div style={{
     display: 'flex', flexDirection: 'column', alignItems: 'center',
-    padding: '0.75rem 1.5rem', borderRadius: '12px',
+    padding: compact ? '0.4rem 0.75rem' : '0.75rem 1.5rem', borderRadius: compact ? '8px' : '12px',
     background: isUs ? 'rgba(4, 101, 104, 0.12)' : 'rgba(255,255,255,0.04)',
     border: `2px solid ${isUs ? 'rgba(4, 101, 104, 0.4)' : 'rgba(255,255,255,0.08)'}`,
-    minWidth: '100px', transition: 'all 0.3s ease',
+    minWidth: compact ? '70px' : '100px', transition: 'all 0.3s ease',
+    flex: compact ? 1 : undefined, maxWidth: compact ? '120px' : undefined,
   }}>
     <span style={{
-      fontSize: 'var(--text-xs)', fontWeight: '700', color: 'var(--text-muted)',
-      textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.25rem',
+      fontSize: compact ? '0.6rem' : 'var(--text-xs)', fontWeight: '700', color: 'var(--text-muted)',
+      textTransform: 'uppercase', letterSpacing: '1px', marginBottom: compact ? '0.1rem' : '0.25rem',
+      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%',
     }}>{label}</span>
     <span style={{
-      fontSize: 'clamp(2rem, 8vw, 3.5rem)', fontWeight: '900',
+      fontSize: compact ? 'clamp(1.5rem, 6vw, 2.5rem)' : 'clamp(2rem, 8vw, 3.5rem)', fontWeight: '900',
       color: isUs ? 'var(--primary-color)' : 'var(--text-main)',
       lineHeight: 1, fontVariantNumeric: 'tabular-nums',
     }}>{score ?? '-'}</span>
   </div>
 );
 
-const BatterRow = ({ player, idx }) => {
+const BatterRow = ({ player, idx, compact = false }) => {
   const b = player.batting || player;
   const name = player.name || player.player || '\u2014';
   const number = player.number;
   return (
     <div style={{
-      display: 'flex', alignItems: 'center', gap: '0.5rem',
-      padding: '0.4rem 0.6rem', borderRadius: '6px',
+      display: 'flex', alignItems: 'center', gap: compact ? '0.3rem' : '0.5rem',
+      padding: compact ? '0.25rem 0.4rem' : '0.4rem 0.6rem', borderRadius: '6px',
       background: idx % 2 === 0 ? 'rgba(0,0,0,0.15)' : 'rgba(0,0,0,0.08)',
+      fontSize: compact ? '0.65rem' : undefined,
     }}>
-      <span style={{ width: '20px', fontSize: 'var(--text-xs)', color: 'var(--text-muted)', textAlign: 'right' }}>{idx + 1}</span>
-      <div style={{ flex: 1, minWidth: '80px' }}>
+      <span style={{ width: compact ? '16px' : '20px', fontSize: compact ? '0.6rem' : 'var(--text-xs)', color: 'var(--text-muted)', textAlign: 'right' }}>{idx + 1}</span>
+      <div style={{ flex: 1, minWidth: compact ? '60px' : '80px' }}>
         <PlayerName name={name} number={number} size="sm" />
       </div>
-      <div style={{ display: 'flex', gap: '0.75rem', fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
+      <div style={{ display: 'flex', gap: compact ? '0.35rem' : '0.75rem', fontSize: compact ? '0.6rem' : 'var(--text-xs)', color: 'var(--text-muted)' }}>
         <span>{b.ab ?? b.pa ?? '-'} AB</span>
         <span>{b.h ?? '-'} H</span>
         <span>{b.r ?? '-'} R</span>
-        <span>{b.rbi ?? '-'} RBI</span>
-        <span>{b.bb ?? '-'} BB</span>
+        {!compact && <span>{b.rbi ?? '-'} RBI</span>}
+        {!compact && <span>{b.bb ?? '-'} BB</span>}
       </div>
     </div>
   );
 };
 
 
-const Scoreboard = ({ isMobile = false, team, schedule }) => {
+const Scoreboard = ({ isMobile = false, isLandscape = false, team, schedule }) => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -246,7 +249,7 @@ const Scoreboard = ({ isMobile = false, team, schedule }) => {
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           {data.gc_game_id && (
             <a
-              href={`https://web.gc.com/teams/NuGgx6WvP7TO/2026-spring-sharks/schedule/${data.gc_game_id}/plays`}
+              href={`https://web.gc.com/teams/${team?.gc_team_id || 'NuGgx6WvP7TO'}/${team?.gc_season_slug || '2026-spring-sharks'}/schedule/${data.gc_game_id}/plays`}
               target="_blank"
               rel="noopener noreferrer"
               style={{
@@ -279,13 +282,13 @@ const Scoreboard = ({ isMobile = false, team, schedule }) => {
 
       {/* Main Scoreboard Card */}
       <div className="glass-panel" style={{
-        padding: isMobile ? 'var(--space-lg)' : '2rem',
+        padding: isLandscape ? 'var(--space-sm)' : isMobile ? 'var(--space-lg)' : '2rem',
         borderTop: isLive ? '3px solid #ff4444' : isFinal ? '3px solid var(--primary-color)' : 'none',
       }}>
         {/* Matchup Header */}
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          gap: '0.5rem', marginBottom: '1.5rem', flexWrap: 'wrap',
+          gap: '0.5rem', marginBottom: isLandscape ? '0.5rem' : '1.5rem', flexWrap: 'wrap',
         }}>
           <span className={`home-away-pill ${isHome ? 'home-away-pill--home' : 'home-away-pill--away'}`}>
             {isHome ? <Home size={10} /> : <Plane size={10} />}
@@ -304,13 +307,14 @@ const Scoreboard = ({ isMobile = false, team, schedule }) => {
         {/* Score Display */}
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          gap: isMobile ? '1rem' : '2rem', marginBottom: '1.5rem',
+          gap: isLandscape ? '0.75rem' : isMobile ? '1rem' : '2rem',
+          marginBottom: isLandscape ? '0.75rem' : '1.5rem',
         }}>
           <ScoreBox
             label="Sharks"
             score={data.sharks_score}
             isUs={true}
-            isLive={isLive}
+            compact={isLandscape}
           />
           <div style={{
             display: 'flex', flexDirection: 'column', alignItems: 'center',
@@ -335,7 +339,7 @@ const Scoreboard = ({ isMobile = false, team, schedule }) => {
             label={data.opponent || 'Opponent'}
             score={data.opponent_score}
             isUs={false}
-            isLive={isLive}
+            compact={isLandscape}
           />
         </div>
 
@@ -402,35 +406,39 @@ const Scoreboard = ({ isMobile = false, team, schedule }) => {
         )}
 
         {/* Batting Stats */}
-        {data.sharks_batting?.length > 0 && (
-          <div style={{ marginTop: '1rem' }}>
-            <h3 style={{
-              fontSize: 'var(--text-sm)', fontWeight: '700', color: 'var(--primary-color)',
-              marginBottom: '0.5rem', paddingBottom: '0.35rem',
-              borderBottom: '1px solid rgba(4, 101, 104, 0.3)',
-            }}>Sharks Batting</h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-              {data.sharks_batting.map((p, i) => (
-                <BatterRow key={`s-${i}`} player={p} idx={i} />
-              ))}
+        <div style={isLandscape && data.sharks_batting?.length > 0 ? {
+          display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginTop: '0.5rem',
+        } : { marginTop: isLandscape ? '0.5rem' : undefined }}>
+          {data.sharks_batting?.length > 0 && (
+            <div style={{ marginTop: isLandscape ? 0 : '1rem' }}>
+              <h3 style={{
+                fontSize: isLandscape ? '0.7rem' : 'var(--text-sm)', fontWeight: '700', color: 'var(--primary-color)',
+                marginBottom: isLandscape ? '0.25rem' : '0.5rem', paddingBottom: '0.35rem',
+                borderBottom: '1px solid rgba(4, 101, 104, 0.3)',
+              }}>Sharks Batting</h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: isLandscape ? '1px' : '2px' }}>
+                {data.sharks_batting.map((p, i) => (
+                  <BatterRow key={`s-${i}`} player={p} idx={i} compact={isLandscape} />
+                ))}
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {data.opponent_batting?.length > 0 && (
-          <div style={{ marginTop: '1rem' }}>
-            <h3 style={{
-              fontSize: 'var(--text-sm)', fontWeight: '700', color: 'var(--text-muted)',
-              marginBottom: '0.5rem', paddingBottom: '0.35rem',
-              borderBottom: '1px solid rgba(255,255,255,0.1)',
-            }}>{data.opponent || 'Opponent'} Batting</h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-              {data.opponent_batting.map((p, i) => (
-                <BatterRow key={`o-${i}`} player={p} idx={i} />
-              ))}
+          {data.opponent_batting?.length > 0 && (
+            <div style={{ marginTop: isLandscape ? 0 : '1rem' }}>
+              <h3 style={{
+                fontSize: isLandscape ? '0.7rem' : 'var(--text-sm)', fontWeight: '700', color: 'var(--text-muted)',
+                marginBottom: isLandscape ? '0.25rem' : '0.5rem', paddingBottom: '0.35rem',
+                borderBottom: '1px solid rgba(255,255,255,0.1)',
+              }}>{data.opponent || 'Opponent'} Batting</h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: isLandscape ? '1px' : '2px' }}>
+                {data.opponent_batting.map((p, i) => (
+                  <BatterRow key={`o-${i}`} player={p} idx={i} compact={isLandscape} />
+                ))}
+              </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
 
         {/* Last Updated */}
         {lastUpdated && (

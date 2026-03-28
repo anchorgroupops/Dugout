@@ -59,6 +59,7 @@ const Lineup = ({
   availability,
   schedule,
   isMobile = false,
+  isLandscape = false,
   onRegenerate,
   onAvailabilityChange,
   onDataRefresh
@@ -121,7 +122,7 @@ const Lineup = ({
       <div
         className="glass-panel"
         data-testid="batting-order-block"
-        style={{ padding: isMobile ? 'var(--space-lg)' : '2rem' }}
+        style={{ padding: isLandscape ? 'var(--space-sm)' : isMobile ? 'var(--space-lg)' : '2rem' }}
       >
         <div style={{ display: 'flex', gap: '0.55rem', alignItems: 'center', flexWrap: 'wrap', width: '100%', marginBottom: isMobile ? '0.85rem' : '1rem' }}>
           <div style={{ display: 'flex', gap: '0.4rem', background: 'var(--surface-base)', padding: '0.22rem', borderRadius: '8px', border: '1px solid var(--surface-border)', width: isMobile ? '100%' : 'auto', overflowX: 'auto' }}>
@@ -223,7 +224,7 @@ const Lineup = ({
             const roleLabel = slotLabel(idx + 1);
             return (
               <div key={`${player.number}-${idx}`} style={{
-                display: 'flex', alignItems: 'center', padding: '0.85rem 1rem',
+                display: 'flex', alignItems: 'center', padding: isLandscape ? '0.4rem 0.6rem' : '0.85rem 1rem',
                 background: !avail ? 'rgba(200,50,50,0.08)' : player.borrowed ? 'rgba(63, 143, 136, 0.08)' : 'rgba(0,0,0,0.2)',
                 borderRadius: '8px',
                 borderLeft: `4px solid ${!avail ? 'var(--danger)' : player.borrowed ? 'rgba(63, 143, 136, 0.42)' : idx < 4 ? 'var(--primary-color)' : 'var(--surface-border)'}`,

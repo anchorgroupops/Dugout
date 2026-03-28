@@ -349,11 +349,12 @@ const GameDetailPanel = ({ gameDetail, source }) => {
 };
 
 // ─── GameCard ─────────────────────────────────────────────────────────────────
-const GameCard = ({ game, onExpand, isExpanded, gameDetail, isMobile = false }) => {
+const GameCard = ({ game, onExpand, isExpanded, gameDetail, isMobile = false, isLandscape = false }) => {
   const t = game.sharks_totals || {};
   const isHome = game.sharks_side === 'home';
   const dateStr = game.date ? formatDateMMDDYYYY(game.date) : 'Unknown Date';
   const isWin = game.result === 'W';
+  const isTie = game.result === 'T';
   const scoreStr = game.score || game.score_str || '';
 
   // Parse score respecting result direction (handle both hyphen and en-dash)
@@ -369,22 +370,26 @@ const GameCard = ({ game, onExpand, isExpanded, gameDetail, isMobile = false }) 
 
   const canExpand = !isMobile && (game.sharks_totals || game.source === 'gc_full_scraper_v2');
 
-  const cardTint = game.result === 'W'
+  const cardTint = isWin
     ? 'rgba(35, 134, 54, 0.06)'
-    : game.result === 'L'
-      ? 'rgba(220, 70, 70, 0.06)'
-      : undefined;
-  const cardBorder = game.result === 'W'
+    : isTie
+      ? 'rgba(251, 191, 36, 0.06)'
+      : game.result === 'L'
+        ? 'rgba(220, 70, 70, 0.06)'
+        : undefined;
+  const cardBorder = isWin
     ? '1px solid rgba(35, 134, 54, 0.2)'
-    : game.result === 'L'
-      ? '1px solid rgba(220, 70, 70, 0.2)'
-      : undefined;
+    : isTie
+      ? '1px solid rgba(251, 191, 36, 0.2)'
+      : game.result === 'L'
+        ? '1px solid rgba(220, 70, 70, 0.2)'
+        : undefined;
 
   return (
     <div
       className="glass-panel"
       style={{
-        padding: isMobile ? 'var(--space-lg)' : '1.25rem',
+        padding: isLandscape ? 'var(--space-sm)' : isMobile ? 'var(--space-lg)' : '1.25rem',
         cursor: canExpand ? 'pointer' : 'default',
         background: cardTint,
         border: cardBorder,
@@ -408,7 +413,7 @@ const GameCard = ({ game, onExpand, isExpanded, gameDetail, isMobile = false }) 
               <span style={{
                 fontSize: isMobile ? '1.5rem' : '1.75rem',
                 fontWeight: '800',
-                color: isWin ? 'var(--success-color, #4ade80)' : 'var(--danger-color, #f87171)',
+                color: isTie ? 'var(--warning, #fbbf24)' : (isWin ? 'var(--success, #4ade80)' : 'var(--danger, #f87171)'),
                 letterSpacing: '1px',
                 lineHeight: 1,
                 whiteSpace: 'nowrap',
@@ -479,7 +484,7 @@ const ScheduleRow = ({ game }) => {
 };
 
 // ─── Main Games component ─────────────────────────────────────────────────────
-const Games = ({ gamesData, schedule, isMobile = false }) => {
+const Games = ({ gamesData, schedule, isMobile = false, isLandscape = false }) => {
   const [expanded, setExpanded] = useState(null);
   const [details, setDetails] = useState({});
 
@@ -521,7 +526,7 @@ const Games = ({ gamesData, schedule, isMobile = false }) => {
       </h2>
 
       {upcoming.length > 0 && (
-        <div className="glass-panel" style={{ padding: isMobile ? 'var(--space-lg)' : '1.25rem', marginBottom: isMobile ? 'var(--space-md)' : '2rem' }}>
+        <div className="glass-panel" style={{ padding: isLandscape ? 'var(--space-sm)' : isMobile ? 'var(--space-lg)' : '1.25rem', marginBottom: isLandscape ? 'var(--space-sm)' : isMobile ? 'var(--space-md)' : '2rem' }}>
           <div className="section-label" style={{
             color: 'var(--primary-color)', fontSize: 'var(--text-base)',
             fontWeight: '800', letterSpacing: '0.5px', textTransform: 'uppercase',
@@ -546,7 +551,12 @@ const Games = ({ gamesData, schedule, isMobile = false }) => {
 
       {sorted.length > 0 ? (
         <>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
+          <div style={{
+          display: isLandscape ? 'grid' : 'flex',
+          gridTemplateColumns: isLandscape ? 'repeat(auto-fill, minmax(280px, 1fr))' : undefined,
+          flexDirection: isLandscape ? undefined : 'column',
+          gap: isLandscape ? 'var(--space-sm)' : 'var(--space-md)',
+        }}>
             {sorted.map(game => (
               <GameCard
                 key={game.game_id}
@@ -554,6 +564,7 @@ const Games = ({ gamesData, schedule, isMobile = false }) => {
                 isExpanded={expanded === game.game_id}
                 gameDetail={details[game.game_id] || null}
                 isMobile={isMobile}
+                isLandscape={isLandscape}
                 onExpand={() => handleExpand(game.game_id)}
               />
             ))}
