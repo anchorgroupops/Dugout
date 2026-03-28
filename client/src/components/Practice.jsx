@@ -171,6 +171,7 @@ const Practice = ({ team, schedule, isMobile = false, isLandscape = false }) => 
 
   useEffect(() => {
     fetchInsights();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Re-fetch selecting all core roster once team data arrives (if initial fetch already ran)
@@ -182,6 +183,7 @@ const Practice = ({ team, schedule, isMobile = false, isLandscape = false }) => 
         setSelected(shouldSelect);
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [coreRosterNames]);
 
   const toggle = (name) => {
@@ -209,6 +211,7 @@ const Practice = ({ team, schedule, isMobile = false, isLandscape = false }) => 
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected]);
 
   const nextPracticeText = (() => {

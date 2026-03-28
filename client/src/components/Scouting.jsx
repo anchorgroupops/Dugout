@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Target, Shield, Swords, AlertTriangle, Calendar, MapPin } from 'lucide-react';
 import { formatDateMMDDYYYY } from '../utils/formatDate';
-import { Tip, TipBadge, PlayerName } from './StatTooltip';
 
 const BulletCard = ({ title, items, color, icon, emptyText }) => (
   <div className="glass-panel" style={{ padding: 'var(--space-lg)', marginBottom: 'var(--space-sm)' }}>
