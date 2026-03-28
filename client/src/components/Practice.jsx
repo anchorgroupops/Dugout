@@ -21,56 +21,43 @@ const drillIcon = (name = '') => {
 
 const NeedCard = ({ need }) => (
   <div className="glass-panel" style={{ padding: 'var(--space-lg)' }}>
-    {/* Priority badge + score row */}
-    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', marginBottom: '0.5rem', alignItems: 'center' }}>
+    {/* Header: priority + title on one line */}
+    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.35rem', flexWrap: 'wrap' }}>
       <span style={{
         background: 'rgba(4, 101, 104, 0.18)', border: '1px solid rgba(4, 101, 104, 0.35)',
-        color: 'var(--primary-color)', borderRadius: '999px', padding: '4px 14px',
-        fontSize: 'var(--text-sm)', fontWeight: '800', letterSpacing: '0.02em',
-      }}>
-        Priority {need.priority}
-      </span>
-      <span style={{
-        background: 'rgba(4, 101, 104, 0.12)', border: '1px solid rgba(4, 101, 104, 0.27)',
         color: 'var(--primary-color)', borderRadius: '999px', padding: '2px 10px',
-        fontSize: 'var(--text-xs)', fontWeight: '700',
+        fontSize: 'var(--text-xs)', fontWeight: '800',
       }}>
-        Score {need.score}
+        P{need.priority}
       </span>
+      <h3 style={{ margin: 0, fontSize: 'var(--text-sm)', fontWeight: '700', flex: 1 }}>{need.title}</h3>
     </div>
 
-    {/* Bold summary / title */}
-    <h3 style={{ margin: '0 0 0.35rem', fontSize: 'var(--text-base)', fontWeight: '700' }}>{need.title}</h3>
-
-    <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', margin: '0 0 0.65rem' }}>{need.why}</p>
+    <p style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', margin: '0 0 0.5rem', lineHeight: '1.4' }}>{need.why}</p>
 
     {need.focus_players?.length > 0 && (
-      <div style={{ marginBottom: '0.65rem' }}>
-        <div className="section-label section-label--muted" style={{ marginBottom: '0.35rem' }}>
-          Focus Players
-        </div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
-          {need.focus_players.map((p, i) => (
-            <span key={`${p}-${i}`} style={{
-              background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)',
-              borderRadius: '6px', padding: '3px 8px', fontSize: 'var(--text-xs)', color: 'var(--text-main)',
-            }}>{p}</span>
-          ))}
-        </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem', marginBottom: '0.5rem' }}>
+        {need.focus_players.map((p, i) => (
+          <span key={`${p}-${i}`} style={{
+            background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)',
+            borderRadius: '6px', padding: '2px 7px', fontSize: 'var(--text-xs)', color: 'var(--text-main)',
+          }}>{p}</span>
+        ))}
       </div>
     )}
 
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
       {(need.drills || []).map((drill, idx) => (
         <div key={`${drill.name}-${idx}`} style={{
           background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)',
-          borderRadius: '8px', padding: '0.55rem 0.65rem',
+          borderRadius: '6px', padding: '0.4rem 0.55rem',
         }}>
-          <div style={{ fontSize: 'var(--text-sm)', fontWeight: '700' }}>
-            <span style={{ marginRight: '0.35rem' }}>{drillIcon(drill.name)}</span>
+          <div style={{ fontSize: 'var(--text-xs)', fontWeight: '700' }}>
+            <span style={{ marginRight: '0.25rem' }}>{drillIcon(drill.name)}</span>
             {drill.name}
+            <span style={{ fontWeight: '500', color: 'var(--text-muted)', marginLeft: '0.3rem' }}>({drill.duration_min}m)</span>
           </div>
-          <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>{drill.duration_min} min — {drill.goal}</div>
+          {drill.goal && <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '0.15rem' }}>{drill.goal}</div>}
         </div>
       ))}
     </div>
@@ -136,13 +123,21 @@ const Practice = ({ team, schedule, isMobile = false }) => {
       .catch(() => {/* silent — non-critical */});
   }, [schedule]);
 
-  const availablePlayers = useMemo(() => [...(insights?.available_players || [])].sort((a, b) => a.localeCompare(b)), [insights]);
-
   // Core roster names from team prop (used to default-select ALL Sharks players)
   const coreRosterNames = useMemo(() => {
     if (!team?.roster) return [];
     return team.roster.filter(p => p.core !== false).map(p => `${p.first || ''} ${p.last || ''}`.trim()).filter(Boolean);
   }, [team]);
+
+  const availablePlayers = useMemo(() => {
+    const all = insights?.available_players || [];
+    // Only show core Sharks players (no borrowed/subs from other teams)
+    if (coreRosterNames.length > 0) {
+      const coreSet = new Set(coreRosterNames);
+      return all.filter(n => coreSet.has(n)).sort((a, b) => a.localeCompare(b));
+    }
+    return [...all].sort((a, b) => a.localeCompare(b));
+  }, [insights, coreRosterNames]);
 
   const fetchInsights = async (preserveSelection = false) => {
     setLoading(true);

@@ -2883,15 +2883,17 @@ def _synthesize_voice_update(text: str) -> bytes:
 def handle_voice_update():
     """
     Generate and return a short spoken team status update as MP3.
+    Falls back to the most recently cached MP3 if live synthesis fails.
     """
+    mp3_file = SHARKS_DIR / "voice_overview_latest.mp3"
+    meta_file = SHARKS_DIR / "voice_overview_latest.json"
+
     try:
         ctx = _load_voice_context()
         text = _build_voice_overview_text(ctx)
         audio = _synthesize_voice_update(text)
 
         now_iso = datetime.now(ET).isoformat()
-        mp3_file = SHARKS_DIR / "voice_overview_latest.mp3"
-        meta_file = SHARKS_DIR / "voice_overview_latest.json"
         with open(mp3_file, "wb") as f:
             f.write(audio)
         with open(meta_file, "w") as f:
@@ -2902,7 +2904,24 @@ def handle_voice_update():
         response.headers["X-Voice-Generated-At"] = now_iso
         return response
     except Exception as e:
-        logging.error(f"[Voice] Voice update generation failed: {e}")
+        logging.error(f"[Voice] Live synthesis failed: {e}")
+        # Fallback: serve cached MP3 if available
+        if mp3_file.exists() and mp3_file.stat().st_size > 0:
+            logging.info("[Voice] Serving cached voice_overview_latest.mp3")
+            with open(mp3_file, "rb") as f:
+                cached_audio = f.read()
+            generated_at = ""
+            if meta_file.exists():
+                try:
+                    meta = json.loads(meta_file.read_text())
+                    generated_at = meta.get("generated_at", "")
+                except Exception:
+                    pass
+            response = Response(cached_audio, mimetype="audio/mpeg")
+            response.headers["Content-Disposition"] = 'inline; filename="voice_overview_latest.mp3"'
+            response.headers["X-Voice-Generated-At"] = generated_at
+            response.headers["X-Voice-Cached"] = "true"
+            return response
         return jsonify({"error": "voice_update_failed", "detail": str(e)}), 503
 
 
