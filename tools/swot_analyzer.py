@@ -470,7 +470,7 @@ def _swot_rationale_from_team(result: dict) -> str:
 
 def load_team(team_dir: Path, prefer_merged: bool = False) -> dict | None:
     """Load team data from a directory.
-    Priority (Sharks): team_enriched.json > team_merged.json > team.json
+    Priority: team_enriched.json > team_merged.json > team.json
     """
     # Always prefer the enriched file (app_stats applied) when it exists
     enriched = team_dir / "team_enriched.json"
@@ -524,7 +524,7 @@ def run_team_analysis() -> dict | None:
 def _team_aggregates(team_data: dict) -> dict:
     """Compute team-level aggregate stats for matchup comparison.
     Handles three data formats:
-      1. Sharks team_merged.json: roster[].batting with numeric values
+      1. Our team team_merged.json: roster[].batting with numeric values
       2. GC app opponent: roster[].batting with string values + top-level batting_stats[]
       3. PDF-derived: roster[].batting with numeric values, no top-level stats
     """
@@ -768,7 +768,7 @@ def analyze_matchup(our_team: dict, opponent_team: dict) -> dict:
     their_ip = float(them.get("pitching", {}).get("ip") or 0.0)
     if their_pa < MIN_PA_FOR_MATCHUP_NONEMPTY and their_ip < 2.0:
         return {
-            "our_team": our_team.get("team_name", "Sharks"),
+            "our_team": our_team.get("team_name", "Our Team"),
             "opponent": opponent_team.get("team_name", "Opponent"),
             "empty": True,
             "reason": "insufficient_data",
@@ -895,7 +895,7 @@ def analyze_matchup(our_team: dict, opponent_team: dict) -> dict:
         recs.append("Evenly matched. The team that makes fewer mistakes will win.")
 
     return {
-        "our_team": our_team.get("team_name", "Sharks"),
+        "our_team": our_team.get("team_name", "Our Team"),
         "opponent": opponent_team.get("team_name", "Opponent"),
         "empty": False,
         "reason": None,

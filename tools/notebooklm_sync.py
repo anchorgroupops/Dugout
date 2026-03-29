@@ -188,7 +188,7 @@ def _game_section(game: dict) -> str:
 
     lines = [title, ""]
 
-    # Sharks stats
+    # Our team stats
     sharks_data = game.get("sharks", {})
     opp_data = game.get("opponent_stats", game.get("opponent_batting", []))
 
@@ -196,14 +196,14 @@ def _game_section(game: dict) -> str:
     if "sharks_batting" in game and not sharks_data:
         sharks_batting = game.get("sharks_batting", [])
         if sharks_batting:
-            lines.append("#### Sharks Batting")
+            lines.append("#### Our Team Batting")
             lines.append(_batting_std_table(sharks_batting, "").replace("### Batting — Standard\n", ""))
     elif isinstance(sharks_data, dict) and sharks_data:
-        lines.append("#### Sharks Batting")
+        lines.append("#### Our Team Batting")
         if "batting" in sharks_data:
             lines.append(_batting_std_table(sharks_data["batting"], "").replace("### Batting — Standard\n", ""))
         if "pitching" in sharks_data:
-            lines.append("#### Sharks Pitching")
+            lines.append("#### Our Team Pitching")
             lines.append(_pitching_std_table(sharks_data["pitching"]).replace("### Pitching — Standard\n", ""))
 
     # Opponent stats
@@ -228,7 +228,7 @@ def _game_section(game: dict) -> str:
 def prepare_notebooklm_payload() -> Path:
     """Build the full Markdown payload and write to data/notebooklm_payload.md."""
     today = datetime.now(ET).strftime("%B %d, %Y")
-    lines = [f"# Sharks Spring 2026 — Full Data Sync ({today})", ""]
+    lines = [f"# Dugout — Full Data Sync ({today})", ""]
 
     # ------------------------------------------------------------------ #
     # 1. Season Stats (from team.json or team_web.json)
@@ -245,7 +245,7 @@ def prepare_notebooklm_payload() -> Path:
     roster = team_data.get("roster", [])
 
     if roster:
-        team_name = team_data.get("team_name", "The Sharks")
+        team_name = team_data.get("team_name", "Our Team")
         record = team_data.get("record", "")
         season = team_data.get("season", "Spring 2026")
         lines.append(f"## {team_name} — {season} {record}")
