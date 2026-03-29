@@ -2395,6 +2395,47 @@ def _aggregate_stats_from_games():
     return player_stats
 
 
+@app.route('/api/2fa-pending', methods=['GET'])
+def handle_2fa_pending():
+    """Check if the scraper is waiting for a 2FA code."""
+    pending_file = DATA_DIR / ".2fa_pending"
+    if pending_file.exists():
+        try:
+            requested_at = pending_file.read_text().strip()
+        except Exception:
+            requested_at = ""
+        return jsonify({"pending": True, "requested_at": requested_at})
+    return jsonify({"pending": False})
+
+
+@app.route('/api/2fa-submit', methods=['POST'])
+def handle_2fa_submit():
+    """Submit a 2FA code for the scraper to use on next login attempt.
+
+    Body: {"code": "123456"}
+    The code is written to a file that the scraper checks during OTP handling.
+    Also clears the auth cooldown so the scraper retries immediately.
+    """
+    data = request.get_json(silent=True) or {}
+    code = str(data.get("code", "")).strip()
+    if not code or not code.isdigit() or len(code) != 6:
+        return jsonify({"error": "Invalid code. Must be a 6-digit number."}), 400
+
+    # Write code for the scraper to pick up
+    code_file = DATA_DIR / ".2fa_code"
+    code_file.write_text(code)
+
+    # Clear pending status
+    pending_file = DATA_DIR / ".2fa_pending"
+    pending_file.unlink(missing_ok=True)
+
+    # Clear auth cooldown so the scraper retries on next cycle
+    cooldown_file = DATA_DIR / ".auth_cooldown"
+    cooldown_file.unlink(missing_ok=True)
+
+    return jsonify({"ok": True, "message": "2FA code submitted. Scraper will use it on next login attempt."})
+
+
 @app.route('/api/sync/status', methods=['GET'])
 def handle_sync_status():
     """Return current sync daemon stage, progress, and milestone info."""

@@ -79,26 +79,21 @@ def _run_step(label: str, args: list[str], env: dict[str, str]) -> None:
 def daily_scout_job():
     """
     Daily orchestration:
-      1) Scrape latest GC data
-      2) Recompute SWOT outputs
-      3) Prepare NotebookLM sync payload
+      1) SWOT analysis (uses data scraped by Pi's sharks_sync daemon)
+      2) NotebookLM sync payload
+      3) RAG memory sync
 
-    Uses persistent Playwright auth/context in Modal Volume to avoid repeated logins.
+    NOTE: GC scraping is handled exclusively by the Pi (sharks_sync daemon)
+    to maintain a consistent IP address and avoid triggering 2FA on every run.
+    Modal cloud IPs change on each invocation, which causes GameChanger to
+    demand re-authentication every time.
     """
     print("[Modal] Daily scouting job started.")
-
-    auth_dir = Path(VOLUME_MOUNT) / "auth"
-    auth_dir.mkdir(parents=True, exist_ok=True)
-    auth_file = auth_dir / "auth.json"
-    profile_dir = auth_dir / "playwright-profile"
-    profile_dir.mkdir(parents=True, exist_ok=True)
+    print("[Modal] Skipping GC scrape — handled by Pi (sharks_sync) to avoid 2FA issues.")
 
     env = os.environ.copy()
-    env["GC_AUTH_FILE"] = str(auth_file)
-    env["GC_PLAYWRIGHT_CONTEXT_DIR"] = str(profile_dir)
     env.setdefault("PYTHONUNBUFFERED", "1")
 
-    _run_step("GameChanger scrape", ["python", "tools/gc_scraper.py"], env=env)
     _run_step("SWOT analysis", ["python", "tools/swot_analyzer.py"], env=env)
     _run_step("NotebookLM payload sync", ["python", "tools/notebooklm_sync.py"], env=env)
     _run_step("RAG Memory sync", ["python", "tools/memory_engine.py", "sync"], env=env)

@@ -133,10 +133,15 @@ class GCFullScraper:
             "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         )
 
-        self._browser = playwright.chromium.launch(
-            headless=self.headless,
-            args=["--no-sandbox", "--disable-dev-shm-usage"],
-        )
+        _launch_kwargs = {
+            "headless": self.headless,
+            "args": ["--no-sandbox", "--disable-dev-shm-usage"],
+        }
+        proxy_server = os.getenv("GC_PROXY_SERVER", "").strip()
+        if proxy_server:
+            _launch_kwargs["proxy"] = {"server": proxy_server}
+            _log(f"Using proxy: {proxy_server}")
+        self._browser = playwright.chromium.launch(**_launch_kwargs)
 
         if auth_file.exists():
             _log(f"Loading session from {auth_file.name}")
@@ -226,23 +231,53 @@ class GCFullScraper:
 
             if has_code_field:
                 _log("[2FA] GC sent a verification code to your email.")
-                _log("[2FA] Check fly386@gmail.com for a code from GameChanger.")
-                # Give the user time to receive the email, then prompt
-                # If running non-interactively, read from GC_2FA_CODE env var
-                otp = os.getenv("GC_2FA_CODE", "").strip()
+                # Try to get OTP code from multiple sources (in priority order)
+                otp = os.getenv("GC_2FA_CODE", "").strip() or os.getenv("GC_OTP", "").strip()
+
+                if not otp:
+                    # Try auto-reading from email via IMAP
+                    try:
+                        from gc_email_otp import fetch_latest_otp, is_configured as imap_configured
+                        if imap_configured():
+                            _log("[2FA] Auto-reading verification code from email...")
+                            otp = fetch_latest_otp(max_wait_seconds=90, poll_interval=5) or ""
+                        else:
+                            _log("[2FA] IMAP not configured — set GC_IMAP_APP_PASSWORD in .env for auto-read")
+                    except ImportError:
+                        _log("[2FA] gc_email_otp module not available")
+
+                if not otp:
+                    # Try reading from the 2FA submit file (dashboard endpoint)
+                    tfa_file = DATA_DIR / ".2fa_code"
+                    if tfa_file.exists():
+                        try:
+                            otp = tfa_file.read_text().strip()
+                            if otp:
+                                _log("[2FA] Using code from dashboard 2FA submission")
+                            tfa_file.unlink(missing_ok=True)
+                        except Exception:
+                            pass
+
                 if not otp:
                     # In daemon mode, set cooldown and abort instead of blocking
                     if os.getenv("SYNC_DAEMON_MODE", "").strip():
-                        set_auth_cooldown("2FA required in GCFull but no GC_2FA_CODE set (daemon mode)")
-                        raise RuntimeError("[GCFull] 2FA required — cooldown activated. "
-                                           "Set GC_2FA_CODE or run save_session.py interactively.")
+                        # Write pending status so the dashboard can show a 2FA prompt
+                        pending_file = DATA_DIR / ".2fa_pending"
+                        pending_file.write_text(
+                            __import__("datetime").datetime.now().isoformat()
+                        )
+                        set_auth_cooldown("2FA required in GCFull but no code available (env/IMAP/dashboard)")
+                        raise RuntimeError(
+                            "[GCFull] 2FA required — cooldown activated.\n"
+                            "  Options: set GC_IMAP_APP_PASSWORD, use /api/2fa-submit, "
+                            "or run save_session.py interactively."
+                        )
                     _log("[2FA] Enter the code (or set GC_2FA_CODE env var):")
                     try:
                         otp = input("[2FA] Code: ").strip()
                     except EOFError:
                         set_auth_cooldown("2FA required but EOFError (non-interactive)")
-                        raise RuntimeError("[GCFull] 2FA required but no code provided. "
-                                           "Re-run with GC_2FA_CODE=<code> env var.")
+                        raise RuntimeError("[GCFull] 2FA required but no code provided.")
                 if otp:
                     code_field.fill(otp)
                     _log("[2FA] Code entered.")

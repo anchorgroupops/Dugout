@@ -357,10 +357,35 @@ class GameChangerScraper:
 
         print("[GC] [OTP] OTP/MFA prompt detected!")
 
-        # Check for pre-configured OTP in env
+        # Try to get OTP code from multiple sources (in priority order)
         otp_code = os.getenv("GC_OTP", "").strip()
+
+        if not otp_code:
+            # Try auto-reading from email via IMAP
+            try:
+                from gc_email_otp import fetch_latest_otp, is_configured as imap_configured
+                if imap_configured():
+                    print("[GC] [OTP] Auto-reading verification code from email...")
+                    otp_code = fetch_latest_otp(max_wait_seconds=90, poll_interval=5) or ""
+                else:
+                    print("[GC] [OTP] IMAP not configured — set GC_IMAP_APP_PASSWORD in .env for auto-read")
+            except ImportError:
+                print("[GC] [OTP] gc_email_otp module not available")
+
+        if not otp_code:
+            # Try reading from the 2FA submit file (set via /api/2fa-submit dashboard endpoint)
+            tfa_file = DATA_DIR / ".2fa_code"
+            if tfa_file.exists():
+                try:
+                    otp_code = tfa_file.read_text().strip()
+                    if otp_code:
+                        print("[GC] [OTP] Using code from dashboard 2FA submission")
+                    tfa_file.unlink(missing_ok=True)
+                except Exception:
+                    pass
+
         if otp_code:
-            print(f"[GC] Using GC_OTP from environment: {'*' * len(otp_code)}")
+            print(f"[GC] Submitting OTP code: {'*' * len(otp_code)}")
             otp_field.fill(otp_code)
             # Submit
             submit_btn = self.page.get_by_role("button", name=re.compile("Verify|Continue|Submit|Confirm", re.I)).first
@@ -371,12 +396,18 @@ class GameChangerScraper:
             self.page.wait_for_load_state("networkidle", timeout=30000)
             print("[GC] [OK] OTP submitted.")
         else:
-            # Running non-interactively (daemon mode): set cooldown instead of blocking 180s
+            # No code from any source
             if os.getenv("SYNC_DAEMON_MODE", "").strip():
-                set_auth_cooldown("2FA code required but running in daemon mode (no GC_OTP set)")
+                # Write pending status so the dashboard can show a 2FA prompt
+                pending_file = DATA_DIR / ".2fa_pending"
+                pending_file.write_text(datetime.now(ET).isoformat())
+                set_auth_cooldown("2FA code required but no code available (env/IMAP/dashboard)")
                 raise RuntimeError(
-                    "[GC] 2FA code required. Set GC_OTP env var with the code from fly386@gmail.com, "
-                    "or run save_session.py interactively. Auth cooldown activated."
+                    "[GC] 2FA code required. Options:\n"
+                    "  1. Set GC_IMAP_APP_PASSWORD in .env for auto-read from email\n"
+                    "  2. Submit code via dashboard (/api/2fa-submit)\n"
+                    "  3. Set GC_OTP env var manually\n"
+                    "  4. Run save_session.py interactively"
                 )
             print("[GC] [WARN]  No GC_OTP set in .env. Waiting 180s for manual entry...")
             print("[GC]    → Enter the code in the browser window NOW. You have 3 minutes.")
@@ -448,10 +479,15 @@ class GameChangerScraper:
             )
             self.browser = self.context
         else:
-            self.browser = playwright.chromium.launch(
-                headless=GC_HEADLESS,
-                args=["--no-sandbox", "--disable-dev-shm-usage"]
-            )
+            _launch_kwargs = {
+                "headless": GC_HEADLESS,
+                "args": ["--no-sandbox", "--disable-dev-shm-usage"],
+            }
+            proxy_server = os.getenv("GC_PROXY_SERVER", "").strip()
+            if proxy_server:
+                _launch_kwargs["proxy"] = {"server": proxy_server}
+                print(f"[GC] Using proxy: {proxy_server}")
+            self.browser = playwright.chromium.launch(**_launch_kwargs)
             if auth_file.exists() and not force_refresh:
                 print(f"[GC] Loading session from {auth_file.name}")
                 self.context = self.browser.new_context(
