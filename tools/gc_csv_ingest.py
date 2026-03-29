@@ -1,10 +1,10 @@
 """
-Ingest GameChanger CSV season-stats export into the Sharks data pipeline.
+Ingest GameChanger CSV season-stats export into the Dugout data pipeline.
 
 Reads the comprehensive 200-column GC CSV export and produces:
-  1. data/sharks/team.json   — full roster with all stat categories
-  2. data/sharks/app_stats.json — backward-compat batting/pitching/fielding arrays
-  3. data/sharks/season_stats.csv — copy of the source CSV
+  1. data/<team_slug>/team.json   — full roster with all stat categories
+  2. data/<team_slug>/app_stats.json — backward-compat batting/pitching/fielding arrays
+  3. data/<team_slug>/season_stats.csv — copy of the source CSV
 
 Usage:
     python tools/gc_csv_ingest.py --csv-path "Scorebooks/Other docs/Sharks Spring 2026 Stats (4).csv"

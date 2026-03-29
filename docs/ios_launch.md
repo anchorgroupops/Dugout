@@ -44,7 +44,7 @@ Deploy to the dedicated server (`dori-pi`):
 1. **Sync Assets**: Ensure the project is synced via Syncthing.
 2. **Launch Docker**:
    ```bash
-   ssh joely@192.168.7.222 "cd Repos/Personal/Softball && docker-compose -f docker-compose.sharks.yml up -d --build"
+   ssh joely@192.168.7.222 "cd Repos/Personal/Softball && docker-compose -f docker-compose.dugout.yml up -d --build"
    ```
 3. **Internal URL**: `http://192.168.7.222:3000`
 

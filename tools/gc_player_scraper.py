@@ -1,10 +1,10 @@
 """
-gc_player_scraper.py — Per-player game-by-game stat scraper for The Sharks.
+gc_player_scraper.py — Per-player game-by-game stat scraper for Dugout.
 
 For each player on the roster (UUIDs from team.json or discovered from team stats page),
 navigates to /players/{player_uuid} and extracts the game-by-game breakdown table.
 
-Saves to data/sharks/players/{player_uuid}.json.
+Saves to data/<team_slug>/players/{player_uuid}.json.
 
 REQUIRES: pip install playwright && playwright install chromium
 REQUIRES: GC_EMAIL, GC_PASSWORD, GC_TEAM_ID, GC_SEASON_SLUG in .env
