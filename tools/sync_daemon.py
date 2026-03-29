@@ -52,7 +52,7 @@ POST_GAME_DEDUP_MINUTES = 30     # Idempotency guard for post-game trigger
 N8N_WEBHOOK_URL = "https://n8n.joelycannoli.com/webhook/gc-alert"
 
 DATA_DIR = Path(__file__).parent.parent / "data"
-SHARKS_DIR = DATA_DIR / "sharks"
+TEAM_DIR = DATA_DIR / os.getenv("TEAM_SLUG", "sharks")
 LOG_DIR = Path(__file__).parent.parent / "logs"
 CONFIG_DIR = Path(__file__).parent.parent / "config"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -81,7 +81,7 @@ def _set_sync_stage(stage: str):
         _SYNC_STATUS["progress"] = 0
 
 DEFAULT_CORS_ORIGINS = [
-    "https://sharks.joelycannoli.com",
+    "https://dugout.joelycannoli.com",
     "http://localhost:3000",
     "http://localhost:5173",
 ]
@@ -167,11 +167,11 @@ def _origin_hostname(origin: str) -> str:
         return ""
 
 DEFAULT_ALLOWED_HOSTS = [
-    "sharks.joelycannoli.com",
+    "dugout.joelycannoli.com",
     "localhost",
     "127.0.0.1",
-    "sharks_api",
-    "sharks_dashboard",
+    "dugout_api",
+    "dugout_dashboard",
 ]
 _derived_allowed_hosts = set()
 for _origin in CORS_ORIGINS + WRITE_ORIGINS:
@@ -228,8 +228,9 @@ def send_alert(message: str, level: str = "ERROR"):
 def _canonical_team_name(name: str, slug: str = "") -> str:
     raw = (name or "").strip()
     slug_l = (slug or "").strip().lower()
+    _team_name = os.getenv("TEAM_NAME", "The Sharks")
     if slug_l == "sharks" or raw.lower() in ("sharks", "the sharks"):
-        return "The Sharks"
+        return _team_name
     if raw:
         return raw
     if slug_l:
@@ -310,7 +311,7 @@ def _read_json_file(path: Path, default=None, retries: int = 3, retry_delay: flo
 def _enrich_team_with_app_stats(team_data: dict) -> dict:
     """Apply app_stats.json stats to Sharks roster (batting, pitching, fielding).
     Keyed by jersey number. Mutates team_data in place and returns it."""
-    app_stats_file = SHARKS_DIR / "app_stats.json"
+    app_stats_file = TEAM_DIR / "app_stats.json"
     if not app_stats_file.exists():
         return team_data
     try:
@@ -442,7 +443,7 @@ def _supplement_enriched_from_base(team_data: dict):
     some fields from the original CSV (babip, ba_risp, ps, tb, xbh, etc.) can be lost.
     This reads the base team.json and fills in any missing values.
     """
-    base_file = SHARKS_DIR / "team.json"
+    base_file = TEAM_DIR / "team.json"
     if not base_file.exists():
         return
     try:
@@ -492,7 +493,7 @@ def _supplement_enriched_from_base(team_data: dict):
 def _aggregate_opponent_stats_from_games(opponent_slug: str) -> list:
     """Aggregate opponent_batting stats from scorebook game JSON files for a given opponent.
     Returns flattened batting_stats[] rows (ab/h/bb...) for direct use in matchup aggregator."""
-    games_dir = SHARKS_DIR / "games"
+    games_dir = TEAM_DIR / "games"
     if not games_dir.exists():
         return []
     player_acc: dict = {}
@@ -622,9 +623,9 @@ def _merge_team_with_scorebook_stats(team_data: dict) -> tuple[dict, dict]:
 
 def _collect_pipeline_health() -> dict:
     """Build pipeline health coverage metrics across app/web/game feeds."""
-    app_stats_file = SHARKS_DIR / "app_stats.json"
-    team_merged_file = SHARKS_DIR / "team_merged.json"
-    games_dir = SHARKS_DIR / "games"
+    app_stats_file = TEAM_DIR / "app_stats.json"
+    team_merged_file = TEAM_DIR / "team_merged.json"
+    games_dir = TEAM_DIR / "games"
     opponents_dir = DATA_DIR / "opponents"
 
     app_data = {}
@@ -762,7 +763,7 @@ def _collect_pipeline_health() -> dict:
 
 def _write_pipeline_health_artifact():
     out = _collect_pipeline_health()
-    out_file = SHARKS_DIR / "pipeline_health.json"
+    out_file = TEAM_DIR / "pipeline_health.json"
     with open(out_file, "w") as f:
         json.dump(out, f, indent=2)
     app_rows = out["feeds"]["app_stats"]["batting_rows"]
@@ -782,9 +783,9 @@ def _write_pipeline_health_artifact():
 def _record_stats_db_snapshot(team_data: dict, source: str = "sync_cycle", notes: str = ""):
     """Persist a time-series snapshot to the running SQLite stats database."""
     try:
-        from stats_db import record_sharks_snapshot
+        from stats_db import record_team_snapshot
 
-        snapshot_id = record_sharks_snapshot(team_data, source=source, notes=notes)
+        snapshot_id = record_team_snapshot(team_data, source=source, notes=notes)
         logging.info("[DB] Recorded stats snapshot id=%s source=%s", snapshot_id, source)
         return snapshot_id
     except Exception as e:
@@ -922,7 +923,7 @@ def _validate_and_write_stat_anomalies(team_data: dict) -> list[dict]:
         "threshold_alerts": threshold_alerts,
         "threshold_alert_count": len(threshold_alerts),
     }
-    out_file = SHARKS_DIR / "stats_anomalies.json"
+    out_file = TEAM_DIR / "stats_anomalies.json"
     with open(out_file, "w") as f:
         json.dump(out, f, indent=2)
 
@@ -948,7 +949,7 @@ def _validate_and_write_stat_anomalies(team_data: dict) -> list[dict]:
 
 def get_next_game_time():
     """Parse schedule_manual.json to find the nearest upcoming game. Returns datetime or None."""
-    schedule_file = SHARKS_DIR / "schedule_manual.json"
+    schedule_file = TEAM_DIR / "schedule_manual.json"
     if not schedule_file.exists():
         return None
     try:
@@ -1063,7 +1064,7 @@ def run_sync_cycle():
         _set_sync_stage("enriching")
         # Write team_enriched.json (team_merged + app_stats + scorebook reconciliation)
         try:
-            team_file = SHARKS_DIR / ("team_merged.json" if (SHARKS_DIR / "team_merged.json").exists() else "team.json")
+            team_file = TEAM_DIR / ("team_merged.json" if (TEAM_DIR / "team_merged.json").exists() else "team.json")
             with open(team_file) as f:
                 team_data = json.load(f)
             _enrich_team_with_app_stats(team_data)
@@ -1072,7 +1073,7 @@ def run_sync_cycle():
             _supplement_enriched_from_base(team_data)
             anomaly_findings = _validate_and_write_stat_anomalies(team_data)
             enriched_team_data = team_data
-            enriched_file = SHARKS_DIR / "team_enriched.json"
+            enriched_file = TEAM_DIR / "team_enriched.json"
             with open(enriched_file, "w") as f:
                 json.dump(team_data, f, indent=2)
             logging.info(
@@ -1087,8 +1088,8 @@ def run_sync_cycle():
         _set_sync_stage("analyzing")
         # Re-run SWOT and lineup optimizer with enriched data
         try:
-            from swot_analyzer import run_sharks_analysis
-            run_sharks_analysis()
+            from swot_analyzer import run_team_analysis
+            run_team_analysis()
             logging.info("[Sync] SWOT analysis refreshed.")
         except Exception as e:
             logging.warning(f"SWOT re-run skipped: {e}")
@@ -1337,7 +1338,7 @@ def _handle_unexpected_error(exc):
 # ---------------------------------------------------------
 def _load_roster_manifest():
     """Load core player names from roster_manifest.json."""
-    mf = SHARKS_DIR / "roster_manifest.json"
+    mf = TEAM_DIR / "roster_manifest.json"
     if not mf.exists():
         return []
     with open(mf) as f:
@@ -1347,7 +1348,7 @@ def _load_roster_manifest():
 
 def _load_sub_tracker():
     """Load sub activation tracker (timestamps)."""
-    tracker_file = SHARKS_DIR / "sub_tracker.json"
+    tracker_file = TEAM_DIR / "sub_tracker.json"
     if not tracker_file.exists():
         return {}
     with open(tracker_file) as f:
@@ -1355,8 +1356,8 @@ def _load_sub_tracker():
 
 
 def _save_sub_tracker(tracker):
-    SHARKS_DIR.mkdir(parents=True, exist_ok=True)
-    with open(SHARKS_DIR / "sub_tracker.json", "w") as f:
+    TEAM_DIR.mkdir(parents=True, exist_ok=True)
+    with open(TEAM_DIR / "sub_tracker.json", "w") as f:
         json.dump(tracker, f, indent=2)
 
 
@@ -1367,8 +1368,8 @@ def _is_core_player(name):
 
 def auto_deactivate_subs():
     """After a game day, deactivate all non-core players and record in sub_tracker."""
-    schedule_file = SHARKS_DIR / "schedule_manual.json"
-    availability_file = SHARKS_DIR / "availability.json"
+    schedule_file = TEAM_DIR / "schedule_manual.json"
+    availability_file = TEAM_DIR / "availability.json"
 
     if not schedule_file.exists() or not availability_file.exists():
         return
@@ -1439,7 +1440,7 @@ def handle_recent_subs():
 
 @app.route('/api/availability', methods=['GET', 'POST'])
 def handle_availability():
-    availability_file = SHARKS_DIR / "availability.json"
+    availability_file = TEAM_DIR / "availability.json"
 
     if request.method == 'POST':
         blocked = _guard_mutating_request()
@@ -1484,9 +1485,9 @@ def handle_availability():
         logging.info("Availability updated via API. Re-running analytics tools...")
         try:
             from lineup_optimizer import run as run_lineup
-            from swot_analyzer import run_sharks_analysis
+            from swot_analyzer import run_team_analysis
             run_lineup()
-            run_sharks_analysis()
+            run_team_analysis()
         except Exception as e:
             logging.error(f"Error re-running tools after update: {e}")
             
@@ -1494,7 +1495,7 @@ def handle_availability():
     
     # GET logic
     if not availability_file.exists():
-        team_file = SHARKS_DIR / "team.json"
+        team_file = TEAM_DIR / "team.json"
         if not team_file.exists():
             return jsonify({})
         with open(team_file, "r") as f:
@@ -1508,9 +1509,9 @@ def _build_games_feed(include_detail: bool = False) -> list[dict]:
     """Return parsed scorebook games enriched with W/L from schedule.
     Optionally includes per-player batting detail from game JSON files."""
     import re as _re
-    games_dir = SHARKS_DIR / "games"
+    games_dir = TEAM_DIR / "games"
     index_path = games_dir / "index.json"
-    schedule_file = SHARKS_DIR / "schedule_manual.json"
+    schedule_file = TEAM_DIR / "schedule_manual.json"
 
     pdf_games = []
     if index_path.exists():
@@ -1747,7 +1748,7 @@ def handle_game_detail(game_id):
     err = _validate_path_slug(game_id, "game_id")
     if err:
         return err
-    game_file = SHARKS_DIR / "games" / f"{game_id}.json"
+    game_file = TEAM_DIR / "games" / f"{game_id}.json"
     if not game_file.exists():
         return jsonify({"error": "Not found"}), 404
     try:
@@ -1760,7 +1761,7 @@ def handle_game_detail(game_id):
     # Self-heal: if primary file lacks full stats (PDF format), supplement from GC UUID file by date
     if "sharks" not in data and data.get("date"):
         g_date = str(data["date"])[:10]
-        gc_dir = SHARKS_DIR / "games"
+        gc_dir = TEAM_DIR / "games"
         for gf in gc_dir.glob("game_*.json"):
             try:
                 gdata = _read_json_file(gf, default={}) or {}
@@ -1884,7 +1885,7 @@ def handle_scoreboard():
     # 3. Build response
     if not target_game:
         # Fallback: use schedule to show next game info
-        sched_file = SHARKS_DIR / "schedule_manual.json"
+        sched_file = TEAM_DIR / "schedule_manual.json"
         if sched_file.exists():
             try:
                 sched = _read_json_file(sched_file, default={}) or {}
@@ -1972,7 +1973,7 @@ def handle_scoreboard():
             game_date = game_dt.date().isoformat()
         except Exception:
             game_date = today_str
-        games_dir = SHARKS_DIR / "games"
+        games_dir = TEAM_DIR / "games"
         if games_dir.exists():
             for gf in games_dir.glob("*.json"):
                 if gf.name == "index.json":
@@ -1996,7 +1997,7 @@ def handle_scoreboard():
         logging.debug(f"[Scoreboard] Local game enrichment failed: {e}")
 
     # 5. Schedule context (time, home/away from our schedule)
-    sched_file = SHARKS_DIR / "schedule_manual.json"
+    sched_file = TEAM_DIR / "schedule_manual.json"
     if sched_file.exists():
         try:
             sched = _read_json_file(sched_file, default={}) or {}
@@ -2161,7 +2162,7 @@ def handle_opponent_detail(slug):
 @app.route('/api/next-game', methods=['GET'])
 def handle_next_game():
     """Return the next upcoming game with opponent slug and matchup URL."""
-    sched_file = SHARKS_DIR / "schedule_manual.json"
+    sched_file = TEAM_DIR / "schedule_manual.json"
     if not sched_file.exists():
         return jsonify({"error": "Schedule unavailable"}), 503
     try:
@@ -2172,7 +2173,7 @@ def handle_next_game():
     if not isinstance(schedule, dict):
         return jsonify({"error": "Schedule unavailable"}), 503
     now = datetime.now(ET)
-    disc_file = SHARKS_DIR / "opponent_discovery.json"
+    disc_file = TEAM_DIR / "opponent_discovery.json"
     teams_list = []
     if disc_file.exists():
         try:
@@ -2232,7 +2233,7 @@ def handle_matchup(opponent_slug):
     if err:
         return err
     from swot_analyzer import analyze_matchup, load_team
-    our_team = load_team(SHARKS_DIR, prefer_merged=True)
+    our_team = load_team(TEAM_DIR, prefer_merged=True)
     if not our_team:
         return jsonify({"error": "Sharks team data not found"}), 404
 
@@ -2336,7 +2337,7 @@ def handle_matchup(opponent_slug):
 
 def _aggregate_stats_from_games():
     """Aggregate batting stats per player across all parsed game files. Returns dict keyed by jersey number."""
-    games_dir = SHARKS_DIR / "games"
+    games_dir = TEAM_DIR / "games"
     if not games_dir.exists():
         return {}
 
@@ -2514,16 +2515,16 @@ def handle_health():
     now = datetime.now(ET)
     # Required: files the sync daemon pipeline directly creates/updates
     required_sources = {
-        "team_enriched": SHARKS_DIR / "team_enriched.json",
-        "swot_analysis": SHARKS_DIR / "swot_analysis.json",
-        "lineups": SHARKS_DIR / "lineups.json",
-        "pipeline_health": SHARKS_DIR / "pipeline_health.json",
+        "team_enriched": TEAM_DIR / "team_enriched.json",
+        "swot_analysis": TEAM_DIR / "swot_analysis.json",
+        "lineups": TEAM_DIR / "lineups.json",
+        "pipeline_health": TEAM_DIR / "pipeline_health.json",
     }
     # Optional: external feed files (gc_app_auto produces these; the daemon
     # consumes them but does not generate them)
     optional_sources = {
-        "app_stats": SHARKS_DIR / "app_stats.json",
-        "schedule": SHARKS_DIR / "schedule_manual.json",
+        "app_stats": TEAM_DIR / "app_stats.json",
+        "schedule": TEAM_DIR / "schedule_manual.json",
     }
     result = {"checked_at": now.isoformat(), "stale_sources": [], "sources": {}}
     for name, path in {**required_sources, **optional_sources}.items():
@@ -2566,11 +2567,11 @@ def handle_h2h(opponent_slug):
 @app.route('/api/team', methods=['GET'])
 def handle_team():
     """Return team data, enriched from app_stats and reconciled with scorebook totals."""
-    team_file = SHARKS_DIR / "team_enriched.json"
+    team_file = TEAM_DIR / "team_enriched.json"
     if not team_file.exists():
-        team_file = SHARKS_DIR / "team_merged.json"
+        team_file = TEAM_DIR / "team_merged.json"
     if not team_file.exists():
-        team_file = SHARKS_DIR / "team.json"
+        team_file = TEAM_DIR / "team.json"
     if not team_file.exists():
         return jsonify({"error": "No team data found"}), 404
 
@@ -2585,7 +2586,7 @@ def handle_team():
 
     # Supplement with richer stats from team.json (CSV-ingested) when fields are missing
     # team.json has: catching, innings_played, pitching_advanced, pitching_breakdown, babip, etc.
-    base_team_file = SHARKS_DIR / "team.json"
+    base_team_file = TEAM_DIR / "team.json"
     if base_team_file.exists() and base_team_file != team_file:
         base_team = _read_json_file(base_team_file, default={}) or {}
         base_by_name = {}
@@ -2689,7 +2690,7 @@ def handle_borrowed_player():
     if gc_team_id and (len(gc_team_id) > 40 or not re.match(r'^[A-Za-z0-9_-]+$', gc_team_id)):
         return jsonify({"error": "invalid_gc_team_id"}), 400
 
-    manifest_file = SHARKS_DIR / "roster_manifest.json"
+    manifest_file = TEAM_DIR / "roster_manifest.json"
     manifest = {}
     if manifest_file.exists():
         with open(manifest_file) as f:
@@ -2735,9 +2736,9 @@ def _scrape_borrowed_player_stats(gc_team_id: str):
             scraper.close()
         run_merge()
         from lineup_optimizer import run as run_lineup
-        from swot_analyzer import run_sharks_analysis
+        from swot_analyzer import run_team_analysis
         run_lineup()
-        run_sharks_analysis()
+        run_team_analysis()
         logging.info(f"Borrowed player stats scraped for team {gc_team_id}")
     except Exception as e:
         logging.error(f"Error scraping borrowed player stats: {e}")
@@ -2781,7 +2782,7 @@ def _load_practice_rsvp_defaults(team: dict) -> tuple[list[str], str, dict]:
     roster_set = {n.lower(): n for n in roster_names}
     practice_meta = {"date": None, "title": None}
 
-    rsvp_file = SHARKS_DIR / "practice_rsvp.json"
+    rsvp_file = TEAM_DIR / "practice_rsvp.json"
     if rsvp_file.exists():
         data = _read_json_file(rsvp_file, default={}) or {}
         candidates = []
@@ -2813,7 +2814,7 @@ def _load_practice_rsvp_defaults(team: dict) -> tuple[list[str], str, dict]:
         if selected:
             return sorted(set(selected)), "practice_rsvp", practice_meta
 
-    availability_file = SHARKS_DIR / "availability.json"
+    availability_file = TEAM_DIR / "availability.json"
     availability = _read_json_file(availability_file, default={}) or {}
     if isinstance(availability, dict) and availability:
         selected = []
@@ -2912,9 +2913,9 @@ def _build_practice_needs(team: dict, selected_names: list[str]) -> list[dict]:
 
 
 def _load_voice_context() -> dict:
-    team_file = SHARKS_DIR / "team_enriched.json"
+    team_file = TEAM_DIR / "team_enriched.json"
     if not team_file.exists():
-        team_file = SHARKS_DIR / ("team_merged.json" if (SHARKS_DIR / "team_merged.json").exists() else "team.json")
+        team_file = TEAM_DIR / ("team_merged.json" if (TEAM_DIR / "team_merged.json").exists() else "team.json")
 
     team = _read_json_file(team_file, default={}) or {}
     if isinstance(team, dict):
@@ -2922,9 +2923,9 @@ def _load_voice_context() -> dict:
         _merge_team_with_scorebook_stats(team)
         team["team_name"] = _canonical_team_name(team.get("team_name", "The Sharks"), "sharks")
 
-    swot = _read_json_file(SHARKS_DIR / "swot_analysis.json", default={}) or {}
-    lineups = _read_json_file(SHARKS_DIR / "lineups.json", default={}) or {}
-    schedule = _read_json_file(SHARKS_DIR / "schedule_manual.json", default={"upcoming": [], "past": []}) or {"upcoming": [], "past": []}
+    swot = _read_json_file(TEAM_DIR / "swot_analysis.json", default={}) or {}
+    lineups = _read_json_file(TEAM_DIR / "lineups.json", default={}) or {}
+    schedule = _read_json_file(TEAM_DIR / "schedule_manual.json", default={"upcoming": [], "past": []}) or {"upcoming": [], "past": []}
 
     # Build deduplicated games list using the authoritative feed (uses known_game_results.json)
     games = _build_games_feed()
@@ -3119,8 +3120,8 @@ def handle_voice_update():
     Generate and return a short spoken team status update as MP3.
     Falls back to the most recently cached MP3 if live synthesis fails.
     """
-    mp3_file = SHARKS_DIR / "voice_overview_latest.mp3"
-    meta_file = SHARKS_DIR / "voice_overview_latest.json"
+    mp3_file = TEAM_DIR / "voice_overview_latest.mp3"
+    meta_file = TEAM_DIR / "voice_overview_latest.json"
 
     try:
         ctx = _load_voice_context()
@@ -3168,7 +3169,7 @@ def handle_schedule():
     in from config/known_game_results.json if available.  This means the
     Pi never needs a manual edit when schedule_manual.json lags reality.
     """
-    schedule_file = SHARKS_DIR / "schedule_manual.json"
+    schedule_file = TEAM_DIR / "schedule_manual.json"
     if not schedule_file.exists():
         return jsonify({"upcoming": [], "past": []})
     data = _read_json_file(schedule_file, default={"upcoming": [], "past": []}) or {"upcoming": [], "past": []}
@@ -3228,7 +3229,7 @@ def handle_schedule():
 @app.route('/api/opponent-discovery', methods=['GET'])
 def handle_opponent_discovery():
     """Return latest opponent ID discovery artifact."""
-    artifact_file = SHARKS_DIR / "opponent_discovery.json"
+    artifact_file = TEAM_DIR / "opponent_discovery.json"
     if not artifact_file.exists():
         return jsonify({"generated_at": None, "teams": [], "missing_schedule_opponents": []})
     data = _read_json_file(artifact_file, default={}) or {}
@@ -3239,9 +3240,9 @@ def handle_opponent_discovery():
 def handle_practice_insights():
     """Build tailored practice priorities from current team stats."""
     try:
-        team_file = SHARKS_DIR / "team_enriched.json"
+        team_file = TEAM_DIR / "team_enriched.json"
         if not team_file.exists():
-            team_file = SHARKS_DIR / ("team_merged.json" if (SHARKS_DIR / "team_merged.json").exists() else "team.json")
+            team_file = TEAM_DIR / ("team_merged.json" if (TEAM_DIR / "team_merged.json").exists() else "team.json")
         team = _read_json_file(team_file, default={}) or {}
         if not isinstance(team, dict):
             team = {}
@@ -3379,7 +3380,7 @@ def handle_regenerate_lineups():
             return jsonify({"error": "invalid_json_object"}), 400
         from lineup_optimizer import run as run_lineup
         run_lineup()
-        lineups_file = SHARKS_DIR / "lineups.json"
+        lineups_file = TEAM_DIR / "lineups.json"
         lineups = {}
         if lineups_file.exists():
             with open(lineups_file) as f:
@@ -3397,8 +3398,8 @@ def handle_regenerate_lineups():
             lineups = {**sanitized, "_meta": meta}
         # Optionally regenerate SWOT too
         if data.get("swot"):
-            from swot_analyzer import run_sharks_analysis
-            run_sharks_analysis()
+            from swot_analyzer import run_team_analysis
+            run_team_analysis()
         return jsonify({"status": "ok", "lineups": lineups})
     except Exception as e:
         logging.error(f"Regenerate lineups error: {e}")
@@ -3407,7 +3408,7 @@ def handle_regenerate_lineups():
 
 def _record_h2h_from_games():
     """Scan game JSON files and insert h2h records for any new games."""
-    games_dir = SHARKS_DIR / "games"
+    games_dir = TEAM_DIR / "games"
     if not games_dir.exists():
         return
     try:
@@ -3415,7 +3416,7 @@ def _record_h2h_from_games():
     except Exception:
         return
     schedule = {}
-    sched_file = SHARKS_DIR / "schedule_manual.json"
+    sched_file = TEAM_DIR / "schedule_manual.json"
     if sched_file.exists():
         try:
             with open(sched_file) as f:
@@ -3531,9 +3532,9 @@ def main():
 
     # Bootstrap a DB snapshot from current enriched/team data on startup.
     try:
-        bootstrap_file = SHARKS_DIR / "team_enriched.json"
+        bootstrap_file = TEAM_DIR / "team_enriched.json"
         if not bootstrap_file.exists():
-            bootstrap_file = SHARKS_DIR / ("team_merged.json" if (SHARKS_DIR / "team_merged.json").exists() else "team.json")
+            bootstrap_file = TEAM_DIR / ("team_merged.json" if (TEAM_DIR / "team_merged.json").exists() else "team.json")
         if bootstrap_file.exists():
             with open(bootstrap_file) as f:
                 bootstrap_team = json.load(f)

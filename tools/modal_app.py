@@ -8,12 +8,12 @@ from dotenv import load_dotenv
 # Load .env so _runtime_secret() has credentials at deploy time
 load_dotenv(Path(__file__).parent.parent / ".env")
 
-app = modal.App("softball-strategy-sharks")
+app = modal.App("dugout")
 
 SESSION_VOLUME = modal.Volume.from_name("softball-gc-session", create_if_missing=True)
 VOLUME_MOUNT = "/vol/softball-gc"
 
-sharks_image = (
+dugout_image = (
     modal.Image.debian_slim()
     .pip_install(
         "playwright==1.49.0",
@@ -70,7 +70,7 @@ def _run_step(label: str, args: list[str], env: dict[str, str]) -> None:
 
 
 @app.function(
-    image=sharks_image,
+    image=dugout_image,
     schedule=modal.Cron("0 6 * * *"),
     volumes={VOLUME_MOUNT: SESSION_VOLUME},
     secrets=[_runtime_secret()],
@@ -103,7 +103,7 @@ def daily_scout_job():
     return {"status": "ok"}
 
 
-@app.function(image=sharks_image, volumes={VOLUME_MOUNT: SESSION_VOLUME}, secrets=[_runtime_secret()], timeout=60 * 45)
+@app.function(image=dugout_image, volumes={VOLUME_MOUNT: SESSION_VOLUME}, secrets=[_runtime_secret()], timeout=60 * 45)
 @modal.web_endpoint(method="POST")
 def manual_sync():
     """Manual trigger via Webhook (POST)."""
@@ -111,7 +111,7 @@ def manual_sync():
     return {"status": "triggered", "message": "Scouting job started in background."}
 
 
-@app.function(image=sharks_image, volumes={VOLUME_MOUNT: SESSION_VOLUME}, secrets=[_runtime_secret()], timeout=60 * 45)
+@app.function(image=dugout_image, volumes={VOLUME_MOUNT: SESSION_VOLUME}, secrets=[_runtime_secret()], timeout=60 * 45)
 def trigger_immediate_refresh():
     """Internal manual trigger."""
     return daily_scout_job.remote()

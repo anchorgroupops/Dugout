@@ -62,9 +62,9 @@ export default defineConfig({
         ],
       },
       manifest: {
-        name: 'The Sharks - Softball Dashboard',
-        short_name: 'Sharks',
-        description: 'Strategy & Training Aid for The Sharks (PCLL)',
+        name: 'Dugout — Softball Strategy Dashboard',
+        short_name: 'Dugout',
+        description: 'Softball strategy, stats & lineup optimizer',
         theme_color: '#046568',
         background_color: '#F7ECE1',
         display: 'standalone',

@@ -1,10 +1,10 @@
-"""Generate a circular favicon PNG from sharks-logo.png using Pillow."""
+"""Generate a circular favicon PNG from team-logo.png using Pillow."""
 from pathlib import Path
 from PIL import Image, ImageDraw
 
 ROOT = Path(__file__).parent.parent
-SRC = ROOT / "client" / "public" / "sharks-logo.png"
-DST = ROOT / "client" / "public" / "sharks-logo-round.png"
+SRC = ROOT / "client" / "public" / "team-logo.png"
+DST = ROOT / "client" / "public" / "team-logo-round.png"
 
 img = Image.open(SRC).convert("RGBA")
 size = min(img.size)

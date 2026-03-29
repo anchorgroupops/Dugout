@@ -25,11 +25,7 @@ const League = ({ isMobile = false, isLandscape = false }) => {
 
   const standingRows = standings?.standings || [];
   const formatTeamName = (team) => {
-    const slug = String(team?.slug || '').toLowerCase();
     const raw = String(team?.team_name || '').trim();
-    if (slug === 'sharks' || raw.toLowerCase() === 'sharks' || raw.toLowerCase() === 'the sharks') {
-      return 'The Sharks';
-    }
     return raw || 'Unknown Team';
   };
 
@@ -113,24 +109,24 @@ const League = ({ isMobile = false, isLandscape = false }) => {
         )}
 
         {standingRows.map((team, i) => {
-          const isSharks = team.slug === 'sharks';
+          const isOurTeam = !!team.isOurTeam;
           if (isMobile && !isLandscape) {
             return (
               <div key={team.slug} style={{
                 padding: '0.625rem 0.75rem',
                 borderRadius: '8px',
-                background: isSharks ? 'rgba(4, 101, 104, 0.15)' : 'rgba(255,255,255,0.03)',
-                border: isSharks ? '2px solid rgba(4, 101, 104, 0.4)' : '1px solid rgba(255,255,255,0.06)',
+                background: isOurTeam ? 'rgba(4, 101, 104, 0.15)' : 'rgba(255,255,255,0.03)',
+                border: isOurTeam ? '2px solid rgba(4, 101, 104, 0.4)' : '1px solid rgba(255,255,255,0.06)',
                 marginBottom: '0.4rem',
                 minHeight: 'var(--touch-min)',
                 display: 'flex',
                 flexDirection: 'column',
                 justifyContent: 'center',
               }}>
-                <div style={{ fontWeight: isSharks ? '700' : '600', color: isSharks ? 'var(--primary-color)' : 'var(--text-main)', fontSize: isSharks ? 'var(--text-base)' : 'var(--text-sm)' }}>
-                  {isSharks ? '\uD83E\uDD88 ' : `${i + 1}. `}{formatTeamName(team)}
+                <div style={{ fontWeight: isOurTeam ? '700' : '600', color: isOurTeam ? 'var(--primary-color)' : 'var(--text-main)', fontSize: isOurTeam ? 'var(--text-base)' : 'var(--text-sm)' }}>
+                  {isOurTeam ? '\u2B50 ' : `${i + 1}. `}{formatTeamName(team)}
                 </div>
-                <div style={{ marginTop: '0.2rem', fontSize: 'var(--text-xs)', color: isSharks ? 'var(--text-main)' : 'var(--text-muted)', fontWeight: isSharks ? '600' : '400' }}>
+                <div style={{ marginTop: '0.2rem', fontSize: 'var(--text-xs)', color: isOurTeam ? 'var(--text-main)' : 'var(--text-muted)', fontWeight: isOurTeam ? '600' : '400' }}>
                   {team.w}-{team.l} {'\u00b7'} {team.record} {'\u00b7'} {team.pct != null ? (team.pct === 1 ? '1.000' : team.pct.toFixed(3)) : '\u2014'}
                 </div>
               </div>
@@ -141,18 +137,18 @@ const League = ({ isMobile = false, isLandscape = false }) => {
               display: 'grid', gridTemplateColumns: '1fr 60px 60px 70px',
               gap: '0.5rem', padding: '0.5rem 0.5rem',
               borderRadius: '6px', alignItems: 'center',
-              background: isSharks ? 'rgba(4, 101, 104, 0.15)' : i % 2 === 0 ? 'rgba(255,255,255,0.02)' : 'transparent',
-              border: isSharks ? '2px solid rgba(4, 101, 104, 0.4)' : '1px solid transparent',
+              background: isOurTeam ? 'rgba(4, 101, 104, 0.15)' : i % 2 === 0 ? 'rgba(255,255,255,0.02)' : 'transparent',
+              border: isOurTeam ? '2px solid rgba(4, 101, 104, 0.4)' : '1px solid transparent',
               marginBottom: '0.25rem'
             }}>
-              <span style={{ fontWeight: isSharks ? '700' : '500', color: isSharks ? 'var(--primary-color)' : 'var(--text-main)', fontSize: isSharks ? 'var(--text-base)' : 'var(--text-sm)' }}>
-                {isSharks ? '\uD83E\uDD88 ' : `${i + 1}. `}{formatTeamName(team)}
+              <span style={{ fontWeight: isOurTeam ? '700' : '500', color: isOurTeam ? 'var(--primary-color)' : 'var(--text-main)', fontSize: isOurTeam ? 'var(--text-base)' : 'var(--text-sm)' }}>
+                {isOurTeam ? '\u2B50 ' : `${i + 1}. `}{formatTeamName(team)}
               </span>
-              <span style={{ textAlign: 'center', fontWeight: isSharks ? '700' : '600', fontSize: 'var(--text-sm)' }}>{team.w}-{team.l}</span>
-              <span style={{ textAlign: 'center', color: isSharks ? 'var(--text-main)' : 'var(--text-muted)', fontSize: 'var(--text-sm)', fontWeight: isSharks ? '600' : '400' }}>
+              <span style={{ textAlign: 'center', fontWeight: isOurTeam ? '700' : '600', fontSize: 'var(--text-sm)' }}>{team.w}-{team.l}</span>
+              <span style={{ textAlign: 'center', color: isOurTeam ? 'var(--text-main)' : 'var(--text-muted)', fontSize: 'var(--text-sm)', fontWeight: isOurTeam ? '600' : '400' }}>
                 {team.pct != null ? (team.pct === 1 ? '1.000' : team.pct.toFixed(3)) : '\u2014'}
               </span>
-              <span style={{ textAlign: 'center', color: isSharks ? 'var(--text-main)' : 'var(--text-muted)', fontSize: 'var(--text-xs)', fontWeight: isSharks ? '600' : '400' }}>{team.record}</span>
+              <span style={{ textAlign: 'center', color: isOurTeam ? 'var(--text-main)' : 'var(--text-muted)', fontSize: 'var(--text-xs)', fontWeight: isOurTeam ? '600' : '400' }}>{team.record}</span>
             </div>
           );
         })}

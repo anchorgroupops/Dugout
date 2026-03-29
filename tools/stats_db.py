@@ -5,6 +5,7 @@ Stores time-series snapshots each sync cycle for auditing and trend analysis.
 
 from __future__ import annotations
 
+import os
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -14,8 +15,8 @@ from stats_normalizer import normalize_batting_row, normalize_fielding_row, norm
 
 ET = ZoneInfo("America/New_York")
 DATA_DIR = Path(__file__).parent.parent / "data"
-SHARKS_DIR = DATA_DIR / "sharks"
-DB_PATH = SHARKS_DIR / "stats_history.db"
+TEAM_DIR = DATA_DIR / os.getenv("TEAM_SLUG", "sharks")
+DB_PATH = TEAM_DIR / "stats_history.db"
 
 
 SCHEMA_SQL = """
@@ -134,16 +135,16 @@ def _player_key(player: dict) -> str:
 
 
 def _connect() -> sqlite3.Connection:
-    SHARKS_DIR.mkdir(parents=True, exist_ok=True)
+    TEAM_DIR.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.execute("PRAGMA foreign_keys=ON;")
     conn.executescript(SCHEMA_SQL)
     return conn
 
 
-def record_sharks_snapshot(team_data: dict, source: str = "sync_cycle", notes: str = "") -> int:
+def record_team_snapshot(team_data: dict, source: str = "sync_cycle", notes: str = "") -> int:
     roster = team_data.get("roster", [])
-    team_name = str(team_data.get("team_name", "The Sharks")).strip() or "The Sharks"
+    team_name = str(team_data.get("team_name", os.getenv("TEAM_NAME", "The Sharks"))).strip() or os.getenv("TEAM_NAME", "The Sharks")
     captured_at = _now_iso()
 
     conn = _connect()
@@ -248,6 +249,10 @@ def record_sharks_snapshot(team_data: dict, source: str = "sync_cycle", notes: s
         return snapshot_id
     finally:
         conn.close()
+
+
+# Backward-compatible alias
+record_sharks_snapshot = record_team_snapshot
 
 
 def get_db_status() -> dict:

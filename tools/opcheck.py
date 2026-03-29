@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 import time
 from datetime import datetime
 from pathlib import Path
@@ -9,7 +10,7 @@ import requests
 
 
 ET = ZoneInfo("America/New_York")
-DEFAULT_BASE = "https://sharks.joelycannoli.com"
+DEFAULT_BASE = os.getenv("OPCHECK_BASE_URL", "https://dugout.joelycannoli.com")
 
 
 def _req_json(session: requests.Session, url: str, method: str = "GET", **kwargs):
@@ -44,22 +45,22 @@ def run_opcheck(base_url: str, include_burst: bool = True) -> dict:
     games = games if isinstance(games, list) else []
     w = sum(1 for g in games if str(g.get("result", "")).upper() == "W")
     l = sum(1 for g in games if str(g.get("result", "")).upper() == "L")
-    sharks_wl = f"{w}-{l}"
+    our_team_wl = f"{w}-{l}"
 
     avail_r, avail = _req_json(s, f"{base}/api/availability")
     add("api_availability_status", avail_r.status_code == 200 and isinstance(avail, dict), f"status={avail_r.status_code}")
 
     standings_r, standings = _req_json(s, f"{base}/api/standings")
     add("api_standings_status", standings_r.status_code == 200, f"status={standings_r.status_code}")
-    sharks_row = None
+    our_team_row = None
     for row in (standings or {}).get("standings", []):
         if str(row.get("slug", "")).lower() == "sharks":
-            sharks_row = row
+            our_team_row = row
             break
     add(
         "standings_games_consistency",
-        bool(sharks_row) and sharks_row.get("record") == sharks_wl and sharks_row.get("team_name") == "The Sharks",
-        f"games={sharks_wl} standings={None if not sharks_row else sharks_row.get('record')} name={None if not sharks_row else sharks_row.get('team_name')}",
+        bool(our_team_row) and our_team_row.get("record") == our_team_wl and our_team_row.get("team_name") == "The Sharks",
+        f"games={our_team_wl} standings={None if not our_team_row else our_team_row.get('record')} name={None if not our_team_row else our_team_row.get('team_name')}",
     )
 
     # Matchups

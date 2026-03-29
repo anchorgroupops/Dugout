@@ -14,6 +14,7 @@ Usage:
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -22,8 +23,8 @@ ET = ZoneInfo("America/New_York")
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT_DIR / "data"
-SHARKS_DIR = DATA_DIR / "sharks"
-PLAYERS_DIR = SHARKS_DIR / "players"
+TEAM_DIR = DATA_DIR / os.getenv("TEAM_SLUG", "sharks")
+PLAYERS_DIR = TEAM_DIR / "players"
 PAYLOAD_FILE = DATA_DIR / "notebooklm_payload.md"
 
 
@@ -232,13 +233,13 @@ def prepare_notebooklm_payload() -> Path:
     # ------------------------------------------------------------------ #
     # 1. Season Stats (from team.json or team_web.json)
     # ------------------------------------------------------------------ #
-    team_file = SHARKS_DIR / "team_web.json"
+    team_file = TEAM_DIR / "team_web.json"
     if not team_file.exists():
-        team_file = SHARKS_DIR / "team_enriched.json"
+        team_file = TEAM_DIR / "team_enriched.json"
     if not team_file.exists():
-        team_file = SHARKS_DIR / "team_merged.json"
+        team_file = TEAM_DIR / "team_merged.json"
     if not team_file.exists():
-        team_file = SHARKS_DIR / "team.json"
+        team_file = TEAM_DIR / "team.json"
 
     team_data = _read_json(team_file, {})
     roster = team_data.get("roster", [])
@@ -264,7 +265,7 @@ def prepare_notebooklm_payload() -> Path:
         lines.append(_fielding_std_table(roster))
 
     # Also check for team_web.json stat arrays (from GCFullScraper)
-    web_data = _read_json(SHARKS_DIR / "team_web.json", {})
+    web_data = _read_json(TEAM_DIR / "team_web.json", {})
     for stat_key, label in [
         ("batting", "Season Batting (Web Scraped)"),
         ("pitching", "Season Pitching (Web Scraped)"),
@@ -282,7 +283,7 @@ def prepare_notebooklm_payload() -> Path:
     # ------------------------------------------------------------------ #
     # 2. Game Log
     # ------------------------------------------------------------------ #
-    games_dir = SHARKS_DIR / "games"
+    games_dir = TEAM_DIR / "games"
     game_files = sorted(games_dir.glob("*.json")) if games_dir.exists() else []
     game_files = [f for f in game_files if f.name != "index.json"]
 
@@ -383,7 +384,7 @@ def prepare_notebooklm_payload() -> Path:
     # ------------------------------------------------------------------ #
     # 5. SWOT Analysis (if available)
     # ------------------------------------------------------------------ #
-    swot_file = SHARKS_DIR / "swot_analysis.json"
+    swot_file = TEAM_DIR / "swot_analysis.json"
     if swot_file.exists():
         swot = _read_json(swot_file, {})
         if swot:

@@ -1,13 +1,13 @@
 """
-scrape_sharks_games.py — Scrape all confirmed Sharks game IDs (DOM-linked)
+scrape_team_games.py — Scrape all confirmed team game IDs (DOM-linked)
 using gc_full_scraper. Runs headlessly using saved auth.json.
 """
 import subprocess
 import sys
 from pathlib import Path
 
-# Game IDs confirmed to be on the Sharks schedule page
-SHARKS_GAME_IDS = [
+# Game IDs confirmed to be on the team schedule page
+TEAM_GAME_IDS = [
     "7931431c-a877-4839-9c6c-c512a138db25",
     "2c4bb11e-58d7-47b1-bf30-aa1220f3777c",
     "f831909e-280e-4983-b91c-7fb0e0bf01fe",
@@ -30,12 +30,12 @@ TOOLS_DIR = Path(__file__).resolve().parent
 
 def main():
     force = "--force" in sys.argv
-    total = len(SHARKS_GAME_IDS)
+    total = len(TEAM_GAME_IDS)
     success = 0
     skipped = 0
     failed = 0
 
-    for i, gid in enumerate(SHARKS_GAME_IDS, 1):
+    for i, gid in enumerate(TEAM_GAME_IDS, 1):
         print(f"\n[{i}/{total}] Scraping {gid}")
         cmd = [sys.executable, str(TOOLS_DIR / "gc_full_scraper.py"), "--game-id", gid]
         if force:

@@ -123,7 +123,7 @@ const Practice = ({ team, schedule, isMobile = false, isLandscape = false }) => 
       .catch(() => {/* silent — non-critical */});
   }, [schedule]);
 
-  // Core roster names from team prop (used to default-select ALL Sharks players)
+  // Core roster names from team prop (used to default-select all team players)
   const coreRosterNames = useMemo(() => {
     if (!team?.roster) return [];
     return team.roster.filter(p => p.core !== false).map(p => `${p.first || ''} ${p.last || ''}`.trim()).filter(Boolean);
@@ -131,7 +131,7 @@ const Practice = ({ team, schedule, isMobile = false, isLandscape = false }) => 
 
   const availablePlayers = useMemo(() => {
     const all = insights?.available_players || [];
-    // Only show core Sharks players (no borrowed/subs from other teams)
+    // Only show core team players (no borrowed/subs from other teams)
     if (coreRosterNames.length > 0) {
       const coreSet = new Set(coreRosterNames);
       return all.filter(n => coreSet.has(n)).sort((a, b) => a.localeCompare(b));

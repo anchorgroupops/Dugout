@@ -214,7 +214,7 @@ const RosterManager = ({
     }
   };
 
-  const handleSharksOnly = async () => {
+  const handleOurTeamOnly = async () => {
     const newAvailability = {};
     for (const p of roster) {
       const name = `${p.first} ${p.last}`.trim();
@@ -231,7 +231,7 @@ const RosterManager = ({
         if (onRosterMutated) await onRosterMutated();
       }
     } catch (e) {
-      console.error('Sharks only failed', e);
+      console.error('Our team only failed', e);
     }
   };
 
@@ -294,10 +294,10 @@ const RosterManager = ({
           <h3 style={{ margin: 0, color: 'var(--primary-color)', fontSize: '1rem' }}>Game-Day Availability</h3>
           <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
             <button
-              onClick={handleSharksOnly}
+              onClick={handleOurTeamOnly}
               style={{ padding: isMobile ? '0.5rem 0.75rem' : '0.3rem 0.75rem', borderRadius: '6px', border: '1px solid rgba(4, 101, 104, 0.32)', background: 'rgba(4, 101, 104, 0.13)', color: 'var(--primary-color)', cursor: 'pointer', fontSize: 'var(--text-xs)', fontWeight: '600', minHeight: 'var(--touch-min)' }}
             >
-              Sharks Only
+              {team?.team_name || 'Our Team'} Only
             </button>
             <button
               onClick={() => handleSetAll(true)}

@@ -140,7 +140,7 @@ if __name__ == "__main__":
         print(f"Account ID: {acc_id}")
         
         domain = "joelycannoli.com"
-        target_hostname = "sharks.joelycannoli.com"
+        target_hostname = "dugout.joelycannoli.com"
         target_service = "http://192.168.7.222:3000"
         
         print(f"Fetching Zone ID for {domain}...")

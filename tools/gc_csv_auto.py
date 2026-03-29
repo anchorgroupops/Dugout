@@ -34,7 +34,7 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT_DIR / ".env")
 
 DATA_DIR = ROOT_DIR / "data"
-SHARKS_DIR = DATA_DIR / "sharks"
+TEAM_DIR = DATA_DIR / os.getenv("TEAM_SLUG", "sharks")
 LOG_DIR = ROOT_DIR / "logs"
 
 GC_BASE = "https://web.gc.com"
@@ -183,7 +183,7 @@ def run_auto_csv(
     if sync_playwright is None:
         return {"error": "playwright not installed", "success": False}
 
-    out_dir = output_dir or SHARKS_DIR
+    out_dir = output_dir or TEAM_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
 
     summary: dict = {

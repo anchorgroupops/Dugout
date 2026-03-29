@@ -37,7 +37,7 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT_DIR / ".env")
 
 DATA_DIR = ROOT_DIR / "data"
-SHARKS_DIR = DATA_DIR / "sharks"
+TEAM_DIR = DATA_DIR / os.getenv("TEAM_SLUG", "sharks")
 LOG_DIR = ROOT_DIR / "logs"
 
 GC_BASE = "https://web.gc.com"
@@ -104,7 +104,7 @@ class GCFullScraper:
         self.season_slug = season_slug or GC_SEASON_SLUG
         self.email = email or GC_EMAIL
         self.password = password or GC_PASSWORD
-        self.out_dir = out_dir or SHARKS_DIR
+        self.out_dir = out_dir or TEAM_DIR
         self.headless = headless if headless is not None else GC_HEADLESS
 
         self.games_dir = self.out_dir / "games"

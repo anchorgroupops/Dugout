@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -12,7 +13,7 @@ except ImportError:
     sync_playwright = None
 
 DATA_DIR = Path(__file__).parent.parent / "data"
-SHARKS_DIR = DATA_DIR / "sharks"
+TEAM_DIR = DATA_DIR / os.getenv("TEAM_SLUG", "sharks")
 TMP_DIR = Path(__file__).parent.parent / ".tmp"
 
 class ScheduleScraper(GameChangerScraper):
@@ -29,7 +30,7 @@ class ScheduleScraper(GameChangerScraper):
                 # Login uses the robust session persistence defined in gc_scraper.py
                 page = self.login(pw)
                 
-                print("[GC_SCHEDULE] Navigating to The Sharks team page...")
+                print(f"[GC_SCHEDULE] Navigating to {os.getenv('TEAM_NAME', 'The Sharks')} team page...")
                 team_link = page.locator(f'text="{self.team_name}"').first
                 if team_link:
                     team_link.click()
@@ -65,8 +66,8 @@ class ScheduleScraper(GameChangerScraper):
                 if self.browser:
                     self.browser.close()
                     
-        SHARKS_DIR.mkdir(parents=True, exist_ok=True)
-        with open(SHARKS_DIR / "schedule.json", "w") as f:
+        TEAM_DIR.mkdir(parents=True, exist_ok=True)
+        with open(TEAM_DIR / "schedule.json", "w") as f:
             json.dump(schedule_data, f, indent=2)
             
         return schedule_data

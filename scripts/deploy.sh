@@ -1,5 +1,5 @@
 #!/bin/bash
-# Deployment script for Sharks Dashboard
+# Deployment script for Dugout
 # Can be triggered by GitHub Actions webhook or run manually on the Pi
 
 set -e
@@ -9,8 +9,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="${SCRIPT_DIR}/.."
 
 # If running on the Pi in the expected location, use that path
-if [ -d "/home/joelycannoli/sharks" ]; then
-  PROJECT_DIR="/home/joelycannoli/sharks"
+if [ -d "/home/joelycannoli/dugout" ]; then
+  PROJECT_DIR="/home/joelycannoli/dugout"
 fi
 
 echo "Starting deployment in ${PROJECT_DIR}..."
@@ -23,8 +23,8 @@ git pull origin main
 # Rebuild and restart the containers
 echo "Rebuilding and restarting Docker containers..."
 if command -v docker &> /dev/null; then
-  docker compose -f docker-compose.sharks.yml build --no-cache
-  docker compose -f docker-compose.sharks.yml up -d
+  docker compose -f docker-compose.dugout.yml build --no-cache
+  docker compose -f docker-compose.dugout.yml up -d
   echo "Docker containers rebuilt and restarted."
 else
   echo "Docker not found — skipping container rebuild."

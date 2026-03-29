@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -25,7 +26,7 @@ from stats_normalizer import safe_float, safe_int
 ET = ZoneInfo("America/New_York")
 ROOT_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT_DIR / "data"
-SHARKS_DIR = DATA_DIR / "sharks"
+TEAM_DIR = DATA_DIR / os.getenv("TEAM_SLUG", "sharks")
 
 # ---------------------------------------------------------------------------
 # CSV column indices (from GC export, 0-indexed, row 1 = column names)
@@ -122,7 +123,7 @@ def _val(row: list[str], idx: int) -> str:
 
 
 def _load_core_players() -> set[str]:
-    manifest = SHARKS_DIR / "roster_manifest.json"
+    manifest = TEAM_DIR / "roster_manifest.json"
     if not manifest.exists():
         return set()
     with open(manifest) as f:
@@ -439,7 +440,7 @@ def parse_gc_csv(csv_path: Path) -> list[dict]:
 def build_team_json(roster: list[dict], csv_path: Path) -> dict:
     """Build team.json-compatible structure from parsed roster."""
     # Preserve existing team metadata if available
-    team_file = SHARKS_DIR / "team.json"
+    team_file = TEAM_DIR / "team.json"
     meta = {}
     if team_file.exists():
         with open(team_file) as f:
@@ -629,19 +630,19 @@ def main():
     app_stats = build_app_stats_json(roster)
 
     # Write team.json
-    team_out = SHARKS_DIR / "team.json"
+    team_out = TEAM_DIR / "team.json"
     with open(team_out, "w") as f:
         json.dump(team_json, f, indent=2)
     print(f"Wrote {team_out}")
 
     # Write app_stats.json
-    app_out = SHARKS_DIR / "app_stats.json"
+    app_out = TEAM_DIR / "app_stats.json"
     with open(app_out, "w") as f:
         json.dump(app_stats, f, indent=2)
     print(f"Wrote {app_out}")
 
     # Copy CSV to season_stats.csv
-    season_out = SHARKS_DIR / "season_stats.csv"
+    season_out = TEAM_DIR / "season_stats.csv"
     shutil.copy2(csv_path, season_out)
     print(f"Copied CSV -> {season_out}")
 

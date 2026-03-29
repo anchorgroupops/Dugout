@@ -8,14 +8,14 @@ import sys
 from pathlib import Path
 
 DATA_DIR = Path(__file__).parent.parent / "data"
-SHARKS_DIR = DATA_DIR / "sharks"
-TEAM_FILE = SHARKS_DIR / "team_merged.json"
-AVAILABILITY_FILE = SHARKS_DIR / "availability.json"
+TEAM_DIR = DATA_DIR / os.getenv("TEAM_SLUG", "sharks")
+TEAM_FILE = TEAM_DIR / "team_merged.json"
+AVAILABILITY_FILE = TEAM_DIR / "availability.json"
 
 def load_team():
     team_file = TEAM_FILE
     if not team_file.exists():
-        fallback = SHARKS_DIR / "team.json"
+        fallback = TEAM_DIR / "team.json"
         if fallback.exists():
             team_file = fallback
         else:

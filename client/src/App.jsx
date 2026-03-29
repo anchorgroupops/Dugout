@@ -206,7 +206,7 @@ function App() {
     setSyncProgress(0);
     setSyncStatusText('Triggering sync...');
     try {
-      const res = await fetch('https://anchorgroupops--softball-strategy-sharks-manual-sync.modal.run', {
+      const res = await fetch('https://anchorgroupops--dugout-manual-sync.modal.run', {
         method: 'POST'
       });
       if (!res.ok) throw new Error('Sync trigger failed');
@@ -372,9 +372,8 @@ function App() {
   };
 
   const displayTeamName = (() => {
-    const raw = String(data.team?.team_name || 'The Sharks').trim();
-    if (raw.toLowerCase() === 'sharks' || raw.toLowerCase() === 'the sharks') return 'The Sharks';
-    return raw;
+    const raw = String(data.team?.team_name || '').trim();
+    return raw || 'My Team';
   })();
 
   return (
@@ -384,11 +383,11 @@ function App() {
         <nav className="navbar navbar-mobile">
           <div className="mobile-header">
             <div className="mobile-header-left">
-              <img src="/sharks-logo-round.png" alt="Sharks" className="logo-avatar" />
+              <img src="/team-logo-round.png" alt="Team Logo" className="logo-avatar" />
               <span className="brand" style={{ fontSize: '1.125rem' }}>
                 {(() => {
                   const labels = { scoreboard: 'Live', scout: 'Scout', swot: 'SWOT', lineups: 'Lineups', practice: 'Practice', roster: 'Roster', games: 'Games', league: 'League' };
-                  return labels[currentView] || 'Sharks';
+                  return labels[currentView] || 'Dugout';
                 })()}
               </span>
               <span
@@ -429,8 +428,8 @@ function App() {
       ) : (
         <nav className="navbar">
           <div className="brand">
-            <img src="/sharks-logo-round.png" alt="Sharks" className="logo-avatar" />
-            The Sharks
+            <img src="/team-logo-round.png" alt="Team Logo" className="logo-avatar" />
+            Dugout
           </div>
           <div className="nav-links">
             {navItems.map(item => (

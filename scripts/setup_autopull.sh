@@ -7,10 +7,10 @@
 
 set -e
 
-PROJECT_DIR="/home/joelycannoli/sharks"
+PROJECT_DIR="/home/joelycannoli/dugout"
 cd "$PROJECT_DIR"
 
-echo "=== Sharks Auto-Deploy Setup ==="
+echo "=== Dugout Auto-Deploy Setup ==="
 echo ""
 
 # 1. Pull latest code
@@ -20,7 +20,7 @@ git pull origin main
 # 2. Authenticate Docker with GHCR
 echo ""
 echo "[2/5] Setting up GitHub Container Registry access..."
-if docker pull ghcr.io/anchorgroupops/sharks-dashboard:latest 2>/dev/null; then
+if docker pull ghcr.io/anchorgroupops/dugout-dashboard:latest 2>/dev/null; then
   echo "  Already authenticated with GHCR."
 else
   echo ""
@@ -51,11 +51,11 @@ fi
 # 4. Pull images and start everything (including Watchtower)
 echo ""
 echo "[4/5] Pulling Docker images from GHCR..."
-docker compose -f docker-compose.sharks.yml pull
+docker compose -f docker-compose.dugout.yml pull
 
 echo ""
 echo "[5/5] Starting all containers (dashboard + API + sync + watchtower)..."
-docker compose -f docker-compose.sharks.yml up -d
+docker compose -f docker-compose.dugout.yml up -d
 
 echo ""
 echo "=== Setup Complete ==="
@@ -65,10 +65,10 @@ echo "  1. You (or Claude) push code to main"
 echo "  2. GitHub Actions builds new Docker images (~3 min)"
 echo "  3. Watchtower on this Pi detects new images (~5 min)"
 echo "  4. Watchtower auto-pulls and restarts containers"
-echo "  5. Dashboard is live at sharks.joelycannoli.com"
+echo "  5. Dashboard is live at dugout.joelycannoli.com"
 echo ""
 echo "Total deploy time: ~5-8 min after push. Fully automatic."
 echo ""
 echo "To check status:  docker ps"
-echo "To view logs:     docker logs -f sharks_api"
+echo "To view logs:     docker logs -f dugout_api"
 echo "Watchtower logs:  docker logs -f watchtower"

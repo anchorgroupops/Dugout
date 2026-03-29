@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from datetime import datetime
 from pathlib import Path
@@ -185,7 +186,7 @@ def _existing_game_sources() -> dict[tuple[str, str], tuple[Path, str]]:
 def sync_recent_games(
     team_id: str = "NuGgx6WvP7TO",
     season_slug: str = "2026-spring-sharks",
-    sharks_team_name: str = "Sharks",
+    sharks_team_name: str = os.getenv("TEAM_NAME", "Sharks"),
     max_games: int = 8,
     force: bool = False,
 ) -> dict:
@@ -291,7 +292,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Scrape GC mobile web box scores into data/sharks/games")
     parser.add_argument("--team-id", default="NuGgx6WvP7TO")
     parser.add_argument("--season-slug", default="2026-spring-sharks")
-    parser.add_argument("--sharks-name", default="Sharks")
+    parser.add_argument("--team-name", default=os.getenv("TEAM_NAME", "Sharks"))
     parser.add_argument("--max-games", type=int, default=8)
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args()
@@ -299,7 +300,7 @@ def main() -> int:
     result = sync_recent_games(
         team_id=args.team_id,
         season_slug=args.season_slug,
-        sharks_team_name=args.sharks_name,
+        sharks_team_name=args.team_name,
         max_games=args.max_games,
         force=args.force,
     )

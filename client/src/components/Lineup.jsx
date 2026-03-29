@@ -98,7 +98,7 @@ const Lineup = ({
     }
   };
 
-  /* Default availability: all core=true Sharks are available */
+  /* Default availability: all core=true roster players are available */
   const isAvailable = (player) => {
     if (!availability) return player.core !== false;
     const name = `${player.first || ''} ${player.last || ''}`.trim();

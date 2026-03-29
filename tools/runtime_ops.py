@@ -24,7 +24,7 @@ import requests
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_APIS_CSV = Path(r"H:\APIs.csv")
 LOCAL_BASE = "http://127.0.0.1:5001"
-PROD_BASE = "https://sharks.joelycannoli.com"
+PROD_BASE = os.getenv("OPCHECK_BASE_URL", "https://dugout.joelycannoli.com")
 DEFAULT_FALLBACK_VOICE_ID = "EXAVITQu4vr4xnSDxMaL"
 ENV_KEYS = (
     "PINECONE_API_KEY",

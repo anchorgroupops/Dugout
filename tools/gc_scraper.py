@@ -33,7 +33,7 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent / ".env")
 
 DATA_DIR = Path(__file__).parent.parent / "data"
-SHARKS_DIR = DATA_DIR / "sharks"
+TEAM_DIR = DATA_DIR / os.getenv("TEAM_SLUG", "sharks")
 OPPONENTS_DIR = DATA_DIR / "opponents"
 TMP_DIR = Path(__file__).parent.parent / ".tmp"
 
@@ -219,8 +219,8 @@ class GameChangerScraper:
         self.team_id = team_id or os.getenv("GC_TEAM_ID", GC_TEAM_ID)
         self.season_slug = season_slug or os.getenv("GC_SEASON_SLUG", GC_SEASON_SLUG)
         self.stats_url = f"{GC_BASE_URL}/teams/{self.team_id}/{self.season_slug}/season-stats"
-        self.out_dir = out_dir or SHARKS_DIR
-        self.roster_manifest_path = roster_manifest_path or (SHARKS_DIR / "roster_manifest.json")
+        self.out_dir = out_dir or TEAM_DIR
+        self.roster_manifest_path = roster_manifest_path or (TEAM_DIR / "roster_manifest.json")
         self.use_manifest = use_manifest
         self.browser = None
         self.context = None

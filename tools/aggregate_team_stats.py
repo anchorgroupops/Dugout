@@ -1,8 +1,9 @@
 """
 Aggregate multiple team.json files into a single merged roster.
-Intended for combining Sharks + borrowed players' home-team stats.
+Intended for combining team + borrowed players' home-team stats.
 """
 import json
+import os
 import re
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -10,10 +11,10 @@ from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT_DIR / "data"
-SHARKS_DIR = DATA_DIR / "sharks"
+TEAM_DIR = DATA_DIR / os.getenv("TEAM_SLUG", "sharks")
 TEAMS_DIR = DATA_DIR / "teams"
-MANIFEST_FILE = SHARKS_DIR / "teams_manifest.json"
-OUTPUT_FILE = SHARKS_DIR / "team_merged.json"
+MANIFEST_FILE = TEAM_DIR / "teams_manifest.json"
+OUTPUT_FILE = TEAM_DIR / "team_merged.json"
 
 BAT_COUNT_KEYS = {
     "gp", "pa", "ab", "h", "singles", "doubles", "triples", "hr",
@@ -173,8 +174,8 @@ def _load_manifest():
         "primary_team": {
             "id": "NuGgx6WvP7TO",
             "season_slug": "2026-spring-sharks",
-            "name": "The Sharks",
-            "data_path": str(SHARKS_DIR / "team.json"),
+            "name": os.getenv("TEAM_NAME", "The Sharks"),
+            "data_path": str(TEAM_DIR / "team.json"),
         },
         "extra_teams": []
     }
@@ -187,7 +188,7 @@ def _team_file_from_entry(entry: dict) -> Path:
     season_slug = entry.get("season_slug")
     if team_id and season_slug:
         return TEAMS_DIR / f"{team_id}_{season_slug}" / "team.json"
-    return SHARKS_DIR / "team.json"
+    return TEAM_DIR / "team.json"
 
 def main():
     manifest = _load_manifest()
@@ -226,7 +227,7 @@ def main():
             if norm:
                 allowed_names.add(norm)
 
-    roster_manifest = SHARKS_DIR / "roster_manifest.json"
+    roster_manifest = TEAM_DIR / "roster_manifest.json"
     if roster_manifest.exists():
         with open(roster_manifest, "r", encoding="utf-8") as f:
             manifest_data = json.load(f)

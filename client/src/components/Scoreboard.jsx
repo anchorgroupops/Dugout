@@ -86,7 +86,8 @@ const BatterRow = ({ player, idx, compact = false }) => {
 };
 
 
-const Scoreboard = ({ isMobile = false, isLandscape = false, team, schedule }) => {
+const Scoreboard = ({ isMobile = false, isLandscape = false, team, schedule, teamName: teamNameProp }) => {
+  const teamName = teamNameProp || team?.team_name || 'My Team';
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -229,7 +230,7 @@ const Scoreboard = ({ isMobile = false, isLandscape = false, team, schedule }) =
 
   // Live or Final game
   const isHome = (data.home_away || '').toLowerCase() === 'home';
-  const sharksWinning = (data.sharks_score ?? 0) > (data.opponent_score ?? 0);
+  const ourWinning = (data.sharks_score ?? 0) > (data.opponent_score ?? 0);
   const tied = (data.sharks_score ?? 0) === (data.opponent_score ?? 0);
 
   return (
@@ -247,9 +248,9 @@ const Scoreboard = ({ isMobile = false, isLandscape = false, team, schedule }) =
           }}>FINAL</span>
         )}
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          {data.gc_game_id && (
+          {data.gc_game_id && team?.gc_team_id && team?.gc_season_slug && (
             <a
-              href={`https://web.gc.com/teams/${team?.gc_team_id || 'NuGgx6WvP7TO'}/${team?.gc_season_slug || '2026-spring-sharks'}/schedule/${data.gc_game_id}/plays`}
+              href={`https://web.gc.com/teams/${team?.gc_team_id}/${team?.gc_season_slug}/schedule/${data.gc_game_id}/plays`}
               target="_blank"
               rel="noopener noreferrer"
               style={{
@@ -311,7 +312,7 @@ const Scoreboard = ({ isMobile = false, isLandscape = false, team, schedule }) =
           marginBottom: isLandscape ? '0.75rem' : '1.5rem',
         }}>
           <ScoreBox
-            label="Sharks"
+            label={teamName}
             score={data.sharks_score}
             isUs={true}
             compact={isLandscape}
@@ -348,14 +349,14 @@ const Scoreboard = ({ isMobile = false, isLandscape = false, team, schedule }) =
           <div style={{
             textAlign: 'center', padding: '0.75rem',
             borderRadius: '8px', marginBottom: '1rem',
-            background: sharksWinning ? 'rgba(46, 160, 67, 0.1)' : tied ? 'rgba(255,220,120,0.1)' : 'rgba(218, 54, 51, 0.1)',
-            border: `1px solid ${sharksWinning ? 'rgba(46, 160, 67, 0.3)' : tied ? 'rgba(255,220,120,0.3)' : 'rgba(218, 54, 51, 0.3)'}`,
+            background: ourWinning ? 'rgba(46, 160, 67, 0.1)' : tied ? 'rgba(255,220,120,0.1)' : 'rgba(218, 54, 51, 0.1)',
+            border: `1px solid ${ourWinning ? 'rgba(46, 160, 67, 0.3)' : tied ? 'rgba(255,220,120,0.3)' : 'rgba(218, 54, 51, 0.3)'}`,
           }}>
             <span style={{
               fontWeight: '800', fontSize: 'var(--text-lg)',
-              color: sharksWinning ? 'var(--success)' : tied ? 'rgba(255,220,120,0.85)' : 'var(--danger)',
+              color: ourWinning ? 'var(--success)' : tied ? 'rgba(255,220,120,0.85)' : 'var(--danger)',
             }}>
-              {sharksWinning ? 'VICTORY!' : tied ? 'TIE GAME' : 'DEFEAT'}
+              {ourWinning ? 'VICTORY!' : tied ? 'TIE GAME' : 'DEFEAT'}
             </span>
           </div>
         )}
@@ -388,7 +389,7 @@ const Scoreboard = ({ isMobile = false, isLandscape = false, team, schedule }) =
                       padding: '0.4rem 0.6rem', textAlign: 'left',
                       color: idx === 0 ? 'var(--primary-color)' : 'var(--text-main)',
                     }}>
-                      {team.name || (idx === 0 ? 'Sharks' : data.opponent)}
+                      {team.name || (idx === 0 ? teamName : data.opponent)}
                     </td>
                     {team.innings?.map((runs, i) => (
                       <td key={i} style={{ padding: '0.4rem 0.3rem', fontVariantNumeric: 'tabular-nums' }}>
@@ -415,7 +416,7 @@ const Scoreboard = ({ isMobile = false, isLandscape = false, team, schedule }) =
                 fontSize: isLandscape ? '0.7rem' : 'var(--text-sm)', fontWeight: '700', color: 'var(--primary-color)',
                 marginBottom: isLandscape ? '0.25rem' : '0.5rem', paddingBottom: '0.35rem',
                 borderBottom: '1px solid rgba(4, 101, 104, 0.3)',
-              }}>Sharks Batting</h3>
+              }}>{teamName} Batting</h3>
               <div style={{ display: 'flex', flexDirection: 'column', gap: isLandscape ? '1px' : '2px' }}>
                 {data.sharks_batting.map((p, i) => (
                   <BatterRow key={`s-${i}`} player={p} idx={i} compact={isLandscape} />

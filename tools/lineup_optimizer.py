@@ -6,6 +6,7 @@ Enforces mandatory play requirements (1 AB + 6 defensive outs per player).
 from __future__ import annotations
 
 import json
+import os
 import random
 from pathlib import Path
 
@@ -13,7 +14,7 @@ from logger import log_decision
 from stats_normalizer import normalize_player_batting, normalize_player_batting_advanced
 
 DATA_DIR = Path(__file__).parent.parent / "data"
-SHARKS_DIR = DATA_DIR / "sharks"
+TEAM_DIR = DATA_DIR / os.getenv("TEAM_SLUG", "sharks")
 
 
 # ── PCLL Mandatory Play Rules ────────────────────────────────────────────
@@ -497,11 +498,11 @@ def _build_lineup_rationale(results: dict) -> str:
 def run():
     """Load Sharks data and generate lineups."""
     # Prefer enriched file (app_stats applied) for most current stats
-    team_file = SHARKS_DIR / "team_enriched.json"
+    team_file = TEAM_DIR / "team_enriched.json"
     if not team_file.exists():
-        team_file = SHARKS_DIR / "team_merged.json"
+        team_file = TEAM_DIR / "team_merged.json"
     if not team_file.exists():
-        team_file = SHARKS_DIR / "team.json"
+        team_file = TEAM_DIR / "team.json"
     if not team_file.exists():
         print(f"[LINEUP] No team data found at {team_file}")
         print("[LINEUP] Run the GC scraper first to populate data.")
@@ -511,7 +512,7 @@ def run():
         team_data = json.load(f)
 
     # ── Availability Filter ────────────────────────────────────────────────
-    availability_file = SHARKS_DIR / "availability.json"
+    availability_file = TEAM_DIR / "availability.json"
     if availability_file.exists():
         with open(availability_file, "r") as f:
             availability = json.load(f)
@@ -540,7 +541,7 @@ def run():
     if results.get("recommended_strategy"):
         print(f"[LINEUP] Recommended strategy: {results['recommended_strategy']}")
 
-    output_file = SHARKS_DIR / "lineups.json"
+    output_file = TEAM_DIR / "lineups.json"
     with open(output_file, "w") as f:
         json.dump(results, f, indent=2)
     print(f"[LINEUP] Lineups saved to {output_file}")

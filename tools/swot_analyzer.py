@@ -6,6 +6,7 @@ Reads player stats from data/ and generates SWOT classifications.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -13,7 +14,7 @@ from logger import log_decision
 from stats_normalizer import normalize_batting_advanced_row, normalize_batting_row
 
 DATA_DIR = Path(__file__).parent.parent / "data"
-SHARKS_DIR = DATA_DIR / "sharks"
+TEAM_DIR = DATA_DIR / os.getenv("TEAM_SLUG", "sharks")
 OPPONENTS_DIR = DATA_DIR / "opponents"
 
 
@@ -485,11 +486,11 @@ def load_team(team_dir: Path, prefer_merged: bool = False) -> dict | None:
         return json.load(f)
 
 
-def run_sharks_analysis() -> dict | None:
-    """Run full SWOT analysis on The Sharks."""
-    team = load_team(SHARKS_DIR, prefer_merged=True)
+def run_team_analysis() -> dict | None:
+    """Run full SWOT analysis on the team."""
+    team = load_team(TEAM_DIR, prefer_merged=True)
     if not team:
-        print(f"[SWOT] No team data found at {SHARKS_DIR / 'team.json'}")
+        print(f"[SWOT] No team data found at {TEAM_DIR / 'team.json'}")
         print("[SWOT] Run the GC scraper first to populate data.")
         return None
 
@@ -498,7 +499,7 @@ def run_sharks_analysis() -> dict | None:
     print(f"[SWOT] Using full roster: {len(team.get('roster', []))} players.")
 
     result = analyze_team(team)
-    output_file = SHARKS_DIR / "swot_analysis.json"
+    output_file = TEAM_DIR / "swot_analysis.json"
     with open(output_file, "w") as f:
         json.dump(result, f, indent=2)
     print(f"[SWOT] Analysis saved to {output_file}")
@@ -948,7 +949,7 @@ if __name__ == "__main__":
             sys.exit(1)
         run_opponent_analysis(sys.argv[2])
     else:
-        result = run_sharks_analysis()
+        result = run_team_analysis()
         if result:
             print(f"\n=== TEAM SWOT: {result['team_name']} ===")
             for cat, items in result["team_swot"].items():

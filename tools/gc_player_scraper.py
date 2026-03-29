@@ -35,8 +35,8 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT_DIR / ".env")
 
 DATA_DIR = ROOT_DIR / "data"
-SHARKS_DIR = DATA_DIR / "sharks"
-PLAYERS_DIR = SHARKS_DIR / "players"
+TEAM_DIR = DATA_DIR / os.getenv("TEAM_SLUG", "sharks")
+PLAYERS_DIR = TEAM_DIR / "players"
 LOG_DIR = ROOT_DIR / "logs"
 
 GC_BASE = "https://web.gc.com"
@@ -123,7 +123,7 @@ class GCPlayerScraper:
         players: dict[str, dict] = {}  # uuid -> {uuid, name, number}
 
         # 1. team.json
-        team_file = SHARKS_DIR / "team.json"
+        team_file = TEAM_DIR / "team.json"
         if team_file.exists():
             try:
                 with open(team_file) as f:

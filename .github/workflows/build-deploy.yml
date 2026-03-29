@@ -35,8 +35,8 @@ jobs:
           platforms: linux/arm64,linux/amd64
           push: true
           tags: |
-            ghcr.io/${{ env.OWNER }}/sharks-dashboard:latest
-            ghcr.io/${{ env.OWNER }}/sharks-dashboard:${{ github.sha }}
+            ghcr.io/${{ env.OWNER }}/dugout-dashboard:latest
+            ghcr.io/${{ env.OWNER }}/dugout-dashboard:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -65,7 +65,7 @@ jobs:
           platforms: linux/arm64,linux/amd64
           push: true
           tags: |
-            ghcr.io/${{ env.OWNER }}/sharks-api:latest
-            ghcr.io/${{ env.OWNER }}/sharks-api:${{ github.sha }}
+            ghcr.io/${{ env.OWNER }}/dugout-api:latest
+            ghcr.io/${{ env.OWNER }}/dugout-api:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

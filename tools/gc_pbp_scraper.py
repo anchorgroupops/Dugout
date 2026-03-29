@@ -1,11 +1,12 @@
 import asyncio
 import json
+import os
 import re
 from pathlib import Path
 from playwright.async_api import async_playwright
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = ROOT_DIR / "data" / "sharks"
+DATA_DIR = ROOT_DIR / "data" / os.getenv("TEAM_SLUG", "sharks")
 AUTH_FILE = ROOT_DIR / "data" / "auth.json"
 
 def parse_plays_text(text_content):

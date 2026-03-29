@@ -1,5 +1,5 @@
 {
-  "appId": "com.sharks.softball",
-  "appName": "Sharks Dashboard",
+  "appId": "com.dugout.softball",
+  "appName": "Dugout",
   "webDir": "dist"
 }

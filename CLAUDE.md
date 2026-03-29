@@ -1,7 +1,7 @@
-# CLAUDE.md - Softball Project (The Sharks)
+# CLAUDE.md - Dugout (Softball Strategy Dashboard)
 
 ## Project Goal
-Deterministic softball analyzer and training aid for **The Sharks** (PCLL). Maximize win probability through GameChanger data scraping, SWOT analysis, and lineup optimization.
+**Dugout** is a team-agnostic, deterministic softball analyzer and training aid. It works for any team — configure yours via the `TEAM_NAME` env var (defaults to "The Sharks"). Maximize win probability through GameChanger data scraping, SWOT analysis, and lineup optimization.
 
 ## Architecture: A.N.T. (Architecture, Navigation, Tools)
 - **Architecture**: Logic governed by `gemini.md`.
@@ -25,3 +25,4 @@ Deterministic softball analyzer and training aid for **The Sharks** (PCLL). Maxi
 - **Read-Only GC**: Follow Playwright patterns for `web.gc.com` access.
 - **Deterministic**: All SWOT and lineup outcomes must be formula-driven.
 - **Mobile-First**: Frontend components must be responsive for dugout use.
+- **Team-Agnostic**: Use `TEAM_NAME` / `TEAM_SLUG` env vars instead of hardcoding team names.

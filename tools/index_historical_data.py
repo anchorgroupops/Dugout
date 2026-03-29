@@ -9,17 +9,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 from typing import Any, Dict, Iterable
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT_DIR / "data"
-SHARKS_DIR = DATA_DIR / "sharks"
+TEAM_DIR = DATA_DIR / os.getenv("TEAM_SLUG", "sharks")
 OPPONENTS_DIR = DATA_DIR / "opponents"
 
 
 def _iter_json_files() -> Iterable[Path]:
-    for base in (SHARKS_DIR, OPPONENTS_DIR):
+    for base in (TEAM_DIR, OPPONENTS_DIR):
         if not base.exists():
             continue
         for path in sorted(base.rglob("*.json")):
@@ -76,7 +77,7 @@ def run(index_name: str, namespace: str, batch_size: int, dry_run: bool = False)
 
 def main():
     parser = argparse.ArgumentParser(description="Index historical Sharks/opponent JSON data into Pinecone.")
-    parser.add_argument("--index", default="softball-sharks", help="Pinecone index name.")
+    parser.add_argument("--index", default="dugout", help="Pinecone index name.")
     parser.add_argument("--namespace", default="softball", help="Pinecone namespace.")
     parser.add_argument("--batch-size", type=int, default=16, help="Upsert batch size.")
     parser.add_argument("--dry-run", action="store_true", help="Discover docs without writing to Pinecone.")

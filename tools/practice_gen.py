@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -15,14 +16,14 @@ from pathlib import Path
 from typing import Any
 
 DATA_DIR = Path(__file__).parent.parent / "data"
-SHARKS_DIR = DATA_DIR / "sharks"
+TEAM_DIR = DATA_DIR / os.getenv("TEAM_SLUG", "sharks")
 ET_TZ = ZoneInfo("America/New_York")
 GAME_DURATION_HOURS = 2.5
 PRACTICE_DURATION_HOURS = 1.5
 PLANNING_COOLDOWN_HOURS = 1.0
 PRACTICE_REFRESH_LEAD_HOURS = 1.0
-PLAN_FILE = SHARKS_DIR / "next_practice.txt"
-PLAN_META_FILE = SHARKS_DIR / "next_practice_meta.json"
+PLAN_FILE = TEAM_DIR / "next_practice.txt"
+PLAN_META_FILE = TEAM_DIR / "next_practice_meta.json"
 
 
 # ── Drill Library ─────────────────────────────────────────────────────────
@@ -493,7 +494,7 @@ def _extract_time_hint(raw_event: dict[str, Any]) -> str:
 
 
 def _load_practice_events(now: datetime) -> list[dict[str, Any]]:
-    rsvp_file = SHARKS_DIR / "practice_rsvp.json"
+    rsvp_file = TEAM_DIR / "practice_rsvp.json"
     data = _load_json(rsvp_file, {})
     if not isinstance(data, dict):
         return []
@@ -541,7 +542,7 @@ def _clean_opponent_name(name: str) -> str:
 
 
 def _load_game_events(now: datetime) -> list[dict[str, Any]]:
-    schedule = _load_json(SHARKS_DIR / "schedule_manual.json", {})
+    schedule = _load_json(TEAM_DIR / "schedule_manual.json", {})
     if not isinstance(schedule, dict):
         return []
     rows = []
@@ -606,15 +607,15 @@ def _compute_windows(now: datetime) -> dict[str, Any]:
 
 def _snapshot_source_files() -> dict[str, dict[str, Any]]:
     candidates = [
-        SHARKS_DIR / "swot_analysis.json",
-        SHARKS_DIR / "team_enriched.json",
-        SHARKS_DIR / "team_merged.json",
-        SHARKS_DIR / "team.json",
-        SHARKS_DIR / "app_stats.json",
-        SHARKS_DIR / "availability.json",
-        SHARKS_DIR / "practice_rsvp.json",
-        SHARKS_DIR / "schedule_manual.json",
-        SHARKS_DIR / "opponent_discovery.json",
+        TEAM_DIR / "swot_analysis.json",
+        TEAM_DIR / "team_enriched.json",
+        TEAM_DIR / "team_merged.json",
+        TEAM_DIR / "team.json",
+        TEAM_DIR / "app_stats.json",
+        TEAM_DIR / "availability.json",
+        TEAM_DIR / "practice_rsvp.json",
+        TEAM_DIR / "schedule_manual.json",
+        TEAM_DIR / "opponent_discovery.json",
     ]
 
     snapshot: dict[str, dict[str, Any]] = {}
@@ -642,7 +643,7 @@ def _load_plan_meta() -> dict[str, Any]:
 
 
 def _save_plan_meta(meta: dict[str, Any]) -> None:
-    SHARKS_DIR.mkdir(parents=True, exist_ok=True)
+    TEAM_DIR.mkdir(parents=True, exist_ok=True)
     with open(PLAN_META_FILE, "w", encoding="utf-8") as f:
         json.dump(meta, f, indent=2)
 
@@ -658,7 +659,7 @@ def _write_plan(swot: dict[str, Any], windows: dict[str, Any], matchup: dict | N
 
 def _resolve_next_opponent_matchup() -> dict | None:
     """Load matchup data for the next upcoming opponent, if available."""
-    schedule = _load_json(SHARKS_DIR / "schedule_manual.json", {})
+    schedule = _load_json(TEAM_DIR / "schedule_manual.json", {})
     if not isinstance(schedule, dict):
         return None
     now = datetime.now(ET_TZ)
@@ -678,7 +679,7 @@ def _resolve_next_opponent_matchup() -> dict | None:
                 if matchup_file.exists():
                     try:
                         from swot_analyzer import analyze_matchup, load_team
-                        our_team = load_team(SHARKS_DIR, prefer_merged=True)
+                        our_team = load_team(TEAM_DIR, prefer_merged=True)
                         with open(matchup_file, "r", encoding="utf-8") as f:
                             opp_team = json.load(f)
                         if our_team:
@@ -694,7 +695,7 @@ def _resolve_next_opponent_matchup() -> dict | None:
 
 def _resolve_opponent_slug(opponent_name: str) -> str | None:
     """Map a schedule opponent name to a data/opponents/ directory slug."""
-    discovery = _load_json(SHARKS_DIR / "opponent_discovery.json", {})
+    discovery = _load_json(TEAM_DIR / "opponent_discovery.json", {})
     if isinstance(discovery, dict):
         for team in discovery.get("teams", []):
             if not isinstance(team, dict):
@@ -719,7 +720,7 @@ def run_scheduled(force: bool = False) -> dict[str, Any]:
     1) wait 1h after completed game/practice to begin planning
     2) refresh 1h before next practice only when new inputs exist."""
     now = datetime.now(ET_TZ)
-    swot_file = SHARKS_DIR / "swot_analysis.json"
+    swot_file = TEAM_DIR / "swot_analysis.json"
     if not swot_file.exists():
         return {"status": "skipped", "reason": "missing_swot"}
 
@@ -809,7 +810,7 @@ def run_scheduled(force: bool = False) -> dict[str, Any]:
 
 def run() -> str | None:
     """Manual plan generation (immediate)."""
-    swot_file = SHARKS_DIR / "swot_analysis.json"
+    swot_file = TEAM_DIR / "swot_analysis.json"
     if not swot_file.exists():
         print("[PRACTICE] No SWOT analysis found. Run swot_analyzer.py first.")
         return None
