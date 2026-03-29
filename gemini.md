@@ -2,7 +2,7 @@
 
 ## The North Star
 
-Use GameChanger statistics to build a comprehensive softball analyzer and training aid for **The Sharks** (PCLL). Perform SWOT analysis per player and team, optimize batting orders, develop targeted training regimens, and maximize improvement and win probability.
+Use GameChanger statistics to build a comprehensive softball analyzer and training aid for **the configured team** (PCLL). Perform SWOT analysis per player and team, optimize batting orders, develop targeted training regimens, and maximize improvement and win probability.
 
 ## B.L.A.S.T. Strategy (Blueprint, Link, Architect, Stylize, Trigger)
 
@@ -91,14 +91,14 @@ Use GameChanger statistics to build a comprehensive softball analyzer and traini
 
 1. **GameChanger (gc.com)**: Primary data source. Browser automation via Playwright to scrape stats from `web.gc.com`.
 2. **Google Docs**: Practice plans are maintained in a shared Google Doc. New practices should be appended.
-3. **NotebookLM**: All scraped GC data pushed here, categorized by team (Sharks vs opponents).
+3. **NotebookLM**: All scraped GC data pushed here, categorized by team (your team vs opponents).
 4. **Web App**: Simple frontend for viewing SWOT analysis, lineup recommendations, and training plans.
 
 ## Behavioral Rules
 
 1. **🚨 READ-ONLY on gc.com**: NEVER modify, delete, or write any data on GameChanger. All access is strictly read-only (scraping/exporting). Any write action requires EXPLICIT Q&A approval from the user — a button click is NOT sufficient.
 2. **PCLL Compliance**: Must respect Palm Coast Little League rules (mandatory play, pitching, batting order).
-3. **Data Separation**: Sharks data and opponent data must NEVER be mixed in storage or NotebookLM.
+3. **Data Separation**: Your team's data and opponent data must NEVER be mixed in storage or NotebookLM.
 4. **Regular Updates**: System should check GC for new game data on a schedule (post-game).
 5. **Real-Time During Games**: Compile and analyze data during and immediately after games.
 6. **Deterministic Analysis**: SWOT analysis and lineup recommendations must be formula-driven, not guessed.
@@ -124,7 +124,7 @@ h:/Repos/Personal/Softball/
 │   └── practice_gen.py    # Training plan generator
 ├── client/                # Web app (Vite)
 ├── data/                  # Exported/scraped data (JSON/CSV)
-│   ├── sharks/            # Our team data
+│   ├── team/              # Our team data
 │   └── opponents/         # Opponent data
 └── .tmp/                  # Intermediates
 ```

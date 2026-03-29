@@ -1,6 +1,6 @@
-# Sharks Softball Dashboard - iOS Launch SOP
+# Dugout Softball Dashboard - iOS Launch SOP
 
-This document describes how to launch the Sharks Softball Dashboard as an iOS application.
+This document describes how to launch the Dugout Softball Dashboard as an iOS application.
 
 ## 🚀 Option 1: The Immediate Launch (PWA)
 
@@ -24,7 +24,7 @@ npm run dev
     - Tap the **Share** button (Square with Up Arrow) in Safari.
     - Scroll down to find and tap **"Add to Home Screen"**.
     - Tap **Add** in the top right corner.
-    - The "Sharks" icon will now appear on your home screen. When launched, it will open in **standalone mode** (no browser address bar).
+    - The "Dugout" icon will now appear on your home screen. When launched, it will open in **standalone mode** (no browser address bar).
 
 ## 🛠️ Option 2: Production Launch (Standalone Deployment)
 
@@ -40,7 +40,7 @@ Once you are ready for everyone to use it, you can deploy it to a public URL.
 3. **Public URL**: You will receive a `tailscale.net` URL that works from anywhere.
 
 ### 🏠 Method B: Raspberry Pi (On-Premise)
-Deploy to the Sharks' dedicated server (`dori-pi`):
+Deploy to the dedicated server (`dori-pi`):
 1. **Sync Assets**: Ensure the project is synced via Syncthing.
 2. **Launch Docker**:
    ```bash
@@ -81,4 +81,4 @@ The app uses the following icons from your `public/` folder:
 
 - `pwa-192x192.png`: Main app icon and `apple-touch-icon`.
 - `pwa-512x512.png`: High-resolution assets.
-- `sharks-logo-round.png`: Web favicon.
+- `dugout-logo-round.png`: Web favicon.

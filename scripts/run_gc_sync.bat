@@ -1,7 +1,7 @@
 @echo off
-:: Sharks GC App Auto-Sync
+:: Dugout GC App Auto-Sync
 :: Requires BlueStacks to be running with emulator-5554 connected.
-:: Scrapes schedule, Sharks stats, and opponent stats from GC app.
+:: Scrapes schedule, team stats, and opponent stats from GC app.
 
 set REPO=H:\Repos\Personal\Softball
 set LOG=%REPO%\logs\gc_sync_task.log

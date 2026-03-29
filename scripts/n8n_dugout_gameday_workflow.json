@@ -1,5 +1,5 @@
 {
-  "name": "🦈 Sharks - Game Day Briefing",
+  "name": "⚾ Dugout - Game Day Briefing",
   "nodes": [
     {
       "parameters": {
@@ -96,7 +96,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const game = $('Check Game Timing').first().json;\nconst team = $input.first().json;\n\nconst roster = team.roster || [];\nconst topBatters = [...roster]\n  .filter(p => (p.batting?.pa || 0) > 0)\n  .sort((a, b) => (b.batting?.ops || 0) - (a.batting?.ops || 0))\n  .slice(0, 3)\n  .map(p => `#${p.number} ${(p.first||'')+' '+(p.last||'')} — OPS: ${p.batting?.ops || '—'}`);\n\nconst ha = game.home_away === 'home' ? 'HOME' : 'AWAY';\nconst msg = [\n  `🦈 SHARKS GAME DAY — ${ha}`,\n  ``,\n  `vs. ${game.opponent}`,\n  `📅 ${game.date}  🕐 ${game.time || 'TBD'}`,\n  ``,\n  `⚡ Top Hitters:`,\n  ...topBatters.map(b => `  ${b}`),\n  ``,\n  `📊 Dashboard: https://dugout.joelycannoli.com`,\n  ``,\n  `⏰ ${game.hoursUntil}h until game time`,\n].join('\\n');\n\nreturn [{ json: { message: msg, game } }];\n"
+        "jsCode": "const game = $('Check Game Timing').first().json;\nconst team = $input.first().json;\n\nconst roster = team.roster || [];\nconst topBatters = [...roster]\n  .filter(p => (p.batting?.pa || 0) > 0)\n  .sort((a, b) => (b.batting?.ops || 0) - (a.batting?.ops || 0))\n  .slice(0, 3)\n  .map(p => `#${p.number} ${(p.first||'')+' '+(p.last||'')} — OPS: ${p.batting?.ops || '—'}`);\n\nconst ha = game.home_away === 'home' ? 'HOME' : 'AWAY';\nconst msg = [\n  `⚾ GAME DAY — ${ha}`,\n  ``,\n  `vs. ${game.opponent}`,\n  `📅 ${game.date}  🕐 ${game.time || 'TBD'}`,\n  ``,\n  `⚡ Top Hitters:`,\n  ...topBatters.map(b => `  ${b}`),\n  ``,\n  `📊 Dashboard: https://dugout.joelycannoli.com`,\n  ``,\n  `⏰ ${game.hoursUntil}h until game time`,\n].join('\\n');\n\nreturn [{ json: { message: msg, game } }];\n"
       },
       "id": "build-message",
       "name": "Build Briefing",
@@ -110,7 +110,7 @@
     {
       "parameters": {
         "sendTo": "joelycannoli@gmail.com",
-        "subject": "=🦈 Game Day — Sharks vs. {{ $json.game.opponent }}",
+        "subject": "=⚾ Game Day vs. {{ $json.game.opponent }}",
         "message": "={{ $json.message }}",
         "options": {}
       },
@@ -208,7 +208,7 @@
   "versionId": "1",
   "tags": [
     {
-      "name": "sharks"
+      "name": "dugout"
     }
   ]
 }
