@@ -4,7 +4,7 @@ Parse GC mobile app scorebook PDFs into per-game JSON files.
 Each PDF has 2 pages (away team, home team). We extract per-player
 batting stats by reading at-bat outcome codes from the scorebook grid.
 
-Outputs: data/sharks/games/<date>_<opponent_slug>.json
+Outputs: data/<team_slug>/games/<date>_<opponent_slug>.json
 """
 import json
 import re
@@ -235,7 +235,7 @@ def parse_pdf(pdf_path: Path) -> dict | None:
         game_date = game_date_from_pdf
 
     if sharks_page is None:
-        print(f"[PDF] ⚠ Could not find Sharks page in {pdf_path.name}")
+        print(f"[PDF] ⚠ Could not find our team page in {pdf_path.name}")
         return None
 
     sharks_players = _parse_players_from_page(sharks_page)
@@ -294,7 +294,7 @@ def run(scorebooks_dir: Path = SCOREBOOKS_DIR, games_dir: Path = GAMES_DIR):
         with open(out_path, "w") as f:
             json.dump(game, f, indent=2)
         print(f"[PDF] Saved {out_path.name} "
-              f"({len(game['sharks_batting'])} Sharks players, "
+              f"({len(game['sharks_batting'])} team players, "
               f"{game['sharks_totals']['h']}H/{game['sharks_totals']['ab']}AB)")
         results.append(game)
 

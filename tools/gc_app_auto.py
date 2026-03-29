@@ -1,7 +1,7 @@
 """
 GameChanger App Auto-Scraper
 Connects to BlueStacks emulator via uiautomator2, extracts stats and schedule,
-writes structured JSON to data/sharks/.
+writes structured JSON to data/<team_slug>/.
 
 Usage:
   python gc_app_auto.py             # full scrape (stats + schedule)
@@ -124,7 +124,7 @@ def _slug_for_opponent(name: str) -> str:
 
 
 def _navigate_to_sharks_team(d):
-    """From anywhere in the app, navigate to the Sharks team page."""
+    """From anywhere in the app, navigate to the configured team page."""
     # If we're already on the team page Schedule/Stats tabs are visible
     if _click_first_visible_text(d, ["Schedule", "Events"], timeout_sec=1.0):
         return
@@ -133,12 +133,12 @@ def _navigate_to_sharks_team(d):
     time.sleep(2)
     d.app_start("com.gc.teammanager")
     time.sleep(7)
-    # Tap the Sharks team entry
+    # Tap the team entry
     if d(text="Sharks", packageName="com.gc.teammanager").exists(timeout=5):
         d(text="Sharks", packageName="com.gc.teammanager").click()
         time.sleep(4)
     else:
-        # Fallback: tap first visible "Sharks" anywhere
+        # Fallback: tap first visible team name anywhere
         if not _click_first_visible_text(d, ["Sharks"], timeout_sec=5.0):
             raise RuntimeError("Could not open Sharks team page in GC app.")
         time.sleep(4)
@@ -456,7 +456,7 @@ def scrape_stats(d):
 # ---------------------------------------------------------------------------
 def _navigate_to_opponent_from_schedule(d, opponent_keyword: str) -> bool:
     """
-    From the Sharks Schedule tab, find the first upcoming game vs opponent_keyword,
+    From the team Schedule tab, find the first upcoming game vs opponent_keyword,
     tap it to open the game detail, then tap the opponent team name to open their page.
     Returns True if successfully landed on the opponent team page (Stats tab visible).
     """
@@ -486,14 +486,14 @@ def _navigate_to_opponent_from_schedule(d, opponent_keyword: str) -> bool:
         return False
 
     # Now on game detail page — look for the opponent team name as a short, tappable link.
-    # Avoid re-tapping the full schedule entry (which contains "Sharks @" or "vs.").
+    # Avoid re-tapping the full schedule entry (which contains "Team @" or "vs.").
     # GC shows each team as a separate tappable row on the game detail page.
     time.sleep(2)
     texts_after = gc_texts(d)
     print(f"  [Opponent] Game detail texts: {texts_after[:20]}")
 
     tapped = False
-    # First pass: prefer a short string that has the keyword but NOT "Sharks" or "@ " or "vs."
+    # First pass: prefer a short string that has the keyword but NOT our team name or "@ " or "vs."
     for t in texts_after:
         tl = t.lower()
         if (opponent_keyword.lower() in tl
@@ -603,7 +603,7 @@ def scrape_all_opponents(d) -> dict:
                 save_opponent_stats(data)
         except Exception as e:
             print(f"  [Opponent] Error scraping '{opp_name}': {e}")
-        # Always return to Sharks team page before next opponent
+        # Always return to team page before next opponent
         _navigate_to_sharks_team(d)
         time.sleep(2)
 
