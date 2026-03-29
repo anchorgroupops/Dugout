@@ -7,7 +7,7 @@ Reads the comprehensive 200-column GC CSV export and produces:
   3. data/<team_slug>/season_stats.csv — copy of the source CSV
 
 Usage:
-    python tools/gc_csv_ingest.py --csv-path "Scorebooks/Other docs/Sharks Spring 2026 Stats (4).csv"
+    python tools/gc_csv_ingest.py --csv-path "path/to/season_stats_export.csv"
 """
 
 from __future__ import annotations

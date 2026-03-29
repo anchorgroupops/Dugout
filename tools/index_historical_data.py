@@ -76,7 +76,7 @@ def run(index_name: str, namespace: str, batch_size: int, dry_run: bool = False)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Index historical Sharks/opponent JSON data into Pinecone.")
+    parser = argparse.ArgumentParser(description="Index historical team/opponent JSON data into Pinecone.")
     parser.add_argument("--index", default="dugout", help="Pinecone index name.")
     parser.add_argument("--namespace", default="softball", help="Pinecone namespace.")
     parser.add_argument("--batch-size", type=int, default=16, help="Upsert batch size.")
