@@ -1,5 +1,5 @@
 """
-Index all Sharks + opponent JSON artifacts into Pinecone via MemoryEngine.
+Index all team + opponent JSON artifacts into Pinecone via MemoryEngine.
 
 Usage:
   python tools/index_historical_data.py

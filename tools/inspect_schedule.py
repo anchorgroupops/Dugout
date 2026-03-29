@@ -18,7 +18,7 @@ def inspect_schedule_api():
         
         # We need to go to the team page, then click Schedule.
         # But wait, without knowing the direct URL, we click.
-        # However, we know the team name is "The Sharks"
+        # Navigate to the configured team page
         
         def handle_response(response):
             if "api" in response.url and response.status == 200:

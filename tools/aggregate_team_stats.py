@@ -1,6 +1,6 @@
 """
 Aggregate multiple team.json files into a single merged roster.
-Intended for combining team + borrowed players' home-team stats.
+Intended for combining the configured team + borrowed players' home-team stats.
 """
 import json
 import os

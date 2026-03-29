@@ -1,5 +1,5 @@
 """
-Manage Sharks Roster Availability
+Manage Roster Availability
 CLI tool to toggle player availability for the next game.
 """
 import json

@@ -1,5 +1,5 @@
 """
-Persistent running stats database for Sharks.
+Persistent running stats database for Dugout.
 Stores time-series snapshots each sync cycle for auditing and trend analysis.
 """
 

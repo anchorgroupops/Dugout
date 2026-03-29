@@ -255,7 +255,7 @@ def generate_lineup(
     team_data: dict,
     strategy: str = "balanced",
 ) -> dict:
-    """Generate an optimized batting lineup for The Sharks."""
+    """Generate an optimized batting lineup for the configured team."""
     roster = team_data.get("roster", team_data.get("players", []))
     if not roster:
         return {"strategy": strategy, "lineup": [], "violations": ["No roster data found"], "compliant": False}
@@ -496,7 +496,7 @@ def _build_lineup_rationale(results: dict) -> str:
 
 
 def run():
-    """Load Sharks data and generate lineups."""
+    """Load team data and generate lineups."""
     # Prefer enriched file (app_stats applied) for most current stats
     team_file = TEAM_DIR / "team_enriched.json"
     if not team_file.exists():
