@@ -1,8 +1,8 @@
 ---
-description: Full Quality Control audit loop for the Sharks Dashboard project
+description: Full Quality Control audit loop for the Dugout Dashboard project
 ---
 
-# QC Loop — Sharks Dashboard
+# QC Loop — Dugout Dashboard
 
 // turbo-all
 
@@ -44,7 +44,7 @@ Open `https://dugout.joelycannoli.com/` in the browser and verify:
 
 ## 5. Docker / Deployment Audit
 Review:
-- `docker-compose.sharks.yml` — Security, healthchecks, network isolation
+- `docker-compose.dugout.yml` — Security, healthchecks, network isolation
 - `client/Dockerfile` — Build stages, layer caching
 - `client/nginx.conf` — Proxy rules, caching headers, security headers
 - `.github/workflows/deploy.yml` — CI/CD pipeline correctness

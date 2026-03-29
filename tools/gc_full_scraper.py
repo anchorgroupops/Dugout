@@ -1,11 +1,11 @@
 """
-gc_full_scraper.py — Comprehensive GameChanger stats scraper for The Sharks.
+gc_full_scraper.py — Comprehensive GameChanger stats scraper for Dugout.
 
 Strategy: Navigate the GC React SPA, click through all stat tabs (Batting/Pitching/Fielding
 with Standard/Advanced/Breakdown/Catching/Innings sub-tabs), and extract every stats table
 for both teams on each game-stats page.
 
-Also scrapes the season-level team stats page and saves to data/sharks/team_web.json.
+Also scrapes the season-level team stats page and saves to data/<team_slug>/team_web.json.
 
 REQUIRES: pip install playwright && playwright install chromium
 REQUIRES: GC_EMAIL, GC_PASSWORD, GC_TEAM_ID, GC_SEASON_SLUG in .env
@@ -737,7 +737,7 @@ class GCFullScraper:
             "opponent_stats": {},
         }
 
-        # Scrape for Sharks first, then toggle to opponent
+        # Scrape for our team first, then toggle to opponent
         for team_key in ("sharks", "opponent_stats"):
             _log(f"  Scraping stats for: {team_key}")
 
@@ -801,7 +801,7 @@ class GCFullScraper:
     def _toggle_to_opponent(self, opponent_name: str) -> bool:
         """Attempt to switch the game-stats view to the opponent team.
 
-        GC game-stats pages show two team tabs at the top.  The Sharks tab
+        GC game-stats pages show two team tabs at the top.  Our team tab
         is active by default; we need to click the other one.  Four
         strategies are tried in order so that any structural change on the
         GC side is more likely to be caught by one of them.
