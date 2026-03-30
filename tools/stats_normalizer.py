@@ -504,3 +504,118 @@ def count_populated_fields(rows: list[dict], fields: list[str], normalizer: Call
             elif val not in (None, "", "-", "—"):
                 counts[field] += 1
     return counts
+
+
+# ===== PITCHING BREAKDOWN & FULL ADVANCED CANONICAL FIELDS =====
+
+CANONICAL_PITCHING_BRK_FIELDS = [
+    "np", "fb", "fbs", "fbs_pct", "fbsm_pct", "fbsw_pct",
+    "ch", "chs", "chs_pct", "chsm_pct", "chsw_pct",
+    "cb", "cbs", "cbs_pct", "cbsm_pct", "cbsw_pct",
+    "sc", "scs", "scs_pct", "scsm_pct", "scsw_pct",
+    "rb", "rbs", "rbs_pct", "rbsm_pct", "rbsw_pct",
+    "db", "dbs", "dbs_pct", "dbsm_pct", "dbsw_pct",
+    "dc", "dcs", "dcs_pct", "dcsm_pct", "dcsw_pct",
+    "kb", "kbs", "kbs_pct", "kbsm_pct", "kbsw_pct",
+    "kc", "kcs", "kcs_pct", "kcsm_pct", "kcsw_pct",
+    "os_pitch", "oss", "oss_pct", "ossm_pct", "ossw_pct",
+    "mph_fb", "mph_ch", "mph_cb", "mph_sc", "mph_rb",
+    "mph_db", "mph_dc", "mph_kb", "mph_kc",
+]
+
+CANONICAL_PITCHING_ADV_FULL_FIELDS = [
+    "ip", "s_pct", "p_ip", "p_bf", "fps_pct", "fpsw_pct", "fpso_pct", "fpsh_pct",
+    "lt3_pct", "lt13", "loo", "first_2out", "one23_inn", "zero_bb_inn",
+    "fip", "k_bf", "k_bb", "bb_inn", "ba_risp", "babip",
+    "ld_pct", "gb_pct", "fb_pct", "hhb_pct", "weak_pct",
+    "go_ao", "p_hr", "sm_pct", "bbs", "lobbs", "lobb",
+]
+
+
+def normalize_pitching_breakdown_row(row: dict) -> dict:
+    """Normalize pitching breakdown (pitch arsenal) data from GC scraper output."""
+    src = row or {}
+    if isinstance(src.get("pitching_breakdown"), dict):
+        src = src["pitching_breakdown"]
+
+    def _pitch_block(prefix):
+        """Extract a pitch type block (e.g., fb, ch, cb)."""
+        count = safe_int(_pick(src, prefix))
+        strikes = safe_int(_pick(src, f"{prefix}s"))
+        s_pct = safe_pct_ratio(_pick(src, f"{prefix}s_pct"))
+        sm_pct = safe_pct_ratio(_pick(src, f"{prefix}sm_pct"))
+        sw_pct = safe_pct_ratio(_pick(src, f"{prefix}sw_pct"))
+        mph = safe_float(_pick(src, f"mph_{prefix}"), None)
+        return {
+            prefix: count if count else None,
+            f"{prefix}s": strikes if strikes else None,
+            f"{prefix}s_pct": round(s_pct, 4) if s_pct else None,
+            f"{prefix}sm_pct": round(sm_pct, 4) if sm_pct else None,
+            f"{prefix}sw_pct": round(sw_pct, 4) if sw_pct else None,
+            f"mph_{prefix}": round(mph, 1) if mph else None,
+        }
+
+    result = {"np": safe_int(_pick(src, "np"))}
+
+    # All pitch types
+    for pitch in ["fb", "ch", "cb", "sc", "rb", "db", "dc", "kb", "kc"]:
+        block = _pitch_block(pitch)
+        result.update(block)
+
+    # Off-speed (special prefix: os_pitch)
+    os_count = safe_int(_pick(src, "os_pitch", "os"))
+    result["os_pitch"] = os_count if os_count else None
+    result["oss"] = safe_int(_pick(src, "oss")) or None
+    result["oss_pct"] = round(safe_pct_ratio(_pick(src, "oss_pct")), 4) or None
+    result["ossm_pct"] = round(safe_pct_ratio(_pick(src, "ossm_pct")), 4) or None
+    result["ossw_pct"] = round(safe_pct_ratio(_pick(src, "ossw_pct")), 4) or None
+
+    return result
+
+
+def normalize_pitching_advanced_full_row(row: dict) -> dict:
+    """Normalize the FULL pitching advanced row (all GC fields, not just the subset)."""
+    src = row or {}
+    if isinstance(src.get("pitching_advanced"), dict):
+        src = src["pitching_advanced"]
+    elif isinstance(src.get("pitching"), dict):
+        pitching = src["pitching"]
+        adv_keys = {"s_pct", "p_ip", "p_bf", "fps_pct", "fip", "k_bf", "k_bb"}
+        if any(k in pitching for k in adv_keys):
+            src = pitching
+
+    ip = innings_to_float(_pick(src, "ip"))
+
+    return {
+        "ip": round(ip, 2),
+        "s_pct": round(safe_pct_ratio(_pick(src, "s_pct")), 4),
+        "p_ip": round(safe_float(_pick(src, "p_ip")), 1),
+        "p_bf": round(safe_float(_pick(src, "p_bf")), 1),
+        "fps_pct": round(safe_pct_ratio(_pick(src, "fps_pct")), 4),
+        "fpsw_pct": round(safe_pct_ratio(_pick(src, "fpsw_pct")), 4),
+        "fpso_pct": round(safe_pct_ratio(_pick(src, "fpso_pct")), 4),
+        "fpsh_pct": round(safe_pct_ratio(_pick(src, "fpsh_pct")), 4),
+        "lt3_pct": round(safe_pct_ratio(_pick(src, "lt3_pct")), 4),
+        "lt13": safe_int(_pick(src, "lt13")),
+        "loo": safe_int(_pick(src, "loo")),
+        "first_2out": safe_int(_pick(src, "first_2out")),
+        "one23_inn": safe_int(_pick(src, "one23_inn")),
+        "zero_bb_inn": safe_int(_pick(src, "zero_bb_inn")),
+        "fip": round(safe_float(_pick(src, "fip")), 2),
+        "k_bf": round(safe_float(_pick(src, "k_bf")), 3),
+        "k_bb": round(safe_float(_pick(src, "k_bb")), 2),
+        "bb_inn": round(safe_float(_pick(src, "bb_inn")), 2),
+        "ba_risp": round(safe_float(_pick(src, "ba_risp")), 3),
+        "babip": round(safe_float(_pick(src, "babip")), 3),
+        "ld_pct": round(safe_pct_ratio(_pick(src, "ld_pct")), 4),
+        "gb_pct": round(safe_pct_ratio(_pick(src, "gb_pct")), 4),
+        "fb_pct": round(safe_pct_ratio(_pick(src, "fb_pct")), 4),
+        "hhb_pct": round(safe_pct_ratio(_pick(src, "hhb_pct")), 4),
+        "weak_pct": round(safe_pct_ratio(_pick(src, "weak_pct")), 4),
+        "go_ao": round(safe_float(_pick(src, "go_ao")), 2),
+        "p_hr": round(safe_float(_pick(src, "p_hr")), 1),
+        "sm_pct": round(safe_pct_ratio(_pick(src, "sm_pct")), 4),
+        "bbs": safe_int(_pick(src, "bbs")),
+        "lobbs": safe_int(_pick(src, "lobbs")),
+        "lobb": safe_int(_pick(src, "lobb")),
+    }
