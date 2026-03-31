@@ -1,11 +1,17 @@
+import os
 import requests
 import json
 import sys
 
-# Cloudflare Configuration
-CLOUDFLARE_EMAIL = "REDACTED_EMAIL"
-# The user provided this key in the latest message
-CLOUDFLARE_API_KEY = "CLOUDFLARE_KEY_REMOVED"
+# Cloudflare Configuration — credentials from environment variables
+CLOUDFLARE_EMAIL = os.getenv("CLOUDFLARE_EMAIL", "").strip()
+CLOUDFLARE_API_KEY = os.getenv("CLOUDFLARE_API_KEY", "").strip()
+
+if not CLOUDFLARE_EMAIL or not CLOUDFLARE_API_KEY:
+    print("ERROR: Set CLOUDFLARE_EMAIL and CLOUDFLARE_API_KEY environment variables.")
+    print("  export CLOUDFLARE_EMAIL=your@email.com")
+    print("  export CLOUDFLARE_API_KEY=your_api_key")
+    sys.exit(1)
 
 BASE_URL = "https://api.cloudflare.com/client/v4"
 
