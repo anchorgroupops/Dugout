@@ -321,7 +321,7 @@ def analyze_player(player: dict) -> dict:
         if adv.get("bb_per_k", 0) > 0 and adv.get("bb_per_k", 0) <= 0.25:
             weaknesses.append(f"Plate-discipline risk (BB/K: {round(adv['bb_per_k'], 3)})")
 
-    raw_ip = _innings_to_float(player.get("stats", {}).get("pitching", {}).get("ip", player.get("pitching", {}).get("ip", 0.0)))
+    raw_ip = _innings_to_float((player.get("stats") or {}).get("pitching", {}).get("ip", (player.get("pitching") or {}).get("ip", 0.0)))
     p_s, p_w = classify_pitching(derived, raw_ip=raw_ip)
     strengths.extend(p_s)
     weaknesses.extend(p_w)
@@ -546,7 +546,7 @@ def _team_aggregates(team_data: dict) -> dict:
 
     if ab == 0 and roster:
         for p in roster:
-            batting = p.get("batting", {})
+            batting = p.get("batting") or {}
             ab += _parse_number(batting.get("ab", 0))
             h += _parse_number(batting.get("h", 0))
             bb += _parse_number(batting.get("bb", 0))
@@ -621,7 +621,7 @@ def _team_aggregates(team_data: dict) -> dict:
         weighted_gb += gb_val * wt
 
     for p in roster:
-        batting = p.get("batting", {})
+        batting = p.get("batting") or {}
         pa_hint = _parse_number(batting.get("pa", 0))
         if pa_hint <= 0:
             pa_hint = _parse_number(batting.get("ab", 0)) + _parse_number(batting.get("bb", 0)) + _parse_number(batting.get("hbp", 0))
