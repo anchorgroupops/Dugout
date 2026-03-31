@@ -7,6 +7,7 @@ data/
 *.db
 .DS_Store
 credentials/
+auth.json
 *.key
 dist/
 tools/frida-server

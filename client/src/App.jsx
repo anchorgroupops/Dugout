@@ -404,6 +404,7 @@ function App() {
                 className="mobile-action-btn"
                 onClick={fetchData}
                 title="Refresh Data"
+                aria-label="Refresh Data"
               >
                 <RefreshCw size={22} />
               </button>
@@ -412,6 +413,7 @@ function App() {
                 onClick={handleVoiceUpdate}
                 disabled={voiceLoading}
                 title="Voice Update"
+                aria-label="Voice Update"
               >
                 <Volume2 size={22} className={voiceLoading ? 'sync-spin' : ''} />
               </button>
@@ -469,7 +471,7 @@ function App() {
                   Install App
                 </button>
               )}
-              <button className={`sync-btn ${syncLoading ? 'sync-btn--active' : ''}`} onClick={handleManualSync} disabled={syncLoading} title="Trigger manual data refresh">
+              <button className={`sync-btn ${syncLoading ? 'sync-btn--active' : ''}`} onClick={handleManualSync} disabled={syncLoading} title="Trigger manual data refresh" aria-label="Trigger manual data refresh">
                 <RefreshCw size={16} className={syncLoading ? 'sync-spin' : ''} />
                 {syncLoading ? 'Syncing...' : 'Manual Sync'}
               </button>
@@ -477,7 +479,7 @@ function App() {
                 <SyncProgressBar progress={syncProgress} stage={syncStage} milestones={syncMilestones} />
               )}
               {!syncLoading && syncStatusText && <span style={{ fontSize: '0.75rem', color: 'var(--primary-color)' }}>{syncStatusText}</span>}
-              <button className="voice-btn" onClick={handleVoiceUpdate} disabled={voiceLoading} title="Play latest audio overview">
+              <button className="voice-btn" onClick={handleVoiceUpdate} disabled={voiceLoading} title="Play latest audio overview" aria-label="Play latest audio overview">
                 <Volume2 size={16} className={voiceLoading ? 'sync-spin' : ''} />
                 {voiceLoading ? 'Preparing...' : 'Voice Update'}
               </button>
@@ -558,6 +560,7 @@ function App() {
                   setCurrentView(item.id);
                   setMoreMenuOpen(false);
                 }}
+                aria-label={item.label}
               >
                 {item.icon}
                 <span>{item.label}</span>
