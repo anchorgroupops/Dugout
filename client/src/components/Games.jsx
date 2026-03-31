@@ -355,16 +355,21 @@ const GameCard = ({ game, onExpand, isExpanded, gameDetail, isMobile = false, is
   const dateStr = game.date ? formatDateMMDDYYYY(game.date) : 'Unknown Date';
   const isWin = game.result === 'W';
   const isTie = game.result === 'T';
-  const scoreStr = game.score || game.score_str || '';
-
-  // Parse score respecting result direction (handle both hyphen and en-dash)
+  // Score can be a string ("20-9") or an object ({sharks:20, opponent:9})
   let sharksScore = null, oppScore = null;
-  if (scoreStr) {
-    const parts = scoreStr.split(/[-\u2013]/).map(Number);
-    if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
-      if (game.result === 'W') { sharksScore = Math.max(...parts); oppScore = Math.min(...parts); }
-      else if (game.result === 'L') { sharksScore = Math.min(...parts); oppScore = Math.max(...parts); }
-      else { [sharksScore, oppScore] = parts; }
+  const rawScore = game.score;
+  if (rawScore && typeof rawScore === 'object' && rawScore.sharks != null) {
+    sharksScore = Number(rawScore.sharks);
+    oppScore = Number(rawScore.opponent);
+  } else {
+    const scoreStr = (typeof rawScore === 'string' ? rawScore : '') || game.score_str || '';
+    if (scoreStr) {
+      const parts = scoreStr.split(/[-\u2013]/).map(Number);
+      if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+        if (game.result === 'W') { sharksScore = Math.max(...parts); oppScore = Math.min(...parts); }
+        else if (game.result === 'L') { sharksScore = Math.min(...parts); oppScore = Math.max(...parts); }
+        else { [sharksScore, oppScore] = parts; }
+      }
     }
   }
 
