@@ -20,4 +20,4 @@ echo "[2/2] Starting containers..."
 docker compose -f docker-compose.sharks.yml up -d
 
 echo ""
-echo "=== Done! Site should be live at sharks.joelycannoli.com ==="
+echo "=== Done! Site should be live at dugout.joelycannoli.com ==="

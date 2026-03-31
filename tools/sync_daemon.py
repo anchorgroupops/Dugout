@@ -81,7 +81,7 @@ def _set_sync_stage(stage: str):
         _SYNC_STATUS["progress"] = 0
 
 DEFAULT_CORS_ORIGINS = [
-    "https://sharks.joelycannoli.com",
+    "https://dugout.joelycannoli.com",
     "http://localhost:3000",
     "http://localhost:5173",
 ]
@@ -167,7 +167,7 @@ def _origin_hostname(origin: str) -> str:
         return ""
 
 DEFAULT_ALLOWED_HOSTS = [
-    "sharks.joelycannoli.com",
+    "dugout.joelycannoli.com",
     "localhost",
     "127.0.0.1",
     "sharks_api",

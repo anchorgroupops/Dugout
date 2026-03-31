@@ -13,8 +13,7 @@
       "runtimeExecutable": "python3",
       "runtimeArgs": ["sync_daemon.py"],
       "cwd": "tools",
-      "port": 5001,
-      "env": { "PORT": "5001" }
+      "port": 5000
     }
   ]
 }

@@ -51,9 +51,9 @@ services:
       - PYTHONDONTWRITEBYTECODE=1
       - PYTHONUNBUFFERED=1
       - RUN_API_SERVER=0
-      - CORS_ORIGINS=https://sharks.joelycannoli.com,http://localhost:3000,http://localhost:5173
-      - WRITE_ORIGINS=https://sharks.joelycannoli.com,http://localhost:3000,http://localhost:5173
-      - ALLOWED_HOSTS=sharks.joelycannoli.com,localhost,127.0.0.1,sharks_api,sharks_dashboard
+      - CORS_ORIGINS=https://dugout.joelycannoli.com,http://localhost:3000,http://localhost:5173
+      - WRITE_ORIGINS=https://dugout.joelycannoli.com,http://localhost:3000,http://localhost:5173
+      - ALLOWED_HOSTS=dugout.joelycannoli.com,localhost,127.0.0.1,sharks_api,sharks_dashboard
       - MAX_JSON_BODY_BYTES=131072
       - MUTATE_RATE_WINDOW_SEC=60
       - MUTATE_RATE_MAX=12
@@ -118,9 +118,9 @@ services:
     environment:
       - PYTHONDONTWRITEBYTECODE=1
       - PYTHONUNBUFFERED=1
-      - CORS_ORIGINS=https://sharks.joelycannoli.com,http://localhost:3000,http://localhost:5173
-      - WRITE_ORIGINS=https://sharks.joelycannoli.com,http://localhost:3000,http://localhost:5173
-      - ALLOWED_HOSTS=sharks.joelycannoli.com,localhost,127.0.0.1,sharks_api,sharks_dashboard
+      - CORS_ORIGINS=https://dugout.joelycannoli.com,http://localhost:3000,http://localhost:5173
+      - WRITE_ORIGINS=https://dugout.joelycannoli.com,http://localhost:3000,http://localhost:5173
+      - ALLOWED_HOSTS=dugout.joelycannoli.com,localhost,127.0.0.1,sharks_api,sharks_dashboard
       - MAX_JSON_BODY_BYTES=131072
       - MUTATE_RATE_WINDOW_SEC=60
       - MUTATE_RATE_MAX=12
