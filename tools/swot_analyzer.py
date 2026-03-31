@@ -321,7 +321,8 @@ def analyze_player(player: dict) -> dict:
         if adv.get("bb_per_k", 0) > 0 and adv.get("bb_per_k", 0) <= 0.25:
             weaknesses.append(f"Plate-discipline risk (BB/K: {round(adv['bb_per_k'], 3)})")
 
-    raw_ip = _innings_to_float((player.get("stats") or {}).get("pitching", {}).get("ip", (player.get("pitching") or {}).get("ip", 0.0)))
+    _pitching = (player.get("stats") or {}).get("pitching") or player.get("pitching") or {}
+    raw_ip = _innings_to_float(_pitching.get("ip", 0.0))
     p_s, p_w = classify_pitching(derived, raw_ip=raw_ip)
     strengths.extend(p_s)
     weaknesses.extend(p_w)

@@ -66,7 +66,7 @@ export default defineConfig({
         short_name: 'Sharks',
         description: 'Strategy & Training Aid for The Sharks (PCLL)',
         theme_color: '#046568',
-        background_color: '#F7ECE1',
+        background_color: '#060d1c',
         display: 'standalone',
         orientation: 'portrait',
         scope: '/',
