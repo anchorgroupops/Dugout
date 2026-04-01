@@ -2418,6 +2418,9 @@ def handle_2fa_submit():
     The code is written to a file that the scraper checks during OTP handling.
     Also clears the auth cooldown so the scraper retries immediately.
     """
+    blocked = _guard_mutating_request()
+    if blocked:
+        return blocked
     data = request.get_json(silent=True) or {}
     code = str(data.get("code", "")).strip()
     if not code or not code.isdigit() or len(code) != 6:
@@ -2485,7 +2488,7 @@ def handle_deploy_webhook():
                 logging.info(f"[Deploy] Success: {result.stdout[-200:]}")
             _DEPLOY_STATUS["last_completed"] = datetime.now(ET).isoformat()
         except Exception as e:
-            _DEPLOY_STATUS["error"] = str(e)
+            _DEPLOY_STATUS["error"] = "deployment_error"
             logging.error(f"[Deploy] Exception: {e}")
         finally:
             _DEPLOY_STATUS["status"] = "idle"
@@ -3240,6 +3243,10 @@ def handle_opponent_discovery():
 @app.route('/api/practice-insights', methods=['GET', 'POST'])
 def handle_practice_insights():
     """Build tailored practice priorities from current team stats."""
+    if request.method == "POST":
+        blocked = _guard_mutating_request()
+        if blocked:
+            return blocked
     try:
         team_file = TEAM_DIR / "team_enriched.json"
         if not team_file.exists():
