@@ -3,7 +3,7 @@
 # Run: cd /home/joelycannoli/sharks && git pull origin main && bash scripts/setup_deploy.sh
 set -e
 
-cd /home/joelycannoli/sharks 2>/dev/null || cd "$(dirname "$0")/.."
+cd /home/joelycannoli/dugout 2>/dev/null || cd /home/joelycannoli/sharks 2>/dev/null || cd "$(dirname "$0")/.."
 
 echo "=== Deploying Sharks Dashboard ==="
 
@@ -20,4 +20,4 @@ echo "[2/2] Starting containers..."
 docker compose -f docker-compose.sharks.yml up -d
 
 echo ""
-echo "=== Done! Site should be live at sharks.joelycannoli.com ==="
+echo "=== Done! Site should be live at dugout.joelycannoli.com ==="

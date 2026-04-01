@@ -5,3 +5,7 @@ dev-dist
 .env.*
 ios
 *.log
+.git
+.gitignore
+README.md
+*.md

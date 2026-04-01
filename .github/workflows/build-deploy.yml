@@ -69,3 +69,17 @@ jobs:
             ghcr.io/${{ env.OWNER }}/sharks-api:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  notify-deploy:
+    runs-on: ubuntu-latest
+    needs: [build-dashboard, build-api]
+    if: success()
+    steps:
+      - name: Trigger deploy webhook
+        continue-on-error: true
+        run: |
+          curl -sf -X POST \
+            -H "Authorization: Bearer ${{ secrets.DEPLOY_WEBHOOK_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            https://dugout.joelycannoli.com/api/deploy \
+            --max-time 10 || echo "Deploy webhook skipped (not configured or unreachable)"

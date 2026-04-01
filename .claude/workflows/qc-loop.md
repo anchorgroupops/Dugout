@@ -34,7 +34,7 @@ Check for:
 - [ ] Missing error boundaries or error handling
 
 ## 4. Visual QC (Browser)
-Open `https://sharks.joelycannoli.com/` in the browser and verify:
+Open `https://dugout.joelycannoli.com/` in the browser and verify:
 - [ ] Page loads without console errors
 - [ ] Navigation works (all tabs)
 - [ ] Mobile layout renders correctly (resize to 375px width)

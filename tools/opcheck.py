@@ -9,7 +9,7 @@ import requests
 
 
 ET = ZoneInfo("America/New_York")
-DEFAULT_BASE = "https://sharks.joelycannoli.com"
+DEFAULT_BASE = "https://dugout.joelycannoli.com"
 
 
 def _req_json(session: requests.Session, url: str, method: str = "GET", **kwargs):

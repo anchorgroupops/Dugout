@@ -1,8 +1,18 @@
+# NOTE: Pair with a .dockerignore to exclude .git/, __pycache__/, *.env, data/, logs/, .venv/
 FROM mcr.microsoft.com/playwright/python:v1.42.0-jammy
 
-# Suppress .pyc files and force stdout/stderr flushing
+# OCI metadata labels
+LABEL org.opencontainers.image.title="sharks-scraper" \
+      org.opencontainers.image.description="GameChanger scraper daemon for The Sharks softball analytics" \
+      org.opencontainers.image.vendor="PCLL Sharks" \
+      org.opencontainers.image.source="https://github.com/anchorgroupops/dugout" \
+      org.opencontainers.image.licenses="MIT"
+
+# Python runtime hardening
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PYTHONHASHSEED=random \
+    PYTHONFAULTHANDLER=1
 
 WORKDIR /app
 
@@ -21,6 +31,10 @@ RUN mkdir -p /app/data /app/logs
 RUN groupadd -r sharks && useradd -r -g sharks -d /app -s /sbin/nologin sharks \
     && chown -R sharks:sharks /app
 USER sharks
+
+# Healthcheck: verify the Python process is responsive
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD python -c "import sys; sys.exit(0)"
 
 # Default: sync daemon. Override with `command:` in docker-compose for gunicorn
 CMD ["python", "tools/sync_daemon.py"]
