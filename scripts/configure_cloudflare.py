@@ -1,11 +1,21 @@
+import os
 import requests
 import json
 import sys
 
-# Cloudflare Configuration
-CLOUDFLARE_EMAIL = "anchorgroupops@gmail.com"
-# The user provided this key in the latest message
-CLOUDFLARE_API_KEY = "8c91653d2645cbd0cdca1c8cc318cb26dd82b"
+from dotenv import load_dotenv
+from pathlib import Path
+load_dotenv(Path(__file__).parent.parent / ".env")
+
+# Cloudflare Configuration — credentials MUST come from environment
+CLOUDFLARE_EMAIL = os.getenv("CLOUDFLARE_EMAIL", "").strip()
+CLOUDFLARE_API_KEY = os.getenv("CLOUDFLARE_API_KEY", "").strip()
+
+if not CLOUDFLARE_EMAIL or not CLOUDFLARE_API_KEY:
+    print("ERROR: Set CLOUDFLARE_EMAIL and CLOUDFLARE_API_KEY in .env")
+    print("  CLOUDFLARE_EMAIL=your-email@example.com")
+    print("  CLOUDFLARE_API_KEY=your-global-api-key")
+    sys.exit(1)
 
 BASE_URL = "https://api.cloudflare.com/client/v4"
 

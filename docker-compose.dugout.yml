@@ -30,6 +30,12 @@ services:
     security_opt:
       - no-new-privileges:true
     pids_limit: 256
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 64M
     networks:
       - dugout_net
     healthcheck:
@@ -70,12 +76,18 @@ services:
     pids_limit: 512
     init: true
     healthcheck:
-      # Check data dir exists AND log file has been written (proves daemon started)
-      test: ["CMD", "sh", "-c", "test -d /app/data && test -d /app/logs"]
+      # Verify data dir exists AND daemon has written logs recently (within 10 min)
+      test: ["CMD", "sh", "-c", "test -d /app/data && find /app/logs -name 'sync_daemon.log' -mmin -10 | grep -q ."]
       interval: 60s
       timeout: 15s
-      retries: 3
-      start_period: 30s
+      retries: 5
+      start_period: 120s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 256M
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
 
@@ -146,6 +158,12 @@ services:
       timeout: 12s
       retries: 4
       start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 128M
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
 

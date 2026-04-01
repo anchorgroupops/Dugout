@@ -4,6 +4,7 @@ import json
 import os
 import re
 import logging
+import signal
 import traceback
 import requests
 import ipaddress
@@ -3551,11 +3552,22 @@ def main():
     except Exception as e:
         logging.warning(f"[Startup] H2H bootstrap skipped: {e}")
 
+    _shutdown_requested = False
+
+    def _handle_shutdown(signum, frame):
+        nonlocal _shutdown_requested
+        sig_name = signal.Signals(signum).name if hasattr(signal, 'Signals') else str(signum)
+        logging.info(f"Received {sig_name} — initiating graceful shutdown...")
+        _shutdown_requested = True
+
+    signal.signal(signal.SIGTERM, _handle_shutdown)
+    signal.signal(signal.SIGINT, _handle_shutdown)
+
     consecutive_errors = 0
     _last_state = "IDLE"
     _last_post_game_trigger_at = None
 
-    while True:
+    while not _shutdown_requested:
         try:
             # Determine Polling State
             is_live_forced = check_live_override()
@@ -3594,7 +3606,7 @@ def main():
             logging.info(f"Current State: {state}. Next cycle in {sleep_duration} seconds.")
 
             success = run_sync_cycle()
-            
+
             if success:
                 consecutive_errors = 0
             else:
@@ -3604,15 +3616,21 @@ def main():
                      sleep_duration = min(sleep_duration * (2 ** (consecutive_errors - 3)), 3600)
                      logging.warning(f"Multiple consecutive errors. Backing off for {sleep_duration} seconds.")
                      send_alert("Sync Daemon is experiencing chronic failures and has entered backoff mode.")
-            
-            time.sleep(sleep_duration)
+
+            # Interruptible sleep — check for shutdown every second
+            for _ in range(int(sleep_duration)):
+                if _shutdown_requested:
+                    break
+                time.sleep(1)
 
         except KeyboardInterrupt:
             logging.info("Daemon stopped by user.")
             break
         except Exception as e:
-            logging.critical(f"UNHANDLED EXCEPTION IN DAEMON LOOP: {e}")
+            logging.critical(f"UNHANDLED EXCEPTION IN DAEMON LOOP: {e}\n{traceback.format_exc()}")
             time.sleep(300) # Failsafe sleep before retry
+
+    logging.info("Daemon shutdown complete.")
 
 if __name__ == "__main__":
     main()
