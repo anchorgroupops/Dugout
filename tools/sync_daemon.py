@@ -2507,38 +2507,6 @@ def handle_health():
     return jsonify(result)
 
 
-@app.route('/api/night-shift/report', methods=['GET'])
-def handle_night_shift_report():
-    """Return the latest Night Shift report."""
-    report_file = SHARKS_DIR / "night_shift_report.json"
-    if not report_file.exists():
-        return jsonify({"error": "No Night Shift report found", "hint": "Night Shift has not run yet."}), 404
-    data = _read_json_file(report_file, default=None)
-    if not isinstance(data, dict):
-        return jsonify({"error": "night_shift_report_unavailable"}), 503
-    return jsonify(data)
-
-
-@app.route('/api/night-shift/trigger', methods=['POST'])
-def handle_night_shift_trigger():
-    """Trigger Night Shift manually via API (runs in background subprocess)."""
-    origin_err = _check_write_origin()
-    if origin_err:
-        return origin_err
-    import subprocess as _sp
-    try:
-        _sp.Popen(
-            [sys.executable, "tools/night_shift.py"],
-            cwd=str(Path(__file__).resolve().parent.parent),
-            stdout=open(LOG_DIR / "night_shift_stdout.log", "w"),
-            stderr=open(LOG_DIR / "night_shift_stderr.log", "w"),
-        )
-        return jsonify({"status": "triggered", "message": "Night Shift started in background."})
-    except Exception as e:
-        logging.error(f"[NightShift] trigger failed: {e}")
-        return jsonify({"error": str(e)}), 500
-
-
 @app.route('/api/h2h/<opponent_slug>', methods=['GET'])
 def handle_h2h(opponent_slug):
     """Return head-to-head game history and W-L summary against an opponent."""
