@@ -108,12 +108,53 @@ def daily_scout_job():
     return {"status": "ok"}
 
 
+@app.function(
+    image=sharks_image,
+    schedule=modal.Cron("0 23 * * *"),  # Nightly at 11PM ET
+    volumes={VOLUME_MOUNT: SESSION_VOLUME},
+    secrets=[_runtime_secret()],
+    timeout=60 * 60,  # 60 min — full pipeline is heavier than daily scout
+)
+def night_shift_job():
+    """
+    Night Shift — autonomous overnight coworker.
+    Runs the full heavy-lift pipeline: league scrape, SWOT, lineups,
+    practice plans, sync, reconciliation, and morning briefing.
+    """
+    print("[Modal] Night Shift started.")
+
+    auth_dir = Path(VOLUME_MOUNT) / "auth"
+    auth_dir.mkdir(parents=True, exist_ok=True)
+    auth_file = auth_dir / "auth.json"
+    profile_dir = auth_dir / "playwright-profile"
+    profile_dir.mkdir(parents=True, exist_ok=True)
+
+    env = os.environ.copy()
+    env["GC_AUTH_FILE"] = str(auth_file)
+    env["GC_PLAYWRIGHT_CONTEXT_DIR"] = str(profile_dir)
+    env.setdefault("PYTHONUNBUFFERED", "1")
+
+    _run_step("Night Shift Pipeline", ["python", "tools/night_shift.py"], env=env)
+
+    SESSION_VOLUME.commit()
+    print("[Modal] Night Shift finished.")
+    return {"status": "ok", "job": "night_shift"}
+
+
 @app.function(image=sharks_image, volumes={VOLUME_MOUNT: SESSION_VOLUME}, secrets=[_runtime_secret()], timeout=60 * 45)
 @modal.web_endpoint(method="POST")
 def manual_sync():
     """Manual trigger via Webhook (POST)."""
     daily_scout_job.spawn()
     return {"status": "triggered", "message": "Scouting job started in background."}
+
+
+@app.function(image=sharks_image, volumes={VOLUME_MOUNT: SESSION_VOLUME}, secrets=[_runtime_secret()], timeout=60 * 60)
+@modal.web_endpoint(method="POST")
+def manual_night_shift():
+    """Manual Night Shift trigger via Webhook (POST)."""
+    night_shift_job.spawn()
+    return {"status": "triggered", "message": "Night Shift started in background."}
 
 
 @app.function(image=sharks_image, volumes={VOLUME_MOUNT: SESSION_VOLUME}, secrets=[_runtime_secret()], timeout=60 * 45)

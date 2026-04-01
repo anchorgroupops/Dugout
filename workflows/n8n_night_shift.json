@@ -1,0 +1,218 @@
+{
+  "name": "Night Shift - Sharks Overnight Coworker",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 23 * * *"
+            }
+          ]
+        }
+      },
+      "id": "night-shift-schedule",
+      "name": "Nightly 11PM ET",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "night-shift",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 200]
+    },
+    {
+      "parameters": {
+        "command": "cd /home/pi/Dugout && git pull origin main",
+        "cwd": "/home/pi/Dugout"
+      },
+      "id": "git-pull",
+      "name": "Git Pull Latest",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [250, 100]
+    },
+    {
+      "parameters": {
+        "command": "cd /home/pi/Dugout && python3 tools/night_shift.py 2>&1",
+        "cwd": "/home/pi/Dugout"
+      },
+      "id": "run-night-shift",
+      "name": "Run Night Shift",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [500, 100],
+      "executeOnce": false
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "check-exit-code",
+              "leftValue": "={{ $json.exitCode }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-success",
+      "name": "Check Exit Code",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [750, 100]
+    },
+    {
+      "parameters": {
+        "command": "cd /home/pi/Dugout && git add data/ logs/ && git commit -m 'chore(night-shift): overnight data refresh [$(date +%Y-%m-%d)]' && git push origin main 2>&1 || echo 'No changes to commit'",
+        "cwd": "/home/pi/Dugout"
+      },
+      "id": "git-commit-push",
+      "name": "Commit & Push Data",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [1000, 0]
+    },
+    {
+      "parameters": {
+        "command": "cd /home/pi/Dugout && cat data/sharks/night_shift_report.json 2>/dev/null || echo '{}'",
+        "cwd": "/home/pi/Dugout"
+      },
+      "id": "read-report",
+      "name": "Read Shift Report",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [1250, 0]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "status",
+              "value": "success"
+            },
+            {
+              "name": "report",
+              "value": "={{ $('Read Shift Report').item.json.stdout }}"
+            },
+            {
+              "name": "timestamp",
+              "value": "={{ $now.toISO() }}"
+            },
+            {
+              "name": "result",
+              "value": "success"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "success-response",
+      "name": "Success Response",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1500, 0]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "error",
+              "value": "={{ $('Run Night Shift').item.json.stderr }}"
+            },
+            {
+              "name": "stdout",
+              "value": "={{ $('Run Night Shift').item.json.stdout }}"
+            },
+            {
+              "name": "exitCode",
+              "value": "={{ $('Run Night Shift').item.json.exitCode }}"
+            },
+            {
+              "name": "timestamp",
+              "value": "={{ $now.toISO() }}"
+            },
+            {
+              "name": "result",
+              "value": "failed"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "error-response",
+      "name": "Error Response",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1000, 200]
+    }
+  ],
+  "connections": {
+    "Nightly 11PM ET": {
+      "main": [
+        [{ "node": "Git Pull Latest", "type": "main", "index": 0 }]
+      ]
+    },
+    "Webhook Trigger": {
+      "main": [
+        [{ "node": "Git Pull Latest", "type": "main", "index": 0 }]
+      ]
+    },
+    "Git Pull Latest": {
+      "main": [
+        [{ "node": "Run Night Shift", "type": "main", "index": 0 }]
+      ]
+    },
+    "Run Night Shift": {
+      "main": [
+        [{ "node": "Check Exit Code", "type": "main", "index": 0 }]
+      ]
+    },
+    "Check Exit Code": {
+      "main": [
+        [{ "node": "Commit & Push Data", "type": "main", "index": 0 }],
+        [{ "node": "Error Response", "type": "main", "index": 0 }]
+      ]
+    },
+    "Commit & Push Data": {
+      "main": [
+        [{ "node": "Read Shift Report", "type": "main", "index": 0 }]
+      ]
+    },
+    "Read Shift Report": {
+      "main": [
+        [{ "node": "Success Response", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/New_York",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "executionTimeout": 3600
+  }
+}
