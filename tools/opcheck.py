@@ -180,6 +180,18 @@ def run_opcheck(base_url: str, include_burst: bool = True) -> dict:
         f"status={practice_r.status_code} needs={len(practice.get('needs', [])) if isinstance(practice, dict) else 'n/a'} selected={len(practice.get('selected_players', [])) if isinstance(practice, dict) else 'n/a'} source={practice.get('default_player_source') if isinstance(practice, dict) else 'n/a'}",
     )
 
+    # Night Shift report endpoint
+    ns_r, ns = _req_json(s, f"{base}/api/night-shift/report")
+    ns_ok = ns_r.status_code in (200, 404)  # 404 is fine if it hasn't run yet
+    ns_health = "n/a"
+    if ns_r.status_code == 200 and isinstance(ns, dict):
+        ns_health = (ns.get("briefing", {}).get("shift_summary", {}).get("health", "unknown"))
+    add(
+        "night_shift_report",
+        ns_ok,
+        f"status={ns_r.status_code} health={ns_health}",
+    )
+
     time.sleep(0.5)
 
     # Security headers and method controls — reuse the first /api/team response (already fetched above)

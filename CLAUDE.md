@@ -15,6 +15,10 @@ Deterministic softball analyzer and training aid for **The Sharks** (PCLL). Maxi
 - **Optimize Lineup**: `python tools/lineup_optimizer.py`
 - **Generate Practice**: `python tools/practice_gen.py`
 - **NotebookLM Sync**: `python tools/notebooklm_sync.py`
+- **Night Shift (full)**: `python tools/night_shift.py`
+- **Night Shift (single stage)**: `python tools/night_shift.py --stage scrape`
+- **Night Shift (dry run)**: `python tools/night_shift.py --dry-run`
+- **Night Shift (Docker)**: `docker compose -f docker-compose.sharks.yml --profile night-shift run sharks_night_shift`
 - **Modal Deploy**: `modal deploy tools/modal_app.py`
 
 ## Rule Hierarchy
