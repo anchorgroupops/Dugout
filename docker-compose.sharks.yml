@@ -149,36 +149,6 @@ services:
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
 
-  sharks_night_shift:
-    image: ghcr.io/anchorgroupops/sharks-api:latest
-    build:
-      context: .
-      dockerfile: Dockerfile.scraper
-    container_name: sharks_night_shift
-    restart: "no"
-    command:
-      - python
-      - tools/night_shift.py
-    environment:
-      - PYTHONDONTWRITEBYTECODE=1
-      - PYTHONUNBUFFERED=1
-      - GC_ORG_IDS=7ZUyPJwky5DG
-    volumes:
-      - ./data:/app/data
-      - ./logs:/app/logs
-      - ./.env:/app/.env:ro
-      - ./Scorebooks:/app/Scorebooks:ro
-    networks:
-      - sharks_net
-    security_opt:
-      - no-new-privileges:true
-    pids_limit: 512
-    init: true
-    profiles:
-      - night-shift
-    labels:
-      - "com.centurylinklabs.watchtower.enable=true"
-
   watchtower:
     image: containrrr/watchtower:latest
     container_name: watchtower
