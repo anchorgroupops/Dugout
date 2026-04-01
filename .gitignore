@@ -22,3 +22,11 @@ tools/logs/
 # Scratch files
 install.log
 list.txt
+# Security: never commit secrets or sensitive files
+*.pem
+*.cert
+*.csr
+APIs*.csv
+secrets.json
+.env.*
+!.env.example

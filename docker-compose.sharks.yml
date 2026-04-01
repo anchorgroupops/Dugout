@@ -1,7 +1,6 @@
-version: "3.8"
-
-# Sharks Softball Dashboard
-# Supports two deploy modes:
+# Sharks Softball Dashboard — Dugout
+# Deploy: dugout.joelycannoli.com
+# Modes:
 #   1. GHCR + Watchtower (auto): images pulled from ghcr.io, Watchtower auto-updates
 #   2. Local build (manual): docker compose build && docker compose up -d
 
@@ -30,6 +29,9 @@ services:
     security_opt:
       - no-new-privileges:true
     pids_limit: 256
+    mem_limit: 256m
+    memswap_limit: 256m
+    cpus: 1.0
     networks:
       - sharks_net
     healthcheck:
@@ -37,8 +39,14 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 10s
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   sharks_sync:
     image: ghcr.io/anchorgroupops/sharks-api:latest
@@ -50,10 +58,11 @@ services:
     environment:
       - PYTHONDONTWRITEBYTECODE=1
       - PYTHONUNBUFFERED=1
+      - PYTHONHASHSEED=random
       - RUN_API_SERVER=0
-      - CORS_ORIGINS=https://sharks.joelycannoli.com,http://localhost:3000,http://localhost:5173
-      - WRITE_ORIGINS=https://sharks.joelycannoli.com,http://localhost:3000,http://localhost:5173
-      - ALLOWED_HOSTS=sharks.joelycannoli.com,localhost,127.0.0.1,sharks_api,sharks_dashboard
+      - CORS_ORIGINS=https://dugout.joelycannoli.com,http://localhost:3000,http://localhost:5173
+      - WRITE_ORIGINS=https://dugout.joelycannoli.com,http://localhost:3000,http://localhost:5173
+      - ALLOWED_HOSTS=dugout.joelycannoli.com,localhost,127.0.0.1,sharks_api,sharks_dashboard
       - MAX_JSON_BODY_BYTES=131072
       - MUTATE_RATE_WINDOW_SEC=60
       - MUTATE_RATE_MAX=12
@@ -68,9 +77,11 @@ services:
     security_opt:
       - no-new-privileges:true
     pids_limit: 512
+    mem_limit: 1g
+    memswap_limit: 1g
+    cpus: 2.0
     init: true
     healthcheck:
-      # Check data dir exists AND log file has been written (proves daemon started)
       test: ["CMD", "sh", "-c", "test -d /app/data && test -d /app/logs"]
       interval: 60s
       timeout: 15s
@@ -78,6 +89,11 @@ services:
       start_period: 30s
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
+    logging:
+      driver: json-file
+      options:
+        max-size: "25m"
+        max-file: "5"
 
   sharks_api:
     image: ghcr.io/anchorgroupops/sharks-api:latest
@@ -114,13 +130,18 @@ services:
       - "40"
       - --limit-request-field_size
       - "8190"
+      - --access-logfile
+      - "-"
+      - --error-logfile
+      - "-"
       - sync_daemon:app
     environment:
       - PYTHONDONTWRITEBYTECODE=1
       - PYTHONUNBUFFERED=1
-      - CORS_ORIGINS=https://sharks.joelycannoli.com,http://localhost:3000,http://localhost:5173
-      - WRITE_ORIGINS=https://sharks.joelycannoli.com,http://localhost:3000,http://localhost:5173
-      - ALLOWED_HOSTS=sharks.joelycannoli.com,localhost,127.0.0.1,sharks_api,sharks_dashboard
+      - PYTHONHASHSEED=random
+      - CORS_ORIGINS=https://dugout.joelycannoli.com,http://localhost:3000,http://localhost:5173
+      - WRITE_ORIGINS=https://dugout.joelycannoli.com,http://localhost:3000,http://localhost:5173
+      - ALLOWED_HOSTS=dugout.joelycannoli.com,localhost,127.0.0.1,sharks_api,sharks_dashboard
       - MAX_JSON_BODY_BYTES=131072
       - MUTATE_RATE_WINDOW_SEC=60
       - MUTATE_RATE_MAX=12
@@ -138,9 +159,11 @@ services:
     security_opt:
       - no-new-privileges:true
     pids_limit: 512
+    mem_limit: 512m
+    memswap_limit: 512m
+    cpus: 2.0
     init: true
     healthcheck:
-      # /api/health is purpose-built: lightweight, never 404s, returns stale-source data
       test: ["CMD", "python", "-c", "import urllib.request,sys; r=urllib.request.urlopen('http://127.0.0.1:5000/api/health', timeout=8); sys.exit(0 if r.status==200 else 1)"]
       interval: 30s
       timeout: 12s
@@ -148,11 +171,18 @@ services:
       start_period: 20s
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
+    logging:
+      driver: json-file
+      options:
+        max-size: "25m"
+        max-file: "5"
 
   watchtower:
     image: containrrr/watchtower:latest
     container_name: watchtower
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
     environment:
       - WATCHTOWER_CLEANUP=true
       - WATCHTOWER_POLL_INTERVAL=300
@@ -160,10 +190,17 @@ services:
       - WATCHTOWER_INCLUDE_STOPPED=false
       - WATCHTOWER_ROLLING_RESTART=true
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/run/docker.sock:/var/run/docker.sock:ro
       - ${HOME}/.docker/config.json:/config.json:ro
     networks:
       - sharks_net
+    mem_limit: 128m
+    cpus: 0.5
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
 
 networks:
   sharks_net:

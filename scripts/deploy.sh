@@ -9,7 +9,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="${SCRIPT_DIR}/.."
 
 # If running on the Pi in the expected location, use that path
-if [ -d "/home/joelycannoli/sharks" ]; then
+if [ -d "/home/joelycannoli/dugout" ]; then
+  PROJECT_DIR="/home/joelycannoli/dugout"
+elif [ -d "/home/joelycannoli/sharks" ]; then
   PROJECT_DIR="/home/joelycannoli/sharks"
 fi
 

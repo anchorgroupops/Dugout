@@ -42,4 +42,4 @@ fi
 
 echo ""
 echo "=== Deployment Complete ==="
-echo "Next step: Add Cloudflare tunnel for sharks.joelycannoli.com -> http://192.168.7.222:3000"
+echo "Next step: Add Cloudflare tunnel for dugout.joelycannoli.com -> http://192.168.7.222:3000"

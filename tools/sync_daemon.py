@@ -81,7 +81,7 @@ def _set_sync_stage(stage: str):
         _SYNC_STATUS["progress"] = 0
 
 DEFAULT_CORS_ORIGINS = [
-    "https://sharks.joelycannoli.com",
+    "https://dugout.joelycannoli.com",
     "http://localhost:3000",
     "http://localhost:5173",
 ]
@@ -167,7 +167,7 @@ def _origin_hostname(origin: str) -> str:
         return ""
 
 DEFAULT_ALLOWED_HOSTS = [
-    "sharks.joelycannoli.com",
+    "dugout.joelycannoli.com",
     "localhost",
     "127.0.0.1",
     "sharks_api",
@@ -193,15 +193,22 @@ _MUTATE_RATE_BUCKETS: dict[str, list[float]] = {}
 MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 # ---------------------------------------------------------
-# LOGGING SETUP (Maximal Hardening)
+# LOGGING SETUP (Hardened with rotation)
 # ---------------------------------------------------------
+from logging.handlers import RotatingFileHandler
+_log_formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
+_file_handler = RotatingFileHandler(
+    LOG_DIR / "sync_daemon.log",
+    maxBytes=10 * 1024 * 1024,  # 10 MB per file
+    backupCount=5,
+    encoding="utf-8",
+)
+_file_handler.setFormatter(_log_formatter)
+_stream_handler = logging.StreamHandler()
+_stream_handler.setFormatter(_log_formatter)
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(message)s',
-    handlers=[
-        logging.FileHandler(LOG_DIR / "sync_daemon.log"),
-        logging.StreamHandler()
-    ]
+    handlers=[_file_handler, _stream_handler],
 )
 
 # ---------------------------------------------------------
@@ -306,6 +313,23 @@ def _read_json_file(path: Path, default=None, retries: int = 3, retry_delay: flo
                 return default
             time.sleep(retry_delay * (attempt + 1))
     return default
+
+
+def _write_json_file(path: Path, data, indent: int = 2):
+    """Atomic JSON write: write to temp file then rename to prevent corruption."""
+    import tempfile
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=indent)
+        os.replace(tmp_path, str(path))
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
 
 def _enrich_team_with_app_stats(team_data: dict) -> dict:
     """Apply app_stats.json stats to Sharks roster (batting, pitching, fielding).
@@ -1073,8 +1097,7 @@ def run_sync_cycle():
             anomaly_findings = _validate_and_write_stat_anomalies(team_data)
             enriched_team_data = team_data
             enriched_file = SHARKS_DIR / "team_enriched.json"
-            with open(enriched_file, "w") as f:
-                json.dump(team_data, f, indent=2)
+            _write_json_file(enriched_file, team_data)
             logging.info(
                 "[Sync] team_enriched.json written (scorebook matched=%s updated=%s, anomalies=%s).",
                 reconcile_meta.get("players_matched", 0),
@@ -1420,8 +1443,7 @@ def auto_deactivate_subs():
                 changed = True
 
     if changed:
-        with open(availability_file, "w") as f:
-            json.dump(avail, f, indent=2)
+        _write_json_file(availability_file, avail)
         _save_sub_tracker(tracker)
 
 @app.route('/api/recent-subs', methods=['GET'])
@@ -1478,8 +1500,7 @@ def handle_availability():
         if tracker_changed:
             _save_sub_tracker(tracker)
 
-        with open(availability_file, "w") as f:
-            json.dump(data, f, indent=2)
+        _write_json_file(availability_file, data)
 
         logging.info("Availability updated via API. Re-running analytics tools...")
         try:
@@ -2416,8 +2437,11 @@ def handle_deploy_webhook():
     if not expected_token:
         return jsonify({"error": "Deploy webhook not configured (DEPLOY_WEBHOOK_TOKEN not set)"}), 503
 
+    import hmac
     auth = request.headers.get("Authorization", "")
-    if auth != f"Bearer {expected_token}":
+    expected = f"Bearer {expected_token}"
+    if not hmac.compare_digest(auth.encode(), expected.encode()):
+        logging.warning("[Security] Deploy webhook: invalid token from %s", _client_ip())
         return jsonify({"error": "Unauthorized"}), 401
 
     if _DEPLOY_STATUS["status"] == "deploying":

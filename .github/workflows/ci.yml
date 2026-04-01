@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - run: npm ci
+        working-directory: client
+
+      - run: npm run lint
+        working-directory: client
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - run: npm ci
+        working-directory: client
+
+      - run: npm run build
+        working-directory: client
+        env:
+          VITE_SKIP_DATA_SYNC: "1"
+
+  python-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Smoke-test stats_normalizer
+        run: python -c "from stats_normalizer import safe_float; print('stats_normalizer OK')"
+        working-directory: tools
+
+      - name: Smoke-test swot_analyzer
+        run: python -c "from swot_analyzer import compute_derived_stats; print('swot_analyzer OK')"
+        working-directory: tools
+
+      - name: Smoke-test lineup_optimizer
+        run: python -c "from lineup_optimizer import compute_batting_score; print('lineup_optimizer OK')"
+        working-directory: tools
+
+      - name: Smoke-test sync_daemon (syntax check)
+        run: python -c "import py_compile; py_compile.compile('sync_daemon.py', doraise=True); print('sync_daemon OK')"
+        working-directory: tools

@@ -7,7 +7,7 @@
 
 set -e
 
-PROJECT_DIR="/home/joelycannoli/sharks"
+PROJECT_DIR="/home/joelycannoli/dugout"
 cd "$PROJECT_DIR"
 
 echo "=== Sharks Auto-Deploy Setup ==="
@@ -65,7 +65,7 @@ echo "  1. You (or Claude) push code to main"
 echo "  2. GitHub Actions builds new Docker images (~3 min)"
 echo "  3. Watchtower on this Pi detects new images (~5 min)"
 echo "  4. Watchtower auto-pulls and restarts containers"
-echo "  5. Dashboard is live at sharks.joelycannoli.com"
+echo "  5. Dashboard is live at dugout.joelycannoli.com"
 echo ""
 echo "Total deploy time: ~5-8 min after push. Fully automatic."
 echo ""
