@@ -60,6 +60,7 @@ services:
       - PYTHONUNBUFFERED=1
       - PYTHONHASHSEED=random
       - RUN_API_SERVER=0
+      - GC_PLAYWRIGHT_CONTEXT_DIR=/app/data/.playwright_context
       - CORS_ORIGINS=https://dugout.joelycannoli.com,http://localhost:3000,http://localhost:5173
       - WRITE_ORIGINS=https://dugout.joelycannoli.com,http://localhost:3000,http://localhost:5173
       - ALLOWED_HOSTS=dugout.joelycannoli.com,localhost,127.0.0.1,sharks_api,sharks_dashboard

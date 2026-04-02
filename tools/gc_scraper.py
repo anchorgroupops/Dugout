@@ -50,7 +50,7 @@ GC_HEADLESS = os.getenv("GC_HEADLESS", "true").lower() != "false"
 
 # Auth cooldown: prevent rapid-fire 2FA code emails when session is expired.
 # After a login failure, wait this many hours before retrying authenticated scraping.
-AUTH_COOLDOWN_HOURS = float(os.getenv("AUTH_COOLDOWN_HOURS", "2"))
+AUTH_COOLDOWN_HOURS = float(os.getenv("AUTH_COOLDOWN_HOURS", "4"))
 _AUTH_COOLDOWN_FILE = DATA_DIR / ".auth_cooldown"
 
 
@@ -490,14 +490,21 @@ class GameChangerScraper:
         final_state = self._get_auth_state()
         if final_state != "AUTHENTICATED":
             if not force_refresh:
+                # Only retry once — avoid cascading login attempts that spam 2FA emails
                 print("[GC] [HEAL] Auth failed with cached state, trying fresh login...")
                 self.close()
                 return self.login(playwright, force_refresh=True)
 
             self._capture_diagnostics("auth_failed")
             print(f"[GC] Current URL: {self.page.url}")
+            # Longer cooldown (4h default) to prevent 2FA email storms
+            cooldown_hours = float(os.getenv("AUTH_COOLDOWN_HOURS", "4"))
             set_auth_cooldown(f"Login failed, state={final_state}")
-            raise RuntimeError(f"[GC] Authentication failed. State: {final_state}")
+            raise RuntimeError(
+                f"[GC] Authentication failed. State: {final_state}. "
+                f"Cooldown set for {cooldown_hours}h to prevent 2FA spam. "
+                f"To bypass: delete {DATA_DIR / '.auth_cooldown'}"
+            )
 
         print(f"[GC] Authenticated. Current URL: {self.page.url}")
         clear_auth_cooldown()
