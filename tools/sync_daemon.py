@@ -2478,7 +2478,16 @@ def handle_deploy_webhook():
 
 @app.route('/api/deploy/status', methods=['GET'])
 def handle_deploy_status():
-    """Check the current deploy status."""
+    """Check the current deploy status. Requires same bearer token as /api/deploy."""
+    expected_token = os.getenv("DEPLOY_WEBHOOK_TOKEN", "").strip()
+    if not expected_token:
+        return jsonify({"error": "not_configured"}), 503
+
+    import hmac
+    auth = request.headers.get("Authorization", "")
+    expected = f"Bearer {expected_token}"
+    if not hmac.compare_digest(auth.encode(), expected.encode()):
+        return jsonify({"error": "unauthorized"}), 401
     return jsonify(_DEPLOY_STATUS)
 
 
@@ -3139,7 +3148,7 @@ def handle_voice_update():
             response.headers["X-Voice-Generated-At"] = generated_at
             response.headers["X-Voice-Cached"] = "true"
             return response
-        return jsonify({"error": "voice_update_failed", "detail": str(e)}), 503
+        return jsonify({"error": "voice_update_failed"}), 503
 
 
 @app.route('/api/schedule', methods=['GET'])
@@ -3249,6 +3258,9 @@ def handle_practice_insights():
 
         selected_names = []
         if request.method == "POST":
+            blocked = _guard_mutating_request()
+            if blocked:
+                return blocked
             body = request.get_json(silent=True) or {}
             if not isinstance(body, dict):
                 body = {}
@@ -3315,7 +3327,6 @@ def handle_practice_insights():
         logging.error(f"[PracticeInsights] Unhandled error: {e}")
         return jsonify({
             "error": "practice_insights_failed",
-            "detail": str(e),
             "generated_at": datetime.now(ET).isoformat(),
             "team_name": "The Sharks",
             "default_player_source": "error",
@@ -3385,7 +3396,7 @@ def handle_regenerate_lineups():
         return jsonify({"status": "ok", "lineups": lineups})
     except Exception as e:
         logging.error(f"Regenerate lineups error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "regenerate_failed"}), 500
 
 
 def _record_h2h_from_games():
