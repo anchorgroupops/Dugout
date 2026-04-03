@@ -14,7 +14,7 @@ pdfplumber>=0.11,<1
 
 # AI / vector APIs
 google-generativeai>=0.8,<1
-pinecone>=5.0,<6
+pinecone>=5.0,<9
 
 # FastAPI (used by modal_app.py)
 fastapi[standard]>=0.110,<1
