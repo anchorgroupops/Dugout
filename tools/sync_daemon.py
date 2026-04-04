@@ -787,8 +787,7 @@ def _collect_pipeline_health() -> dict:
 def _write_pipeline_health_artifact():
     out = _collect_pipeline_health()
     out_file = SHARKS_DIR / "pipeline_health.json"
-    with open(out_file, "w") as f:
-        json.dump(out, f, indent=2)
+    _write_json_file(out_file, out)
     app_rows = out["feeds"]["app_stats"]["batting_rows"]
     team_rows = out["feeds"]["team_merged"]["roster_rows"]
     game_rows = out["feeds"]["games"]["opponent_batting_rows"]
@@ -947,8 +946,7 @@ def _validate_and_write_stat_anomalies(team_data: dict) -> list[dict]:
         "threshold_alert_count": len(threshold_alerts),
     }
     out_file = SHARKS_DIR / "stats_anomalies.json"
-    with open(out_file, "w") as f:
-        json.dump(out, f, indent=2)
+    _write_json_file(out_file, out)
 
     if findings:
         for player_finding in findings:
@@ -1378,9 +1376,7 @@ def _load_sub_tracker():
 
 
 def _save_sub_tracker(tracker):
-    SHARKS_DIR.mkdir(parents=True, exist_ok=True)
-    with open(SHARKS_DIR / "sub_tracker.json", "w") as f:
-        json.dump(tracker, f, indent=2)
+    _write_json_file(SHARKS_DIR / "sub_tracker.json", tracker)
 
 
 def _is_core_player(name):
@@ -2696,8 +2692,7 @@ def handle_borrowed_player():
     if not existing:
         entry = {"first": first, "last": last, "number": number, "gc_team_id": gc_team_id}
         manifest["borrowed_players"].append(entry)
-        with open(manifest_file, "w") as f:
-            json.dump(manifest, f, indent=2)
+        _write_json_file(manifest_file, manifest)
         logging.info(f"Added borrowed player: {first} {last} #{number}")
 
     # Optionally scrape stats from their home team
@@ -3122,8 +3117,7 @@ def handle_voice_update():
         now_iso = datetime.now(ET).isoformat()
         with open(mp3_file, "wb") as f:
             f.write(audio)
-        with open(meta_file, "w") as f:
-            json.dump({"generated_at": now_iso, "script": text}, f, indent=2)
+        _write_json_file(meta_file, {"generated_at": now_iso, "script": text})
 
         response = Response(audio, mimetype="audio/mpeg")
         response.headers["Content-Disposition"] = 'inline; filename="voice_overview_latest.mp3"'
