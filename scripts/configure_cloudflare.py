@@ -147,7 +147,7 @@ if __name__ == "__main__":
         
         domain = "joelycannoli.com"
         target_hostname = "dugout.joelycannoli.com"
-        target_service = "http://192.168.7.222:3000"
+        target_service = os.getenv("TUNNEL_TARGET_SERVICE", "http://localhost:3000")
         
         print(f"Fetching Zone ID for {domain}...")
         zone_id = get_zone_id(domain)

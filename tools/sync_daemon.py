@@ -255,6 +255,11 @@ def _parse_record_parts(record: str) -> tuple[int, int, int]:
     return w, l, t
 
 
+def _sanitize_log(value: str, max_len: int = 200) -> str:
+    """Strip newlines and control characters from values before logging to prevent log injection."""
+    return re.sub(r'[\x00-\x1f\x7f-\x9f]', '', value)[:max_len]
+
+
 def _request_origin() -> str:
     origin = (request.headers.get("Origin") or "").strip()
     if origin:
@@ -289,14 +294,14 @@ def _guard_mutating_request():
     req_origin = _request_origin()
     if req_origin:
         if req_origin not in WRITE_ORIGINS:
-            logging.warning(f"[Security] Blocked mutating request from disallowed origin: {req_origin}")
+            logging.warning("[Security] Blocked mutating request from disallowed origin: %s", _sanitize_log(req_origin))
             return jsonify({"error": "forbidden_origin"}), 403
         return None
 
     # Requests without origin/referer are only allowed from private/loopback addresses.
     ip = _client_ip()
     if not _is_private_or_loopback(ip):
-        logging.warning(f"[Security] Blocked mutating request with no origin from non-private IP: {ip}")
+        logging.warning("[Security] Blocked mutating request with no origin from non-private IP: %s", _sanitize_log(ip))
         return jsonify({"error": "forbidden"}), 403
     return None
 
@@ -2437,7 +2442,7 @@ def handle_deploy_webhook():
     auth = request.headers.get("Authorization", "")
     expected = f"Bearer {expected_token}"
     if not hmac.compare_digest(auth.encode(), expected.encode()):
-        logging.warning("[Security] Deploy webhook: invalid token from %s", _client_ip())
+        logging.warning("[Security] Deploy webhook: invalid token from %s", _sanitize_log(_client_ip()))
         return jsonify({"error": "Unauthorized"}), 401
 
     if _DEPLOY_STATUS["status"] == "deploying":
@@ -3261,7 +3266,9 @@ def handle_practice_insights():
             players_raw = body.get("players") or []
             if not isinstance(players_raw, list):
                 players_raw = []
-            selected_names = [str(n).strip() for n in players_raw if str(n).strip()]
+            if len(players_raw) > 50:
+                return jsonify({"error": "too_many_players", "max": 50}), 400
+            selected_names = [str(n).strip()[:80] for n in players_raw if str(n).strip()]
         else:
             csv = (request.args.get("players") or "").strip()
             if csv:
