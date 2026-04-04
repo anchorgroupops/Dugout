@@ -3404,6 +3404,15 @@ def handle_regenerate_lineups():
 # ANNOUNCER ENDPOINTS
 # ---------------------------------------------------------
 
+def _validate_player_id(player_id: str):
+    """Return error response if player_id is invalid/dangerous, else None."""
+    if not player_id or len(player_id) > 100:
+        return jsonify({"error": "invalid_player_id"}), 400
+    if '..' in player_id or '/' in player_id or '\\' in player_id:
+        return jsonify({"error": "invalid_player_id"}), 400
+    return None
+
+
 @app.route('/api/announcer/roster', methods=['GET'])
 def handle_announcer_roster():
     """Return all active players with announcer metadata."""
@@ -3423,8 +3432,9 @@ def handle_announcer_render(player_id):
     blocked = _guard_mutating_request()
     if blocked:
         return blocked
-    if not player_id or len(player_id) > 100:
-        return jsonify({"error": "invalid_player_id"}), 400
+    invalid = _validate_player_id(player_id)
+    if invalid:
+        return invalid
 
     import threading
     from announcer_engine import render_player_audio, get_player_by_id
@@ -3470,8 +3480,9 @@ def handle_announcer_phonetics(player_id):
     blocked = _guard_mutating_request()
     if blocked:
         return blocked
-    if not player_id or len(player_id) > 100:
-        return jsonify({"error": "invalid_player_id"}), 400
+    invalid = _validate_player_id(player_id)
+    if invalid:
+        return invalid
 
     from announcer_engine import update_player, build_announcement_text, get_player_by_id
 
@@ -3515,7 +3526,8 @@ def handle_announcer_add_sub():
     if not first:
         return jsonify({"error": "first_name_required"}), 400
 
-    player_id = f"{number}-{first}-{last}".lower().replace(" ", "-")
+    from announcer_engine import _sanitize_player_id
+    player_id = _sanitize_player_id(f"{number}-{first}-{last}")
     roster = load_announcer_roster()
 
     # Check for duplicate
@@ -3555,15 +3567,16 @@ def handle_announcer_add_sub():
 @app.route('/api/announcer/clip/<player_id>', methods=['GET'])
 def handle_announcer_clip(player_id):
     """Serve the latest rendered clip for a player."""
-    if not player_id or len(player_id) > 100:
-        return jsonify({"error": "invalid_player_id"}), 400
+    invalid = _validate_player_id(player_id)
+    if invalid:
+        return invalid
 
-    from announcer_engine import get_player_by_id, CLIPS_DIR
+    from announcer_engine import get_player_by_id, CLIPS_DIR, _sanitize_player_id
     player = get_player_by_id(player_id)
     if not player:
         return jsonify({"error": "player_not_found"}), 404
 
-    clip_dir = CLIPS_DIR / player_id
+    clip_dir = CLIPS_DIR / _sanitize_player_id(player_id)
     if not clip_dir.exists():
         return jsonify({"error": "no_clips"}), 404
 

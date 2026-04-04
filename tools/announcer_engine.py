@@ -92,6 +92,19 @@ def _atomic_write_json(path: Path, data, indent: int = 2):
         raise
 
 
+def _sanitize_player_id(raw: str) -> str:
+    """Sanitize player ID to prevent path traversal. Only allow [a-z0-9_-]."""
+    import re
+    # Strip path separators and collapse to safe chars
+    safe = re.sub(r'[^a-z0-9_-]', '', raw.lower().replace(' ', '-'))
+    # Remove leading dots/dashes to prevent hidden files or relative paths
+    safe = safe.lstrip('.-')
+    return safe[:100] or 'unknown'
+
+
+MAX_TTS_OUTPUT_BYTES = 10 * 1024 * 1024  # 10 MB cap on TTS output
+
+
 def _read_json(path: Path, default=None):
     if not path.exists():
         return default
@@ -366,7 +379,7 @@ def _bootstrap_roster_from_team() -> list[dict]:
         if not first:
             continue
 
-        player_id = f"{number}-{first}-{last}".lower().replace(" ", "-")
+        player_id = _sanitize_player_id(f"{number}-{first}-{last}")
         entry = {
             "id": player_id,
             "first": first,
@@ -442,15 +455,19 @@ def render_player_audio(player_id: str) -> dict:
         text = build_announcement_text(player)
         audio_bytes = provider.synthesize(text, voice)
 
-        # Save clip
+        if len(audio_bytes) > MAX_TTS_OUTPUT_BYTES:
+            raise RuntimeError(f"TTS output too large ({len(audio_bytes)} bytes, max {MAX_TTS_OUTPUT_BYTES})")
+
+        # Save clip — sanitize player_id for safe filesystem path
         ts = datetime.now(ET).strftime("%Y%m%d_%H%M%S")
-        player_clip_dir = CLIPS_DIR / player_id
+        safe_id = _sanitize_player_id(player_id)
+        player_clip_dir = CLIPS_DIR / safe_id
         player_clip_dir.mkdir(parents=True, exist_ok=True)
         clip_path = player_clip_dir / f"{ts}.mp3"
         clip_path.write_bytes(audio_bytes)
 
         # Build URL path (served by nginx or Flask)
-        clip_url = f"/announcer-clips/{player_id}/{ts}.mp3"
+        clip_url = f"/announcer-clips/{safe_id}/{ts}.mp3"
 
         updated = update_player(player_id, {
             "status": "ready",
