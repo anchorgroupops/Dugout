@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Users, Activity, RefreshCw, ListOrdered, Calendar, Trophy, Dumbbell, Volume2, Target, AlertTriangle, MoreHorizontal, Download, Globe, GlobeLock, Clock, Radio } from 'lucide-react';
+import { Users, Activity, RefreshCw, ListOrdered, Calendar, Trophy, Dumbbell, Volume2, Target, AlertTriangle, MoreHorizontal, Download, Globe, GlobeLock, Clock, Radio, Mic } from 'lucide-react';
 import { formatDateTime, formatRelative } from './utils/formatDate';
 import { usePWAInstall } from './utils/usePWAInstall';
 import { useOnlineStatus } from './utils/useOnlineStatus';
@@ -11,6 +11,7 @@ import League from './components/League';
 import Practice from './components/Practice';
 import Scouting from './components/Scouting';
 import Scoreboard from './components/Scoreboard';
+import Announcer from './components/Announcer';
 import ErrorBoundary from './components/ErrorBoundary';
 
 
@@ -295,7 +296,8 @@ function App() {
     { id: 'lineups', label: 'Lineups', icon: <ListOrdered size={18} /> },
     { id: 'games', label: 'Games', icon: <Calendar size={18} /> },
     { id: 'league', label: 'League', icon: <Trophy size={18} /> },
-    { id: 'practice', label: 'Practice', icon: <Dumbbell size={18} /> }
+    { id: 'practice', label: 'Practice', icon: <Dumbbell size={18} /> },
+    { id: 'announcer', label: 'Announcer', icon: <Mic size={18} /> }
   ];
 
   // Mobile: 4 primary bottom tabs + "More" overflow
@@ -305,6 +307,7 @@ function App() {
     { id: 'scout', label: 'Scout', icon: <Target size={22} /> },
     { id: 'lineups', label: 'Lineups', icon: <ListOrdered size={22} /> },
     { id: 'practice', label: 'Practice', icon: <Dumbbell size={22} /> },
+    { id: 'announcer', label: 'Announcer', icon: <Mic size={22} /> },
   ];
 
   const overflowNavItems = [
@@ -360,6 +363,9 @@ function App() {
           isMobile={isMobile}
           isLandscape={isLandscape}
         />
+      );
+      case 'announcer': return (
+        <Announcer lineups={data.lineups} />
       );
       default: return (
         <Roster

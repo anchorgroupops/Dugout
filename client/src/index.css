@@ -1183,3 +1183,450 @@ input[type="checkbox"]:checked::after {
     margin: 1rem auto;
   }
 }
+
+/* ==========================================================================
+   ANNOUNCER
+   ========================================================================== */
+
+.announcer-container {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.announcer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+}
+
+.announcer-header h2 {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-family: var(--font-heading);
+  font-size: 1.4rem;
+  margin: 0;
+}
+
+.announcer-header-actions {
+  display: flex;
+  gap: var(--space-xs);
+}
+
+/* Stats Bar */
+.announcer-stats-bar {
+  padding: var(--space-sm) var(--space-md);
+}
+
+.announcer-stats-counts {
+  display: flex;
+  gap: var(--space-md);
+  margin-bottom: var(--space-xs);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.announcer-stat-item {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.announcer-progress-track {
+  height: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.announcer-progress-fill {
+  height: 100%;
+  background: var(--primary-color);
+  border-radius: 3px;
+  transition: width 0.5s ease;
+}
+
+/* Toolbar */
+.announcer-toolbar {
+  display: flex;
+  gap: var(--space-xs);
+  flex-wrap: wrap;
+}
+
+/* Buttons */
+.announcer-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.5rem 0.9rem;
+  border: 1px solid var(--surface-border);
+  border-radius: 8px;
+  font-family: var(--font-base);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.announcer-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.announcer-btn-primary {
+  background: var(--primary-color);
+  color: var(--bg-color);
+  border-color: var(--primary-color);
+}
+
+.announcer-btn-primary:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+
+.announcer-btn-secondary {
+  background: var(--surface-base);
+  color: var(--text-main);
+}
+
+.announcer-btn-secondary:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+
+.announcer-btn-accent {
+  background: rgba(130, 203, 195, 0.15);
+  color: var(--primary-color);
+  border-color: rgba(130, 203, 195, 0.3);
+}
+
+.announcer-btn-accent:hover:not(:disabled) {
+  background: rgba(130, 203, 195, 0.25);
+}
+
+/* Status LED */
+.announcer-status-led {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* Player Cards */
+.announcer-player-card {
+  padding: 0;
+  overflow: hidden;
+}
+
+.announcer-player-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  padding: 0.75rem 1rem;
+  background: none;
+  border: none;
+  color: var(--text-main);
+  cursor: pointer;
+  font-family: var(--font-base);
+  font-size: 0.9rem;
+  text-align: left;
+}
+
+.announcer-player-header:hover {
+  background: var(--surface-hover);
+}
+
+.announcer-player-info {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.announcer-jersey {
+  font-weight: 800;
+  color: var(--primary-color);
+  font-size: 1rem;
+  min-width: 2.5rem;
+}
+
+.announcer-player-name {
+  font-weight: 600;
+}
+
+.announcer-player-actions-mini {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text-muted);
+}
+
+.announcer-mini-play {
+  color: var(--primary-color);
+  cursor: pointer;
+  padding: 0.2rem;
+}
+
+.announcer-mini-play:hover {
+  color: var(--text-main);
+}
+
+/* Player Details (Expanded) */
+.announcer-player-details {
+  padding: 0 1rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  border-top: 1px solid var(--surface-border);
+}
+
+.announcer-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.announcer-form-group label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.announcer-form-group input,
+.announcer-form-group textarea {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--surface-border);
+  border-radius: 6px;
+  padding: 0.45rem 0.65rem;
+  color: var(--text-main);
+  font-family: var(--font-base);
+  font-size: 0.85rem;
+  transition: border-color var(--transition-fast);
+}
+
+.announcer-form-group input:focus,
+.announcer-form-group textarea:focus {
+  outline: none;
+  border-color: var(--primary-color);
+}
+
+.announcer-form-row {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+.announcer-preview-text {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  padding: 0.5rem 0.75rem;
+  background: rgba(130, 203, 195, 0.06);
+  border-radius: 6px;
+  border: 1px solid rgba(130, 203, 195, 0.12);
+}
+
+.announcer-error-msg {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--danger);
+  padding: 0.4rem 0.65rem;
+  background: rgba(179, 74, 57, 0.1);
+  border-radius: 6px;
+}
+
+.announcer-card-actions {
+  display: flex;
+  gap: var(--space-xs);
+  flex-wrap: wrap;
+  padding-top: var(--space-xs);
+}
+
+/* Roster List */
+.announcer-roster-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+/* Add Sub Modal */
+.announcer-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-md);
+}
+
+.announcer-modal {
+  width: 100%;
+  max-width: 420px;
+  padding: var(--space-lg);
+}
+
+.announcer-modal h3 {
+  margin: 0 0 var(--space-md);
+  font-family: var(--font-heading);
+}
+
+.announcer-modal form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.announcer-modal input {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--surface-border);
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  color: var(--text-main);
+  font-family: var(--font-base);
+  font-size: 0.85rem;
+  flex: 1;
+}
+
+.announcer-modal input:focus {
+  outline: none;
+  border-color: var(--primary-color);
+}
+
+.announcer-form-actions {
+  display: flex;
+  gap: var(--space-xs);
+  justify-content: flex-end;
+  padding-top: var(--space-xs);
+}
+
+/* Now Playing View */
+.announcer-now-playing {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+  align-items: center;
+}
+
+.announcer-np-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+}
+
+.announcer-np-position {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.announcer-np-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 2rem 3rem;
+  text-align: center;
+  gap: var(--space-sm);
+  width: 100%;
+  max-width: 360px;
+}
+
+.announcer-np-jersey {
+  font-size: 3.5rem;
+  font-weight: 800;
+  color: var(--primary-color);
+  line-height: 1;
+  font-family: var(--font-heading);
+}
+
+.announcer-np-name {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.announcer-np-timeline {
+  width: 100%;
+  max-width: 360px;
+}
+
+.announcer-np-time {
+  text-align: center;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 0.3rem;
+}
+
+.announcer-np-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-lg);
+}
+
+.announcer-btn-round {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  padding: 0;
+  justify-content: center;
+  background: var(--surface-base);
+  color: var(--text-main);
+}
+
+.announcer-btn-round:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+
+.announcer-btn-play {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  padding: 0;
+  justify-content: center;
+  background: var(--primary-color);
+  color: var(--bg-color);
+  border-color: var(--primary-color);
+}
+
+.announcer-btn-play:hover:not(:disabled) {
+  filter: brightness(1.15);
+  transform: scale(1.05);
+}
+
+.announcer-btn-play.active {
+  background: var(--danger);
+  border-color: var(--danger);
+}
+
+/* Mobile adjustments */
+@media (max-width: 768px) {
+  .announcer-form-row {
+    flex-direction: column;
+  }
+
+  .announcer-form-row .announcer-form-group {
+    width: 100% !important;
+  }
+
+  .announcer-np-card {
+    padding: 1.5rem 2rem;
+  }
+
+  .announcer-np-jersey {
+    font-size: 2.5rem;
+  }
+
+  .announcer-np-name {
+    font-size: 1.2rem;
+  }
+}

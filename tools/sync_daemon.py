@@ -3400,6 +3400,195 @@ def handle_regenerate_lineups():
         return jsonify({"error": "regenerate_failed"}), 500
 
 
+# ---------------------------------------------------------
+# ANNOUNCER ENDPOINTS
+# ---------------------------------------------------------
+
+@app.route('/api/announcer/roster', methods=['GET'])
+def handle_announcer_roster():
+    """Return all active players with announcer metadata."""
+    try:
+        from announcer_engine import load_announcer_roster, get_roster_stats
+        roster = load_announcer_roster()
+        stats = get_roster_stats()
+        return jsonify({"roster": roster, "stats": stats})
+    except Exception as e:
+        logging.error("[Announcer] roster error: %s", e)
+        return jsonify({"error": "announcer_roster_failed"}), 500
+
+
+@app.route('/api/announcer/render/<player_id>', methods=['POST'])
+def handle_announcer_render(player_id):
+    """Trigger TTS render for a single player (runs in background thread)."""
+    blocked = _guard_mutating_request()
+    if blocked:
+        return blocked
+    if not player_id or len(player_id) > 100:
+        return jsonify({"error": "invalid_player_id"}), 400
+
+    import threading
+    from announcer_engine import render_player_audio, get_player_by_id
+
+    player = get_player_by_id(player_id)
+    if not player:
+        return jsonify({"error": "player_not_found"}), 404
+
+    def _bg_render():
+        try:
+            render_player_audio(player_id)
+        except Exception as e:
+            logging.error("[Announcer] bg render failed for %s: %s", player_id, e)
+
+    threading.Thread(target=_bg_render, daemon=True).start()
+    return jsonify({"status": "rendering", "player_id": player_id}), 202
+
+
+@app.route('/api/announcer/render-all', methods=['POST'])
+def handle_announcer_render_all():
+    """Batch render all pending players (sequential, in background)."""
+    blocked = _guard_mutating_request()
+    if blocked:
+        return blocked
+
+    import threading
+    from announcer_engine import render_all_pending
+
+    def _bg_render_all():
+        try:
+            result = render_all_pending()
+            logging.info("[Announcer] Batch render: %s", result)
+        except Exception as e:
+            logging.error("[Announcer] batch render error: %s", e)
+
+    threading.Thread(target=_bg_render_all, daemon=True).start()
+    return jsonify({"status": "rendering_all"}), 202
+
+
+@app.route('/api/announcer/phonetics/<player_id>', methods=['POST'])
+def handle_announcer_phonetics(player_id):
+    """Update phonetic spelling and TTS instruction for a player."""
+    blocked = _guard_mutating_request()
+    if blocked:
+        return blocked
+    if not player_id or len(player_id) > 100:
+        return jsonify({"error": "invalid_player_id"}), 400
+
+    from announcer_engine import update_player, build_announcement_text, get_player_by_id
+
+    data = request.get_json(silent=True) or {}
+    phonetic = (data.get("phonetic_hint") or "")[:200]
+    instruction = (data.get("tts_instruction") or "")[:500]
+    walkup_url = (data.get("walkup_song_url") or "")[:500]
+    intro_ts = data.get("intro_timestamp")
+
+    updates = {"phonetic_hint": phonetic, "tts_instruction": instruction, "status": "pending"}
+    if walkup_url:
+        updates["walkup_song_url"] = walkup_url
+    if intro_ts is not None:
+        try:
+            updates["intro_timestamp"] = max(0.0, min(float(intro_ts), 300.0))
+        except (TypeError, ValueError):
+            pass
+
+    updated = update_player(player_id, updates)
+    if not updated:
+        return jsonify({"error": "player_not_found"}), 404
+
+    preview = build_announcement_text(updated)
+    return jsonify({"status": "ok", "player": updated, "announcement_preview": preview})
+
+
+@app.route('/api/announcer/add-sub', methods=['POST'])
+def handle_announcer_add_sub():
+    """Add a borrowed/sub player to the announcer roster."""
+    blocked = _guard_mutating_request()
+    if blocked:
+        return blocked
+
+    from announcer_engine import load_announcer_roster, save_announcer_roster, render_player_audio
+
+    data = request.get_json(silent=True) or {}
+    first = (data.get("first") or "").strip()[:64]
+    last = (data.get("last") or "").strip()[:64]
+    number = str(data.get("number") or "").strip()[:4]
+
+    if not first:
+        return jsonify({"error": "first_name_required"}), 400
+
+    player_id = f"{number}-{first}-{last}".lower().replace(" ", "-")
+    roster = load_announcer_roster()
+
+    # Check for duplicate
+    if any(p.get("id") == player_id for p in roster):
+        return jsonify({"error": "player_already_exists", "player_id": player_id}), 409
+
+    entry = {
+        "id": player_id,
+        "first": first,
+        "last": last,
+        "number": number,
+        "phonetic_hint": (data.get("phonetic_hint") or "")[:200],
+        "tts_instruction": "",
+        "walkup_song_url": (data.get("walkup_song_url") or "")[:500],
+        "intro_timestamp": 5.0,
+        "announcer_audio_url": "",
+        "status": "pending",
+        "is_active": True,
+        "rendered_at": "",
+        "error_message": "",
+    }
+    roster.append(entry)
+    save_announcer_roster(roster)
+
+    # Background render
+    import threading
+    def _bg():
+        try:
+            render_player_audio(player_id)
+        except Exception as e:
+            logging.error("[Announcer] sub render failed: %s", e)
+
+    threading.Thread(target=_bg, daemon=True).start()
+    return jsonify({"status": "added", "player": entry}), 201
+
+
+@app.route('/api/announcer/clip/<player_id>', methods=['GET'])
+def handle_announcer_clip(player_id):
+    """Serve the latest rendered clip for a player."""
+    if not player_id or len(player_id) > 100:
+        return jsonify({"error": "invalid_player_id"}), 400
+
+    from announcer_engine import get_player_by_id, CLIPS_DIR
+    player = get_player_by_id(player_id)
+    if not player:
+        return jsonify({"error": "player_not_found"}), 404
+
+    clip_dir = CLIPS_DIR / player_id
+    if not clip_dir.exists():
+        return jsonify({"error": "no_clips"}), 404
+
+    clips = sorted(clip_dir.glob("*.mp3"), reverse=True)
+    if not clips:
+        return jsonify({"error": "no_clips"}), 404
+
+    return Response(
+        clips[0].read_bytes(),
+        mimetype="audio/mpeg",
+        headers={"Content-Disposition": f'inline; filename="{player_id}.mp3"'},
+    )
+
+
+@app.route('/api/announcer/voice-profiles', methods=['GET'])
+def handle_announcer_voice_profiles():
+    """List available voice profiles."""
+    try:
+        from announcer_engine import load_voice_profiles
+        return jsonify({"profiles": load_voice_profiles()})
+    except Exception as e:
+        logging.error("[Announcer] voice profiles error: %s", e)
+        return jsonify({"error": "voice_profiles_failed"}), 500
+
+
 def _record_h2h_from_games():
     """Scan game JSON files and insert h2h records for any new games."""
     games_dir = SHARKS_DIR / "games"
