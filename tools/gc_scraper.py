@@ -51,7 +51,8 @@ GC_HEADLESS = os.getenv("GC_HEADLESS", "true").lower() != "false"
 # Auth cooldown: prevent rapid-fire 2FA code emails when session is expired.
 # After a login failure, wait this many hours before retrying authenticated scraping.
 AUTH_COOLDOWN_HOURS = float(os.getenv("AUTH_COOLDOWN_HOURS", "4"))
-_AUTH_COOLDOWN_FILE = DATA_DIR / ".auth_cooldown"
+# GC_AUTH_COOLDOWN_FILE can be overridden (e.g. in Modal to point to a persistent volume)
+_AUTH_COOLDOWN_FILE = Path(os.getenv("GC_AUTH_COOLDOWN_FILE", str(DATA_DIR / ".auth_cooldown")))
 
 
 def set_auth_cooldown(reason: str = ""):
