@@ -16,6 +16,7 @@
 const DUCK_LEVEL = 0.3;
 const DUCK_RAMP_MS = 300;
 const BUFFER_CACHE = new Map();
+const MAX_CACHE_SIZE = 20;
 
 let ctx = null;
 let masterGain = null;
@@ -53,6 +54,11 @@ async function loadBuffer(url) {
   if (!resp.ok) throw new Error(`Failed to fetch audio: ${resp.status} ${url}`);
   const arrayBuf = await resp.arrayBuffer();
   const audioBuf = await audioCtx.decodeAudioData(arrayBuf);
+  // LRU eviction: drop oldest entry when cache is full
+  if (BUFFER_CACHE.size >= MAX_CACHE_SIZE) {
+    const oldest = BUFFER_CACHE.keys().next().value;
+    BUFFER_CACHE.delete(oldest);
+  }
   BUFFER_CACHE.set(url, audioBuf);
   return audioBuf;
 }
