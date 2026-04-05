@@ -10,7 +10,10 @@
       "Bash(powershell -Command \"5001,5050,5100,5200,8000,8080,8888 | ForEach-Object { $port = $_ $conn = New-Object System.Net.Sockets.TcpClient; try { $conn.Connect\\(''127.0.0.1'', $port\\); \"\"$port IN USE\"\" } catch { \"\"$port FREE\"\" } finally { $conn.Dispose\\(\\) } }\")",
       "Bash(powershell -Command \":*)",
       "Bash(where python:*)",
-      "Bash(where py:*)"
+      "Bash(where py:*)",
+      "mcp__a7ff7ca0-0f34-4323-a520-f5ae16c67295__get_node_types",
+      "mcp__a7ff7ca0-0f34-4323-a520-f5ae16c67295__get_suggested_nodes",
+      "mcp__a7ff7ca0-0f34-4323-a520-f5ae16c67295__validate_workflow"
     ]
   }
 }
