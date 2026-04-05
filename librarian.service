@@ -1,0 +1,15 @@
+[Unit]
+Description=The Librarian Flask API
+After=network.target
+
+[Service]
+User=joelycannoli
+WorkingDirectory=/home/joelycannoli/repos/antigravity-repos/NotebookLM Librarian
+Environment=PYTHONPATH='/home/joelycannoli/repos/antigravity-repos/NotebookLM Librarian'
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/joelycannoli/repos/antigravity-repos/NotebookLM Librarian/venv/bin/python3 api.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
