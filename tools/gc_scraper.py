@@ -228,10 +228,13 @@ class GameChangerScraper:
         self.page = None
 
     def _validate_credentials(self):
-        """Ensure GC credentials are set."""
-        if not self.email or not self.password:
+        """Ensure GC credentials are available (cookies OR email/password)."""
+        has_cookies = bool(os.getenv("GC_SESSION_COOKIES", "").strip())
+        has_creds = bool(self.email and self.password)
+        if not has_cookies and not has_creds:
             raise ValueError(
-                "[GC] Missing credentials. Set GC_EMAIL and GC_PASSWORD in .env"
+                "[GC] Missing credentials. Set GC_SESSION_COOKIES (JSON cookie array) "
+                "or GC_EMAIL + GC_PASSWORD in .env"
             )
 
     def _capture_diagnostics(self, label: str):
@@ -358,31 +361,22 @@ class GameChangerScraper:
 
         print("[GC] [OTP] OTP/MFA prompt detected!")
 
-        # Check for pre-configured OTP in env
-        otp_code = os.getenv("GC_OTP", "").strip()
-        if otp_code:
-            print(f"[GC] Using GC_OTP from environment: {'*' * len(otp_code)}")
-            otp_field.fill(otp_code)
-            # Submit
-            submit_btn = self.page.get_by_role("button", name=re.compile("Verify|Continue|Submit|Confirm", re.I)).first
-            if submit_btn.count() > 0:
-                submit_btn.click()
-            else:
-                otp_field.press("Enter")
-            self.page.wait_for_load_state("networkidle", timeout=30000)
-            print("[GC] [OK] OTP submitted.")
-        else:
-            # Running non-interactively (daemon mode): set cooldown instead of blocking 180s
-            if os.getenv("SYNC_DAEMON_MODE", "").strip():
-                set_auth_cooldown("2FA code required but running in daemon mode (no GC_OTP set)")
-                raise RuntimeError(
-                    "[GC] 2FA code required. Set GC_OTP env var with the code from fly386@gmail.com, "
-                    "or run save_session.py interactively. Auth cooldown activated."
-                )
-            print("[GC] [WARN]  No GC_OTP set in .env. Waiting 180s for manual entry...")
-            print("[GC]    → Enter the code in the browser window NOW. You have 3 minutes.")
-            self.page.wait_for_timeout(180000)
-            print("[GC] Resuming after OTP wait...")
+        # OTP-based auth is unreliable in automated runs (codes expire in 30s).
+        # If running headless/daemon, set cooldown and fail clearly.
+        is_headless = GC_HEADLESS or os.getenv("SYNC_DAEMON_MODE", "").strip()
+        if is_headless:
+            set_auth_cooldown("2FA code required — use GC_SESSION_COOKIES for headless auth")
+            raise RuntimeError(
+                "[GC] 2FA/OTP required but running headless. OTP codes expire too quickly "
+                "for automated use. Instead, set GC_SESSION_COOKIES with cookies from a "
+                "logged-in browser session. Auth cooldown activated."
+            )
+
+        # Interactive mode: wait for manual entry
+        print("[GC] [WARN] OTP required. Waiting 180s for manual entry...")
+        print("[GC]    → Enter the code in the browser window NOW. You have 3 minutes.")
+        self.page.wait_for_timeout(180000)
+        print("[GC] Resuming after OTP wait...")
 
 
     def _heal_locator(self, target_text: str, role: str = "button") -> Any:
@@ -465,14 +459,38 @@ class GameChangerScraper:
 
         self.page = self.context.pages[0] if self.context.pages else self.context.new_page()
 
+        # --- Cookie injection auth path (preferred — avoids 2FA entirely) ---
+        session_cookies_json = os.getenv("GC_SESSION_COOKIES", "").strip()
+        if session_cookies_json:
+            try:
+                cookies = json.loads(session_cookies_json)
+                if isinstance(cookies, list) and cookies:
+                    # Ensure each cookie has the required domain field
+                    for c in cookies:
+                        if "domain" not in c:
+                            c["domain"] = ".gc.com"
+                        if "path" not in c:
+                            c["path"] = "/"
+                    self.context.add_cookies(cookies)
+                    print(f"[GC] Injected {len(cookies)} session cookies from GC_SESSION_COOKIES")
+            except (json.JSONDecodeError, TypeError) as e:
+                print(f"[GC] [WARN] Failed to parse GC_SESSION_COOKIES: {e}")
+
         print(f"[GC] Navigating to {GC_BASE_URL}...")
         self.page.goto(GC_BASE_URL, wait_until="domcontentloaded", timeout=60000)
-        
+
         # Check initial state
         state = self._get_auth_state()
         print(f"[GC] Initial state: {state}")
 
         if state == "LOGIN_REQUIRED":
+            # If we only have cookies (no email/password), fail clearly
+            if session_cookies_json and not (self.email and self.password):
+                self._capture_diagnostics("cookie_auth_failed")
+                raise RuntimeError(
+                    "[GC] Cookie-based auth failed — session cookies may be expired. "
+                    "Update GC_SESSION_COOKIES with fresh cookies from a logged-in browser."
+                )
             print("[GC] Session invalid or expired. Running login flow...")
             self._complete_login_flow()
             self._wait_for_stable_page(self.stats_url)
