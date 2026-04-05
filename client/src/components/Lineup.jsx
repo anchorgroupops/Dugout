@@ -166,8 +166,8 @@ const Lineup = ({
 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: isMobile ? 'flex-start' : 'center', flexDirection: isMobile ? 'column' : 'row', marginBottom: isMobile ? '1rem' : '2rem', paddingBottom: '1rem', borderBottom: '1px solid var(--surface-border)', gap: isMobile ? '0.55rem' : 0 }}>
           <div>
-            <h3 style={{ fontSize: isMobile ? 'var(--text-lg)' : '1.5rem', color: 'var(--text-main)', textTransform: 'capitalize' }}>
-              Batting Order &middot; {strategy} Strategy
+            <h3 style={{ fontSize: isMobile ? 'var(--text-lg)' : '1.5rem', color: 'var(--text-main)' }}>
+              Batting Order &middot; {strategy.charAt(0).toUpperCase() + strategy.slice(1)} Strategy
             </h3>
             {!isMobile && (
               <p style={{ color: 'var(--text-muted)', fontSize: 'var(--text-sm)', marginTop: '0.25rem' }}>

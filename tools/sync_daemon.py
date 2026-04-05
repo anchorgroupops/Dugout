@@ -273,8 +273,19 @@ def _request_origin() -> str:
 
 
 def _client_ip() -> str:
-    xff = (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
-    return xff or (request.remote_addr or "")
+    """Return the most trustworthy client IP for rate-limiting.
+    Only trust X-Forwarded-For when the direct peer is a private/loopback
+    address (i.e. a trusted reverse proxy like nginx on the same host)."""
+    remote = (request.remote_addr or "").strip()
+    try:
+        ip_obj = ipaddress.ip_address(remote)
+        if ip_obj.is_private or ip_obj.is_loopback:
+            xff = (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+            if xff:
+                return xff
+    except Exception:
+        pass
+    return remote
 
 
 def _is_private_or_loopback(ip_str: str) -> bool:

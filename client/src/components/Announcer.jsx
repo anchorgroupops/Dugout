@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Mic, Music, Play, Square, SkipBack, SkipForward,
   ChevronDown, ChevronUp, RefreshCw, UserPlus, Save,
@@ -65,7 +66,7 @@ function AddSubModal({ onClose, onAdd }) {
     }
   };
 
-  return (
+  return createPortal(
     <div className="announcer-modal-overlay" onClick={onClose}>
       <div className="announcer-modal glass-panel" onClick={e => e.stopPropagation()}>
         <h3>Add Sub Player</h3>
@@ -87,7 +88,8 @@ function AddSubModal({ onClose, onAdd }) {
           </div>
         </form>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
