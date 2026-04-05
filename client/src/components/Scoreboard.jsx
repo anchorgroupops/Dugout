@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Radio, Home, Plane, Clock, Trophy, RefreshCw, ExternalLink } from 'lucide-react';
+import { Radio, Home, Plane, Clock, Trophy, RefreshCw, ExternalLink, Shield, AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react';
 import { formatDateMMDDYYYY } from '../utils/formatDate';
 import { PlayerName } from './StatTooltip';
 
@@ -85,6 +85,226 @@ const BatterRow = ({ player, idx, compact = false }) => {
   );
 };
 
+
+// ─── Mini Spray Chart (compact SVG for live view) ─────────────────────
+const ZONE_POLYS = [
+  { id: 'lf',  points: '10,10 55,10 70,80 10,90' },
+  { id: 'lc',  points: '55,10 100,5 100,70 70,80' },
+  { id: 'cf',  points: '100,5 145,10 130,70 100,70' },
+  { id: 'rc',  points: '145,10 190,10 190,80 130,70' },
+  { id: 'rf',  points: '190,10 190,90 130,80 145,10' },
+  { id: 'if3', points: '10,90 70,80 75,130 40,140' },
+  { id: 'ifm', points: '70,80 130,80 120,130 80,130' },
+  { id: 'if1', points: '130,80 190,90 160,140 120,130' },
+];
+
+const MiniSprayChart = ({ zones, size = 100 }) => {
+  if (!zones) return null;
+  return (
+    <svg width={size} height={size * 0.85} viewBox="0 0 200 170" style={{ display: 'block' }}>
+      <rect width="200" height="170" fill="rgba(0,80,0,0.15)" rx="8" />
+      {ZONE_POLYS.map(z => {
+        const weight = zones[z.id] || 0;
+        const r = Math.round(255 * weight);
+        const g = Math.round(60 * (1 - weight));
+        const opacity = 0.15 + weight * 0.65;
+        return (
+          <polygon
+            key={z.id}
+            points={z.points}
+            fill={`rgba(${r}, ${g}, 30, ${opacity})`}
+            stroke="rgba(255,255,255,0.15)"
+            strokeWidth="1"
+          />
+        );
+      })}
+      {/* Diamond */}
+      <polygon points="100,155 115,140 100,125 85,140" fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth="1.5" />
+      <circle cx="100" cy="155" r="3" fill="var(--primary-color)" opacity="0.8" />
+    </svg>
+  );
+};
+
+const DangerBadge = ({ danger }) => {
+  const color = danger >= 70 ? 'var(--danger)' : danger >= 40 ? 'var(--warning)' : 'var(--success)';
+  const label = danger >= 70 ? 'HIGH' : danger >= 40 ? 'MED' : 'LOW';
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: '0.2rem',
+      background: `${color}22`, color, padding: '2px 8px', borderRadius: '4px',
+      fontSize: '0.6rem', fontWeight: '800', letterSpacing: '0.5px',
+      border: `1px solid ${color}44`,
+    }}>
+      {danger >= 70 && <AlertTriangle size={9} />}
+      {label} {danger}
+    </span>
+  );
+};
+
+const ScoutingCard = ({ player, expanded, onToggle, compact = false }) => {
+  if (!player) return null;
+  const fmtAvg = (v) => v != null ? (v < 1 ? `.${String(v).split('.')[1] || '000'}` : v.toFixed(3)) : '—';
+  return (
+    <div style={{
+      background: 'rgba(0,0,0,0.2)', borderRadius: '8px', overflow: 'hidden',
+      border: `1px solid ${player.danger >= 70 ? 'rgba(179,74,57,0.3)' : 'rgba(255,255,255,0.06)'}`,
+    }}>
+      <button
+        onClick={onToggle}
+        style={{
+          display: 'flex', alignItems: 'center', gap: '0.5rem', width: '100%',
+          padding: compact ? '0.35rem 0.5rem' : '0.5rem 0.75rem', background: 'none', border: 'none',
+          color: 'var(--text-main)', cursor: 'pointer', fontFamily: 'var(--font-base)',
+          fontSize: compact ? '0.7rem' : '0.8rem', textAlign: 'left',
+        }}
+      >
+        <span style={{ fontWeight: '800', color: 'var(--text-muted)', minWidth: '28px' }}>
+          #{player.number || '?'}
+        </span>
+        <span style={{ flex: 1, fontWeight: '600' }}>{player.name}</span>
+        <DangerBadge danger={player.danger} />
+        {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+      </button>
+      {expanded && (
+        <div style={{ padding: '0.5rem 0.75rem', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+          <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+            <MiniSprayChart zones={player.zones} size={compact ? 80 : 110} />
+            <div style={{ flex: 1, minWidth: '120px' }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', marginBottom: '0.4rem' }}>
+                {(player.tags || []).map(t => (
+                  <span key={t} style={{
+                    background: 'rgba(130,203,195,0.12)', color: 'var(--primary-color)',
+                    padding: '1px 6px', borderRadius: '3px', fontSize: '0.6rem', fontWeight: '700',
+                  }}>{t}</span>
+                ))}
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.2rem', fontSize: '0.65rem' }}>
+                <span style={{ color: 'var(--text-muted)' }}>AVG <strong style={{ color: 'var(--text-main)' }}>{fmtAvg(player.avg)}</strong></span>
+                <span style={{ color: 'var(--text-muted)' }}>SLG <strong style={{ color: 'var(--text-main)' }}>{fmtAvg(player.slg)}</strong></span>
+                <span style={{ color: 'var(--text-muted)' }}>OBP <strong style={{ color: 'var(--text-main)' }}>{fmtAvg(player.obp)}</strong></span>
+                <span style={{ color: 'var(--text-muted)' }}>H <strong style={{ color: 'var(--text-main)' }}>{player.h ?? '—'}</strong></span>
+                <span style={{ color: 'var(--text-muted)' }}>HR <strong style={{ color: 'var(--text-main)' }}>{player.hr ?? '—'}</strong></span>
+                <span style={{ color: 'var(--text-muted)' }}>BB <strong style={{ color: 'var(--text-main)' }}>{player.bb ?? '—'}</strong></span>
+                <span style={{ color: 'var(--text-muted)' }}>SO <strong style={{ color: 'var(--text-main)' }}>{player.so ?? '—'}</strong></span>
+                <span style={{ color: 'var(--text-muted)' }}>SB <strong style={{ color: 'var(--text-main)' }}>{player.sb ?? '—'}</strong></span>
+                <span style={{ color: 'var(--text-muted)' }}>PA <strong style={{ color: 'var(--text-main)' }}>{player.pa ?? '—'}</strong></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const LivePlayPanel = ({ livePlay }) => {
+  if (!livePlay) return null;
+  const batter = livePlay.current_batter;
+  return (
+    <div className="glass-panel" style={{
+      padding: '0.75rem 1rem', marginTop: '0.75rem',
+      borderLeft: '3px solid #ff4444',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.4rem' }}>
+        <Shield size={14} color="var(--primary-color)" />
+        <span style={{ fontSize: '0.7rem', fontWeight: '800', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+          Live Situation
+        </span>
+        <span style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.3)', marginLeft: 'auto' }}>
+          {livePlay.outs} out{livePlay.outs !== 1 ? 's' : ''}
+        </span>
+      </div>
+      {batter && (
+        <div style={{ fontSize: '0.85rem', fontWeight: '700', marginBottom: '0.3rem' }}>
+          At Bat: <span style={{ color: 'var(--primary-color)' }}>#{batter.number}</span> {batter.name}
+        </div>
+      )}
+      {livePlay.last_play && (
+        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+          {livePlay.last_play}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const OpponentScoutPanel = ({ scouting, livePlay, isLandscape }) => {
+  const [expandedPlayer, setExpandedPlayer] = useState(null);
+  const [showAll, setShowAll] = useState(false);
+
+  if (!scouting?.has_data) return null;
+
+  const players = scouting.players || [];
+  // If we know the current batter, highlight them
+  const currentBatterNum = livePlay?.current_batter?.number;
+  const currentBatterName = livePlay?.current_batter?.name?.toLowerCase();
+
+  // Auto-expand current batter
+  const highlightIdx = players.findIndex(p =>
+    (currentBatterNum && p.number === currentBatterNum) ||
+    (currentBatterName && p.name.toLowerCase() === currentBatterName)
+  );
+
+  const displayPlayers = showAll ? players : players.slice(0, 5);
+
+  return (
+    <div style={{ marginTop: '1rem' }}>
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: '0.5rem',
+        marginBottom: '0.5rem', paddingBottom: '0.35rem',
+        borderBottom: '1px solid rgba(179, 74, 57, 0.3)',
+      }}>
+        <Shield size={14} color="var(--danger)" />
+        <h3 style={{ fontSize: 'var(--text-sm)', fontWeight: '700', color: 'var(--danger)', margin: 0 }}>
+          Opponent Scouting
+        </h3>
+        <span style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginLeft: 'auto' }}>
+          {players.length} batter{players.length !== 1 ? 's' : ''}
+        </span>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+        {displayPlayers.map((p, i) => {
+          const isCurrentBatter = i === highlightIdx;
+          return (
+            <div key={p.number || i} style={isCurrentBatter ? { border: '1px solid rgba(255,68,68,0.4)', borderRadius: '8px' } : {}}>
+              {isCurrentBatter && (
+                <div style={{
+                  fontSize: '0.55rem', fontWeight: '800', color: '#ff4444',
+                  textTransform: 'uppercase', letterSpacing: '1px', padding: '3px 8px',
+                  background: 'rgba(255,68,68,0.1)',
+                  borderRadius: '8px 8px 0 0',
+                }}>
+                  AT BAT
+                </div>
+              )}
+              <ScoutingCard
+                player={p}
+                expanded={expandedPlayer === i || isCurrentBatter}
+                onToggle={() => setExpandedPlayer(expandedPlayer === i ? null : i)}
+                compact={isLandscape}
+              />
+            </div>
+          );
+        })}
+      </div>
+      {players.length > 5 && (
+        <button
+          onClick={() => setShowAll(!showAll)}
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.3rem',
+            width: '100%', marginTop: '0.4rem', padding: '0.4rem',
+            background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)',
+            borderRadius: '6px', color: 'var(--text-muted)', fontSize: '0.7rem',
+            fontWeight: '600', cursor: 'pointer', fontFamily: 'var(--font-base)',
+          }}
+        >
+          {showAll ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+          {showAll ? 'Show top 5' : `Show all ${players.length}`}
+        </button>
+      )}
+    </div>
+  );
+};
 
 const Scoreboard = ({ isMobile = false, isLandscape = false, team, schedule }) => {
   const [data, setData] = useState(null);
@@ -404,6 +624,14 @@ const Scoreboard = ({ isMobile = false, isLandscape = false, team, schedule }) =
             </table>
           </div>
         )}
+
+        {/* Live Play + Opponent Scouting */}
+        {isLive && <LivePlayPanel livePlay={data.live_play} />}
+        <OpponentScoutPanel
+          scouting={data.opponent_scouting}
+          livePlay={data.live_play}
+          isLandscape={isLandscape}
+        />
 
         {/* Batting Stats */}
         <div style={isLandscape && data.sharks_batting?.length > 0 ? {

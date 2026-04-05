@@ -2032,8 +2032,245 @@ def handle_scoreboard():
         except Exception:
             pass
 
+    # 6. Opponent scouting intelligence (spray charts, danger zones)
+    opp_slug = _slugify_opponent(result.get("opponent", ""))
+    if opp_slug:
+        try:
+            opp_scouting = _build_opponent_scouting(opp_slug, result.get("opponent_batting", []))
+            result["opponent_scouting"] = opp_scouting
+        except Exception as e:
+            logging.debug("[Scoreboard] Opponent scouting failed: %s", e)
+
+    # 7. Try to get live play-by-play data from GC events API (current batter, runners, etc.)
+    if display_status == "live" and gc_game_id:
+        try:
+            events_data = _fetch_gc_live_events(gc_game_id)
+            if events_data:
+                result["live_play"] = events_data
+        except Exception as e:
+            logging.debug("[Scoreboard] Live events fetch failed: %s", e)
+
     return jsonify(result)
 
+
+def _slugify_opponent(name: str) -> str:
+    """Convert opponent name to a filesystem slug for data lookup."""
+    import re
+    if not name:
+        return ""
+    slug = re.sub(r'[^a-z0-9]+', '_', name.lower()).strip('_')
+    return slug
+
+
+def _build_opponent_scouting(opp_slug: str, live_batting: list) -> dict:
+    """Build opponent scouting intel: per-player spray zone weights + danger ratings."""
+    from stats_normalizer import normalize_batting_row
+
+    # Load opponent team data from scraped files
+    opp_dir = DATA_DIR / "opponents" / opp_slug
+    opp_team = None
+    for fname in ("team_merged.json", "team.json"):
+        f = opp_dir / fname
+        if f.exists():
+            opp_team = _read_json_file(f, default=None)
+            if opp_team:
+                break
+
+    # Build roster lookup by jersey number and name
+    roster_by_num = {}
+    roster_by_name = {}
+    if opp_team and isinstance(opp_team.get("roster"), list):
+        for p in opp_team["roster"]:
+            num = str(p.get("number", "")).strip()
+            name = (p.get("name") or f"{p.get('first', '')} {p.get('last', '')}").strip().lower()
+            if num:
+                roster_by_num[num] = p
+            if name:
+                roster_by_name[name] = p
+
+    # Also try aggregated batting stats
+    batting_stats = []
+    if opp_team and isinstance(opp_team.get("batting_stats"), list):
+        batting_stats = opp_team["batting_stats"]
+
+    # Build per-player scouting cards
+    players = []
+    seen = set()
+
+    # Merge live batting with historical data
+    all_batters = list(live_batting or [])
+    for bs in batting_stats:
+        num = str(bs.get("number", "")).strip()
+        name = (bs.get("name") or "").strip()
+        key = num or name.lower()
+        if key and key not in seen:
+            all_batters.append(bs)
+        seen.add(key)
+
+    seen.clear()
+    for batter in all_batters:
+        name = (batter.get("name") or batter.get("player") or "").strip()
+        num = str(batter.get("number", "")).strip()
+        key = num or name.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+
+        # Find full stats from roster
+        full_stats = roster_by_num.get(num) or roster_by_name.get(name.lower()) or {}
+        batting = full_stats.get("batting") or batter.get("batting") or batter
+        adv = full_stats.get("batting_advanced") or {}
+
+        # Normalize stats
+        norm = normalize_batting_row(batting)
+        avg = norm.get("avg", 0) or 0
+        slg = norm.get("slg", 0) or 0
+        obp = norm.get("obp", 0) or 0
+        h = norm.get("h", 0) or 0
+        hr = norm.get("hr", 0) or 0
+        doubles = norm.get("doubles", 0) or 0
+        triples = norm.get("triples", 0) or 0
+        singles = max(0, h - doubles - triples - hr)
+        bb = norm.get("bb", 0) or 0
+        so = norm.get("so", 0) or 0
+        pa = norm.get("pa", 0) or norm.get("ab", 0) or 0
+        sb = norm.get("sb", 0) or 0
+
+        # Compute spray zone weights (simplified field map)
+        total_hits = max(1, singles + doubles + triples + hr)
+        s_pct = singles / total_hits
+        d_pct = doubles / total_hits
+        hr_pct = hr / total_hits
+
+        # Advanced tendencies
+        raw_gb = float(adv.get("gb_pct", 0) or 0)
+        raw_fb = float(adv.get("fb_pct", 0) or 0)
+        gb = raw_gb / 100 if raw_gb > 1 else raw_gb
+        fb = raw_fb / 100 if raw_fb > 1 else raw_fb
+
+        zones = {
+            "lf": 0.10 + s_pct * 0.05 + d_pct * 0.15 + fb * 0.08,
+            "lc": 0.12 + d_pct * 0.15 + s_pct * 0.10,
+            "cf": 0.10 + fb * 0.10 + hr_pct * 0.15,
+            "rc": 0.12 + d_pct * 0.15 + s_pct * 0.10,
+            "rf": 0.10 + s_pct * 0.05 + d_pct * 0.15 + fb * 0.08,
+            "if3": 0.12 + gb * 0.15 + s_pct * 0.10,
+            "ifm": 0.14 + gb * 0.12 + s_pct * 0.08,
+            "if1": 0.12 + gb * 0.15 + s_pct * 0.08,
+        }
+        # Normalize to 0-1
+        max_z = max(zones.values()) or 1
+        zones = {k: round(v / max_z, 2) for k, v in zones.items()}
+
+        # Danger rating: 0-100 composite
+        danger = min(100, int(
+            (avg * 100) * 0.3 +
+            (slg * 100) * 0.2 +
+            (obp * 100) * 0.2 +
+            min(hr * 20, 30) +
+            min(sb * 5, 10)
+        ))
+
+        # Threat tags
+        tags = []
+        if avg >= 0.350:
+            tags.append("Contact")
+        if slg >= 0.500:
+            tags.append("Power")
+        if bb > so and pa >= 5:
+            tags.append("Patient")
+        if sb >= 2:
+            tags.append("Speed")
+        if gb > 0.5:
+            tags.append("Grounder")
+        if fb > 0.4:
+            tags.append("Flyball")
+
+        player_card = {
+            "name": name,
+            "number": num,
+            "avg": round(avg, 3) if avg else None,
+            "slg": round(slg, 3) if slg else None,
+            "obp": round(obp, 3) if obp else None,
+            "h": h, "hr": hr, "bb": bb, "so": so, "sb": sb,
+            "pa": pa,
+            "zones": zones,
+            "danger": danger,
+            "tags": tags,
+        }
+        players.append(player_card)
+
+    # Sort by danger rating descending
+    players.sort(key=lambda p: p.get("danger", 0), reverse=True)
+
+    return {
+        "opponent": opp_slug,
+        "players": players,
+        "has_data": len(players) > 0 and any(p.get("pa", 0) > 0 for p in players),
+    }
+
+
+def _fetch_gc_live_events(gc_game_id: str) -> dict | None:
+    """Attempt to fetch live play-by-play from GC events API.
+    Returns current batter, runners, outs, last play — or None on failure."""
+    gc_api_base = "https://api.team-manager.gc.com"
+
+    try:
+        resp = requests.get(
+            f"{gc_api_base}/game-streams/{gc_game_id}/events",
+            timeout=8,
+        )
+        if resp.status_code != 200:
+            return None
+
+        events = resp.json()
+        if not isinstance(events, list) or not events:
+            return None
+
+        # Parse the most recent events to determine game state
+        last_event = events[-1] if events else {}
+        current_batter = None
+        runners = []
+        outs = 0
+        last_play = ""
+
+        # Walk backwards through events to find current at-bat and game state
+        for ev in reversed(events):
+            ev_type = str(ev.get("type", "")).lower()
+            ev_data = ev.get("data") or ev
+
+            if not current_batter and ev_type in ("at_bat", "plate_appearance", "batter_up"):
+                batter_info = ev_data.get("batter") or ev_data.get("player") or {}
+                current_batter = {
+                    "name": batter_info.get("name", ""),
+                    "number": str(batter_info.get("number", "")),
+                }
+
+            if ev_data.get("outs") is not None:
+                outs = int(ev_data.get("outs", 0))
+
+            if ev_data.get("runners"):
+                runners = ev_data.get("runners", [])
+
+            if not last_play and ev_data.get("description"):
+                last_play = str(ev_data["description"])[:200]
+
+            if current_batter and last_play:
+                break
+
+        if not current_batter and not last_play:
+            return None
+
+        return {
+            "current_batter": current_batter,
+            "outs": outs,
+            "runners": runners,
+            "last_play": last_play,
+            "event_count": len(events),
+        }
+    except Exception as e:
+        logging.debug("[Scoreboard] Events API error: %s", e)
+        return None
 
 @app.route('/api/standings', methods=['GET'])
 def handle_standings():
