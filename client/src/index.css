@@ -176,8 +176,8 @@ main {
 
 /* Animations */
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 .animate-fade-in {
@@ -1462,11 +1462,15 @@ input[type="checkbox"]:checked::after {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.6);
-  z-index: 100;
+  z-index: 150;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: var(--space-md);
+}
+
+body:has(.announcer-modal-overlay) .navbar {
+  z-index: 50;
 }
 
 .announcer-modal {

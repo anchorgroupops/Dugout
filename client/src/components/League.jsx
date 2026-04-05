@@ -128,7 +128,7 @@ const League = ({ isMobile = false, isLandscape = false }) => {
                 justifyContent: 'center',
               }}>
                 <div style={{ fontWeight: isSharks ? '700' : '600', color: isSharks ? 'var(--primary-color)' : 'var(--text-main)', fontSize: isSharks ? 'var(--text-base)' : 'var(--text-sm)' }}>
-                  {isSharks ? '\uD83E\uDD88 ' : `${i + 1}. `}{formatTeamName(team)}
+                  {isSharks ? `\uD83E\uDD88 ${i + 1}. ` : `${i + 1}. `}{formatTeamName(team)}
                 </div>
                 <div style={{ marginTop: '0.2rem', fontSize: 'var(--text-xs)', color: isSharks ? 'var(--text-main)' : 'var(--text-muted)', fontWeight: isSharks ? '600' : '400' }}>
                   {team.w}-{team.l} {'\u00b7'} {team.record} {'\u00b7'} {team.pct != null ? (team.pct === 1 ? '1.000' : team.pct.toFixed(3)) : '\u2014'}
@@ -146,7 +146,7 @@ const League = ({ isMobile = false, isLandscape = false }) => {
               marginBottom: '0.25rem'
             }}>
               <span style={{ fontWeight: isSharks ? '700' : '500', color: isSharks ? 'var(--primary-color)' : 'var(--text-main)', fontSize: isSharks ? 'var(--text-base)' : 'var(--text-sm)' }}>
-                {isSharks ? '\uD83E\uDD88 ' : `${i + 1}. `}{formatTeamName(team)}
+                {isSharks ? `\uD83E\uDD88 ${i + 1}. ` : `${i + 1}. `}{formatTeamName(team)}
               </span>
               <span style={{ textAlign: 'center', fontWeight: isSharks ? '700' : '600', fontSize: 'var(--text-sm)' }}>{team.w}-{team.l}</span>
               <span style={{ textAlign: 'center', color: isSharks ? 'var(--text-main)' : 'var(--text-muted)', fontSize: 'var(--text-sm)', fontWeight: isSharks ? '600' : '400' }}>
