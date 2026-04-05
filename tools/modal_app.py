@@ -20,6 +20,7 @@ sharks_image = (
         "playwright==1.42.0",  # keep in sync with requirements.txt
         "python-dotenv",
         "requests",
+        "pyotp",
         "pinecone>=5.0,<6",
         "google-generativeai>=0.8,<1",
         "fastapi[standard]",
@@ -27,6 +28,12 @@ sharks_image = (
     .run_commands("playwright install --with-deps chromium")
     .add_local_dir(".", remote_path="/app", ignore=["node_modules", "data", "client/node_modules", "client/dist", ".git"])
 )
+
+# Named Modal secret for GC auth credentials (GC_TOTP_SECRET, GC_PASSWORD, etc.)
+try:
+    _sharks_auth_secret = modal.Secret.from_name("softball-sharks-auth")
+except Exception:
+    _sharks_auth_secret = None
 
 tts_image = (
     modal.Image.debian_slim(python_version="3.11")
@@ -46,6 +53,7 @@ def _runtime_secret() -> modal.Secret:
     for key in (
         "GC_EMAIL",
         "GC_PASSWORD",
+        "GC_TOTP_SECRET",
         "GC_TEAM_ID",
         "GC_SEASON_SLUG",
         "GC_ORG_IDS",
@@ -193,7 +201,7 @@ def generate_voice_update(script_text: str, output_path: str = "/vol/softball-gc
     image=sharks_image,
     schedule=modal.Cron("0 6 * * *"),
     volumes={VOLUME_MOUNT: SESSION_VOLUME},
-    secrets=[_runtime_secret()],
+    secrets=[s for s in [_runtime_secret(), _sharks_auth_secret] if s],
     timeout=60 * 45,
 )
 def daily_scout_job():
@@ -224,14 +232,23 @@ def daily_scout_job():
     env["GC_AUTH_COOLDOWN_FILE"] = str(cooldown_file)
     env.setdefault("PYTHONUNBUFFERED", "1")
     env.setdefault("AUTH_COOLDOWN_HOURS", "4")
+    # Hardcoded GC team config fallbacks
+    env.setdefault("GC_TEAM_ID", "NuGgx6WvP7TO")
+    env.setdefault("GC_SEASON_SLUG", "2026-spring-sharks")
 
-    # Auth: prefer GC_SESSION_COOKIES, fall back to email/password
+    # Auth: prefer TOTP, then session cookies, then email/password
+    gc_totp = env.get("GC_TOTP_SECRET", "").strip()
     gc_cookies = env.get("GC_SESSION_COOKIES", "").strip()
     gc_email = env.get("GC_EMAIL", "").strip()
     gc_password = env.get("GC_PASSWORD", "").strip()
-    if not gc_cookies and not (gc_email and gc_password):
-        print("[Modal] WARNING: Neither GC_SESSION_COOKIES nor GC_EMAIL/GC_PASSWORD set.")
-        print("[Modal] GC scrape will be skipped. Analysis steps will run on cached data.")
+    if gc_totp:
+        print("[Modal] GC_TOTP_SECRET available — will generate fresh TOTP codes for 2FA.")
+    elif gc_cookies:
+        print("[Modal] GC_SESSION_COOKIES available — will use cookie injection.")
+    elif gc_email and gc_password:
+        print("[Modal] Using GC_EMAIL/GC_PASSWORD for login (may trigger 2FA).")
+    else:
+        print("[Modal] WARNING: No GC auth configured. GC scrape will be skipped.")
 
     # Check for auth cooldown file (persisted in volume) — avoid 2FA spam
     skip_gc = False
@@ -289,7 +306,7 @@ def daily_scout_job():
     return {"status": "ok", "steps": results}
 
 
-@app.function(image=sharks_image, volumes={VOLUME_MOUNT: SESSION_VOLUME}, secrets=[_runtime_secret()], timeout=60 * 45)
+@app.function(image=sharks_image, volumes={VOLUME_MOUNT: SESSION_VOLUME}, secrets=[s for s in [_runtime_secret(), _sharks_auth_secret] if s], timeout=60 * 45)
 @modal.fastapi_endpoint(method="POST")
 def manual_sync():
     """Manual trigger via Webhook (POST)."""
@@ -297,7 +314,7 @@ def manual_sync():
     return {"status": "triggered", "message": "Scouting job started in background."}
 
 
-@app.function(image=sharks_image, volumes={VOLUME_MOUNT: SESSION_VOLUME}, secrets=[_runtime_secret()], timeout=60 * 45)
+@app.function(image=sharks_image, volumes={VOLUME_MOUNT: SESSION_VOLUME}, secrets=[s for s in [_runtime_secret(), _sharks_auth_secret] if s], timeout=60 * 45)
 def trigger_immediate_refresh():
     """Internal manual trigger."""
     return daily_scout_job.remote()

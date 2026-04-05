@@ -28,6 +28,11 @@ try:
 except ImportError:
     sync_playwright = None
 
+try:
+    import pyotp
+except ImportError:
+    pyotp = None
+
 from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent.parent / ".env")
@@ -361,18 +366,32 @@ class GameChangerScraper:
 
         print("[GC] [OTP] OTP/MFA prompt detected!")
 
-        # OTP-based auth is unreliable in automated runs (codes expire in 30s).
-        # If running headless/daemon, set cooldown and fail clearly.
+        # Strategy 1: Generate a fresh TOTP code if GC_TOTP_SECRET is set
+        totp_secret = os.getenv("GC_TOTP_SECRET", "").strip()
+        if totp_secret and pyotp:
+            otp_code = pyotp.TOTP(totp_secret).now()
+            print(f"[GC] Generated fresh TOTP: {otp_code[:2]}****")
+            otp_field.fill(otp_code)
+            submit_btn = self.page.get_by_role("button", name=re.compile("Verify|Continue|Submit|Confirm", re.I)).first
+            if submit_btn.count() > 0:
+                submit_btn.click()
+            else:
+                otp_field.press("Enter")
+            self.page.wait_for_load_state("networkidle", timeout=30000)
+            print("[GC] [OK] TOTP submitted.")
+            return
+
+        # Strategy 2: Headless without TOTP — fail clearly
         is_headless = GC_HEADLESS or os.getenv("SYNC_DAEMON_MODE", "").strip()
         if is_headless:
-            set_auth_cooldown("2FA code required — use GC_SESSION_COOKIES for headless auth")
+            set_auth_cooldown("2FA code required — set GC_TOTP_SECRET or GC_SESSION_COOKIES")
             raise RuntimeError(
-                "[GC] 2FA/OTP required but running headless. OTP codes expire too quickly "
-                "for automated use. Instead, set GC_SESSION_COOKIES with cookies from a "
-                "logged-in browser session. Auth cooldown activated."
+                "[GC] 2FA/OTP required but no GC_TOTP_SECRET set. "
+                "Add GC_TOTP_SECRET to Modal secrets at "
+                "modal.com/secrets/anchorgroupops/main/softball-sharks-auth"
             )
 
-        # Interactive mode: wait for manual entry
+        # Strategy 3: Interactive mode — wait for manual entry
         print("[GC] [WARN] OTP required. Waiting 180s for manual entry...")
         print("[GC]    → Enter the code in the browser window NOW. You have 3 minutes.")
         self.page.wait_for_timeout(180000)
