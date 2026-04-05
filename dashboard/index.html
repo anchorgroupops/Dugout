@@ -1,0 +1,1305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>The Librarian — Joel Cannoli</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      /* Google palette */
+      --g-blue:   #4285F4;
+      --g-red:    #EA4335;
+      --g-yellow: #FBBC05;
+      --g-green:  #34A853;
+
+      /* Surface */
+      --bg:     #0A0F1E;
+      --surf1:  #111827;
+      --surf2:  #1C2333;
+      --surf3:  #253044;
+      --border: rgba(66,133,244,0.15);
+
+      /* Text */
+      --white: #FFFFFF;
+      --off:   #C8D6E8;
+      --muted: #6B7FA3;
+
+      /* Radius / shadow */
+      --r: 10px;
+      --r-sm: 6px;
+      --shadow: 0 4px 24px rgba(0,0,0,0.45);
+      --glow:   0 0 20px rgba(66,133,244,0.18);
+      --t: all 0.2s ease;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg);
+      color: var(--white);
+      min-height: 100vh;
+    }
+
+    /* ── Header ─────────────────────────────────────────────── */
+    header {
+      background: var(--surf1);
+      border-bottom: 1px solid var(--border);
+      padding: 0 2rem;
+      height: 64px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      box-shadow: var(--shadow);
+    }
+
+    /* ── Futuristic logo ────────────────────────────────────── */
+    .logo { display: flex; align-items: center; gap: 14px; text-decoration: none; }
+
+    .logo-mark {
+      position: relative;
+      width: 44px;
+      height: 44px;
+      flex-shrink: 0;
+    }
+    /* Outer ring — animated Google gradient */
+    .logo-mark::before {
+      content: '';
+      position: absolute;
+      inset: -2px;
+      border-radius: 50%;
+      padding: 2.5px;
+      background: conic-gradient(
+        var(--g-blue) 0deg, var(--g-red) 90deg,
+        var(--g-yellow) 180deg, var(--g-green) 270deg,
+        var(--g-blue) 360deg
+      );
+      -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+      -webkit-mask-composite: xor;
+      mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+      mask-composite: exclude;
+      animation: spin 6s linear infinite;
+      filter: blur(0.5px);
+    }
+    /* Outer glow pulse */
+    .logo-mark::after {
+      content: '';
+      position: absolute;
+      inset: -6px;
+      border-radius: 50%;
+      background: conic-gradient(
+        rgba(66,133,244,0.3) 0deg, rgba(234,67,53,0.3) 90deg,
+        rgba(251,188,5,0.3) 180deg, rgba(52,168,83,0.3) 270deg,
+        rgba(66,133,244,0.3) 360deg
+      );
+      animation: spin 6s linear infinite, pulse-glow 3s ease-in-out infinite;
+      filter: blur(8px);
+      opacity: 0.6;
+      z-index: -1;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes pulse-glow { 0%,100% { opacity:0.4; transform:rotate(0deg) scale(1); } 50% { opacity:0.8; transform:rotate(180deg) scale(1.15); } }
+    /* Inner icon — SVG book/brain */
+    .logo-mark-inner {
+      position: absolute;
+      inset: 4px;
+      background: var(--surf1);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .logo-mark-inner svg { width: 20px; height: 20px; }
+
+    .logo-text { display: flex; flex-direction: column; gap: 1px; }
+    .logo-name {
+      font-size: 1rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      color: var(--white);
+    }
+    .logo-sub {
+      font-size: 0.62rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.13em;
+      background: linear-gradient(90deg, var(--g-blue), var(--g-green));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .header-center {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    /* Google G dot bar */
+    .g-bar span {
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+    }
+    .g-bar span:nth-child(1) { background: var(--g-blue); }
+    .g-bar span:nth-child(2) { background: var(--g-red); }
+    .g-bar span:nth-child(3) { background: var(--g-yellow); }
+    .g-bar span:nth-child(4) { background: var(--g-green); }
+
+    .sync-label {
+      font-size: 0.72rem;
+      color: var(--muted);
+      margin-left: 6px;
+    }
+
+    .header-right { display: flex; align-items: center; gap: 10px; }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 18px;
+      border-radius: var(--r-sm);
+      border: none;
+      font-size: 0.8rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: var(--t);
+      text-decoration: none;
+    }
+    .btn-primary { background: var(--g-blue); color: #fff; }
+    .btn-primary:hover { background: #5a95f5; transform: translateY(-1px); box-shadow: var(--glow); }
+    .btn-ghost {
+      background: transparent;
+      color: var(--muted);
+      border: 1px solid var(--border);
+    }
+    .btn-ghost:hover { color: var(--white); border-color: var(--g-blue); }
+
+    /* ── Layout ─────────────────────────────────────────────── */
+    main { max-width: 1400px; margin: 0 auto; padding: 2rem; }
+
+    /* ── Stat Row ────────────────────────────────────────────── */
+    .stat-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 1rem;
+      margin-bottom: 1.75rem;
+    }
+
+    .stat-card {
+      background: var(--surf1);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      padding: 1.2rem 1.5rem;
+      position: relative;
+      overflow: hidden;
+      transition: var(--t);
+    }
+    .stat-card:nth-child(1)::before { background: var(--g-blue); }
+    .stat-card:nth-child(2)::before { background: var(--g-green); }
+    .stat-card:nth-child(3)::before { background: var(--g-yellow); }
+    .stat-card:nth-child(4)::before { background: var(--g-red); }
+    .stat-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+    }
+    .stat-card:hover { border-color: var(--g-blue); transform: translateY(-2px); box-shadow: var(--glow); }
+
+    .stat-label {
+      font-size: 0.65rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+    .stat-value {
+      font-size: 2.1rem;
+      font-weight: 900;
+      line-height: 1;
+      letter-spacing: -0.03em;
+    }
+    .stat-sub { font-size: 0.68rem; color: var(--muted); margin-top: 4px; }
+
+    /* ── Tabs ─────────────────────────────────────────────────── */
+    .view-tabs {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 1.5rem;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 0;
+    }
+    .view-tab {
+      padding: 8px 18px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: var(--muted);
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      transition: var(--t);
+      border-bottom: 2px solid transparent;
+      margin-bottom: -1px;
+    }
+    .view-tab:hover { color: var(--white); }
+    .view-tab.active { color: var(--g-blue); border-bottom-color: var(--g-blue); }
+
+    /* ── Views ────────────────────────────────────────────────── */
+    .view { display: none; }
+    .view.active { display: block; }
+
+    /* ── Main Grid ────────────────────────────────────────────── */
+    .main-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 1.5rem; }
+
+    /* ── Panel ────────────────────────────────────────────────── */
+    .panel {
+      background: var(--surf1);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      overflow: hidden;
+    }
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.9rem 1.4rem;
+      border-bottom: 1px solid var(--border);
+      background: var(--surf2);
+    }
+    .panel-title {
+      font-size: 0.78rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--off);
+    }
+    .badge {
+      background: var(--g-blue);
+      color: #fff;
+      border-radius: 20px;
+      padding: 2px 9px;
+      font-size: 0.68rem;
+      font-weight: 800;
+    }
+    .panel-body { padding: 1rem 1.4rem; }
+
+    /* ── Filter Tabs ─────────────────────────────────────────── */
+    .filter-row { display: flex; gap: 6px; margin-bottom: 1rem; }
+    .ftab {
+      padding: 4px 12px;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--muted);
+      font-size: 0.68rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: var(--t);
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+    }
+    .ftab:hover { color: var(--white); border-color: var(--g-blue); }
+    .ftab.active { background: var(--g-blue); color: #fff; border-color: var(--g-blue); }
+
+    /* ── Notebook Cards ──────────────────────────────────────── */
+    .nb-list { display: flex; flex-direction: column; gap: 5px; }
+
+    .nb-card {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 0.75rem 1rem;
+      border-radius: var(--r-sm);
+      border: 1px solid var(--border);
+      cursor: pointer;
+      transition: var(--t);
+      text-decoration: none;
+      color: inherit;
+    }
+    .nb-card:hover { background: var(--surf2); border-color: var(--g-blue); }
+    .nb-card.selected { background: var(--surf3); border-color: var(--g-blue); box-shadow: var(--glow); }
+
+    .nb-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+    .dot-b { background: var(--g-blue); }
+    .dot-g { background: var(--g-green); }
+    .dot-y { background: var(--g-yellow); }
+    .dot-r { background: var(--g-red); }
+    .dot-m { background: var(--muted); }
+
+    .type-pill {
+      font-size: 0.58rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      padding: 2px 7px;
+      border-radius: 3px;
+      flex-shrink: 0;
+      min-width: 66px;
+      text-align: center;
+    }
+    .pill-yt    { background: rgba(234,67,53,0.15); color: #EA4335; }
+    .pill-topic { background: rgba(66,133,244,0.15); color: var(--g-blue); }
+    .pill-proj  { background: rgba(52,168,83,0.15); color: var(--g-green); }
+    .pill-other { background: rgba(107,127,163,0.12); color: var(--muted); }
+
+    .nb-info { flex: 1; min-width: 0; }
+    .nb-title { font-size: 0.82rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; align-items: center; gap: 6px; }
+    .nb-meta  { font-size: 0.65rem; color: var(--muted); margin-top: 2px; }
+    .nb-count { font-size: 0.75rem; font-weight: 700; color: var(--g-blue); flex-shrink: 0; }
+
+    /* Auto-managed badge */
+    .auto-badge {
+      font-size: 0.52rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em;
+      padding: 1px 5px; border-radius: 3px; flex-shrink: 0;
+      background: rgba(52,168,83,0.15); color: var(--g-green); border: 1px solid rgba(52,168,83,0.25);
+    }
+    .stale-badge {
+      font-size: 0.52rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em;
+      padding: 1px 5px; border-radius: 3px; flex-shrink: 0;
+      background: rgba(234,67,53,0.12); color: var(--g-red); border: 1px solid rgba(234,67,53,0.2);
+    }
+
+    /* ── Suggestions ─────────────────────────────────────────── */
+    .sug-list { display: flex; flex-direction: column; gap: 7px; }
+    .sug {
+      padding: 0.7rem 0.9rem;
+      border-radius: var(--r-sm);
+      border-left: 3px solid var(--border);
+      background: var(--surf2);
+    }
+    .sug.high   { border-left-color: var(--g-red); }
+    .sug.medium { border-left-color: var(--g-yellow); }
+    .sug.low    { border-left-color: var(--g-green); }
+    .sug-hdr { display: flex; align-items: center; gap: 7px; margin-bottom: 4px; }
+    .p-pill {
+      font-size: 0.58rem; font-weight: 800; text-transform: uppercase;
+      letter-spacing: 0.08em; padding: 2px 6px; border-radius: 3px;
+    }
+    .pp-h { background: var(--g-red); color: #fff; }
+    .pp-m { background: var(--g-yellow); color: #000; }
+    .pp-l { background: var(--g-green); color: #fff; }
+    .sug-type { font-size: 0.7rem; font-weight: 600; color: var(--g-blue); }
+    .sug-text { font-size: 0.72rem; color: var(--muted); line-height: 1.45; }
+    .sug-btns { display: flex; gap: 6px; margin-top: 7px; }
+    .btn-approve, .btn-dismiss {
+      font-size: 0.68rem; font-weight: 700; padding: 3px 10px;
+      border-radius: 4px; border: none; cursor: pointer; transition: var(--t);
+    }
+    .btn-approve { background: var(--g-blue); color: #fff; }
+    .btn-approve:hover { background: #5a95f5; }
+    .btn-dismiss { background: var(--surf3); color: var(--muted); }
+    .btn-dismiss:hover { color: var(--white); }
+
+    /* ── Settings View ───────────────────────────────────────── */
+    .settings-grid { display: grid; grid-template-columns: 220px 1fr; gap: 1.5rem; }
+
+    .settings-nav { display: flex; flex-direction: column; gap: 4px; }
+    .snav-item {
+      padding: 8px 14px;
+      border-radius: var(--r-sm);
+      font-size: 0.78rem;
+      font-weight: 500;
+      color: var(--muted);
+      cursor: pointer;
+      transition: var(--t);
+      border: 1px solid transparent;
+    }
+    .snav-item:hover { color: var(--white); background: var(--surf2); }
+    .snav-item.active { background: var(--surf2); color: var(--g-blue); border-color: var(--border); }
+    .snav-sep { font-size: 0.6rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); padding: 10px 14px 4px; opacity: 0.6; }
+
+    .settings-panel {
+      background: var(--surf1);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      padding: 1.5rem;
+    }
+    .setting-section-title {
+      font-size: 0.75rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--g-blue);
+      margin-bottom: 1rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .setting-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 1rem;
+      margin-bottom: 1rem;
+      padding-bottom: 1rem;
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+    }
+    .setting-row:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+    .setting-label { flex: 1; min-width: 0; }
+    .setting-name { font-size: 0.82rem; font-weight: 600; color: var(--off); }
+    .setting-desc { font-size: 0.68rem; color: var(--muted); margin-top: 3px; line-height: 1.4; }
+    .setting-control { flex-shrink: 0; }
+    .setting-input {
+      background: var(--surf2);
+      border: 1px solid var(--border);
+      border-radius: var(--r-sm);
+      color: var(--white);
+      font-family: inherit;
+      font-size: 0.78rem;
+      padding: 6px 10px;
+      width: 160px;
+      transition: var(--t);
+    }
+    .setting-input:focus { outline: none; border-color: var(--g-blue); box-shadow: var(--glow); }
+    .setting-textarea {
+      width: 100%;
+      min-height: 70px;
+      resize: vertical;
+    }
+
+    /* Toggle switch */
+    .toggle { position: relative; display: inline-block; width: 40px; height: 22px; }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .toggle-slider {
+      position: absolute; inset: 0;
+      background: var(--surf3);
+      border-radius: 22px;
+      cursor: pointer;
+      transition: var(--t);
+      border: 1px solid var(--border);
+    }
+    .toggle-slider::before {
+      content: '';
+      position: absolute;
+      height: 14px; width: 14px;
+      left: 3px; bottom: 3px;
+      background: var(--muted);
+      border-radius: 50%;
+      transition: var(--t);
+    }
+    .toggle input:checked + .toggle-slider { background: rgba(66,133,244,0.25); border-color: var(--g-blue); }
+    .toggle input:checked + .toggle-slider::before { transform: translateX(18px); background: var(--g-blue); }
+
+    .save-bar {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-top: 1.5rem;
+      padding-top: 1rem;
+      border-top: 1px solid var(--border);
+    }
+
+    /* ── Log View ────────────────────────────────────────────── */
+    .log-entry {
+      font-size: 0.72rem;
+      font-family: 'Courier New', monospace;
+      padding: 4px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+      display: flex;
+      gap: 10px;
+    }
+    .log-ts { color: var(--muted); flex-shrink: 0; }
+    .log-ok   { color: var(--g-green); }
+    .log-fail { color: var(--g-red); }
+    .log-info { color: var(--g-blue); }
+
+    /* ── Empty ────────────────────────────────────────────────── */
+    .empty {
+      text-align: center;
+      padding: 2.5rem 1rem;
+      color: var(--muted);
+      font-size: 0.8rem;
+      line-height: 1.6;
+    }
+    .empty-icon { font-size: 2rem; display: block; margin-bottom: 8px; }
+
+    /* ── Toast ────────────────────────────────────────────────── */
+    #toast {
+      position: fixed; bottom: 2rem; right: 2rem;
+      background: var(--g-blue); color: #fff;
+      font-weight: 600;
+      padding: 0.7rem 1.4rem;
+      border-radius: 8px;
+      font-size: 0.82rem;
+      box-shadow: var(--shadow), var(--glow);
+      transform: translateY(100px); opacity: 0;
+      transition: all 0.3s ease; pointer-events: none; z-index: 999;
+    }
+    #toast.show { transform: translateY(0); opacity: 1; }
+
+    @media (max-width: 900px) {
+      .stat-row { grid-template-columns: repeat(2, 1fr); }
+      .main-grid { grid-template-columns: 1fr; }
+      .settings-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── Header ──────────────────────────────────────────────── -->
+<header>
+  <a class="logo" href="#">
+    <div class="logo-mark">
+      <div class="logo-mark-inner">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" stroke="url(#lg1)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" stroke="url(#lg2)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M9 7h6M9 11h4" stroke="url(#lg3)" stroke-width="1.5" stroke-linecap="round"/>
+          <circle cx="15" cy="14" r="2.5" stroke="var(--g-yellow)" stroke-width="1.2" opacity="0.9"/>
+          <path d="M15 11.5v-1M17.2 12.8l.7-.7M17.5 14h1M17.2 15.2l.7.7M15 16.5v1M12.8 15.2l-.7.7M12.5 14h-1M12.8 12.8l-.7-.7" stroke="var(--g-yellow)" stroke-width="0.7" stroke-linecap="round" opacity="0.5">
+            <animateTransform attributeName="transform" type="rotate" from="0 15 14" to="360 15 14" dur="12s" repeatCount="indefinite"/>
+          </path>
+          <defs>
+            <linearGradient id="lg1" x1="4" y1="18" x2="20" y2="18"><stop stop-color="#4285F4"/><stop offset="1" stop-color="#34A853"/></linearGradient>
+            <linearGradient id="lg2" x1="4" y1="2" x2="20" y2="22"><stop stop-color="#4285F4"/><stop offset=".5" stop-color="#EA4335"/><stop offset="1" stop-color="#34A853"/></linearGradient>
+            <linearGradient id="lg3" x1="9" y1="7" x2="13" y2="11"><stop stop-color="#FBBC05"/><stop offset="1" stop-color="#4285F4"/></linearGradient>
+          </defs>
+        </svg>
+      </div>
+    </div>
+    <div class="logo-text">
+      <div class="logo-name">The Librarian</div>
+      <div class="logo-sub">NotebookLM Intelligence Layer</div>
+    </div>
+  </a>
+
+  <div class="header-center">
+    <div class="g-bar">
+      <span></span><span></span><span></span><span></span>
+    </div>
+    <span class="sync-label" id="last-run-label">Loading...</span>
+  </div>
+
+  <div class="header-right">
+    <button class="btn btn-ghost" onclick="loadAll()">↻</button>
+    <button class="btn btn-primary" onclick="triggerRun()">▶ Run Now</button>
+  </div>
+</header>
+
+<!-- ── Main ────────────────────────────────────────────────── -->
+<main>
+
+  <!-- Stats -->
+  <div class="stat-row">
+    <div class="stat-card">
+      <div class="stat-label">Total Notebooks</div>
+      <div class="stat-value" id="stat-total" style="color:var(--g-blue);">—</div>
+      <div class="stat-sub" id="stat-owned-shared">Loading...</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Auto-Managed</div>
+      <div class="stat-value" id="stat-managed" style="color:var(--g-green);">—</div>
+      <div class="stat-sub">deep sync enabled</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Suggestions</div>
+      <div class="stat-value" id="stat-suggestions" style="color:var(--g-yellow);">—</div>
+      <div class="stat-sub">awaiting review</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Need Attention</div>
+      <div class="stat-value" id="stat-empty" style="color:var(--g-red);">—</div>
+      <div class="stat-sub">empty or stale</div>
+    </div>
+  </div>
+
+  <!-- View Tabs -->
+  <div class="view-tabs">
+    <button class="view-tab active" onclick="showView('library', this)">Library</button>
+    <button class="view-tab" onclick="showView('settings', this)">Settings</button>
+    <button class="view-tab" onclick="showView('log', this)">Run Log</button>
+  </div>
+
+  <!-- ── LIBRARY VIEW ──────────────────────────────────────── -->
+  <div class="view active" id="view-library">
+    <div class="main-grid">
+
+      <!-- Notebook List -->
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title">Knowledge Collection</span>
+          <span class="badge" id="nb-count-badge">0</span>
+        </div>
+        <div class="panel-body">
+          <div class="filter-row">
+            <button class="ftab active" onclick="filterNbs('all',this)">All</button>
+            <button class="ftab" onclick="filterNbs('owned',this)">Owned</button>
+            <button class="ftab" onclick="filterNbs('shared',this)">Shared</button>
+            <button class="ftab" onclick="filterNbs('managed',this)">Auto</button>
+          </div>
+          <div class="nb-list" id="nb-list">
+            <div class="empty"><span class="empty-icon">⏳</span>Loading...</div>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <!-- Suggestions -->
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Suggestions</span>
+            <span class="badge" id="sug-badge">0</span>
+          </div>
+          <div class="panel-body">
+            <div class="sug-list" id="sug-list">
+              <div class="empty"><span class="empty-icon">✨</span>No suggestions yet.<br>Run the Librarian to analyze.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Discovered (unregistered) notebooks -->
+        <div class="panel" style="margin-top:1rem;">
+          <div class="panel-header">
+            <span class="panel-title">Untracked Notebooks</span>
+            <span class="badge" id="discover-count" style="background:var(--muted);">...</span>
+          </div>
+          <div class="panel-body">
+            <div class="nb-list" id="discover-list">
+              <div class="empty" style="padding:1rem;font-size:0.72rem;">Scanning NotebookLM...</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── SETTINGS VIEW ─────────────────────────────────────── -->
+  <div class="view" id="view-settings">
+    <div class="settings-grid">
+
+      <!-- Nav -->
+      <div class="settings-nav" id="settings-nav">
+        <div class="snav-sep">Global</div>
+        <div class="snav-item active" onclick="showSettings('global',this)">Universal Settings</div>
+        <div class="snav-sep" id="snav-notebooks-label">Notebooks</div>
+        <!-- Notebook items injected by JS -->
+      </div>
+
+      <!-- Panel -->
+      <div class="settings-panel" id="settings-panel">
+        <div class="setting-section-title">Universal Settings</div>
+
+        <div class="setting-row">
+          <div class="setting-label">
+            <div class="setting-name">API Key</div>
+            <div class="setting-desc">Authentication key for the Librarian API. Must match LIBRARIAN_API_KEY in .env.</div>
+          </div>
+          <div class="setting-control">
+            <input class="setting-input" type="password" id="gs-api-key" placeholder="Enter API key...">
+          </div>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-label">
+            <div class="setting-name">Max Sources Per Run</div>
+            <div class="setting-desc">Safety cap: max new sources added in a single orchestrator run.</div>
+          </div>
+          <div class="setting-control">
+            <input class="setting-input" type="number" id="gs-max-per-run" value="10" min="1" max="50">
+          </div>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-label">
+            <div class="setting-name">Dry Run Mode</div>
+            <div class="setting-desc">Simulate runs without writing to NotebookLM.</div>
+          </div>
+          <div class="setting-control">
+            <label class="toggle">
+              <input type="checkbox" id="gs-dry-run">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-label">
+            <div class="setting-name">YouTube API Key</div>
+            <div class="setting-desc">Required for @handle resolution and deep sync. Set in .env file on server.</div>
+          </div>
+          <div class="setting-control">
+            <input class="setting-input" type="password" id="gs-yt-key" placeholder="AIza...">
+          </div>
+        </div>
+
+        <div class="save-bar">
+          <button class="btn btn-ghost" onclick="loadGlobalSettings()">Reset</button>
+          <button class="btn btn-primary" onclick="saveGlobalSettings()">Save Settings</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── LOG VIEW ──────────────────────────────────────────── -->
+  <div class="view" id="view-log">
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">Run Log</span>
+        <button class="btn btn-ghost" style="font-size:0.7rem;padding:4px 10px;" onclick="loadRunLog()">Refresh</button>
+      </div>
+      <div class="panel-body">
+        <div id="run-log">
+          <div class="empty"><span class="empty-icon">📋</span>No run logs yet.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<div id="toast"></div>
+
+<script>
+// ── Config ────────────────────────────────────────────────────────────────────
+const IS_LOCAL = window.location.pathname.includes('/dashboard/');
+const BASE = IS_LOCAL ? '../' : './';
+const API  = ''; // Relative to host
+const p    = (f) => BASE + f;
+
+// API key — set window.LIBRARIAN_API_KEY before this script, or leave blank
+const API_KEY = (typeof window.LIBRARIAN_API_KEY !== 'undefined') ? window.LIBRARIAN_API_KEY : '';
+
+async function apiFetch(path, opts = {}) {
+  const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
+  const key = localStorage.getItem('librarian_api_key') || '';
+  if (key) headers['Authorization'] = `Bearer ${key}`;
+  
+  try {
+    const res = await fetch(`${API}${path}`, { ...opts, headers });
+    if (res.status === 401) {
+      showToast('⚠️ Unauthorized — set API Key in Settings', 4000);
+      throw new Error('Unauthorized');
+    }
+    return res;
+  } catch (e) {
+    if (e.message !== 'Unauthorized') showToast('⚠️ API Offline', 3000);
+    throw e;
+  }
+}
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let allNotebooks    = [];
+let allSuggestions  = [];
+let globalConfig    = {};
+let _pollTimer      = null;
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+function showToast(msg, ms = 2800) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), ms);
+}
+
+// ── View switching ────────────────────────────────────────────────────────────
+function showView(name, btn) {
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.querySelectorAll('.view-tab').forEach(b => b.classList.remove('active'));
+  document.getElementById(`view-${name}`).classList.add('active');
+  if (btn) btn.classList.add('active');
+}
+
+// ── Data loading ──────────────────────────────────────────────────────────────
+async function loadRegistry() {
+  try {
+    const res = await apiFetch('/notebooks');
+    if (!res.ok) throw new Error(res.status);
+    const data = await res.json();
+    allNotebooks = data.notebooks || [];
+    globalConfig = data._meta?.global_config || {};
+    renderStats();
+    renderNotebooks(allNotebooks);
+    buildSettingsNav();
+    loadGlobalSettings();
+    const sync = data._meta?.last_full_sync;
+    if (sync) {
+      const d = new Date(sync);
+      const ago = Math.round((Date.now() - d.getTime()) / 60000);
+      const agoStr = ago < 1 ? 'just now' : ago < 60 ? `${ago}m ago` : ago < 1440 ? `${Math.round(ago/60)}h ago` : `${Math.round(ago/1440)}d ago`;
+      document.getElementById('last-run-label').textContent = `Last sync: ${d.toLocaleString()} (${agoStr})`;
+    } else {
+      document.getElementById('last-run-label').textContent = 'Never synced';
+    }
+  } catch (e) {
+    console.warn("API not available, trying static fetch...", e.message);
+    try {
+      const res = await fetch(p('notebooks.json'));
+      if (!res.ok) throw new Error(res.status);
+      const data = await res.json();
+      allNotebooks = data.notebooks || [];
+      renderStats();
+      renderNotebooks(allNotebooks);
+      buildSettingsNav();
+    } catch(err) {
+      document.getElementById('nb-list').innerHTML =
+        `<div class="empty"><span class="empty-icon">⚠️</span>Could not load registry.<br><small>${e.message}</small></div>`;
+    }
+  }
+}
+
+async function loadSuggestions() {
+  try {
+    const res = await apiFetch('/suggestions');
+    if (!res.ok) throw new Error();
+    const data = await res.json();
+    allSuggestions = (data.suggestions || []).filter(s => s.status === 'pending');
+    renderSuggestions(allSuggestions);
+    document.getElementById('stat-suggestions').textContent = allSuggestions.length;
+    document.getElementById('sug-badge').textContent = allSuggestions.length;
+  } catch {
+    document.getElementById('stat-suggestions').textContent = '0';
+  }
+}
+
+async function loadRunLog() {
+  try {
+    // API endpoint /status returns latest log automatically
+    const res = await apiFetch('/status');
+    if (!res.ok) throw new Error();
+    const data = await res.json();
+    if (data.status !== 'no_logs') {
+      renderRunLog(data.actions || []);
+    }
+  } catch { /* no logs or offline */ }
+}
+
+function loadAll() { loadRegistry(); loadSuggestions(); loadRunLog(); }
+
+// ── Stats ─────────────────────────────────────────────────────────────────────
+function renderStats() {
+  const owned   = allNotebooks.filter(n => n.ownership === 'owned').length;
+  const shared  = allNotebooks.filter(n => n.ownership !== 'owned').length;
+  const managed = allNotebooks.filter(n => n.config?.auto_add).length;
+  const needsAttn = allNotebooks.filter(n => !n.sources?.length || isStale(n)).length;
+  document.getElementById('stat-total').textContent = allNotebooks.length;
+  document.getElementById('stat-owned-shared').textContent = `${owned} owned · ${shared} shared`;
+  document.getElementById('stat-managed').textContent = managed;
+  document.getElementById('stat-empty').textContent = needsAttn;
+  document.getElementById('nb-count-badge').textContent = allNotebooks.length;
+}
+
+// ── Notebooks ─────────────────────────────────────────────────────────────────
+function filterNbs(type, btn) {
+  document.querySelectorAll('.ftab').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  let list = allNotebooks;
+  if (type === 'owned')   list = list.filter(n => n.ownership === 'owned');
+  if (type === 'shared')  list = list.filter(n => n.ownership !== 'owned');
+  if (type === 'managed') list = list.filter(n => n.config?.auto_add);
+  renderNotebooks(list);
+}
+
+const TYPE_CONFIG = {
+  youtube_channel: ['YT Channel', 'pill-yt',    'dot-r'],
+  youtube_topic:   ['YT Topic',   'pill-topic',  'dot-b'],
+  project:         ['Project',    'pill-proj',   'dot-g'],
+  forum:           ['Forum',      'pill-proj',   'dot-g'],
+  documentation:   ['Docs',       'pill-other',  'dot-m'],
+};
+
+function isStale(nb) {
+  if (!nb.last_synced) return true;
+  const days = (Date.now() - new Date(nb.last_synced).getTime()) / 86400000;
+  const interval = nb.config?.refresh_interval_days || 7;
+  return days > interval;
+}
+
+function renderNotebooks(list) {
+  const el = document.getElementById('nb-list');
+  if (!list.length) {
+    el.innerHTML = '<div class="empty"><span class="empty-icon">🔍</span>No notebooks match.</div>';
+    return;
+  }
+  el.innerHTML = list.map(nb => {
+    const [label, pill, dot] = TYPE_CONFIG[nb.type] || ['Other', 'pill-other', 'dot-m'];
+    const count = nb.sources?.length ?? 0;
+    const sync  = nb.last_synced ? new Date(nb.last_synced).toLocaleDateString() : 'Not synced';
+    const autoBadge = nb.config?.auto_add ? '<span class="auto-badge">AUTO</span>' : '';
+    const staleBadge = (count === 0 || isStale(nb)) ? '<span class="stale-badge">' + (count === 0 ? 'EMPTY' : 'STALE') + '</span>' : '';
+    const interval = nb.config?.refresh_interval_days || 7;
+    let metaStr = sync;
+    if (nb.last_synced && !isStale(nb)) {
+      const nextDue = new Date(new Date(nb.last_synced).getTime() + interval * 86400000);
+      const daysLeft = Math.ceil((nextDue - Date.now()) / 86400000);
+      metaStr += ` · next in ${daysLeft}d`;
+    } else if (nb.last_synced && isStale(nb)) {
+      const overdue = Math.floor((Date.now() - new Date(nb.last_synced).getTime()) / 86400000) - interval;
+      metaStr += ` · ${overdue}d overdue`;
+    }
+    const nbUrl = `https://notebooklm.google.com/notebook/${nb.id}`;
+    return `<div class="nb-card" onclick="openNotebook('${nb.id}', '${nbUrl}')">
+      <span class="nb-dot ${dot}"></span>
+      <span class="type-pill ${pill}">${label}</span>
+      <div class="nb-info">
+        <div class="nb-title">${nb.title || '(Untitled)'}${autoBadge}${staleBadge}</div>
+        <div class="nb-meta">${metaStr}</div>
+      </div>
+      <span class="nb-count">${count}</span>
+    </div>`;
+  }).join('');
+}
+
+function openNotebook(id, url) {
+  // Could open settings panel for this notebook
+  window.open(url, '_blank');
+}
+
+// ── Suggestions ───────────────────────────────────────────────────────────────
+function renderSuggestions(list) {
+  const el = document.getElementById('sug-list');
+  if (!list.length) {
+    el.innerHTML = '<div class="empty"><span class="empty-icon">✨</span>No pending suggestions.</div>';
+    return;
+  }
+  const tm = {
+    remove_source:'Remove Source', delete_notebook:'Delete Notebook',
+    create_notebook:'Create Notebook', classify_notebook:'Classify',
+    merge_notebooks:'Merge', add_source:'Add Source',
+  };
+  const pmap = { high: 'pp-h', medium: 'pp-m', low: 'pp-l' };
+  el.innerHTML = list.map(s => `
+    <div class="sug ${s.priority}" id="sug-${s.id}">
+      <div class="sug-hdr">
+        <span class="p-pill ${pmap[s.priority]}">${s.priority}</span>
+        <span class="sug-type">${tm[s.type] || s.type}</span>
+      </div>
+      <div class="sug-text">${s.reasoning}</div>
+      <div class="sug-btns">
+        <button class="btn-approve" onclick="approveSug('${s.id}')">✓ Approve</button>
+        <button class="btn-dismiss" onclick="dismissSug('${s.id}')">✗ Dismiss</button>
+      </div>
+    </div>`).join('');
+}
+
+async function approveSug(id) {
+  const el = document.getElementById(`sug-${id}`);
+  try {
+    const res = await apiFetch(`/suggestions/${id}`, {
+      method: 'PATCH', body: JSON.stringify({ status: 'approved' }),
+    });
+    if (res.ok) {
+      if (el) { el.style.opacity='0.4'; el.style.pointerEvents='none';
+        el.querySelector('.sug-btns').innerHTML='<span style="color:var(--g-green);font-size:0.7rem;font-weight:700;">✓ Approved — next run</span>'; }
+      showToast('✓ Suggestion approved.');
+    } else { showToast('⚠️ Could not save — API offline?', 3000); }
+  } catch { showToast('⚠️ API offline — changes not persisted', 3000); }
+}
+
+async function dismissSug(id) {
+  const el = document.getElementById(`sug-${id}`);
+  try {
+    await apiFetch(`/suggestions/${id}`, {
+      method: 'PATCH', body: JSON.stringify({ status: 'dismissed' }),
+    });
+  } catch { /* non-fatal */ }
+  if (el) { el.style.opacity='0.3'; el.style.pointerEvents='none'; }
+  showToast('✗ Dismissed.');
+}
+
+// ── Run Log ───────────────────────────────────────────────────────────────────
+function renderRunLog(actions) {
+  const el = document.getElementById('run-log');
+  if (!actions.length) return;
+  el.innerHTML = actions.slice(-30).reverse().map(a => {
+    const cls = a.status==='success'?'log-ok':a.status==='failed'?'log-fail':'log-info';
+    const ts  = a.ts ? new Date(a.ts).toLocaleTimeString() : '';
+    const url = a.source_url ? ` <span style="color:#556">${a.source_url.slice(0,48)}...</span>` : '';
+    return `<div class="log-entry">
+      <span class="log-ts">${ts}</span>
+      <span class="${cls}">[${(a.status||'info').toUpperCase()}] ${a.action}${url}</span>
+    </div>`;
+  }).join('');
+}
+
+// ── Settings ──────────────────────────────────────────────────────────────────
+function buildSettingsNav() {
+  const nav = document.getElementById('settings-nav');
+  // Remove previous notebook nav items (keep global + sep)
+  nav.querySelectorAll('[data-nb-nav]').forEach(e => e.remove());
+
+  allNotebooks.filter(n => n.ownership === 'owned').forEach(nb => {
+    const item = document.createElement('div');
+    item.className = 'snav-item';
+    item.dataset.nbNav = nb.id;
+    item.textContent = nb.title || '(Untitled)';
+    item.onclick = () => showNotebookSettings(nb.id, item);
+    nav.appendChild(item);
+  });
+}
+
+function showSettings(key, btn) {
+  document.querySelectorAll('.snav-item').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  // Reset to global settings panel
+  renderGlobalSettingsPanel();
+}
+
+function renderGlobalSettingsPanel() {
+  const savedKey = localStorage.getItem('librarian_api_key') || '';
+  const savedYtKey = localStorage.getItem('librarian_yt_api_key') || '';
+  document.getElementById('settings-panel').innerHTML = `
+    <div class="setting-section-title">Universal Settings</div>
+    <div class="setting-row">
+      <div class="setting-label">
+        <div class="setting-name">API Key</div>
+        <div class="setting-desc">Authentication key for the Librarian API. Must match LIBRARIAN_API_KEY in .env.</div>
+      </div>
+      <div class="setting-control">
+        <input class="setting-input" type="password" id="gs-api-key" value="${savedKey}" placeholder="Enter API key...">
+      </div>
+    </div>
+    <div class="setting-row">
+      <div class="setting-label">
+        <div class="setting-name">Max Sources Per Run</div>
+        <div class="setting-desc">Safety cap: max new sources added per orchestrator run.</div>
+      </div>
+      <div class="setting-control">
+        <input class="setting-input" type="number" id="gs-max-per-run" value="${globalConfig.max_sources_per_run || 10}" min="1" max="100">
+      </div>
+    </div>
+    <div class="setting-row">
+      <div class="setting-label">
+        <div class="setting-name">Dry Run Mode</div>
+        <div class="setting-desc">Simulate without writing to NotebookLM.</div>
+      </div>
+      <div class="setting-control">
+        <label class="toggle"><input type="checkbox" id="gs-dry-run" ${globalConfig.dry_run?'checked':''}><span class="toggle-slider"></span></label>
+      </div>
+    </div>
+    <div class="setting-row">
+      <div class="setting-label">
+        <div class="setting-name">YouTube API Key</div>
+        <div class="setting-desc">Required for @handle resolution and deep sync. Also set in .env on server.</div>
+      </div>
+      <div class="setting-control">
+        <input class="setting-input" type="password" id="gs-yt-key" value="${savedYtKey}" placeholder="AIza...">
+      </div>
+    </div>
+    <div class="save-bar">
+      <button class="btn btn-ghost" onclick="loadGlobalSettings()">Reset</button>
+      <button class="btn btn-primary" onclick="saveGlobalSettings()">Save</button>
+    </div>`;
+}
+
+function loadGlobalSettings() { renderGlobalSettingsPanel(); }
+
+function saveGlobalSettings() {
+  const key = document.getElementById('gs-api-key').value.trim();
+  const ytKey = document.getElementById('gs-yt-key')?.value.trim() || '';
+
+  if (key) localStorage.setItem('librarian_api_key', key);
+  else localStorage.removeItem('librarian_api_key');
+
+  if (ytKey) localStorage.setItem('librarian_yt_api_key', ytKey);
+  else localStorage.removeItem('librarian_yt_api_key');
+
+  if (key) {
+    showToast('Settings saved. Reloading...', 1500);
+    setTimeout(() => location.reload(), 1500);
+  } else {
+    showToast('Settings saved (no API key set — API calls will fail).');
+  }
+}
+
+function showNotebookSettings(id, btn) {
+  document.querySelectorAll('.snav-item').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+
+  const nb = allNotebooks.find(n => n.id === id);
+  if (!nb) return;
+  const c = nb.config || {};
+
+  document.getElementById('settings-panel').innerHTML = `
+    <div class="setting-section-title">${nb.title}</div>
+
+    <div class="setting-row">
+      <div class="setting-label">
+        <div class="setting-name">Auto-Manage</div>
+        <div class="setting-desc">Enable automatic source fetching for this notebook.</div>
+      </div>
+      <div class="setting-control">
+        <label class="toggle"><input type="checkbox" id="nb-auto-add" ${c.auto_add?'checked':''}><span class="toggle-slider"></span></label>
+      </div>
+    </div>
+
+    <div class="setting-row">
+      <div class="setting-label">
+        <div class="setting-name">Deep Sync</div>
+        <div class="setting-desc">Fetch up to Max Sources from the channel history (requires YouTube API key).</div>
+      </div>
+      <div class="setting-control">
+        <label class="toggle"><input type="checkbox" id="nb-deep-sync" ${c.deep_sync?'checked':''}><span class="toggle-slider"></span></label>
+      </div>
+    </div>
+
+    <div class="setting-row">
+      <div class="setting-label">
+        <div class="setting-name">YouTube Channel IDs / Handles</div>
+        <div class="setting-desc">One per line. Accepts @handle or UC… channel IDs.</div>
+      </div>
+      <div class="setting-control" style="flex:1">
+        <textarea class="setting-input setting-textarea" id="nb-channels">${(c.youtube_channel_ids||[]).join('\n')}</textarea>
+      </div>
+    </div>
+
+    <div class="setting-row">
+      <div class="setting-label">
+        <div class="setting-name">Topic Keywords</div>
+        <div class="setting-desc">YouTube search keywords, one per line.</div>
+      </div>
+      <div class="setting-control" style="flex:1">
+        <textarea class="setting-input setting-textarea" id="nb-keywords">${(c.youtube_topic_keywords||[]).join('\n')}</textarea>
+      </div>
+    </div>
+
+    <div class="setting-row">
+      <div class="setting-label">
+        <div class="setting-name">Max Sources</div>
+        <div class="setting-desc">Maximum total sources for this notebook.</div>
+      </div>
+      <div class="setting-control">
+        <input class="setting-input" type="number" id="nb-max" value="${c.max_sources||50}" min="10" max="500">
+      </div>
+    </div>
+
+    <div class="setting-row">
+      <div class="setting-label">
+        <div class="setting-name">Refresh Interval</div>
+        <div class="setting-desc">Days between auto-sync runs.</div>
+      </div>
+      <div class="setting-control">
+        <input class="setting-input" type="number" id="nb-refresh" value="${c.refresh_interval_days||7}" min="1" max="90">
+      </div>
+    </div>
+
+    <div class="save-bar">
+      <a href="https://notebooklm.google.com/notebook/${nb.id}" target="_blank" class="btn btn-ghost">Open in NotebookLM ↗</a>
+      <button class="btn btn-primary" onclick="saveNotebookSettings('${id}')">Save</button>
+    </div>`;
+}
+
+function saveNotebookSettings(id) {
+  showToast('Settings previewed. Edit notebooks.json to persist changes.');
+}
+
+// ── Run & status polling ───────────────────────────────────────────────────────
+function _setRunningUI(running) {
+  const btn = document.querySelector('.btn-primary');
+  const lbl = document.getElementById('last-run-label');
+  if (running) {
+    if (btn) { btn.textContent = '⏳ Running...'; btn.disabled = true; }
+    if (lbl) lbl.textContent = 'Sync in progress...';
+  } else {
+    if (btn) { btn.textContent = '▶ Run Now'; btn.disabled = false; }
+  }
+}
+
+function _startPoll() {
+  if (_pollTimer) return;
+  _setRunningUI(true);
+  _pollTimer = setInterval(async () => {
+    try {
+      const res = await apiFetch('/run/status');
+      const data = await res.json();
+      if (!data.running) {
+        clearInterval(_pollTimer);
+        _pollTimer = null;
+        _setRunningUI(false);
+        showToast('✅ Sync complete — reloading...', 3000);
+        setTimeout(loadAll, 1500);
+      }
+    } catch {
+      clearInterval(_pollTimer);
+      _pollTimer = null;
+      _setRunningUI(false);
+    }
+  }, 4000);
+}
+
+async function triggerRun() {
+  // Check if already running
+  try {
+    const sr = await apiFetch('/run/status');
+    const sd = await sr.json();
+    if (sd.running) { showToast('⏳ Sync already running...', 2500); _startPoll(); return; }
+  } catch { /* API not up yet */ }
+
+  showToast('▶ Starting sync...', 2000);
+  try {
+    const res = await apiFetch('/run', { method: 'POST', body: JSON.stringify({ dry_run: false }) });
+    const data = await res.json();
+    if (data.status === 'triggered') {
+      _startPoll();
+    } else if (data.status === 'already_running') {
+      showToast('⏳ Already running...', 2500);
+      _startPoll();
+    } else {
+      showToast(`⚠️ ${data.status || data.error}`, 3000);
+    }
+  } catch {
+    showToast('⚠️ API offline — start api.py on port 5000', 3500);
+  }
+}
+
+// Check on load if a sync is already running
+async function checkRunningOnLoad() {
+  try {
+    const res = await apiFetch('/run/status');
+    const data = await res.json();
+    if (data.running) _startPoll();
+  } catch { /* API not up */ }
+}
+
+// ── Discover all NotebookLM notebooks ──────────────────────────────────────────
+async function discoverNotebooks() {
+  try {
+    const res = await apiFetch('/notebooks/discover');
+    if (!res.ok) return;
+    const data = await res.json();
+    const unregistered = (data.notebooks || []).filter(n => !n.registered);
+    const el = document.getElementById('discover-list');
+    if (!el) return;
+    if (!unregistered.length) {
+      el.innerHTML = '<div class="empty" style="padding:1rem;font-size:0.72rem;">All NotebookLM notebooks are registered.</div>';
+      return;
+    }
+    el.innerHTML = unregistered.map(nb => {
+      const own = nb.ownership === 'owned' ? 'owned' : 'shared';
+      return `<div class="nb-card" style="opacity:0.7;" onclick="window.open('${nb.url || `https://notebooklm.google.com/notebook/${nb.id}`}','_blank')">
+        <span class="nb-dot dot-m"></span>
+        <span class="type-pill pill-other">${own}</span>
+        <div class="nb-info">
+          <div class="nb-title">${nb.title || '(Untitled)'}</div>
+          <div class="nb-meta">${nb.source_count || 0} sources</div>
+        </div>
+      </div>`;
+    }).join('');
+    document.getElementById('discover-count').textContent = unregistered.length;
+  } catch { /* MCP not available */ }
+}
+
+// ── Auto-generate suggestions for empty/stale ─────────────────────────────────
+async function autoGenerateSuggestions() {
+  try {
+    await apiFetch('/suggestions/generate', { method: 'POST' });
+    await loadSuggestions();
+  } catch { /* non-fatal */ }
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+loadAll();
+checkRunningOnLoad();
+autoGenerateSuggestions();
+setTimeout(discoverNotebooks, 1500);
+</script>
+</body>
+</html>

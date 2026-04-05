@@ -1,4 +1,6 @@
 .env
+.env.*
+!.env.example
 .tmp/
 node_modules/
 __pycache__/
@@ -9,6 +11,9 @@ data/
 credentials/
 auth.json
 *.key
+*.pem
+*.cert
+*.csr
 dist/
 tools/frida-server
 tools/frida-server.xz
@@ -23,10 +28,12 @@ tools/logs/
 install.log
 list.txt
 # Security: never commit secrets or sensitive files
-*.pem
-*.cert
-*.csr
 APIs*.csv
+architecture/APIs*.csv
 secrets.json
-.env.*
-!.env.example
+# Separate repo (anchorgroupops/Dugout) — don't nest
+Dugout/
+# Binary artifacts
+*.apk
+# Temp/editor files
+~

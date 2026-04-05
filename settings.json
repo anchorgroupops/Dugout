@@ -1,0 +1,16 @@
+{
+    "librarian": {
+        "name": "The Librarian",
+        "version": "1.0.0",
+        "max_run_sources": 200,
+        "empty_notebook_ttl_days": 7,
+        "sync_intervals": {
+            "youtube": 7,
+            "web": 14
+        },
+        "automation": {
+            "auto_delete_empty": true,
+            "auto_add_verified": true
+        }
+    }
+}

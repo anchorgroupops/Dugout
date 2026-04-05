@@ -1,4 +1,5 @@
 import os
+import json
 import subprocess
 from pathlib import Path
 
@@ -27,6 +28,18 @@ sharks_image = (
     .add_local_dir(".", remote_path="/app", ignore=["node_modules", "data", "client/node_modules", "client/dist", ".git"])
 )
 
+tts_image = (
+    modal.Image.debian_slim(python_version="3.11")
+    .pip_install(
+        "torch==2.3.1",
+        "torchaudio==2.3.1",
+        "transformers>=4.45.0",
+        "soundfile",
+        "numpy",
+        "scipy",
+    )
+)
+
 
 def _runtime_secret() -> modal.Secret:
     payload = {}
@@ -36,6 +49,7 @@ def _runtime_secret() -> modal.Secret:
         "GC_TEAM_ID",
         "GC_SEASON_SLUG",
         "GC_ORG_IDS",
+        "GC_SESSION_COOKIES",
         "PINECONE_API_KEY",
         "GEMINI_API_KEY",
         "GOOGLE_API_KEY",
@@ -76,6 +90,105 @@ def _run_step(label: str, args: list[str], env: dict[str, str], optional: bool =
     return True
 
 
+def _build_voice_script(sharks_dir: str) -> str:
+    """Build a 30-45 second sports radio announcement from team data."""
+    team_file = Path(sharks_dir) / "team_enriched.json"
+    if not team_file.exists():
+        team_file = Path(sharks_dir) / "team.json"
+    if not team_file.exists():
+        return ""
+
+    try:
+        team = json.loads(team_file.read_text())
+    except Exception:
+        return ""
+
+    team_name = team.get("team_name", "The Sharks")
+    record = team.get("record", "0-0")
+    roster = team.get("roster", [])
+
+    # Top 3 hitters by AVG
+    hitters = []
+    for p in roster:
+        bat = p.get("batting") or {}
+        avg = float(bat.get("avg", 0) or 0)
+        name = p.get("name") or f"{p.get('first', '')} {p.get('last', '')}".strip()
+        if avg > 0 and name:
+            hitters.append((name, avg))
+    hitters.sort(key=lambda x: x[1], reverse=True)
+    top3 = hitters[:3]
+
+    hitter_text = ""
+    if top3:
+        parts = [f"{name} batting {avg:.3f}" for name, avg in top3]
+        hitter_text = f"Leading the charge at the plate: {', '.join(parts)}."
+
+    # Next game from schedule
+    sched_file = Path(sharks_dir) / "schedule_manual.json"
+    next_game_text = ""
+    if sched_file.exists():
+        try:
+            sched = json.loads(sched_file.read_text())
+            from datetime import datetime
+            from zoneinfo import ZoneInfo
+            today = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+            upcoming = [g for g in (sched.get("upcoming") or []) if str(g.get("date", "")) >= today]
+            if upcoming:
+                g = upcoming[0]
+                opp = g.get("opponent", "their next opponent")
+                ha = "at home" if g.get("home_away") == "home" else "on the road"
+                next_game_text = f"Next up, the Sharks take on the {opp} {ha}."
+        except Exception:
+            pass
+
+    script = (
+        f"Hey Sharks fans! Here's your latest team update. "
+        f"{team_name} are {record} this season. "
+        f"{hitter_text} "
+        f"{next_game_text} "
+        f"Let's go Sharks!"
+    )
+    return script.strip()
+
+
+@app.function(
+    image=tts_image,
+    gpu="T4",
+    volumes={VOLUME_MOUNT: SESSION_VOLUME},
+    timeout=300,
+    memory=8192,
+)
+def generate_voice_update(script_text: str, output_path: str = "/vol/softball-gc/sharks/voice_update.mp3"):
+    """Generate TTS audio using Qwen3-TTS on Modal GPU."""
+    import torch
+    import soundfile as sf
+    from transformers import AutoTokenizer, AutoModelForCausalLM
+
+    if not script_text.strip():
+        return {"status": "skipped", "reason": "empty script"}
+
+    model_id = "Qwen/Qwen3-TTS"
+    print(f"[TTS] Loading model {model_id}...")
+    tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
+    model = AutoModelForCausalLM.from_pretrained(
+        model_id, torch_dtype=torch.float16, trust_remote_code=True
+    ).to("cuda")
+
+    print(f"[TTS] Generating speech for {len(script_text)} chars...")
+    inputs = tokenizer(script_text, return_tensors="pt").to("cuda")
+    with torch.no_grad():
+        output = model.generate(**inputs, do_sample=True, temperature=0.7, max_new_tokens=4096)
+
+    # Decode audio from model output
+    audio_tokens = output[0][inputs["input_ids"].shape[-1]:]
+    audio_np = audio_tokens.cpu().float().numpy()
+
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    sf.write(output_path, audio_np, samplerate=24000)
+    print(f"[TTS] Saved to {output_path} ({Path(output_path).stat().st_size} bytes)")
+    return {"status": "ok", "path": output_path}
+
+
 @app.function(
     image=sharks_image,
     schedule=modal.Cron("0 6 * * *"),
@@ -89,8 +202,10 @@ def daily_scout_job():
       1) Scrape latest GC data
       2) Recompute SWOT outputs
       3) Prepare NotebookLM sync payload
+      4) Generate voice update (GPU)
 
     Uses persistent Playwright auth/context in Modal Volume to avoid repeated logins.
+    Each step is wrapped in try/except so a single failure doesn't abort the pipeline.
     """
     print("[Modal] Daily scouting job started.")
 
@@ -110,48 +225,72 @@ def daily_scout_job():
     env.setdefault("PYTHONUNBUFFERED", "1")
     env.setdefault("AUTH_COOLDOWN_HOURS", "4")
 
-    # Validate credentials before attempting scrape to surface missing secrets clearly
+    # Auth: prefer GC_SESSION_COOKIES, fall back to email/password
+    gc_cookies = env.get("GC_SESSION_COOKIES", "").strip()
     gc_email = env.get("GC_EMAIL", "").strip()
     gc_password = env.get("GC_PASSWORD", "").strip()
-    if not gc_email or not gc_password:
-        raise RuntimeError(
-            "[Modal] GC_EMAIL or GC_PASSWORD not set. "
-            "Add them as Modal secrets: modal secret create sharks-gc GC_EMAIL=... GC_PASSWORD=..."
-        )
+    if not gc_cookies and not (gc_email and gc_password):
+        print("[Modal] WARNING: Neither GC_SESSION_COOKIES nor GC_EMAIL/GC_PASSWORD set.")
+        print("[Modal] GC scrape will be skipped. Analysis steps will run on cached data.")
 
     # Check for auth cooldown file (persisted in volume) — avoid 2FA spam
+    skip_gc = False
     if cooldown_file.exists():
         try:
-            import json as _json
-            cd = _json.loads(cooldown_file.read_text())
+            cd = json.loads(cooldown_file.read_text())
             until_ts = cd.get("until", 0)
             now_ts = __import__("time").time()
             if now_ts < until_ts:
                 remaining_min = int((until_ts - now_ts) / 60)
-                print(f"[Modal] Auth cooldown active — skipping GC scrape for {remaining_min}m to prevent 2FA spam.")
-                # Still run analysis steps on existing data
-                _run_step("SWOT analysis", ["python", "tools/swot_analyzer.py"], env=env, optional=True)
-                _run_step("NotebookLM payload sync", ["python", "tools/notebooklm_sync.py"], env=env, optional=True)
-                SESSION_VOLUME.commit()
-                return {"status": "skipped_gc", "reason": "auth_cooldown", "remaining_min": remaining_min}
+                print(f"[Modal] Auth cooldown active — skipping GC scrape for {remaining_min}m")
+                skip_gc = True
         except Exception as e:
             print(f"[Modal] Could not read cooldown file: {e}")
 
-    gc_ok = _run_step("GameChanger scrape", ["python", "tools/gc_scraper.py"], env=env, optional=True)
-    if not gc_ok:
-        print("[Modal] GC scrape failed — analysis steps will use cached data.")
+    results = {}
 
-    _run_step("SWOT analysis", ["python", "tools/swot_analyzer.py"], env=env, optional=True)
-    _run_step("NotebookLM payload sync", ["python", "tools/notebooklm_sync.py"], env=env, optional=True)
-    _run_step("RAG Memory sync", ["python", "tools/memory_engine.py", "sync"], env=env, optional=True)
+    # Step 1: GC scrape
+    if skip_gc:
+        results["gc_scrape"] = "skipped_cooldown"
+    else:
+        gc_ok = _run_step("GameChanger scrape", ["python", "tools/gc_scraper.py"], env=env, optional=True)
+        results["gc_scrape"] = "ok" if gc_ok else "failed"
+        if not gc_ok:
+            print("[Modal] GC scrape failed — analysis steps will use cached data.")
+
+    # Step 2: SWOT analysis
+    swot_ok = _run_step("SWOT analysis", ["python", "tools/swot_analyzer.py"], env=env, optional=True)
+    results["swot"] = "ok" if swot_ok else "failed"
+
+    # Step 3: NotebookLM sync
+    nb_ok = _run_step("NotebookLM payload sync", ["python", "tools/notebooklm_sync.py"], env=env, optional=True)
+    results["notebooklm"] = "ok" if nb_ok else "failed"
+
+    # Step 4: RAG memory sync
+    rag_ok = _run_step("RAG Memory sync", ["python", "tools/memory_engine.py", "sync"], env=env, optional=True)
+    results["rag"] = "ok" if rag_ok else "failed"
+
+    # Step 5: Voice update (runs on GPU via separate function)
+    try:
+        sharks_dir = str(Path(VOLUME_MOUNT) / "sharks")
+        script = _build_voice_script(sharks_dir)
+        if script:
+            print("[Modal] Spawning voice update generation (GPU)...")
+            generate_voice_update.spawn(script)
+            results["voice"] = "spawned"
+        else:
+            results["voice"] = "skipped_no_data"
+    except Exception as e:
+        print(f"[Modal] Voice generation spawn failed: {e}")
+        results["voice"] = "failed"
 
     SESSION_VOLUME.commit()
-    print("[Modal] Daily scouting job finished.")
-    return {"status": "ok" if gc_ok else "partial", "gc_scrape": "ok" if gc_ok else "failed"}
+    print(f"[Modal] Daily scouting job finished. Results: {results}")
+    return {"status": "ok", "steps": results}
 
 
 @app.function(image=sharks_image, volumes={VOLUME_MOUNT: SESSION_VOLUME}, secrets=[_runtime_secret()], timeout=60 * 45)
-@modal.web_endpoint(method="POST")
+@modal.fastapi_endpoint(method="POST")
 def manual_sync():
     """Manual trigger via Webhook (POST)."""
     daily_scout_job.spawn()

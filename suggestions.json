@@ -1,0 +1,17 @@
+{
+  "generated_at": "2026-03-21T23:23:32.104180+00:00",
+  "total": 1,
+  "pending": 0,
+  "suggestions": [
+    {
+      "id": "auto-empty-c88726f5",
+      "notebook_id": "c88726f5-9304-4f60-aa8a-41ec9593142c",
+      "notebook_title": "Joel's Projects",
+      "type": "add_source",
+      "priority": "high",
+      "reasoning": "\"Joel's Projects\" has no sources. Add content to make this notebook useful.",
+      "status": "approved",
+      "generated_at": "2026-03-20T01:04:18.996464+00:00"
+    }
+  ]
+}
