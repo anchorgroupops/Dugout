@@ -187,7 +187,9 @@ def generate_voice_update(script_text: str, output_path: str = "/vol/softball-gc
     with torch.no_grad():
         output = model.generate(**inputs, do_sample=True, temperature=0.7, max_new_tokens=4096)
 
-    # Decode audio from model output
+    # TODO: Qwen3-TTS output requires model-specific audio decoding (codec/vocoder),
+    # not raw token-to-float conversion. This produces garbled/silent output.
+    # Fix: use the model's decode_audio() API or switch to a known-working TTS model.
     audio_tokens = output[0][inputs["input_ids"].shape[-1]:]
     audio_np = audio_tokens.cpu().float().numpy()
 

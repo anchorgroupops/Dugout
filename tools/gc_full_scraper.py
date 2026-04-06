@@ -226,7 +226,7 @@ class GCFullScraper:
 
             if has_code_field:
                 _log("[2FA] GC sent a verification code to your email.")
-                _log("[2FA] Check fly386@gmail.com for a code from GameChanger.")
+                _log("[2FA] Check the GC account email for a code from GameChanger.")
                 # Give the user time to receive the email, then prompt
                 # If running non-interactively, read from GC_2FA_CODE env var
                 otp = os.getenv("GC_2FA_CODE", "").strip()

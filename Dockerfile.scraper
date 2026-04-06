@@ -32,9 +32,9 @@ RUN groupadd -r sharks && useradd -r -g sharks -d /app -s /sbin/nologin sharks \
     && chown -R sharks:sharks /app
 USER sharks
 
-# Healthcheck: verify the Python process is responsive
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD python -c "import sys; sys.exit(0)"
+# Healthcheck: try Flask API first, fall back to data dir check (docker-compose overrides per service)
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD python -c "import urllib.request,sys; urllib.request.urlopen('http://127.0.0.1:5000/api/health',timeout=4)" || test -d /app/data
 
 # Default: sync daemon. Override with `command:` in docker-compose for gunicorn
 CMD ["python", "tools/sync_daemon.py"]

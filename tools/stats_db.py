@@ -133,11 +133,16 @@ def _player_key(player: dict) -> str:
     return f"sharks:nonumber:{name}"
 
 
+_schema_initialized = False
+
 def _connect() -> sqlite3.Connection:
+    global _schema_initialized
     SHARKS_DIR.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.execute("PRAGMA foreign_keys=ON;")
-    conn.executescript(SCHEMA_SQL)
+    if not _schema_initialized:
+        conn.executescript(SCHEMA_SQL)
+        _schema_initialized = True
     return conn
 
 

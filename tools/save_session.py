@@ -68,7 +68,7 @@ def main():
         print()
         print("=" * 60)
         print("ACTION REQUIRED:")
-        print("  1. Check fly386@gmail.com for the GameChanger code")
+        print("  1. Check the GC account email for the GameChanger code")
         print("  2. Enter the code + password in the browser window")
         print("  3. Click Sign In")
         print("  4. Wait for the page to reach /teams or /home")

@@ -275,14 +275,20 @@ def _request_origin() -> str:
 def _client_ip() -> str:
     """Return the most trustworthy client IP for rate-limiting.
     Only trust X-Forwarded-For when the direct peer is a private/loopback
-    address (i.e. a trusted reverse proxy like nginx on the same host)."""
+    address (i.e. a trusted reverse proxy like nginx on the same host).
+    The extracted XFF value is validated as a real IP address to prevent
+    spoofing with arbitrary strings."""
     remote = (request.remote_addr or "").strip()
     try:
         ip_obj = ipaddress.ip_address(remote)
         if ip_obj.is_private or ip_obj.is_loopback:
             xff = (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
             if xff:
-                return xff
+                try:
+                    ipaddress.ip_address(xff)  # validate it's a real IP
+                    return xff
+                except ValueError:
+                    pass
     except Exception:
         pass
     return remote
@@ -309,12 +315,10 @@ def _guard_mutating_request():
             return jsonify({"error": "forbidden_origin"}), 403
         return None
 
-    # Requests without origin/referer are only allowed from private/loopback addresses.
-    ip = _client_ip()
-    if not _is_private_or_loopback(ip):
-        logging.warning("[Security] Blocked mutating request with no origin from non-private IP: %s", _sanitize_log(ip))
-        return jsonify({"error": "forbidden"}), 403
-    return None
+    # Requests without origin/referer require a valid origin header for mutating ops.
+    # Do not fall back to IP-based trust since XFF can be spoofed through the proxy.
+    logging.warning("[Security] Blocked mutating request with no origin header from IP: %s", _sanitize_log(_client_ip()))
+    return jsonify({"error": "origin_required"}), 403
 
 
 def _read_json_file(path: Path, default=None, retries: int = 3, retry_delay: float = 0.08):
@@ -1038,7 +1042,7 @@ def run_sync_cycle():
             logging.warning(f"[Sync] Opponent discovery skipped: {e}")
         
         # Check auth cooldown — if GC login recently failed (2FA required),
-        # skip all authenticated scrapers to avoid flooding fly386@gmail.com with codes.
+        # skip all authenticated scrapers to avoid flooding the GC account with codes.
         _auth_available = not is_auth_on_cooldown()
         if not _auth_available:
             logging.warning("[Sync] Auth on cooldown — skipping all authenticated GC scrapers this cycle.")
@@ -1289,6 +1293,8 @@ def _is_mutating_api_request() -> bool:
     return request.path.startswith("/api/") and request.method.upper() in MUTATING_METHODS
 
 
+_MUTATE_RATE_MAX_KEYS = 500  # hard cap on tracked IPs to bound memory
+
 def _guard_mutating_rate_limit():
     """In-app write throttle as defense-in-depth if edge limits are bypassed.
     Returns (response, status) tuple when blocked, else None."""
@@ -1300,7 +1306,19 @@ def _guard_mutating_rate_limit():
     window_floor = now_ts - MUTATE_RATE_WINDOW_SEC
 
     with _MUTATE_RATE_LOCK:
+        # Evict all stale keys first (cheap for bounded dict)
+        stale_before = now_ts - (MUTATE_RATE_WINDOW_SEC * 2)
+        stale_keys = [k for k, v in _MUTATE_RATE_BUCKETS.items() if not v or v[-1] < stale_before]
+        for stale_key in stale_keys:
+            _MUTATE_RATE_BUCKETS.pop(stale_key, None)
+
+        # Hard cap: if still too many keys, reject new ones to prevent memory abuse
         bucket = _MUTATE_RATE_BUCKETS.get(key, [])
+        if not bucket and len(_MUTATE_RATE_BUCKETS) >= _MUTATE_RATE_MAX_KEYS:
+            resp = jsonify({"error": "rate_limited", "scope": "global"})
+            resp.headers["Retry-After"] = str(MUTATE_RATE_WINDOW_SEC)
+            return resp, 429
+
         bucket = [ts for ts in bucket if ts >= window_floor]
         if len(bucket) >= MUTATE_RATE_MAX:
             retry_after = max(1, int(MUTATE_RATE_WINDOW_SEC - (now_ts - bucket[0])))
@@ -1314,13 +1332,6 @@ def _guard_mutating_rate_limit():
             return resp, 429
         bucket.append(now_ts)
         _MUTATE_RATE_BUCKETS[key] = bucket
-
-        # Opportunistic cleanup of stale keys.
-        if len(_MUTATE_RATE_BUCKETS) > 2000:
-            stale_before = now_ts - (MUTATE_RATE_WINDOW_SEC * 2)
-            stale_keys = [k for k, v in _MUTATE_RATE_BUCKETS.items() if not v or v[-1] < stale_before]
-            for stale_key in stale_keys[:500]:
-                _MUTATE_RATE_BUCKETS.pop(stale_key, None)
     return None
 
 
@@ -2737,14 +2748,15 @@ def handle_deploy_webhook():
                 cwd=str(Path(__file__).parent.parent),
             )
             if result.returncode != 0:
-                # Sanitize stderr to avoid leaking env vars or secrets
+                # Sanitize stderr — scrub ALL secret-bearing env vars
                 stderr_tail = (result.stderr or "Unknown error")[-500:]
-                for env_key in ("DEPLOY_WEBHOOK_TOKEN", "ELEVENLABS_API_KEY", "GC_PASSWORD", "GC_TOTP_SECRET"):
-                    val = os.getenv(env_key, "")
-                    if val and val in stderr_tail:
-                        stderr_tail = stderr_tail.replace(val, f"<{env_key}>")
+                for env_key in os.environ:
+                    if any(s in env_key.upper() for s in ("KEY", "TOKEN", "SECRET", "PASSWORD", "COOKIE")):
+                        val = os.getenv(env_key, "")
+                        if val and val in stderr_tail:
+                            stderr_tail = stderr_tail.replace(val, f"<{env_key}>")
                 _DEPLOY_STATUS["error"] = stderr_tail
-                logging.error(f"[Deploy] Failed: {result.stderr}")
+                logging.error("[Deploy] Failed (exit %d). See logs for details.", result.returncode)
             else:
                 logging.info(f"[Deploy] Success: {result.stdout[-200:]}")
             _DEPLOY_STATUS["last_completed"] = datetime.now(ET).isoformat()
@@ -3708,11 +3720,7 @@ def handle_regenerate_lineups():
 
 def _validate_player_id(player_id: str):
     """Return error response if player_id is invalid/dangerous, else None."""
-    if not player_id or len(player_id) > 100:
-        return jsonify({"error": "invalid_player_id"}), 400
-    if '..' in player_id or '/' in player_id or '\\' in player_id:
-        return jsonify({"error": "invalid_player_id"}), 400
-    return None
+    return _validate_path_slug(player_id, "player_id")
 
 
 @app.route('/api/announcer/roster', methods=['GET'])
