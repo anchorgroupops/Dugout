@@ -200,7 +200,16 @@ services:
     networks:
       - sharks_net
     mem_limit: 128m
+    memswap_limit: 128m
     cpus: 0.5
+    pids_limit: 128
+    init: true
+    healthcheck:
+      test: ["CMD", "sh", "-c", "test -f /proc/1/status"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     logging:
       driver: json-file
       options:

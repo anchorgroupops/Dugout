@@ -2709,7 +2709,13 @@ def handle_deploy_webhook():
                 cwd=str(Path(__file__).parent.parent),
             )
             if result.returncode != 0:
-                _DEPLOY_STATUS["error"] = result.stderr[-500:] if result.stderr else "Unknown error"
+                # Sanitize stderr to avoid leaking env vars or secrets
+                stderr_tail = (result.stderr or "Unknown error")[-500:]
+                for env_key in ("DEPLOY_WEBHOOK_TOKEN", "ELEVENLABS_API_KEY", "GC_PASSWORD", "GC_TOTP_SECRET"):
+                    val = os.getenv(env_key, "")
+                    if val and val in stderr_tail:
+                        stderr_tail = stderr_tail.replace(val, f"<{env_key}>")
+                _DEPLOY_STATUS["error"] = stderr_tail
                 logging.error(f"[Deploy] Failed: {result.stderr}")
             else:
                 logging.info(f"[Deploy] Success: {result.stdout[-200:]}")

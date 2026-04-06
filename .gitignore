@@ -9,11 +9,12 @@ data/
 *.db
 .DS_Store
 credentials/
+secrets.json
 auth.json
-*.key
-*.pem
-*.cert
-*.csr
+**/*.key
+**/*.pem
+**/*.cert
+**/*.csr
 dist/
 tools/frida-server
 tools/frida-server.xz

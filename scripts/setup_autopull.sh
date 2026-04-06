@@ -28,8 +28,9 @@ else
   echo "  Create one at: https://github.com/settings/tokens/new"
   echo "  Select scope: read:packages"
   echo ""
-  read -p "  Paste your GitHub token: " GH_TOKEN
-  echo "$GH_TOKEN" | docker login ghcr.io -u anchorgroupops --password-stdin
+  read -rsp "  Paste your GitHub token: " GH_TOKEN
+  echo ""
+  printf '%s' "$GH_TOKEN" | docker login ghcr.io -u anchorgroupops --password-stdin
   echo "  Logged in to GHCR."
 fi
 
