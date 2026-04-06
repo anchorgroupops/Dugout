@@ -262,7 +262,8 @@ function App() {
             }
           }
 
-          // Also check health timestamp for completion
+          // Also check health timestamp for completion (skip if already cleared above)
+          if (!syncPollRef.current) return;
           const hRes = await fetch('/api/health').catch(() => null);
           if (hRes?.ok) {
             const h = await hRes.json();
@@ -275,6 +276,7 @@ function App() {
               setSyncStatusText('Sync complete');
               fetchData();
               setTimeout(() => { setSyncProgress(0); setSyncStatusText(''); }, 4000);
+              return;
             }
           }
         } catch { /* ignore poll errors */ }
@@ -393,7 +395,7 @@ function App() {
               <img src="/sharks-logo-round.png" alt="Sharks" className="logo-avatar" />
               <span className="brand" style={{ fontSize: '1.125rem' }}>
                 {(() => {
-                  const labels = { scoreboard: 'Live', scout: 'Scout', swot: 'SWOT', lineups: 'Lineups', practice: 'Practice', roster: 'Roster', games: 'Games', league: 'League' };
+                  const labels = { scoreboard: 'Live', scout: 'Scout', swot: 'SWOT', lineups: 'Lineups', practice: 'Practice', roster: 'Roster', games: 'Games', league: 'League', announcer: 'Announcer' };
                   return labels[currentView] || 'Sharks';
                 })()}
               </span>
