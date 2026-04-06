@@ -1396,10 +1396,7 @@ def _load_roster_manifest():
 def _load_sub_tracker():
     """Load sub activation tracker (timestamps)."""
     tracker_file = SHARKS_DIR / "sub_tracker.json"
-    if not tracker_file.exists():
-        return {}
-    with open(tracker_file) as f:
-        return json.load(f)
+    return _read_json_file(tracker_file, default={})
 
 
 def _save_sub_tracker(tracker):
@@ -1502,10 +1499,7 @@ def handle_availability():
                 return jsonify({"error": "values_must_be_boolean"}), 400
 
         # Track sub activations in sub_tracker
-        old_avail = {}
-        if availability_file.exists():
-            with open(availability_file) as f:
-                old_avail = json.load(f)
+        old_avail = _read_json_file(availability_file, default={})
 
         tracker = _load_sub_tracker()
         tracker_changed = False
@@ -1539,14 +1533,12 @@ def handle_availability():
     # GET logic
     if not availability_file.exists():
         team_file = SHARKS_DIR / "team.json"
-        if not team_file.exists():
+        team_data = _read_json_file(team_file, default={})
+        if not team_data:
             return jsonify({})
-        with open(team_file, "r") as f:
-            team_data = json.load(f)
-            return jsonify({f"{p.get('first', '')} {p.get('last', '')}".strip(): p.get("core", True) for p in team_data.get("roster", [])})
-    
-    with open(availability_file, "r") as f:
-        return jsonify(json.load(f))
+        return jsonify({f"{p.get('first', '')} {p.get('last', '')}".strip(): p.get("core", True) for p in team_data.get("roster", [])})
+
+    return jsonify(_read_json_file(availability_file, default={}))
 
 def _build_games_feed(include_detail: bool = False) -> list[dict]:
     """Return parsed scorebook games enriched with W/L from schedule.
@@ -2712,6 +2704,7 @@ def handle_sync_status():
 
 
 _DEPLOY_STATUS: dict = {"status": "idle", "last_triggered": "", "last_completed": "", "error": ""}
+_DEPLOY_LOCK = threading.Lock()
 
 
 @app.route('/api/deploy', methods=['POST'])
@@ -2732,12 +2725,13 @@ def handle_deploy_webhook():
         logging.warning("[Security] Deploy webhook: invalid token from %s", _sanitize_log(_client_ip()))
         return jsonify({"error": "Unauthorized"}), 401
 
-    if _DEPLOY_STATUS["status"] == "deploying":
-        return jsonify({"status": "already_deploying", "since": _DEPLOY_STATUS["last_triggered"]}), 409
-
-    def _run_deploy():
+    with _DEPLOY_LOCK:
+        if _DEPLOY_STATUS["status"] == "deploying":
+            return jsonify({"status": "already_deploying", "since": _DEPLOY_STATUS["last_triggered"]}), 409
         _DEPLOY_STATUS["status"] = "deploying"
         _DEPLOY_STATUS["last_triggered"] = datetime.now(ET).isoformat()
+
+    def _run_deploy():
         _DEPLOY_STATUS["error"] = ""
         try:
             import subprocess

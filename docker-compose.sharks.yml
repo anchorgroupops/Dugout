@@ -77,6 +77,8 @@ services:
       - sharks_net
     security_opt:
       - no-new-privileges:true
+    cap_drop:
+      - ALL
     pids_limit: 512
     mem_limit: 1g
     memswap_limit: 1g
@@ -162,6 +164,8 @@ services:
       - sharks_net
     security_opt:
       - no-new-privileges:true
+    cap_drop:
+      - ALL
     pids_limit: 512
     mem_limit: 512m
     memswap_limit: 512m

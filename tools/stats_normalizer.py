@@ -79,6 +79,8 @@ def safe_pct_ratio(val: Any, default: float = 0.0) -> float:
       0.8 -> 0.8
     """
     raw = safe_float(val, default)
+    # NOTE: exactly 1.0 is ambiguous (1% as integer or 100% as ratio).
+    # GC rarely produces exactly 1% in integer format, so we treat <= 1.0 as ratio.
     if raw > 1.0:
         return raw / 100.0
     return raw
