@@ -45,14 +45,42 @@ function getContext() {
   return ctx;
 }
 
+const MAX_AUDIO_BYTES = 50 * 1024 * 1024; // 50 MB hard limit
+
+function _isAllowedAudioUrl(url) {
+  if (!url) return false;
+  // Allow same-origin (relative paths / announcer clips)
+  if (url.startsWith('/')) return true;
+  try {
+    const parsed = new URL(url, window.location.origin);
+    // Only allow https (or http on localhost for dev)
+    if (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && parsed.hostname === 'localhost')) return false;
+    // Block private/internal IPs
+    if (/^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|127\.|0\.)/.test(parsed.hostname)) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function loadBuffer(url) {
   if (BUFFER_CACHE.has(url)) {
     return BUFFER_CACHE.get(url);
   }
+  if (!_isAllowedAudioUrl(url)) {
+    throw new Error(`Audio URL blocked by security policy: ${url}`);
+  }
   const audioCtx = getContext();
   const resp = await fetch(url);
   if (!resp.ok) throw new Error(`Failed to fetch audio: ${resp.status} ${url}`);
+  const contentLength = parseInt(resp.headers.get('content-length') || '0', 10);
+  if (contentLength > MAX_AUDIO_BYTES) {
+    throw new Error(`Audio file too large: ${contentLength} bytes (max ${MAX_AUDIO_BYTES})`);
+  }
   const arrayBuf = await resp.arrayBuffer();
+  if (arrayBuf.byteLength > MAX_AUDIO_BYTES) {
+    throw new Error(`Audio file too large: ${arrayBuf.byteLength} bytes`);
+  }
   const audioBuf = await audioCtx.decodeAudioData(arrayBuf);
   // LRU eviction: drop oldest entry when cache is full
   if (BUFFER_CACHE.size >= MAX_CACHE_SIZE) {

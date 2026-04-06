@@ -77,7 +77,7 @@ function AddSubModal({ onClose, onAdd }) {
           </div>
           <div className="announcer-form-row">
             <input placeholder="Jersey #" value={number} onChange={e => setNumber(e.target.value)} maxLength={4} style={{ width: '80px' }} />
-            <input placeholder="Walk-up song URL" value={walkupUrl} onChange={e => setWalkupUrl(e.target.value)} maxLength={500} />
+            <input placeholder="Walk-up song URL (https://)" value={walkupUrl} onChange={e => setWalkupUrl(e.target.value)} maxLength={500} type="url" pattern="https://.*" />
           </div>
           <div className="announcer-form-actions">
             <button type="button" onClick={onClose} className="announcer-btn announcer-btn-secondary">Cancel</button>
@@ -188,6 +188,8 @@ function PlayerCard({ player, onSavePhonetics, onRender }) {
                 onChange={e => setWalkupUrl(e.target.value)}
                 placeholder="https://example.com/walkup.mp3"
                 maxLength={500}
+                type="url"
+                pattern="https://.*"
               />
             </div>
             <div className="announcer-form-group" style={{ width: '100px' }}>
