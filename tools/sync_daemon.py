@@ -2047,7 +2047,7 @@ def handle_scoreboard():
     opp_slug = _slugify_opponent(result.get("opponent", ""))
     if opp_slug:
         try:
-            opp_scouting = _build_opponent_scouting(opp_slug, result.get("opponent_batting", []))
+            opp_scouting = _cached_opponent_scouting(opp_slug, result.get("opponent_batting", []))
             result["opponent_scouting"] = opp_scouting
         except Exception as e:
             logging.debug("[Scoreboard] Opponent scouting failed: %s", e)
@@ -2055,7 +2055,7 @@ def handle_scoreboard():
     # 7. Try to get live play-by-play data from GC events API (current batter, runners, etc.)
     if display_status == "live" and gc_game_id:
         try:
-            events_data = _fetch_gc_live_events(gc_game_id)
+            events_data = _cached_live_events(gc_game_id)
             if events_data:
                 result["live_play"] = events_data
         except Exception as e:
@@ -2064,9 +2064,37 @@ def handle_scoreboard():
     return jsonify(result)
 
 
+# TTL caches for expensive scoreboard enrichments (avoid re-computing every 15s poll)
+_SCOUTING_CACHE: dict[str, tuple[float, dict]] = {}  # slug -> (expiry_ts, data)
+_SCOUTING_CACHE_TTL = 120  # 2 minutes — scouting data is static during a game
+_LIVE_EVENTS_CACHE: dict[str, tuple[float, dict | None]] = {}  # game_id -> (expiry_ts, data)
+_LIVE_EVENTS_CACHE_TTL = 15  # 15 seconds — match frontend poll interval
+
+
+def _cached_opponent_scouting(opp_slug: str, live_batting: list) -> dict:
+    """Return cached scouting data, recomputing only when TTL expires."""
+    now = time.time()
+    cached = _SCOUTING_CACHE.get(opp_slug)
+    if cached and cached[0] > now:
+        return cached[1]
+    data = _build_opponent_scouting(opp_slug, live_batting)
+    _SCOUTING_CACHE[opp_slug] = (now + _SCOUTING_CACHE_TTL, data)
+    return data
+
+
+def _cached_live_events(gc_game_id: str) -> dict | None:
+    """Return cached live events, re-fetching only when TTL expires."""
+    now = time.time()
+    cached = _LIVE_EVENTS_CACHE.get(gc_game_id)
+    if cached and cached[0] > now:
+        return cached[1]
+    data = _fetch_gc_live_events(gc_game_id)
+    _LIVE_EVENTS_CACHE[gc_game_id] = (now + _LIVE_EVENTS_CACHE_TTL, data)
+    return data
+
+
 def _slugify_opponent(name: str) -> str:
     """Convert opponent name to a filesystem slug for data lookup."""
-    import re
     if not name:
         return ""
     slug = re.sub(r'[^a-z0-9]+', '_', name.lower()).strip('_')

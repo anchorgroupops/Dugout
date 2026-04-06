@@ -228,7 +228,7 @@ const LivePlayPanel = ({ livePlay }) => {
   );
 };
 
-const OpponentScoutPanel = ({ scouting, livePlay, isLandscape }) => {
+const OpponentScoutPanel = React.memo(({ scouting, livePlay, isLandscape }) => {
   const [expandedPlayer, setExpandedPlayer] = useState(null);
   const [showAll, setShowAll] = useState(false);
 
@@ -304,7 +304,7 @@ const OpponentScoutPanel = ({ scouting, livePlay, isLandscape }) => {
       )}
     </div>
   );
-};
+});
 
 const Scoreboard = ({ isMobile = false, isLandscape = false, team, schedule }) => {
   const [data, setData] = useState(null);
