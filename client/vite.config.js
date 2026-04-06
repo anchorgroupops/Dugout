@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
 // https://vite.dev/config/
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   server: {
     proxy: {
       '/api': 'http://localhost:5001',
@@ -90,8 +90,8 @@ export default defineConfig({
         ]
       },
       devOptions: {
-        enabled: true
+        enabled: mode !== 'production'
       }
     })
   ],
-})
+}))
