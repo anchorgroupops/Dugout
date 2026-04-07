@@ -2744,7 +2744,8 @@ def handle_deploy_webhook():
         _DEPLOY_STATUS["last_triggered"] = datetime.now(ET).isoformat()
 
     def _run_deploy():
-        _DEPLOY_STATUS["error"] = ""
+        with _DEPLOY_LOCK:
+            _DEPLOY_STATUS["error"] = ""
         try:
             import subprocess
             script = Path(__file__).parent.parent / "scripts" / "deploy.sh"
@@ -2761,16 +2762,20 @@ def handle_deploy_webhook():
                         val = os.getenv(env_key, "")
                         if val and val in stderr_tail:
                             stderr_tail = stderr_tail.replace(val, f"<{env_key}>")
-                _DEPLOY_STATUS["error"] = stderr_tail
+                with _DEPLOY_LOCK:
+                    _DEPLOY_STATUS["error"] = stderr_tail
                 logging.error("[Deploy] Failed (exit %d). See logs for details.", result.returncode)
             else:
                 logging.info(f"[Deploy] Success: {result.stdout[-200:]}")
-            _DEPLOY_STATUS["last_completed"] = datetime.now(ET).isoformat()
+            with _DEPLOY_LOCK:
+                _DEPLOY_STATUS["last_completed"] = datetime.now(ET).isoformat()
         except Exception as e:
-            _DEPLOY_STATUS["error"] = str(e)
+            with _DEPLOY_LOCK:
+                _DEPLOY_STATUS["error"] = str(e)
             logging.error(f"[Deploy] Exception: {e}")
         finally:
-            _DEPLOY_STATUS["status"] = "idle"
+            with _DEPLOY_LOCK:
+                _DEPLOY_STATUS["status"] = "idle"
 
     deploy_thread = threading.Thread(target=_run_deploy, daemon=True)
     deploy_thread.start()
@@ -2789,7 +2794,9 @@ def handle_deploy_status():
     expected = f"Bearer {expected_token}"
     if not hmac.compare_digest(auth.encode(), expected.encode()):
         return jsonify({"error": "unauthorized"}), 401
-    return jsonify(_DEPLOY_STATUS)
+    with _DEPLOY_LOCK:
+        snapshot = dict(_DEPLOY_STATUS)
+    return jsonify(snapshot)
 
 
 @app.route('/api/health', methods=['GET'])
