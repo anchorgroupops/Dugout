@@ -14,7 +14,7 @@ COPY . .
 RUN VITE_SKIP_DATA_SYNC=1 npm run build
 
 # Stage 2: Serve with Nginx
-FROM nginx:1.27-alpine
+FROM nginx:1.29-alpine
 
 LABEL org.opencontainers.image.title="dugout-client" \
       org.opencontainers.image.description="Sharks softball dashboard frontend" \
