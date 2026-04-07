@@ -1303,10 +1303,13 @@ def _is_mutating_api_request() -> bool:
 
 
 _MUTATE_RATE_MAX_KEYS = 500  # hard cap on tracked IPs to bound memory
+_LAST_EVICTION: float = 0.0
+_EVICT_INTERVAL_SEC = 30
 
 def _guard_mutating_rate_limit():
     """In-app write throttle as defense-in-depth if edge limits are bypassed.
     Returns (response, status) tuple when blocked, else None."""
+    global _LAST_EVICTION
     if not _is_mutating_api_request():
         return None
 
@@ -1315,11 +1318,13 @@ def _guard_mutating_rate_limit():
     window_floor = now_ts - MUTATE_RATE_WINDOW_SEC
 
     with _MUTATE_RATE_LOCK:
-        # Evict all stale keys first (cheap for bounded dict)
-        stale_before = now_ts - (MUTATE_RATE_WINDOW_SEC * 2)
-        stale_keys = [k for k, v in _MUTATE_RATE_BUCKETS.items() if not v or v[-1] < stale_before]
-        for stale_key in stale_keys:
-            _MUTATE_RATE_BUCKETS.pop(stale_key, None)
+        # Evict stale keys at most once per interval (avoid O(n) scan per request)
+        if now_ts - _LAST_EVICTION > _EVICT_INTERVAL_SEC:
+            stale_before = now_ts - (MUTATE_RATE_WINDOW_SEC * 2)
+            stale_keys = [k for k, v in _MUTATE_RATE_BUCKETS.items() if not v or v[-1] < stale_before]
+            for stale_key in stale_keys:
+                _MUTATE_RATE_BUCKETS.pop(stale_key, None)
+            _LAST_EVICTION = now_ts
 
         # Hard cap: if still too many keys, reject new ones to prevent memory abuse
         bucket = _MUTATE_RATE_BUCKETS.get(key, [])
@@ -1392,14 +1397,20 @@ def _handle_unexpected_error(exc):
 # ---------------------------------------------------------
 # SUB AUTO-DEACTIVATION HELPERS
 # ---------------------------------------------------------
+_ROSTER_MANIFEST_CACHE: list | None = None
+
 def _load_roster_manifest():
-    """Load core player names from roster_manifest.json."""
+    """Load core player names from roster_manifest.json (cached after first read)."""
+    global _ROSTER_MANIFEST_CACHE
+    if _ROSTER_MANIFEST_CACHE is not None:
+        return _ROSTER_MANIFEST_CACHE
     mf = SHARKS_DIR / "roster_manifest.json"
     if not mf.exists():
         return []
     with open(mf) as f:
         data = json.load(f)
-    return [n.strip().lower() for n in data.get("core_players", [])]
+    _ROSTER_MANIFEST_CACHE = [n.strip().lower() for n in data.get("core_players", [])]
+    return _ROSTER_MANIFEST_CACHE
 
 
 def _load_sub_tracker():
