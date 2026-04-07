@@ -6,6 +6,7 @@ import re
 import logging
 import traceback
 import requests
+import hmac
 import ipaddress
 import sqlite3
 from datetime import datetime, timedelta
@@ -329,6 +330,18 @@ def _guard_mutating_request():
     # Do not fall back to IP-based trust since XFF can be spoofed through the proxy.
     logging.warning("[Security] Blocked mutating request with no origin header from IP: %s", _sanitize_log(_client_ip()))
     return jsonify({"error": "origin_required"}), 403
+
+
+def _require_deploy_token():
+    """Verify Bearer token for deploy endpoints. Returns error response or None."""
+    expected_token = os.getenv("DEPLOY_WEBHOOK_TOKEN", "").strip()
+    if not expected_token:
+        return jsonify({"error": "Deploy webhook not configured (DEPLOY_WEBHOOK_TOKEN not set)"}), 503
+    auth = request.headers.get("Authorization", "")
+    if not hmac.compare_digest(auth.encode(), f"Bearer {expected_token}".encode()):
+        logging.warning("[Security] Deploy webhook: invalid token from %s", _sanitize_log(_client_ip()))
+        return jsonify({"error": "Unauthorized"}), 401
+    return None
 
 
 def _read_json_file(path: Path, default=None, retries: int = 3, retry_delay: float = 0.08):
@@ -2734,16 +2747,9 @@ def handle_deploy_webhook():
     Secured with a bearer token set via DEPLOY_WEBHOOK_TOKEN env var.
     If no token is configured, the endpoint is disabled for safety.
     """
-    expected_token = os.getenv("DEPLOY_WEBHOOK_TOKEN", "").strip()
-    if not expected_token:
-        return jsonify({"error": "Deploy webhook not configured (DEPLOY_WEBHOOK_TOKEN not set)"}), 503
-
-    import hmac
-    auth = request.headers.get("Authorization", "")
-    expected = f"Bearer {expected_token}"
-    if not hmac.compare_digest(auth.encode(), expected.encode()):
-        logging.warning("[Security] Deploy webhook: invalid token from %s", _sanitize_log(_client_ip()))
-        return jsonify({"error": "Unauthorized"}), 401
+    auth_err = _require_deploy_token()
+    if auth_err:
+        return auth_err
 
     with _DEPLOY_LOCK:
         if _DEPLOY_STATUS["status"] == "deploying":
@@ -2793,15 +2799,9 @@ def handle_deploy_webhook():
 @app.route('/api/deploy/status', methods=['GET'])
 def handle_deploy_status():
     """Check the current deploy status. Requires same bearer token as /api/deploy."""
-    expected_token = os.getenv("DEPLOY_WEBHOOK_TOKEN", "").strip()
-    if not expected_token:
-        return jsonify({"error": "not_configured"}), 503
-
-    import hmac
-    auth = request.headers.get("Authorization", "")
-    expected = f"Bearer {expected_token}"
-    if not hmac.compare_digest(auth.encode(), expected.encode()):
-        return jsonify({"error": "unauthorized"}), 401
+    auth_err = _require_deploy_token()
+    if auth_err:
+        return auth_err
     with _DEPLOY_LOCK:
         snapshot = dict(_DEPLOY_STATUS)
     return jsonify(snapshot)
