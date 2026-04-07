@@ -107,8 +107,6 @@ def _candidate_secrets_csv_paths() -> list[Path]:
     raw_paths = [
         os.getenv("SECRETS_CSV", "").strip(),
         os.getenv("APIS_CSV_PATH", "").strip(),
-        r"H:\APIs.csv",
-        r"H:\APIs - Sheet1 (6).csv",
         str(Path(__file__).parent.parent / "APIs.csv"),
         str(Path(__file__).parent / "APIs - Sheet1 (6).csv"),
         str(Path(__file__).parent.parent / "Scorebooks" / "APIs - Sheet1 (6).csv"),
@@ -576,7 +574,6 @@ def _aggregate_opponent_stats_from_games(opponent_slug: str) -> list:
                 acc = player_acc[key]
                 for stat in CANONICAL_BATTING_FIELDS:
                     acc[stat] = acc.get(stat, 0) + b.get(stat, 0)
-                acc["sac"] = acc.get("sac", 0) + b.get("sac", 0)
         except Exception as e:
             logging.warning(f"Opponent game-stat aggregation error ({game_file.name}): {e}")
 
