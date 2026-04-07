@@ -6,6 +6,9 @@ from pathlib import Path
 EDEN_AUTH_TOKENS = os.getenv("GC_EDEN_AUTH_TOKENS", "")
 PERSIST_ROOT = os.getenv("GC_PERSIST_ROOT", "")
 
+if not EDEN_AUTH_TOKENS or not PERSIST_ROOT:
+    raise SystemExit("ERROR: GC_EDEN_AUTH_TOKENS and GC_PERSIST_ROOT env vars are required")
+
 COOKIES = [
     {"domain": "gc.com", "expires": 0, "name": "afUserId", "path": "/", "sameSite": "Lax", "secure": False, "value": os.getenv("GC_AF_USER_ID", "")},
     {"domain": "gc.com", "expires": 0, "name": "gc_logged_in", "path": "/", "sameSite": "Lax", "secure": False, "value": "1"},
@@ -26,7 +29,7 @@ storage_state = {
 }
 
 # Ensure directory exists
-output_path = Path("h:/Repos/Personal/Softball/data/auth.json")
+output_path = Path(os.getenv("GC_AUTH_OUTPUT", str(Path(__file__).parent.parent / "data" / "auth.json")))
 output_path.parent.mkdir(parents=True, exist_ok=True)
 
 with open(output_path, "w") as f:

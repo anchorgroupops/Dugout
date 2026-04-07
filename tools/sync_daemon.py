@@ -350,6 +350,8 @@ def _read_json_file(path: Path, default=None, retries: int = 3, retry_delay: flo
         try:
             with open(path) as f:
                 return json.load(f)
+        except FileNotFoundError:
+            return default
         except Exception as e:
             if attempt == retries - 1:
                 logging.warning(f"JSON read failed for {path}: {e}")
