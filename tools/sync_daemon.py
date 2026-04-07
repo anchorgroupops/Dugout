@@ -159,6 +159,18 @@ def _resolve_secret(name: str, default: str = "") -> str:
     return str(cache.get(name, default)).strip()
 
 
+def _resolve_critical_env(name: str, fallback: str) -> str:
+    """Resolve a critical env var; logs WARNING if falling back to hardcoded default."""
+    val = _resolve_secret(name, fallback)
+    if val == fallback:
+        logging.warning(
+            "[Config] %s not set in .env or secrets CSV — using hardcoded fallback '%s'. "
+            "Set %s explicitly to avoid scraping the wrong team.",
+            name, fallback, name,
+        )
+    return val
+
+
 def _origin_hostname(origin: str) -> str:
     try:
         parsed = urlparse(origin)
@@ -1034,7 +1046,7 @@ def run_sync_cycle():
             from opponent_discovery import discover_and_persist_opponents
             discovery = discover_and_persist_opponents(
                 data_dir=DATA_DIR,
-                sharks_team_id=os.getenv("GC_TEAM_ID", "NuGgx6WvP7TO"),
+                sharks_team_id=_resolve_critical_env("GC_TEAM_ID", "NuGgx6WvP7TO"),
             )
             missing = len((discovery or {}).get("missing_schedule_opponents", []))
             logging.info(f"[Sync] Opponent discovery refreshed (missing schedule opponents={missing}).")
@@ -1062,8 +1074,8 @@ def run_sync_cycle():
             from gc_web_mobile_scraper import sync_recent_games as sync_web_mobile_games
 
             web_ingest = sync_web_mobile_games(
-                team_id=os.getenv("GC_TEAM_ID", "NuGgx6WvP7TO"),
-                season_slug=os.getenv("GC_SEASON_SLUG", "2026-spring-sharks"),
+                team_id=_resolve_critical_env("GC_TEAM_ID", "NuGgx6WvP7TO"),
+                season_slug=_resolve_critical_env("GC_SEASON_SLUG", "2026-spring-sharks"),
                 sharks_team_name=os.getenv("TEAM_NAME", "Sharks"),
                 max_games=int(os.getenv("GC_WEB_BOX_MAX_GAMES", "8")),
             )
@@ -1878,7 +1890,7 @@ def handle_scoreboard():
     Checks for in-progress or today's game, returns score, inning, and
     game status so the frontend can render a real-time scoreboard.
     Falls back to schedule_manual.json for context when no API data."""
-    team_id = os.getenv("GC_TEAM_ID", "NuGgx6WvP7TO")
+    team_id = _resolve_critical_env("GC_TEAM_ID", "NuGgx6WvP7TO")
     gc_api_base = "https://api.team-manager.gc.com"
 
     now = datetime.now(ET)
@@ -2946,9 +2958,9 @@ def handle_team():
 
     # Ensure GC identifiers are always present (hardcoded fallbacks for The Sharks)
     if not team.get("gc_team_id"):
-        team["gc_team_id"] = os.getenv("GC_TEAM_ID", "NuGgx6WvP7TO")
+        team["gc_team_id"] = _resolve_critical_env("GC_TEAM_ID", "NuGgx6WvP7TO")
     if not team.get("gc_season_slug"):
-        team["gc_season_slug"] = os.getenv("GC_SEASON_SLUG", "2026-spring-sharks")
+        team["gc_season_slug"] = _resolve_critical_env("GC_SEASON_SLUG", "2026-spring-sharks")
 
     return jsonify(team)
 

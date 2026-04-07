@@ -67,7 +67,9 @@ services:
       - MAX_JSON_BODY_BYTES=131072
       - MUTATE_RATE_WINDOW_SEC=60
       - MUTATE_RATE_MAX=12
-      - GC_ORG_IDS=7ZUyPJwky5DG
+      - GC_ORG_IDS=${GC_ORG_IDS}
+      - GC_TEAM_ID=${GC_TEAM_ID}
+      - GC_SEASON_SLUG=${GC_SEASON_SLUG}
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
@@ -148,7 +150,9 @@ services:
       - MAX_JSON_BODY_BYTES=131072
       - MUTATE_RATE_WINDOW_SEC=60
       - MUTATE_RATE_MAX=12
-      - GC_ORG_IDS=7ZUyPJwky5DG
+      - GC_ORG_IDS=${GC_ORG_IDS}
+      - GC_TEAM_ID=${GC_TEAM_ID}
+      - GC_SEASON_SLUG=${GC_SEASON_SLUG}
       - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY}
       - ELEVENLABS_VOICE_ID=${ELEVENLABS_VOICE_ID}
       - REPLICATE_API_TOKEN=${REPLICATE_API_TOKEN}
