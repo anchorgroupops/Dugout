@@ -6,6 +6,7 @@ Stores time-series snapshots each sync cycle for auditing and trend analysis.
 from __future__ import annotations
 
 import sqlite3
+import threading
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -134,15 +135,18 @@ def _player_key(player: dict) -> str:
 
 
 _schema_initialized = False
+_schema_lock = threading.Lock()
 
 def _connect() -> sqlite3.Connection:
     global _schema_initialized
     SHARKS_DIR.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.execute("PRAGMA foreign_keys=ON;")
-    if not _schema_initialized:
-        conn.executescript(SCHEMA_SQL)
-        _schema_initialized = True
+    with _schema_lock:
+        if not _schema_initialized:
+            conn.executescript(SCHEMA_SQL)
+            conn.execute("PRAGMA foreign_keys=ON;")  # re-set after executescript
+            _schema_initialized = True
     return conn
 
 

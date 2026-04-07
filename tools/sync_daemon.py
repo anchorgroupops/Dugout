@@ -1302,8 +1302,19 @@ def _validate_path_slug(value: str, label: str = "slug"):
     return None
 
 
+def _is_trusted_proxy() -> bool:
+    """True when the direct peer is a private/loopback address (e.g. nginx on same host)."""
+    try:
+        ip_obj = ipaddress.ip_address((request.remote_addr or "").strip())
+        return ip_obj.is_private or ip_obj.is_loopback
+    except Exception:
+        return False
+
+
 def _normalized_request_host() -> str:
-    host = (request.headers.get("X-Forwarded-Host") or request.host or "").split(",")[0].strip().lower()
+    # Only trust X-Forwarded-Host from a trusted reverse proxy (same guard as _client_ip)
+    xfh = request.headers.get("X-Forwarded-Host") if _is_trusted_proxy() else None
+    host = (xfh or request.host or "").split(",")[0].strip().lower()
     if not host:
         return ""
     if host.startswith("["):
@@ -2722,8 +2733,8 @@ def _aggregate_stats_from_games():
         hr = b.get("hr", 0)
 
         b["avg"] = round(h / ab, 3) if ab > 0 else 0.0
-        ob_den = ab + bb + hbp + sac
-        b["obp"] = round((h + bb + hbp) / ob_den, 3) if ob_den > 0 else 0.0
+        pa = b.get("pa", 0) or (ab + bb + hbp + sac)
+        b["obp"] = round((h + bb + hbp) / pa, 3) if pa > 0 else 0.0
         tb = singles + 2 * doubles + 3 * triples + 4 * hr
         b["slg"] = round(tb / ab, 3) if ab > 0 else 0.0
         b["ops"] = round(b["obp"] + b["slg"], 3)
