@@ -18,9 +18,9 @@ import ErrorBoundary from './components/ErrorBoundary';
 function SyncProgressBar({ progress, stage, milestones }) {
   const activeIdx = milestones.findIndex(m => m.id === stage);
   return (
-    <div className="sync-progress-wrap">
+    <div className="sync-progress-wrap animate-fade-in glass-panel" style={{ padding: '0.75rem', borderRadius: '12px', background: 'rgba(130, 203, 195, 0.05)' }}>
       <div className="sync-progress-track">
-        <div className="sync-progress-fill" style={{ width: `${progress}%` }} />
+        <div className="sync-progress-fill" style={{ width: `${progress}%`, transition: 'width 1s cubic-bezier(0.34, 1.56, 0.64, 1)' }} />
         {milestones.map((m, i) => {
           const done = progress >= m.pct;
           const active = i === activeIdx;
@@ -32,7 +32,7 @@ function SyncProgressBar({ progress, stage, milestones }) {
           );
         })}
       </div>
-      <div className="sync-progress-pct">{progress}%</div>
+      <div className="sync-progress-pct" style={{ minWidth: '3.5rem', fontWeight: 800 }}>{progress}%</div>
     </div>
   );
 }
@@ -207,9 +207,17 @@ function App() {
     setSyncProgress(0);
     setSyncStatusText('Triggering sync...');
     try {
-      const res = await fetch('https://anchorgroupops--softball-strategy-sharks-manual-sync.modal.run', {
-        method: 'POST'
-      });
+      // 1. Try local sync first
+      let res = await fetch('/api/run', { method: 'POST' }).catch(() => ({ ok: false }));
+      
+      // 2. Fallback to Modal cloud if local fails (e.g. dev environment vs cloud production)
+      if (!res.ok) {
+        console.log("Local sync unavailable, trying Modal cloud fallback...");
+        res = await fetch('https://anchorgroupops--softball-strategy-sharks-manual-sync.modal.run', {
+          method: 'POST'
+        });
+      }
+      
       if (!res.ok) throw new Error('Sync trigger failed');
 
       // Capture the current health timestamp to detect fresh data

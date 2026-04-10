@@ -57,6 +57,16 @@ SHARKS_DIR = DATA_DIR / "sharks"
 LOG_DIR = Path(__file__).parent.parent / "logs"
 CONFIG_DIR = Path(__file__).parent.parent / "config"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
+# Ensure the log file exists and is writable by any container user (e.g. the
+# non-root "sharks" uid which differs from the host owner uid 1000).  We
+# touch-and-chmod here at import time so RotatingFileHandler never races
+# against a host-owned file.
+_log_file = LOG_DIR / "sync_daemon.log"
+try:
+    _log_file.touch(exist_ok=True)
+    _log_file.chmod(0o666)
+except OSError:
+    pass  # Already writable, or on a read-only FS — RotatingFileHandler will surface the real error
 DEFAULT_FALLBACK_VOICE_ID = "EXAVITQu4vr4xnSDxMaL"
 _SECRET_CACHE: dict[str, str] | None = None
 _SYNC_STATUS: dict = {"stage": "idle", "last_completed": "", "progress": 0}

@@ -76,10 +76,34 @@ jobs:
     if: success()
     steps:
       - name: Trigger deploy webhook
-        continue-on-error: true
         run: |
           curl -sf -X POST \
             -H "Authorization: Bearer ${{ secrets.DEPLOY_WEBHOOK_TOKEN }}" \
             -H "Content-Type: application/json" \
             https://dugout.joelycannoli.com/api/deploy \
-            --max-time 10 || echo "Deploy webhook skipped (not configured or unreachable)"
+            --max-time 15
+        # If the webhook fails the deploy job fails — makes broken deploys visible in CI
+        # Watchtower (5-min poll) serves as the fallback if the Pi is temporarily unreachable
+
+  verify-deploy:
+    runs-on: ubuntu-latest
+    needs: [notify-deploy]
+    if: success()
+    steps:
+      - name: Wait for Pi to pull and restart containers
+        run: sleep 60
+
+      - name: Health check dugout.joelycannoli.com
+        run: |
+          for i in 1 2 3 4 5; do
+            STATUS=$(curl -sf -o /dev/null -w "%{http_code}" \
+              https://dugout.joelycannoli.com/api/health --max-time 15 || echo "000")
+            echo "Attempt $i: HTTP $STATUS"
+            if [ "$STATUS" = "200" ]; then
+              echo "Health check passed."
+              exit 0
+            fi
+            sleep 30
+          done
+          echo "Health check failed after 5 attempts."
+          exit 1

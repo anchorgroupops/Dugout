@@ -23,8 +23,8 @@ services:
     read_only: true
     init: true
     tmpfs:
-      - /var/cache/nginx
-      - /var/run
+      - /var/cache/nginx:uid=101,gid=101
+      - /var/run:uid=101,gid=101
       - /tmp
     security_opt:
       - no-new-privileges:true

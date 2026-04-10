@@ -371,6 +371,7 @@ def health():
         "disk": _disk_health(),
         "youtube_api": _youtube_connectivity(),
         "last_batch_sync": _last_batch_sync_status(),
+        "stale_sources": [], # Placeholder for now, can be enriched later
     }
     return jsonify(payload)
 
@@ -420,16 +421,17 @@ def discover_notebooks():
 
 
 @app.route("/status", methods=["GET"])
-@require_api_key
+@app.route("/sync/status", methods=["GET"])
 def get_status():
+    """Returns the current sync progress/status. Publicly accessible."""
     if not LOGS_DIR.exists():
-        return jsonify({"status": "no_logs"})
+        return jsonify({"status": "no_logs", "stage": "idle", "progress": 0})
 
     logs = sorted(LOGS_DIR.glob("run_*.json"), reverse=True)
     if not logs:
-        return jsonify({"status": "no_logs"})
+        return jsonify({"status": "no_logs", "stage": "idle", "progress": 0})
 
-    data = _read_json(logs[0], fallback={})
+    data = _read_json(logs[0], fallback={"stage": "idle", "progress": 0})
     return jsonify(data)
 
 

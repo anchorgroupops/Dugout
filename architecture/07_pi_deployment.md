@@ -1,77 +1,115 @@
-# SOP 07: Raspberry Pi 5 Deployment
+# SOP 07: Raspberry Pi 5 Deployment — Dugout
 
-Layer 3 — Infrastructure | The Librarian
+Layer 3 — Infrastructure | Sharks Softball Dashboard
 
-## 📐 Overview
+## Overview
 
-This SOP defines the process for deploying The Librarian to the Raspberry Pi 5 (`192.168.7.222`).
+Dugout runs on the Raspberry Pi 5 (`192.168.7.222`) as a Docker Compose stack.
+Traffic reaches the Pi via a **Cloudflare Tunnel** (no port-forwarding required).
 
-## 🛠️ Prerequisites
+```text
+Internet
+  └── Cloudflare (dugout.joelycannoli.com, DNS proxied)
+        └── cloudflared-tunnel (container on Pi)
+              └── http://sharks_dashboard:8080  ← nginx/React SPA
+                    └── /api/* proxied → sharks_api:5000 (gunicorn/Flask)
+```
 
-- Raspberry Pi 5 (ARM64)
-- Python 3.12+
-- `pip install notebooklm-mcp` (logged in with Google cookies)
-- Syncthing (paired with development workstation)
+## Services (docker-compose.sharks.yml)
 
-## 📦 Deployment Steps
+| Container | Image | Role |
+| --- | --- | --- |
+| `sharks_dashboard` | `ghcr.io/anchorgroupops/sharks-dashboard:latest` | nginx serving React SPA + API proxy |
+| `sharks_api` | `ghcr.io/anchorgroupops/sharks-api:latest` | gunicorn/Flask serving team data, SWOT, lineups |
+| `sharks_sync` | `ghcr.io/anchorgroupops/sharks-api:latest` | sync_daemon.py — GC scraper, runs on schedule |
+| `watchtower` | `containrrr/watchtower:latest` | polls GHCR every 5 min, rolling restart on new images |
 
-### 1. Sync Files
+## Deploy Directory on Pi
 
-Ensure the `h:/Repos/NotebookLM Librarian` directory is synced to the Pi via Syncthing.
-Destination path on Pi: `~/librarian`
+```text
+/home/joelycannoli/dugout/
+├── docker-compose.sharks.yml   ← source of truth for container config
+├── .env                        ← secrets (never committed)
+├── data/                       ← mounted into sharks_api + sharks_sync
+│   └── sharks/                 ← team.json, swot_analysis.json, lineups.json, etc.
+├── logs/                       ← mounted into sharks_api + sharks_sync
+│   └── sync_daemon.log
+└── Scorebooks/                 ← PDF scorebooks (read-only mount)
+```
 
-### 2. Environment Configuration
+## Automated Deploy Flow (GitHub Actions → Pi)
 
-Create/Update `~/librarian/.env` on the Pi:
+1. **Push to `main`** → `build-deploy.yml` runs
+2. **Builds** `sharks-dashboard` (React + nginx) and `sharks-api` (Python + Playwright) for `linux/arm64,linux/amd64`
+3. **Pushes** both images to `ghcr.io/anchorgroupops/`
+4. **Fires webhook**: `POST https://dugout.joelycannoli.com/api/deploy` with `DEPLOY_WEBHOOK_TOKEN`
+5. **`sharks_api`** handles the webhook → runs `scripts/deploy.sh` on Pi:
+   - `git pull origin main` (syncs compose + config)
+   - `docker compose pull sharks_dashboard sharks_api`
+   - `docker compose up -d`
+6. **`verify-deploy` job** polls `/api/health` for up to 3 minutes to confirm the Pi came up
+
+**Watchtower** (every 5 min) acts as a fallback if the webhook is temporarily unreachable.
+
+## Manual Deploy (Pi)
 
 ```bash
-LIBRARIAN_API_KEY=your_secure_key
-LIBRARIAN_MCP_EXE=notebooklm-mcp  # Use the PATH version on Linux
-YOUTUBE_API_KEY=your_google_key
-MAX_SOURCES_PER_RUN=200
+cd /home/joelycannoli/dugout
+git pull origin main
+docker compose -f docker-compose.sharks.yml pull
+docker compose -f docker-compose.sharks.yml up -d
 ```
 
-### 3. Install Dependencies
+## Cloudflare Tunnel Config
+
+File: `/home/joelycannoli/repos/Training/cloudflared/config.yml`
+
+```yaml
+ingress:
+  - hostname: dugout.joelycannoli.com
+    service: http://sharks_dashboard:8080
+  - hostname: training.joelycannoli.com
+    service: http://training-app:3000
+  - service: http_status:404
+```
+
+After editing, restart the tunnel:
 
 ```bash
-cd ~/librarian
-pip install -r requirements.txt
-playwright install chromium
+docker restart cloudflared-tunnel
 ```
 
-### 4. Systemd Service (Process Management)
+**Note:** Traefik is NOT used for Dugout. SSL is terminated by Cloudflare at the edge.
+The `cloudflared-tunnel` container must be on `sharks_net` to reach `sharks_dashboard` by name.
 
-Create `/etc/systemd/system/librarian.service`:
+## Secrets (.env)
 
-```ini
-[Unit]
-Description=The Librarian API Gateway
-After=network.target
+Copy `.env.example` to `.env` and fill in:
 
-[Service]
-User=pi
-WorkingDirectory=/home/pi/librarian
-ExecStart=/usr/bin/python3 api.py
-Restart=always
-Environment=PYTHONUNBUFFERED=1
+- `GC_EMAIL`, `GC_TEAM_ID`, `GC_SEASON_SLUG`, `GC_ORG_IDS` — GameChanger credentials
+- `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID` — voice synthesis
+- `DEPLOY_WEBHOOK_TOKEN` — must match the GitHub Actions secret of the same name
+- `CLOUDFLARE_EMAIL` — used by Traefik ACME (n8n/librarian, not Dugout directly)
 
-[Install]
-WantedBy=multi-user.target
-```
-
-### 5. Start and Enable
+## Verification
 
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable librarian
-sudo systemctl start librarian
+# All containers healthy
+docker ps --filter 'name=sharks' --format 'table {{.Names}}\t{{.Status}}'
+
+# API health check
+curl https://dugout.joelycannoli.com/api/health
+
+# Logs
+docker logs sharks_api --tail 50
+docker logs sharks_dashboard --tail 20
 ```
 
-## 🔍 Verification
+## Troubleshooting
 
-1. Access the API health check: `http://librarian.joelycannoli.com/health`
-2. Trigger a dry-run sync:
-
-   ```bash
-   curl -X POST http://librarian.joelycannoli.com/run -H "Authorization: Bearer key" -d '{"dry_run": true}'
-   ```
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| `sharks_api` crash loop: `PermissionError: logs/sync_daemon.log` | Log file owned by host uid 1000, container user blocked | `chmod 666 /home/joelycannoli/dugout/logs/sync_daemon.log` then `docker restart sharks_api` |
+| `dugout.joelycannoli.com` returns 502/connection refused | cloudflared ingress pointing to wrong port | Edit `cloudflared/config.yml` → ensure `sharks_dashboard:8080`, `docker restart cloudflared-tunnel` |
+| Dashboard loads but `/api/*` returns 502 | `sharks_api` not healthy | `docker logs sharks_api --tail 50` to diagnose |
+| Watchtower not updating | GHCR credentials missing | Ensure `~/.docker/config.json` has GHCR token on Pi |
