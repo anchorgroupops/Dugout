@@ -1,42 +1,30 @@
 #!/bin/bash
-# Deployment script for Sharks Dashboard
-# Can be triggered by GitHub Actions webhook or run manually on the Pi.
-# Prefers GHCR pull (fast, matches CI-built images); falls back to local build.
-
+# Container-side deploy wrapper.
+# Runs inside the sharks_api Docker container; SSHes to the Pi host to execute
+# the native pi-deploy.sh (which has access to docker compose and the project dir).
+#
+# Requires:
+#   DEPLOY_SSH_KEY_B64  — base64-encoded Pi SSH private key (set in .env + docker-compose)
+#   pi-host             — resolves via extra_hosts:host-gateway in docker-compose
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_DIR="${SCRIPT_DIR}/.."
-
-# If running on the Pi in the expected location, use that path
-if [ -d "/home/joelycannoli/dugout" ]; then
-  PROJECT_DIR="/home/joelycannoli/dugout"
-elif [ -d "/home/joelycannoli/sharks" ]; then
-  PROJECT_DIR="/home/joelycannoli/sharks"
-fi
-
-echo "Starting deployment in ${PROJECT_DIR}..."
-cd "$PROJECT_DIR" || exit 1
-
-# Pull the latest code (config/compose changes)
-echo "Pulling latest code..."
-git pull origin main
-
-if ! command -v docker &> /dev/null; then
-  echo "Docker not found — cannot deploy."
+if [ -z "${DEPLOY_SSH_KEY_B64}" ]; then
+  echo "ERROR: DEPLOY_SSH_KEY_B64 is not set — cannot deploy via SSH" >&2
   exit 1
 fi
 
-# Pull pre-built images from GHCR; fall back to local build only if pull fails
-echo "Pulling images from GHCR..."
-if docker compose -f docker-compose.sharks.yml pull sharks_dashboard sharks_api 2>/dev/null; then
-  echo "GHCR images pulled successfully."
-else
-  echo "GHCR pull failed — building locally as fallback..."
-  docker compose -f docker-compose.sharks.yml build
-fi
+# Write the SSH key to a temp file with strict permissions
+KEY_FILE=$(mktemp)
+printf '%s' "${DEPLOY_SSH_KEY_B64}" | base64 -d > "${KEY_FILE}"
+chmod 600 "${KEY_FILE}"
 
-echo "Restarting containers..."
-docker compose -f docker-compose.sharks.yml up -d
+cleanup() { rm -f "${KEY_FILE}"; }
+trap cleanup EXIT
 
-echo "Deployment complete."
+echo "SSHing to pi-host to run pi-deploy.sh..."
+ssh -i "${KEY_FILE}" \
+    -o StrictHostKeyChecking=no \
+    -o ConnectTimeout=15 \
+    -o BatchMode=yes \
+    joelycannoli@pi-host \
+    "bash /home/joelycannoli/dugout/scripts/pi-deploy.sh"

@@ -23,6 +23,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy only the tools needed at runtime (not data/logs/docs/secrets)
 COPY tools/ ./tools/
 COPY config/ ./config/
+COPY scripts/ ./scripts/
 
 # Create runtime directories (populated by mounted volumes)
 RUN mkdir -p /app/data /app/logs

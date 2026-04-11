@@ -161,6 +161,9 @@ services:
       - ANNOUNCER_VOICE_REF_URL=${ANNOUNCER_VOICE_REF_URL}
       - ANNOUNCER_VOICE_REF_TEXT=${ANNOUNCER_VOICE_REF_TEXT}
       - DEPLOY_WEBHOOK_TOKEN=${DEPLOY_WEBHOOK_TOKEN}
+      - DEPLOY_SSH_KEY_B64=${DEPLOY_SSH_KEY_B64}   # Base64-encoded Pi deploy key for webhook SSH
+    extra_hosts:
+      - "pi-host:host-gateway"   # Resolve Pi host from inside container (for deploy SSH)
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
@@ -215,11 +218,7 @@ services:
     pids_limit: 128
     init: true
     healthcheck:
-      test: ["CMD", "sh", "-c", "test -f /proc/1/status"]
-      interval: 60s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
+      test: ["NONE"]   # watchtower image has no shell; disable to prevent autoheal restart loop
     logging:
       driver: json-file
       options:
