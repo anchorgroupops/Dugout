@@ -9,8 +9,9 @@ gunicorn>=22.0,<26
 # HTTP client (security-sensitive: CVEs in <2.31)
 requests>=2.32,<3
 
-# PDF parsing
+# PDF parsing + image handling for scorebook OCR
 pdfplumber>=0.11,<1
+Pillow>=10.0,<12
 
 # AI / vector APIs
 google-generativeai>=0.8,<1

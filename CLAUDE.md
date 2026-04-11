@@ -1,7 +1,7 @@
 # CLAUDE.md - Softball Project (The Sharks)
 
 ## Project Goal
-Deterministic softball analyzer and training aid for **The Sharks** (PCLL). Maximize win probability through GameChanger data scraping, SWOT analysis, and lineup optimization.
+Deterministic softball analyzer and training aid for **The Sharks** (PCLL). Maximize win probability through GameChanger CSV ingestion, SWOT analysis, and lineup optimization.
 
 ## Architecture: A.N.T. (Architecture, Navigation, Tools)
 - **Architecture**: Logic governed by `gemini.md`.
@@ -11,7 +11,8 @@ Deterministic softball analyzer and training aid for **The Sharks** (PCLL). Maxi
 ## Core Commands
 - **Install Dependencies**: `pip install -r requirements.txt`
 - **Run Opcheck**: `python tools/opcheck.py`
-- **Run Scraper**: `python tools/gc_scraper.py`
+- **Ingest CSV**: `python tools/gc_ingest_pipeline.py --csv <path/to/export.csv>`
+- **Ingest CSV + Scorebook**: `python tools/gc_ingest_pipeline.py --csv <path> --scorebook <path>`
 - **Optimize Lineup**: `python tools/lineup_optimizer.py`
 - **Generate Practice**: `python tools/practice_gen.py`
 - **NotebookLM Sync**: `python tools/notebooklm_sync.py`
@@ -22,6 +23,7 @@ Deterministic softball analyzer and training aid for **The Sharks** (PCLL). Maxi
 - **Secondary**: `CLAUDE.md` (Operational context).
 
 ## Development Patterns
-- **Read-Only GC**: Follow Playwright patterns for `web.gc.com` access.
+- **CSV-First**: GameChanger CSV export is the primary data source. No browser automation or API scraping.
+- **Scorebook Optional**: Scorebook image/PDF parsing is a low-priority supplement via `tools/scorebook_ocr.py`.
 - **Deterministic**: All SWOT and lineup outcomes must be formula-driven.
 - **Mobile-First**: Frontend components must be responsive for dugout use.
