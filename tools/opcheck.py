@@ -264,14 +264,118 @@ def run_opcheck(base_url: str, include_burst: bool = True) -> dict:
     }
 
 
+def check_local_pipeline_artifacts(root_dir: Path = None) -> dict:
+    """
+    Check local pipeline artifact health (offline, no HTTP calls).
+    Verifies that the CSV-based ingest pipeline has produced expected outputs.
+
+    Run with: python tools/opcheck.py --local
+    """
+    if root_dir is None:
+        root_dir = Path(__file__).resolve().parent.parent
+    sharks_dir = root_dir / "data" / "sharks"
+
+    checks = []
+
+    def add(name: str, ok: bool, detail: str):
+        checks.append({"name": name, "ok": bool(ok), "detail": detail})
+
+    # 1. Pipeline scripts exist
+    tools_dir = root_dir / "tools"
+    add(
+        "gc_ingest_pipeline_exists",
+        (tools_dir / "gc_ingest_pipeline.py").exists(),
+        f"path={tools_dir / 'gc_ingest_pipeline.py'}",
+    )
+    add(
+        "scorebook_ocr_exists",
+        (tools_dir / "scorebook_ocr.py").exists(),
+        f"path={tools_dir / 'scorebook_ocr.py'}",
+    )
+
+    # 2. CSV source ingested (season_stats.csv = copy of the source export)
+    season_csv = sharks_dir / "season_stats.csv"
+    add("csv_source_ingested", season_csv.exists(), f"path={season_csv} exists={season_csv.exists()}")
+
+    # 3. team.json exists and has a non-empty roster
+    team_file = sharks_dir / "team.json"
+    roster_count = 0
+    if team_file.exists():
+        try:
+            with open(team_file) as f:
+                team = json.load(f)
+            roster_count = len(team.get("roster", []))
+        except Exception:
+            pass
+    add("team_json_has_roster", roster_count > 0, f"path={team_file} roster_size={roster_count}")
+
+    # 4. swot_analysis.json exists and has player analyses
+    swot_file = sharks_dir / "swot_analysis.json"
+    swot_count = 0
+    if swot_file.exists():
+        try:
+            with open(swot_file) as f:
+                swot = json.load(f)
+            swot_count = len(swot.get("player_analyses", []))
+        except Exception:
+            pass
+    add("swot_analysis_populated", swot_count > 0, f"path={swot_file} player_analyses={swot_count}")
+
+    # 5. lineups.json exists and has a balanced lineup
+    lineups_file = sharks_dir / "lineups.json"
+    lineup_len = 0
+    if lineups_file.exists():
+        try:
+            with open(lineups_file) as f:
+                lineups = json.load(f)
+            lineup_len = len((lineups.get("balanced") or {}).get("lineup", []))
+        except Exception:
+            pass
+    add("lineups_json_populated", lineup_len > 0, f"path={lineups_file} balanced_lineup={lineup_len}")
+
+    # 6. next_practice.txt exists and is non-empty
+    practice_file = sharks_dir / "next_practice.txt"
+    practice_size = practice_file.stat().st_size if practice_file.exists() else 0
+    add("practice_plan_generated", practice_size > 0, f"path={practice_file} size={practice_size}")
+
+    # 7. gc_report.json exists (pipeline ran to completion)
+    report_file = sharks_dir / "gc_report.json"
+    add("gc_report_exists", report_file.exists(), f"path={report_file} exists={report_file.exists()}")
+
+    # 8. stats_history.db exists (SQLite snapshot recorded)
+    db_file = sharks_dir / "stats_history.db"
+    add("sqlite_db_exists", db_file.exists(), f"path={db_file} exists={db_file.exists()}")
+
+    passed = sum(1 for c in checks if c["ok"])
+    return {
+        "generated_at": datetime.now(ET).isoformat(),
+        "type": "local_pipeline_artifacts",
+        "summary": {
+            "total": len(checks),
+            "passed": passed,
+            "failed": len(checks) - passed,
+        },
+        "checks": checks,
+    }
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", default=DEFAULT_BASE)
     parser.add_argument("--no-burst", action="store_true", help="Skip burst/rate-limit checks.")
     parser.add_argument("--out", default="", help="Optional output file for JSON report.")
+    parser.add_argument(
+        "--local",
+        action="store_true",
+        help="Run local artifact checks only (no HTTP calls). Use after running gc_ingest_pipeline.py.",
+    )
     args = parser.parse_args()
 
-    report = run_opcheck(args.base_url, include_burst=not args.no_burst)
+    if args.local:
+        report = check_local_pipeline_artifacts()
+    else:
+        report = run_opcheck(args.base_url, include_burst=not args.no_burst)
+
     text = json.dumps(report, indent=2)
     print(text)
 

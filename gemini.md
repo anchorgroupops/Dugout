@@ -7,7 +7,7 @@ Use GameChanger statistics to build a comprehensive softball analyzer and traini
 ## B.L.A.S.T. Strategy (Blueprint, Link, Architect, Stylize, Trigger)
 
 1. **Blueprint**: This `gemini.md` file defines the North Star, schemas, and guardrails.
-2. **Link**: Data pipelines connect GameChanger (Playwright) to NotebookLM and Pinecone.
+2. **Link**: Data pipelines connect GameChanger CSV exports to NotebookLM and Pinecone.
 3. **Architect**: A.N.T. structure (Architecture/Navigation/Tools).
 4. **Stylize**: UI adheres to Anchor Team brand guidelines (Clear Water, Sandy Shore, Pearl Aqua).
 5. **Trigger**: Workflows are triggered by Modal schedules or user requests.
@@ -89,9 +89,9 @@ Use GameChanger statistics to build a comprehensive softball analyzer and traini
 
 ## Integrations
 
-1. **GameChanger (gc.com)**: Primary data source. Browser automation via Playwright to scrape stats from `web.gc.com`.
+1. **GameChanger (gc.com)**: Primary data source. CSV exports downloaded manually from the gc.com stats page. No browser automation or API scraping.
 2. **Google Docs**: Practice plans are maintained in a shared Google Doc. New practices should be appended.
-3. **NotebookLM**: All scraped GC data pushed here, categorized by team (Sharks vs opponents).
+3. **NotebookLM**: All ingested GC data pushed here, categorized by team (Sharks vs opponents).
 4. **Web App**: Simple frontend for viewing SWOT analysis, lineup recommendations, and training plans.
 
 ## Behavioral Rules
@@ -99,7 +99,7 @@ Use GameChanger statistics to build a comprehensive softball analyzer and traini
 1. **🚨 READ-ONLY on gc.com**: NEVER modify, delete, or write any data on GameChanger. All access is strictly read-only (scraping/exporting). Any write action requires EXPLICIT Q&A approval from the user — a button click is NOT sufficient.
 2. **PCLL Compliance**: Must respect Palm Coast Little League rules (mandatory play, pitching, batting order).
 3. **Data Separation**: Sharks data and opponent data must NEVER be mixed in storage or NotebookLM.
-4. **Regular Updates**: System should check GC for new game data on a schedule (post-game).
+4. **Regular Updates**: Export a fresh CSV from gc.com after each game and run the ingestion pipeline. No automated scraping.
 5. **Real-Time During Games**: Compile and analyze data during and immediately after games.
 6. **Deterministic Analysis**: SWOT analysis and lineup recommendations must be formula-driven, not guessed.
 7. **Training Alignment**: Recommended training areas must directly map to identified weaknesses.
@@ -117,11 +117,13 @@ h:/Repos/Personal/Softball/
 ├── gemini.md              # This file (Constitution)
 ├── .env                   # GC credentials, API keys
 ├── architecture/          # SOPs and strategy docs
-├── tools/                 # Python scripts (scrapers, analyzers)
-│   ├── gc_scraper.py      # GameChanger browser automation
-│   ├── swot_analyzer.py   # SWOT analysis engine
-│   ├── lineup_optimizer.py # Batting order generator
-│   └── practice_gen.py    # Training plan generator
+├── tools/                 # Python scripts (analyzers, optimizers)
+│   ├── gc_ingest_pipeline.py  # CSV ingestion pipeline orchestrator
+│   ├── gc_csv_ingest.py       # GC CSV → team.json parser
+│   ├── scorebook_ocr.py       # Scorebook PDF/image parser (optional)
+│   ├── swot_analyzer.py       # SWOT analysis engine
+│   ├── lineup_optimizer.py    # Batting order generator
+│   └── practice_gen.py        # Training plan generator
 ├── client/                # Web app (Vite)
 ├── data/                  # Exported/scraped data (JSON/CSV)
 │   ├── sharks/            # Our team data
