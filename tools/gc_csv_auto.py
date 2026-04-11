@@ -1,11 +1,26 @@
 """
 gc_csv_auto.py — Automated CSV export downloader for GameChanger stats.
 
-Logs into GC, navigates to the stats page, clicks the CSV export button,
-waits for the download, saves it, and then automatically runs gc_csv_ingest.py.
+Loads the saved session from data/auth.json, navigates to the stats page,
+clicks the CSV export button, waits for the download, saves it, and then
+automatically runs gc_csv_ingest.py.
+
+Auth model:
+  - Default path is STATELESS and never triggers a GC 2FA email. It only
+    reuses the storage state produced by `python tools/save_session.py`.
+  - If the stored session is missing or stale the run aborts fast with a
+    clear error — the daemon's cooldown handles the rest.
+  - Pass --allow-interactive-login (or allow_interactive_login=True) to fall
+    back to GCFullScraper.login(), which can prompt for a 2FA code via the
+    GC_2FA_CODE env var. Use this for manual bootstrap runs only.
+
+One-time setup:
+    python tools/save_session.py   # headed; complete login + 2FA once
+    python tools/gc_csv_auto.py    # headless; reuses data/auth.json
 
 REQUIRES: pip install playwright && playwright install chromium
-REQUIRES: GC_EMAIL, GC_PASSWORD, GC_TEAM_ID, GC_SEASON_SLUG in .env
+REQUIRES: GC_TEAM_ID, GC_SEASON_SLUG in .env (GC_EMAIL/GC_PASSWORD only
+          needed for save_session.py and the interactive fallback)
 """
 
 from __future__ import annotations
@@ -36,10 +51,17 @@ load_dotenv(ROOT_DIR / ".env")
 DATA_DIR = ROOT_DIR / "data"
 SHARKS_DIR = DATA_DIR / "sharks"
 LOG_DIR = ROOT_DIR / "logs"
+AUTH_FILE = DATA_DIR / "auth.json"
 
 GC_BASE = "https://web.gc.com"
 GC_TEAM_ID = os.getenv("GC_TEAM_ID", "NuGgx6WvP7TO")
 GC_SEASON_SLUG = os.getenv("GC_SEASON_SLUG", "2026-spring-sharks")
+
+USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
+VIEWPORT = {"width": 1440, "height": 900}
 
 
 def _log(msg: str) -> None:
@@ -171,13 +193,79 @@ def run_csv_ingest(csv_path: Path) -> bool:
         return False
 
 
+def _open_stats_page_with_stored_auth(pw: Any, headless: bool) -> tuple[Any, Any, Any] | None:
+    """
+    Launch a browser, load the saved storage state, and verify the session
+    still works by navigating to the stats URL. Fails fast (returns None)
+    if auth.json is missing or if GC redirects to /login — never triggers
+    a new 2FA code.
+
+    Returns (browser, context, page) on success, or None on failure.
+    """
+    if not AUTH_FILE.exists():
+        _log(
+            f"[ERROR] No saved session at {AUTH_FILE}. "
+            "Run `python tools/save_session.py` once (headed) to create it."
+        )
+        return None
+
+    browser = pw.chromium.launch(
+        headless=headless,
+        args=["--no-sandbox", "--disable-dev-shm-usage"],
+    )
+    context = browser.new_context(
+        storage_state=str(AUTH_FILE),
+        user_agent=USER_AGENT,
+        viewport=VIEWPORT,
+    )
+    page = context.new_page()
+
+    stats_url = f"{GC_BASE}/teams/{GC_TEAM_ID}/{GC_SEASON_SLUG}/stats"
+    _log(f"Verifying stored session against: {stats_url}")
+    try:
+        page.goto(stats_url, wait_until="domcontentloaded", timeout=60000)
+    except Exception as e:
+        _log(f"[ERROR] Stats page navigation failed: {e}")
+        browser.close()
+        return None
+
+    # Fail fast: if GC punted us to /login or a login form is showing,
+    # the stored session is stale. Do NOT fall through to the 2FA flow.
+    landed = page.url.lower()
+    has_email_field = False
+    try:
+        has_email_field = page.locator('input[type="email"]').count() > 0
+    except Exception:
+        pass
+
+    if "login" in landed or "signin" in landed or has_email_field:
+        _log(
+            f"[ERROR] Stored session is stale (landed on {page.url}). "
+            "Re-run `python tools/save_session.py` to refresh auth.json."
+        )
+        browser.close()
+        return None
+
+    return browser, context, page
+
+
 def run_auto_csv(
     headless: bool = True,
     skip_ingest: bool = False,
     output_dir: Path | None = None,
+    allow_interactive_login: bool = False,
 ) -> dict:
     """
-    Full automated CSV download and ingest flow.
+    Automated CSV download and ingest flow.
+
+    By default this ONLY uses the stored session at data/auth.json and never
+    triggers a GC 2FA email. If the stored session is missing or stale the
+    run aborts with a clear error pointing at save_session.py.
+
+    Set allow_interactive_login=True to fall back to GCFullScraper.login()
+    which can prompt for a 2FA code via GC_2FA_CODE env var. This path is
+    intended for manual bootstrap runs, not the daemon.
+
     Returns a summary dict.
     """
     if sync_playwright is None:
@@ -188,6 +276,7 @@ def run_auto_csv(
 
     summary: dict = {
         "started_at": datetime.now(ET).isoformat(),
+        "auth_mode": "stored_state",
         "csv_downloaded": False,
         "csv_path": None,
         "ingest_run": False,
@@ -197,33 +286,58 @@ def run_auto_csv(
     }
 
     with sync_playwright() as pw:
-        # Use GCFullScraper's login helper
-        from gc_full_scraper import GCFullScraper
-        helper = GCFullScraper(headless=headless)
-        try:
-            page = helper.login(pw)
-        except Exception as e:
-            summary["errors"].append(f"Login failed: {e}")
-            _log(f"[ERROR] Login failed: {e}")
+        browser = None
+        context = None
+        page = None
+        helper = None
+
+        opened = _open_stats_page_with_stored_auth(pw, headless=headless)
+        if opened is not None:
+            browser, context, page = opened
+        elif allow_interactive_login:
+            # Explicit opt-in: use the full login helper (may require 2FA).
+            summary["auth_mode"] = "interactive"
+            _log("Falling back to GCFullScraper.login() (interactive 2FA path).")
+            try:
+                from gc_full_scraper import GCFullScraper
+                helper = GCFullScraper(headless=headless)
+                page = helper.login(pw)
+            except Exception as e:
+                summary["errors"].append(f"Interactive login failed: {e}")
+                _log(f"[ERROR] Interactive login failed: {e}")
+                summary["completed_at"] = datetime.now(ET).isoformat()
+                return summary
+        else:
+            summary["errors"].append(
+                "Stored session unavailable or stale; run save_session.py."
+            )
+            summary["completed_at"] = datetime.now(ET).isoformat()
             return summary
 
-        csv_path = download_season_csv(page, out_dir)
+        try:
+            csv_path = download_season_csv(page, out_dir)
 
-        if csv_path and csv_path.exists():
-            summary["csv_downloaded"] = True
-            summary["csv_path"] = str(csv_path)
-            _log(f"CSV saved: {csv_path}")
+            if csv_path and csv_path.exists():
+                summary["csv_downloaded"] = True
+                summary["csv_path"] = str(csv_path)
+                _log(f"CSV saved: {csv_path}")
 
-            if not skip_ingest:
-                ok = run_csv_ingest(csv_path)
-                summary["ingest_run"] = True
-                summary["ingest_success"] = ok
-            summary["success"] = True
-        else:
-            summary["errors"].append("CSV download returned no file")
-            _log("[ERROR] CSV download failed")
-
-        helper.close()
+                if not skip_ingest:
+                    ok = run_csv_ingest(csv_path)
+                    summary["ingest_run"] = True
+                    summary["ingest_success"] = ok
+                summary["success"] = True
+            else:
+                summary["errors"].append("CSV download returned no file")
+                _log("[ERROR] CSV download failed")
+        finally:
+            if helper is not None:
+                helper.close()
+            elif browser is not None:
+                try:
+                    browser.close()
+                except Exception:
+                    pass
 
     summary["completed_at"] = datetime.now(ET).isoformat()
     return summary
@@ -237,6 +351,12 @@ def main() -> None:
     parser.add_argument("--headed", action="store_true", help="Run with visible browser")
     parser.add_argument("--skip-ingest", action="store_true", help="Download CSV but don't run ingest")
     parser.add_argument("--output-dir", help="Directory to save the CSV (default: data/sharks/)")
+    parser.add_argument(
+        "--allow-interactive-login",
+        action="store_true",
+        help="Fall back to GCFullScraper.login() if the stored session is stale. "
+             "May trigger a GC 2FA email (requires GC_2FA_CODE env var in non-TTY mode).",
+    )
     args = parser.parse_args()
 
     if sync_playwright is None:
@@ -248,6 +368,7 @@ def main() -> None:
         headless=not args.headed,
         skip_ingest=args.skip_ingest,
         output_dir=output_dir,
+        allow_interactive_login=args.allow_interactive_login,
     )
     print(json.dumps(result, indent=2))
     sys.exit(0 if result.get("success") else 1)
