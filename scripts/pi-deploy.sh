@@ -36,6 +36,18 @@ else
   docker compose -f docker-compose.sharks.yml build
 fi
 
+echo "Removing any watchtower-orphaned containers (missing compose project label)..."
+for svc in sharks_dashboard sharks_api sharks_sync; do
+  if docker inspect "$svc" >/dev/null 2>&1; then
+    PROJ=$(docker inspect "$svc" --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null)
+    if [ "$PROJ" != "dugout" ]; then
+      echo "  Removing unmanaged container $svc (project label: '${PROJ}')..."
+      docker stop "$svc" 2>/dev/null || true
+      docker rm "$svc" 2>/dev/null || true
+    fi
+  fi
+done
+
 echo "Restarting containers..."
 docker compose -f docker-compose.sharks.yml up -d
 
