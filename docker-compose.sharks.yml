@@ -29,7 +29,7 @@ services:
     security_opt:
       - no-new-privileges:true
     cap_add:
-      - NET_BIND_SERVICE   # Allows nginx (non-root uid 101) to bind port 80 for Cloudflare tunnel
+      - NET_BIND_SERVICE
     pids_limit: 256
     mem_limit: 256m
     memswap_limit: 256m
@@ -63,9 +63,9 @@ services:
       - PYTHONHASHSEED=random
       - RUN_API_SERVER=0
       - GC_PLAYWRIGHT_CONTEXT_DIR=/app/data/.playwright_context
-      - CORS_ORIGINS=https://dugout.joelycannoli.com,http://localhost:3000,http://localhost:5173
-      - WRITE_ORIGINS=https://dugout.joelycannoli.com,http://localhost:3000,http://localhost:5173
-      - ALLOWED_HOSTS=dugout.joelycannoli.com,localhost,127.0.0.1,sharks_api,sharks_dashboard
+      - CORS_ORIGINS=https://sharks.joelycannoli.com,https://dugout.joelycannoli.com,http://localhost:3000,http://localhost:5173
+      - WRITE_ORIGINS=https://sharks.joelycannoli.com,https://dugout.joelycannoli.com,http://localhost:3000,http://localhost:5173
+      - ALLOWED_HOSTS=sharks.joelycannoli.com,dugout.joelycannoli.com,localhost,127.0.0.1,sharks_api,sharks_dashboard
       - MAX_JSON_BODY_BYTES=131072
       - MUTATE_RATE_WINDOW_SEC=60
       - MUTATE_RATE_MAX=12
@@ -146,9 +146,9 @@ services:
       - PYTHONDONTWRITEBYTECODE=1
       - PYTHONUNBUFFERED=1
       - PYTHONHASHSEED=random
-      - CORS_ORIGINS=https://dugout.joelycannoli.com,http://localhost:3000,http://localhost:5173
-      - WRITE_ORIGINS=https://dugout.joelycannoli.com,http://localhost:3000,http://localhost:5173
-      - ALLOWED_HOSTS=dugout.joelycannoli.com,localhost,127.0.0.1,sharks_api,sharks_dashboard
+      - CORS_ORIGINS=https://sharks.joelycannoli.com,https://dugout.joelycannoli.com,http://localhost:3000,http://localhost:5173
+      - WRITE_ORIGINS=https://sharks.joelycannoli.com,https://dugout.joelycannoli.com,http://localhost:3000,http://localhost:5173
+      - ALLOWED_HOSTS=sharks.joelycannoli.com,dugout.joelycannoli.com,localhost,127.0.0.1,sharks_api,sharks_dashboard
       - MAX_JSON_BODY_BYTES=131072
       - MUTATE_RATE_WINDOW_SEC=60
       - MUTATE_RATE_MAX=12
@@ -161,9 +161,9 @@ services:
       - ANNOUNCER_VOICE_REF_URL=${ANNOUNCER_VOICE_REF_URL}
       - ANNOUNCER_VOICE_REF_TEXT=${ANNOUNCER_VOICE_REF_TEXT}
       - DEPLOY_WEBHOOK_TOKEN=${DEPLOY_WEBHOOK_TOKEN}
-      - DEPLOY_SSH_KEY_B64=${DEPLOY_SSH_KEY_B64}   # Base64-encoded Pi deploy key for webhook SSH
+      - DEPLOY_SSH_KEY_B64=${DEPLOY_SSH_KEY_B64}
     extra_hosts:
-      - "pi-host:host-gateway"   # Resolve Pi host from inside container (for deploy SSH)
+      - "pi-host:host-gateway"
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
@@ -218,7 +218,7 @@ services:
     pids_limit: 128
     init: true
     healthcheck:
-      test: ["NONE"]   # watchtower image has no shell; disable to prevent autoheal restart loop
+      test: ["NONE"]
     logging:
       driver: json-file
       options:
