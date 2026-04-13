@@ -56,7 +56,9 @@ DATA_DIR = Path(__file__).parent.parent / "data"
 SHARKS_DIR = DATA_DIR / "sharks"
 LOG_DIR = Path(__file__).parent.parent / "logs"
 CONFIG_DIR = Path(__file__).parent.parent / "config"
+SCOREBOOKS_DIR = Path(__file__).parent.parent / "Scorebooks"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
+SHARKS_DIR.mkdir(parents=True, exist_ok=True)
 # Ensure the log file exists and is writable by any container user (e.g. the
 # non-root "sharks" uid which differs from the host owner uid 1000).  We
 # touch-and-chmod here at import time so RotatingFileHandler never races
@@ -1217,8 +1219,12 @@ def run_sync_cycle():
                 )
             except Exception as e:
                 logging.warning(f"[Sync] gc_csv_auto skipped: {e}")
+                # Fallback: ingest from local CSV if available
+                _csv_ingest_from_local()
         else:
             logging.info("[Sync] gc_full_scraper + gc_csv_auto skipped (auth cooldown).")
+            # Fallback: ingest from local CSV when auth is unavailable
+            _csv_ingest_from_local()
 
         _set_sync_stage("finalizing")
 
@@ -4053,6 +4059,86 @@ def _trigger_post_game_analysis():
         send_alert("Post-game analysis encountered errors. Check sync_daemon logs.", level="ERROR")
 
 
+def _csv_ingest_from_local():
+    """Re-ingest team data from the latest local GC CSV export.
+
+    Used as a fallback in the sync cycle when gc_csv_auto (browser-based
+    download) is unavailable due to auth cooldown or missing credentials.
+    """
+    search_dir = SCOREBOOKS_DIR / "Other docs"
+    if not search_dir.exists():
+        return
+
+    candidates = sorted(search_dir.glob("Sharks Spring 2026 Stats*.csv"))
+    if not candidates:
+        return
+
+    csv_path = candidates[-1]
+    try:
+        from gc_csv_ingest import parse_gc_csv, build_team_json, build_app_stats_json
+        import shutil
+
+        roster = parse_gc_csv(csv_path)
+        if not roster:
+            return
+
+        team_json = build_team_json(roster, csv_path)
+        app_stats = build_app_stats_json(roster)
+
+        _write_json_file(SHARKS_DIR / "team.json", team_json)
+        _write_json_file(SHARKS_DIR / "app_stats.json", app_stats)
+        shutil.copy2(csv_path, SHARKS_DIR / "season_stats.csv")
+
+        logging.info("[Sync] CSV local ingest fallback: %d players from %s", len(roster), csv_path.name)
+    except Exception as e:
+        logging.warning("[Sync] CSV local ingest fallback failed: %s", e)
+
+
+def _bootstrap_from_csv():
+    """Auto-generate team.json from the latest GameChanger CSV if no team data exists.
+
+    This is the CSV-first fallback: when the data directory is empty (e.g.
+    fresh deploy, volume wipe), we look for a CSV in Scorebooks/Other docs/
+    and run gc_csv_ingest to seed the pipeline.
+    """
+    team_file = SHARKS_DIR / "team.json"
+    if team_file.exists():
+        return  # Data already present — nothing to do
+
+    search_dir = SCOREBOOKS_DIR / "Other docs"
+    if not search_dir.exists():
+        logging.info("[Bootstrap] No Scorebooks/Other docs/ directory — CSV bootstrap skipped.")
+        return
+
+    candidates = sorted(search_dir.glob("Sharks Spring 2026 Stats*.csv"))
+    if not candidates:
+        logging.info("[Bootstrap] No GC CSV files found in %s — CSV bootstrap skipped.", search_dir)
+        return
+
+    csv_path = candidates[-1]  # Latest export
+    logging.info("[Bootstrap] No team.json found — bootstrapping from CSV: %s", csv_path.name)
+
+    try:
+        from gc_csv_ingest import parse_gc_csv, build_team_json, build_app_stats_json
+        import shutil
+
+        roster = parse_gc_csv(csv_path)
+        if not roster:
+            logging.warning("[Bootstrap] CSV parsed but no players found.")
+            return
+
+        team_json = build_team_json(roster, csv_path)
+        app_stats = build_app_stats_json(roster)
+
+        _write_json_file(team_file, team_json)
+        _write_json_file(SHARKS_DIR / "app_stats.json", app_stats)
+        shutil.copy2(csv_path, SHARKS_DIR / "season_stats.csv")
+
+        logging.info("[Bootstrap] CSV bootstrap complete — %d players ingested from %s", len(roster), csv_path.name)
+    except Exception as e:
+        logging.warning("[Bootstrap] CSV bootstrap failed: %s", e)
+
+
 def run_api():
     port = int(os.environ.get("PORT", 5000))
     logging.info(f"Starting API server on port {port}...")
@@ -4082,6 +4168,9 @@ def main():
         auto_deactivate_subs()
     except Exception as e:
         logging.warning(f"Sub auto-deactivation skipped: {e}")
+
+    # CSV-first bootstrap: generate team.json from local CSV if data dir is empty
+    _bootstrap_from_csv()
 
     run_api_server = os.getenv("RUN_API_SERVER", "1").lower() in ("1", "true", "yes")
     if run_api_server:
@@ -4173,6 +4262,10 @@ def main():
         except Exception as e:
             logging.critical(f"UNHANDLED EXCEPTION IN DAEMON LOOP: {e}")
             time.sleep(300) # Failsafe sleep before retry
+
+# Bootstrap from CSV on module import (covers Gunicorn-served API process
+# which never calls main()).  This is a no-op if team.json already exists.
+_bootstrap_from_csv()
 
 if __name__ == "__main__":
     main()
