@@ -32,6 +32,14 @@
       "score": "16-7",
       "home_away": "away",
       "verified": true
+    },
+    {
+      "date": "2026-04-01",
+      "opponent": "Riptide Rebels",
+      "result": "L",
+      "score": "13-14",
+      "home_away": "away",
+      "verified": true
     }
   ]
 }
