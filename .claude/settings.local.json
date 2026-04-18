@@ -13,7 +13,10 @@
       "Bash(where py:*)",
       "mcp__a7ff7ca0-0f34-4323-a520-f5ae16c67295__get_node_types",
       "mcp__a7ff7ca0-0f34-4323-a520-f5ae16c67295__get_suggested_nodes",
-      "mcp__a7ff7ca0-0f34-4323-a520-f5ae16c67295__validate_workflow"
+      "mcp__a7ff7ca0-0f34-4323-a520-f5ae16c67295__validate_workflow",
+      "mcp__a7ff7ca0-0f34-4323-a520-f5ae16c67295__get_sdk_reference",
+      "mcp__a7ff7ca0-0f34-4323-a520-f5ae16c67295__search_nodes",
+      "mcp__a7ff7ca0-0f34-4323-a520-f5ae16c67295__create_workflow_from_code"
     ]
   }
 }
