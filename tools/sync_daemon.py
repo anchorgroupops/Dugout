@@ -49,7 +49,7 @@ GAME_DURATION_HOURS = 2.5        # Assumed max length of a softball game
 PREGAME_WINDOW_HOURS = 1.0       # Time before game to enter PREGAME state
 POST_GAME_DEDUP_MINUTES = 30     # Idempotency guard for post-game trigger
 
-N8N_WEBHOOK_URL = "https://n8n.joelycannoli.com/webhook/gc-alert"
+N8N_WEBHOOK_URL = os.getenv("N8N_WEBHOOK_URL", "https://n8n.joelycannoli.com/webhook/gc-alert").strip()
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 SHARKS_DIR = DATA_DIR / "sharks"
@@ -227,7 +227,9 @@ logging.basicConfig(
 # DAEMON LOGIC
 # ---------------------------------------------------------
 def send_alert(message: str, level: str = "ERROR"):
-    """Sends an alert to the local n8n instance if the session drops or errors occur."""
+    """Sends an alert to the configured n8n webhook if set."""
+    if not N8N_WEBHOOK_URL:
+        return
     payload = {
         "source": "sync_daemon",
         "level": level,
