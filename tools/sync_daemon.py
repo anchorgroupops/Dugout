@@ -3811,8 +3811,8 @@ def handle_announcer_phonetics(player_id):
     updates = {"phonetic_hint": phonetic, "tts_instruction": instruction, "status": "pending"}
     if walkup_url:
         parsed_url = urlparse(walkup_url)
-        if parsed_url.scheme not in ('http', 'https', ''):
-            return jsonify({"error": "walkup_song_url must be HTTP(S)"}), 400
+        if parsed_url.scheme != 'https' or not parsed_url.netloc:
+            return jsonify({"error": "walkup_song_url must be an absolute https:// URL"}), 400
         updates["walkup_song_url"] = walkup_url
     if intro_ts is not None:
         try:
@@ -3868,12 +3868,13 @@ def handle_announcer_add_sub():
         "rendered_at": "",
         "error_message": "",
     }
-    # Validate walkup URL scheme
+    # Validate walkup URL: require absolute https URL (matches client pattern)
     raw_walkup = (data.get("walkup_song_url") or "").strip()[:500]
     if raw_walkup:
         parsed_wu = urlparse(raw_walkup)
-        if parsed_wu.scheme in ('http', 'https', ''):
-            entry["walkup_song_url"] = raw_walkup
+        if parsed_wu.scheme != 'https' or not parsed_wu.netloc:
+            return jsonify({"error": "walkup_song_url must be an absolute https:// URL"}), 400
+        entry["walkup_song_url"] = raw_walkup
 
     roster.append(entry)
     save_announcer_roster(roster)
