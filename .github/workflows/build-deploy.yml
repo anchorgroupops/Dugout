@@ -75,27 +75,29 @@ jobs:
     needs: [build-dashboard, build-api]
     if: success()
     steps:
-      - name: Trigger deploy webhook
+      - name: Trigger deploy webhook (best-effort)
+        continue-on-error: true
         run: |
           curl -sf -X POST \
             -H "Authorization: Bearer ${{ secrets.DEPLOY_WEBHOOK_TOKEN }}" \
             -H "Content-Type: application/json" \
             https://dugout.joelycannoli.com/api/deploy \
             --max-time 15
-        # If the webhook fails the deploy job fails — makes broken deploys visible in CI
-        # Watchtower (5-min poll) serves as the fallback if the Pi is temporarily unreachable
+        # Best-effort because Cloudflare bot-fight rejects the GH Actions curl before
+        # it reaches the Pi. Watchtower (WATCHTOWER_POLL_INTERVAL=300) picks up the
+        # new image within 5 min regardless, and verify-deploy below is the real gate.
 
   verify-deploy:
     runs-on: ubuntu-latest
     needs: [notify-deploy]
     if: success()
     steps:
-      - name: Wait for Pi to pull and restart containers
-        run: sleep 60
-
       - name: Health check dugout.joelycannoli.com
+        # Budget must cover Watchtower's 5-min poll interval plus container restart.
+        # 30s initial + 12 * 30s = 6.5 min max wait.
         run: |
-          for i in 1 2 3 4 5; do
+          sleep 30
+          for i in $(seq 1 12); do
             STATUS=$(curl -sf -o /dev/null -w "%{http_code}" \
               https://dugout.joelycannoli.com/api/health --max-time 15 || echo "000")
             echo "Attempt $i: HTTP $STATUS"
@@ -105,5 +107,5 @@ jobs:
             fi
             sleep 30
           done
-          echo "Health check failed after 5 attempts."
+          echo "Health check failed after 12 attempts."
           exit 1
