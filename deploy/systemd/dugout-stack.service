@@ -1,0 +1,18 @@
+[Unit]
+Description=Dugout Sharks Docker Compose stack (boot-time + watchdog)
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=joelycannoli
+WorkingDirectory=/home/joelycannoli/dugout
+EnvironmentFile=/home/joelycannoli/dugout/.env
+ExecStart=/usr/bin/docker compose -f docker-compose.sharks.yml up -d --no-recreate
+ExecStop=/usr/bin/docker compose -f docker-compose.sharks.yml stop
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target
