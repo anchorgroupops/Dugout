@@ -1487,6 +1487,13 @@ def auto_deactivate_subs():
     if not schedule_file.exists() or not availability_file.exists():
         return
 
+    # Without a roster_manifest.json listing core players, _is_core_player()
+    # returns False for everyone — and this function would then deactivate
+    # every player, leaving an empty active roster.  Skip when we can't
+    # distinguish subs from starters.
+    if not _load_roster_manifest():
+        return
+
     with open(schedule_file) as f:
         sched = json.load(f)
     with open(availability_file) as f:
@@ -1942,6 +1949,40 @@ def handle_game_detail(game_id):
     return jsonify(data)
 
 
+def _pick_scoreboard_target(games: list, now: "datetime", today_str: str):
+    """Pick the game to show on the scoreboard.
+
+    Prefer a current in-progress game, then today's game.  Rejects "live"
+    games whose start_ts is more than GAME_DURATION_HOURS + 1 ago — GC's
+    public API occasionally fails to flip old games from "in_progress" to
+    "completed" (observed 8+ days stuck).
+    """
+    live_game = None
+    today_game = None
+    for g in games:
+        status = str(g.get("game_status", "")).lower()
+        start_ts = str(g.get("start_ts", ""))
+        game_dt = None
+        game_date = ""
+        try:
+            game_dt = datetime.fromisoformat(start_ts.replace("Z", "+00:00")).astimezone(ET)
+            game_date = game_dt.date().isoformat()
+        except Exception:
+            pass
+
+        if status in ("in_progress", "active", "live"):
+            if game_dt is not None:
+                hours_since_start = (now - game_dt).total_seconds() / 3600
+                if hours_since_start > GAME_DURATION_HOURS + 1:
+                    continue  # stale "live" status from GC; keep looking
+            live_game = g
+            break
+        if game_date == today_str and not today_game:
+            today_game = g
+
+    return live_game or today_game
+
+
 @app.route('/api/scoreboard', methods=['GET'])
 def handle_scoreboard():
     """Return live/recent scoreboard data from the GC public API.
@@ -1968,25 +2009,7 @@ def handle_scoreboard():
         logging.warning(f"[Scoreboard] GC API fetch failed: {e}")
 
     # 2. Find in-progress game first, then today's game
-    live_game = None
-    today_game = None
-    for g in games:
-        status = str(g.get("game_status", "")).lower()
-        start_ts = str(g.get("start_ts", ""))
-        game_date = ""
-        try:
-            game_dt = datetime.fromisoformat(start_ts.replace("Z", "+00:00")).astimezone(ET)
-            game_date = game_dt.date().isoformat()
-        except Exception:
-            pass
-
-        if status in ("in_progress", "active", "live"):
-            live_game = g
-            break
-        if game_date == today_str and not today_game:
-            today_game = g
-
-    target_game = live_game or today_game
+    target_game = _pick_scoreboard_target(games, now, today_str)
 
     # 3. Build response
     if not target_game:
