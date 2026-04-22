@@ -210,23 +210,35 @@ def default_runner(*, cfg: config_mod.AutopullConfig,
     final = team_dir / f"season_stats_{datetime.now(ET).strftime('%Y%m%d')}.csv"
     result.downloaded_path.replace(final)
 
-    # Ingest: pass the team slug so gc_csv_ingest writes into data/<slug>/.
+    # Ingest: use gc_ingest_pipeline so team_enriched.json + SWOT + lineups
+    # get regenerated from fresh data. The pipeline gates Sharks-only stages
+    # internally (Phase 1 design).
     import subprocess
+    pipeline = Path(__file__).resolve().parents[1] / "gc_ingest_pipeline.py"
     rc = subprocess.run(
-        [sys.executable,
-         str(Path(__file__).resolve().parents[1] / "gc_csv_ingest.py"),
-         "--team", team.data_slug, str(final)],
-        timeout=180,
+        [sys.executable, str(pipeline),
+         "--team", team.data_slug, "--csv", str(final)],
+        timeout=300,
     ).returncode
     if rc != 0:
-        return {
-            "outcome": "failure",
-            "failure_reason": f"gc_csv_ingest.py exited {rc}",
-            "csv_path": str(final),
-            "llm_fallback_invoked": result.llm_used,
-            "session_refreshed": refreshed,
-            "drift_severity": val.drift_severity,
-        }
+        # Non-fatal stages may have errored; the raw CSV is already in place.
+        # Fall back to a minimal ingest to at least refresh team.json.
+        log.warning("gc_ingest_pipeline exited %d; falling back to raw ingest", rc)
+        rc2 = subprocess.run(
+            [sys.executable,
+             str(Path(__file__).resolve().parents[1] / "gc_csv_ingest.py"),
+             "--team", team.data_slug, str(final)],
+            timeout=180,
+        ).returncode
+        if rc2 != 0:
+            return {
+                "outcome": "failure",
+                "failure_reason": f"ingest failed (pipeline rc={rc}, fallback rc={rc2})",
+                "csv_path": str(final),
+                "llm_fallback_invoked": result.llm_used,
+                "session_refreshed": refreshed,
+                "drift_severity": val.drift_severity,
+            }
 
     return {
         "outcome": "success",

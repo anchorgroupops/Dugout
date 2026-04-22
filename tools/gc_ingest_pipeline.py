@@ -86,6 +86,20 @@ def run_pipeline(csv_path: Path, scorebook_path: Path | None, out_path: Path,
     team_dir.mkdir(parents=True, exist_ok=True)
     roster: list = []
 
+    # Invalidate any stale enriched/merged team files. The API prefers
+    # team_enriched.json > team_merged.json > team.json; if older enriched
+    # files exist from a sync_daemon cycle that hasn't run recently, they
+    # mask the fresh team.json we're about to write. sync_daemon's next
+    # full cycle will regenerate these from the fresh source.
+    for stale in ("team_enriched.json", "team_merged.json"):
+        p = team_dir / stale
+        if p.exists():
+            try:
+                p.unlink()
+                print(f"[PIPELINE] Invalidated stale {p.name}")
+            except OSError as e:
+                print(f"[PIPELINE] Could not remove {p.name}: {e}")
+
     # ── Stage 1: CSV ingest ──────────────────────────────────────────────────
     print(f"[PIPELINE] Stage 1: CSV ingest ({csv_path.name}) -> {team_dir}")
     try:
