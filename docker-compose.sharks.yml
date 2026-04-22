@@ -202,7 +202,9 @@ services:
       - no-new-privileges:true
     environment:
       - WATCHTOWER_CLEANUP=true
-      - WATCHTOWER_POLL_INTERVAL=300
+      # Poll every 60s so new GHCR images are picked up within a minute,
+      # well inside the GHA verify-deploy budget.
+      - WATCHTOWER_POLL_INTERVAL=60
       - WATCHTOWER_LABEL_ENABLE=true
       - WATCHTOWER_INCLUDE_STOPPED=false
       - WATCHTOWER_ROLLING_RESTART=true

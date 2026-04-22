@@ -93,11 +93,13 @@ jobs:
     if: success()
     steps:
       - name: Health check dugout.joelycannoli.com
-        # Budget must cover Watchtower's 5-min poll interval plus container restart.
-        # 30s initial + 12 * 30s = 6.5 min max wait.
+        # Budget covers: GHCR propagation (~seconds), Watchtower poll (60s),
+        # image pull on Pi (~1 min), rolling restart (brief 502 window).
+        # 60s initial + 36 * 30s = 19 min ceiling. Generous buffer avoids
+        # spurious CI failure emails from tight-timing edge cases.
         run: |
-          sleep 30
-          for i in $(seq 1 12); do
+          sleep 60
+          for i in $(seq 1 36); do
             STATUS=$(curl -sf -o /dev/null -w "%{http_code}" \
               https://dugout.joelycannoli.com/api/health --max-time 15 || echo "000")
             echo "Attempt $i: HTTP $STATUS"
@@ -107,5 +109,5 @@ jobs:
             fi
             sleep 30
           done
-          echo "Health check failed after 12 attempts."
+          echo "Health check failed after 36 attempts (~18 min)."
           exit 1
