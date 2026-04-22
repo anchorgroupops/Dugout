@@ -14,7 +14,6 @@ def _cfg(tmp_path: Path) -> AutopullConfig:
         gmail_client_id="", gmail_client_secret="", gmail_refresh_token="",
         gmail_notify_from="", gmail_notify_to="",
         anthropic_api_key="", n8n_status_webhook="", n8n_weekly_webhook="",
-        gc_team_id="T", gc_season_slug="S",
         data_root=tmp_path / "data", log_root=tmp_path / "logs",
     )
 

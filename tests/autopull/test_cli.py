@@ -19,7 +19,7 @@ def _fake_cfg(tmp_path: Path, **over):
         gmail_client_id="x", gmail_client_secret="y", gmail_refresh_token="z",
         gmail_notify_from="a@b.c", gmail_notify_to="a@b.c",
         anthropic_api_key="", n8n_status_webhook="",
-        n8n_weekly_webhook="", gc_team_id="T", gc_season_slug="S",
+        n8n_weekly_webhook="",
         data_root=tmp_path / "data", log_root=tmp_path / "logs",
     )
     base.update(over)

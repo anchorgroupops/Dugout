@@ -58,9 +58,6 @@ class AutopullConfig:
     n8n_status_webhook: str
     n8n_weekly_webhook: str
 
-    gc_team_id: str
-    gc_season_slug: str
-
     data_root: Path
     log_root: Path
 
@@ -81,8 +78,6 @@ def load(require_gmail: bool = False) -> AutopullConfig:
         anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
         n8n_status_webhook=os.getenv("N8N_AUTOPULL_STATUS_WEBHOOK", ""),
         n8n_weekly_webhook=os.getenv("N8N_AUTOPULL_WEEKLY_WEBHOOK", ""),
-        gc_team_id=os.getenv("GC_TEAM_ID", ""),
-        gc_season_slug=os.getenv("GC_SEASON_SLUG", ""),
         data_root=Path(os.getenv("DUGOUT_DATA_ROOT", "data")),
         log_root=Path(os.getenv("DUGOUT_LOG_ROOT", "logs")),
     )
