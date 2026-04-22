@@ -1,0 +1,12 @@
+# Dugout team registry — source of truth for multi-team autopull + ingest.
+# Add a new team by appending a new list entry. Pause a team with active: false.
+# See docs/superpowers/specs/2026-04-22-multi-team-phase1-design.md §4 for schema.
+
+teams:
+  - id: NuGgx6WvP7TO
+    season_slug: 2026-spring-sharks
+    name: The Sharks
+    data_slug: sharks
+    league: PCLL
+    is_own_team: true
+    active: true
