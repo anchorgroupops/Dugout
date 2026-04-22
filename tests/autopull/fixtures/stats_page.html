@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head><title>Sharks Stats</title></head>
+<body>
+  <h1>Season Stats</h1>
+  <button data-testid="export-csv" id="dl">Export CSV</button>
+  <script>
+    document.getElementById('dl').addEventListener('click', function() {
+      const blob = new Blob(
+        ["Player,AB,H,BB,K,HBP,RBI,BA,OBP,SLG\n" +
+         "Alice Smith,20,8,3,4,1,6,0.400,0.500,0.600\n" +
+         "Bob Jones,18,5,2,5,0,3,0.278,0.350,0.389\n"],
+        {type: "text/csv"}
+      );
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = "season_stats.csv";
+      document.body.appendChild(a); a.click(); a.remove();
+    });
+  </script>
+</body>
+</html>
