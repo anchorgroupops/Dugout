@@ -12,7 +12,7 @@ Checks, in order:
 Exit 0 if everything passes, 1 otherwise. Secrets are never printed.
 
 Usage:
-    /tmp/dugout-venv/bin/python -m tools.autopull.diagnose
+    .venv/bin/python -m tools.autopull.diagnose
 """
 from __future__ import annotations
 import os
@@ -112,7 +112,7 @@ def main() -> int:
         p.name.startswith(("chromium", "chrome")) for p in chromium_cache.iterdir()
     )
     all_ok &= _check(f"Chromium in {chromium_cache}", has_chromium,
-                     "Run: /tmp/dugout-venv/bin/playwright install chromium" if not has_chromium else "")
+                     "Run: .venv/bin/playwright install chromium" if not has_chromium else "")
 
     print("\n[5] systemd timers")
     for unit in ("gc-autopull.timer", "gc-autopull-weekly.timer"):

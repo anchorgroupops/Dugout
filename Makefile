@@ -1,5 +1,5 @@
 PY ?= python3
-VENV ?= /tmp/dugout-venv
+VENV ?= .venv
 ACT := . $(VENV)/bin/activate
 
 .PHONY: install-dev test cov cov-html run clean help
