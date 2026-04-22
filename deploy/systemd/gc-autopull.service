@@ -8,7 +8,7 @@ Type=oneshot
 User=joelycannoli
 WorkingDirectory=/home/joelycannoli/dugout
 EnvironmentFile=/home/joelycannoli/dugout/.env
-ExecStart=/usr/bin/env python3 -m tools.autopull.cli --trigger=cron
+ExecStart=/tmp/dugout-venv/bin/python -m tools.autopull.cli --trigger=cron
 StandardOutput=append:/home/joelycannoli/dugout/logs/autopull.log
 StandardError=append:/home/joelycannoli/dugout/logs/autopull.log
 TimeoutStartSec=600
