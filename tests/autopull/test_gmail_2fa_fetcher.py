@@ -6,12 +6,13 @@ import pytest
 from tools.autopull import gmail_2fa_fetcher as g
 
 
-def _build_raw_email(body: str, sender: str = "no-reply@gc.com") -> bytes:
+def _build_raw_email(body: str, sender: str = "gamechanger-noreply@info.gc.com",
+                     subject: str = "Verify your GameChanger account") -> bytes:
     from email.message import EmailMessage
     m = EmailMessage()
     m["From"] = sender
     m["To"] = "fly386@gmail.com"
-    m["Subject"] = "Verify your GameChanger account"
+    m["Subject"] = subject
     m.set_content(body)
     return m.as_bytes()
 
@@ -35,14 +36,28 @@ def test_fetch_latest_code_scans_newest_first():
     client.uid.side_effect = [
         ("OK", [b"100 101 102"]),                   # SEARCH returns 3 UIDs
         ("OK", [(b"102", _build_raw_email(
-            "Your verification code is 654321."))]),
+            "body text",
+            subject="Your GameChanger code is 654321"))]),
     ]
     code, uid = g.fetch_latest_code(client, lookback_minutes=5)
-    assert code == "654321"
+    assert code == "654321"   # picked up from subject
     assert uid == "102"
-    # First call: SEARCH by sender
+    # First call: SEARCH by sender DOMAIN
     assert client.uid.call_args_list[0].args[0] == "SEARCH"
-    assert "no-reply@gc.com" in client.uid.call_args_list[0].args[2]
+    assert any("info.gc.com" in str(a) for a in client.uid.call_args_list[0].args)
+
+
+def test_fetch_latest_code_falls_back_to_body():
+    client = MagicMock()
+    client.uid.side_effect = [
+        ("OK", [b"50"]),
+        ("OK", [(b"50", _build_raw_email(
+            "Your verification code is 987654. Expires soon.",
+            subject="GameChanger notification"))]),
+    ]
+    code, uid = g.fetch_latest_code(client, lookback_minutes=5)
+    assert code == "987654"
+    assert uid == "50"
 
 
 def test_fetch_latest_code_returns_none_when_no_messages():
@@ -58,9 +73,11 @@ def test_fetch_latest_code_skips_codeless_emails():
     client.uid.side_effect = [
         ("OK", [b"50 51"]),
         ("OK", [(b"51", _build_raw_email(
-            "Welcome to GameChanger — confirm your account."))]),
+            "Welcome to GameChanger — confirm your account.",
+            subject="Welcome to GameChanger"))]),
         ("OK", [(b"50", _build_raw_email(
-            "Your code is 987654. Expires soon."))]),
+            "Your code is 987654. Expires soon.",
+            subject="Your GameChanger code is 987654"))]),
     ]
     code, uid = g.fetch_latest_code(client, lookback_minutes=5)
     assert code == "987654"

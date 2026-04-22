@@ -24,7 +24,9 @@ from typing import Any
 log = logging.getLogger(__name__)
 
 CODE_RE = re.compile(r"\b(\d{6})\b")
-GC_SENDER = "no-reply@gc.com"
+# GC sends from `gamechanger-noreply@info.gc.com`. We search by the domain
+# substring so a future sender address change still hits.
+GC_SENDER_DOMAIN = "info.gc.com"
 IMAP_HOST = "imap.gmail.com"
 IMAP_PORT = 993
 SMTP_HOST = "smtp.gmail.com"
@@ -43,21 +45,52 @@ def build_client(*, username: str, app_password: str) -> imaplib.IMAP4_SSL:
     return client
 
 
+def current_max_uid(client: imaplib.IMAP4_SSL) -> int:
+    """Highest UID currently in the inbox from the GC domain. Use as a
+    baseline before triggering a new code so we don't reuse stale emails.
+    """
+    typ, data = client.uid("SEARCH", None, "FROM", GC_SENDER_DOMAIN)
+    if typ != "OK" or not data or not data[0]:
+        return 0
+    uids = [int(u) for u in data[0].split()]
+    return max(uids) if uids else 0
+
+
 def fetch_latest_code(
-    client: imaplib.IMAP4_SSL, *, lookback_minutes: int = 5
+    client: imaplib.IMAP4_SSL, *, lookback_minutes: int = 5,
+    min_uid: int = 0,
 ) -> tuple[str | None, str | None]:
     """Return (code, message_uid) for the latest GC 2FA email, or (None, None).
 
-    IMAP SEARCH filters by date (day granularity), so we rely on the sort
-    order of returned UIDs for the ~5-minute recency filter and additionally
-    walk from newest backwards.
+    GC's current email format puts the 6-digit code in the SUBJECT line
+    (e.g. "Your GameChanger code is 257052"); we check the subject first
+    and fall back to body. If `min_uid` is given, only emails with
+    UID > min_uid are considered — this prevents returning a previous
+    attempt's already-used code during the polling window.
     """
-    typ, data = client.uid("SEARCH", None, f'FROM "{GC_SENDER}"')
+    # Force a server sync each poll — IMAP clients cache mailbox state and
+    # won't see freshly-delivered mail without a NOOP / reselect.
+    try:
+        client.noop()
+    except Exception:
+        pass
+    typ, data = client.uid("SEARCH", None, "FROM", GC_SENDER_DOMAIN)
     if typ != "OK" or not data or not data[0]:
-        return None, None
+        # Re-sync with server — IMAP caches stale state across a long session
+        try:
+            client.noop()
+        except Exception:
+            pass
+        typ, data = client.uid("SEARCH", None, "FROM", GC_SENDER_DOMAIN)
+        if typ != "OK" or not data or not data[0]:
+            return None, None
     uids = data[0].split()
     if not uids:
         return None, None
+    if min_uid > 0:
+        uids = [u for u in uids if int(u) > min_uid]
+        if not uids:
+            return None, None
 
     # Newest first
     for uid in reversed(uids[-10:]):  # cap scanned emails
@@ -69,8 +102,17 @@ def fetch_latest_code(
             msg = email.message_from_bytes(raw)
         except Exception:  # pragma: no cover — defensive
             continue
-        body = _extract_text(msg)
-        code = extract_code(body)
+        # Decode the subject (may be RFC 2047 encoded)
+        subject_raw = msg.get("Subject", "") or ""
+        try:
+            from email.header import decode_header, make_header
+            subject = str(make_header(decode_header(subject_raw)))
+        except Exception:
+            subject = subject_raw
+        # Subject first (GC's current format puts the code there)
+        code = extract_code(subject)
+        if not code:
+            code = extract_code(_extract_text(msg))
         if code:
             return code, uid.decode() if isinstance(uid, bytes) else str(uid)
     return None, None

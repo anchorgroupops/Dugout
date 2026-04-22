@@ -159,7 +159,9 @@ def default_runner(*, cfg: config_mod.AutopullConfig,
         username=cfg.gmail_username,
         app_password=cfg.gmail_app_password,
     )
-    gmail_fetcher = lambda: g2fa.fetch_latest_code(gmail_client)
+    gmail_fetcher = lambda min_uid=0: g2fa.fetch_latest_code(
+        gmail_client, min_uid=min_uid,
+    )
     auth_file = cfg.data_root / "autopull" / "gc_session.json"
 
     import os
