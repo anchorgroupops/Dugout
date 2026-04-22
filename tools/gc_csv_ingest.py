@@ -21,11 +21,21 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from stats_normalizer import safe_float, safe_int
+# Import works whether run as `python tools/gc_csv_ingest.py` (tools/ on path)
+# or as `python -m tools.gc_csv_ingest` (repo root on path).
+try:
+    from team_registry import Team, require_by_slug
+except ImportError:
+    from tools.team_registry import Team, require_by_slug
 
 ET = ZoneInfo("America/New_York")
 ROOT_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT_DIR / "data"
-SHARKS_DIR = DATA_DIR / "sharks"
+SHARKS_DIR = DATA_DIR / "sharks"  # legacy default; new code uses _team_dir(team)
+
+
+def _team_dir(team: Team) -> Path:
+    return DATA_DIR / team.data_slug
 
 # ---------------------------------------------------------------------------
 # CSV column indices (from GC export, 0-indexed, row 1 = column names)
@@ -121,8 +131,8 @@ def _val(row: list[str], idx: int) -> str:
     return ""
 
 
-def _load_core_players() -> set[str]:
-    manifest = SHARKS_DIR / "roster_manifest.json"
+def _load_core_players(team_dir: Path = SHARKS_DIR) -> set[str]:
+    manifest = team_dir / "roster_manifest.json"
     if not manifest.exists():
         return set()
     with open(manifest) as f:
@@ -407,9 +417,9 @@ def _merge_players(existing: dict, new: dict) -> dict:
     return merged
 
 
-def parse_gc_csv(csv_path: Path) -> list[dict]:
+def parse_gc_csv(csv_path: Path, team_dir: Path = SHARKS_DIR) -> list[dict]:
     """Parse GC CSV export into a list of player dicts."""
-    core_set = _load_core_players()
+    core_set = _load_core_players(team_dir)
     players_by_number: dict[str, dict] = {}
     players_no_number: list[dict] = []
 
@@ -436,26 +446,34 @@ def parse_gc_csv(csv_path: Path) -> list[dict]:
     return list(players_by_number.values()) + players_no_number
 
 
-def build_team_json(roster: list[dict], csv_path: Path) -> dict:
+def build_team_json(roster: list[dict], csv_path: Path,
+                    team: Team | None = None,
+                    team_dir: Path = SHARKS_DIR) -> dict:
     """Build team.json-compatible structure from parsed roster."""
+    team_name_default = team.name if team is not None else "The Sharks"
+    league_default = team.league if (team and team.league) else "PCLL Majors"
+    season_default = team.season_slug if team is not None else "Spring 2026"
+    gc_team_id_default = team.id if team is not None else ""
+
     # Preserve existing team metadata if available
-    team_file = SHARKS_DIR / "team.json"
+    team_file = team_dir / "team.json"
     meta = {}
     if team_file.exists():
         with open(team_file) as f:
             existing = json.load(f)
         meta = {
-            "team_name": existing.get("team_name", "The Sharks"),
-            "league": existing.get("league", "PCLL Majors"),
-            "season": existing.get("season", "Spring 2026"),
+            "team_name": existing.get("team_name", team_name_default),
+            "league": existing.get("league", league_default),
+            "season": existing.get("season", season_default),
             "gc_team_url": existing.get("gc_team_url", ""),
-            "gc_team_id": existing.get("gc_team_id", ""),
+            "gc_team_id": existing.get("gc_team_id", gc_team_id_default),
         }
     else:
         meta = {
-            "team_name": "The Sharks",
-            "league": "PCLL Majors",
-            "season": "Spring 2026",
+            "team_name": team_name_default,
+            "league": league_default,
+            "season": season_default,
+            "gc_team_id": gc_team_id_default,
         }
 
     meta["last_updated"] = datetime.now(ET).isoformat()
@@ -594,23 +612,36 @@ def build_app_stats_json(roster: list[dict]) -> dict:
 def main():
     parser = argparse.ArgumentParser(description="Ingest GC CSV season-stats export")
     parser.add_argument(
-        "--csv-path",
-        type=str,
-        help="Path to the GC CSV export file (relative to project root or absolute)",
+        "csv_path_pos", nargs="?", default=None,
+        help="Path to the GC CSV export (positional).",
+    )
+    parser.add_argument(
+        "--csv-path", type=str,
+        help="Path to the GC CSV export file (alternative to positional).",
+    )
+    parser.add_argument(
+        "--team", default="sharks",
+        help="data_slug from config/teams.yaml (default: sharks)",
     )
     args = parser.parse_args()
 
-    # Resolve CSV path
-    if args.csv_path:
-        csv_path = Path(args.csv_path)
+    # Resolve team + team_dir
+    team = require_by_slug(args.team)
+    team_dir = _team_dir(team)
+    team_dir.mkdir(parents=True, exist_ok=True)
+
+    # Resolve CSV path (positional wins; falls back to --csv-path; then auto-discover)
+    csv_arg = args.csv_path_pos or args.csv_path
+    if csv_arg:
+        csv_path = Path(csv_arg)
         if not csv_path.is_absolute():
             csv_path = ROOT_DIR / csv_path
     else:
-        # Auto-discover from Scorebooks/Other docs
+        # Auto-discover from Scorebooks/Other docs (Sharks-only legacy path)
         search_dir = ROOT_DIR / "Scorebooks" / "Other docs"
         candidates = sorted(search_dir.glob("Sharks Spring 2026 Stats*.csv"))
         if not candidates:
-            print("ERROR: No CSV found. Use --csv-path to specify.")
+            print("ERROR: No CSV found. Specify positional path or --csv-path.")
             return
         csv_path = candidates[-1]
 
@@ -618,30 +649,30 @@ def main():
         print(f"ERROR: CSV not found: {csv_path}")
         return
 
-    print(f"Ingesting: {csv_path.name}")
+    print(f"Ingesting {csv_path.name} for team {team.name} ({team.data_slug})")
 
     # Parse
-    roster = parse_gc_csv(csv_path)
+    roster = parse_gc_csv(csv_path, team_dir=team_dir)
     print(f"Parsed {len(roster)} players")
 
     # Build outputs
-    team_json = build_team_json(roster, csv_path)
+    team_json = build_team_json(roster, csv_path, team=team, team_dir=team_dir)
     app_stats = build_app_stats_json(roster)
 
     # Write team.json
-    team_out = SHARKS_DIR / "team.json"
+    team_out = team_dir / "team.json"
     with open(team_out, "w") as f:
         json.dump(team_json, f, indent=2)
     print(f"Wrote {team_out}")
 
     # Write app_stats.json
-    app_out = SHARKS_DIR / "app_stats.json"
+    app_out = team_dir / "app_stats.json"
     with open(app_out, "w") as f:
         json.dump(app_stats, f, indent=2)
     print(f"Wrote {app_out}")
 
     # Copy CSV to season_stats.csv
-    season_out = SHARKS_DIR / "season_stats.csv"
+    season_out = team_dir / "season_stats.csv"
     shutil.copy2(csv_path, season_out)
     print(f"Copied CSV -> {season_out}")
 
