@@ -12,7 +12,7 @@ def _cfg(tmp_path: Path) -> AutopullConfig:
         enabled=True, postgame_enabled=True, llm_adapt_enabled=False,
         idempotency_window_min=15, llm_daily_budget_usd=1.0,
         llm_model="claude-sonnet-4-6",
-        gmail_client_id="", gmail_client_secret="", gmail_refresh_token="",
+        gmail_username="", gmail_app_password="",
         gmail_notify_from="", gmail_notify_to="",
         anthropic_api_key="", n8n_status_webhook="", n8n_weekly_webhook="",
         data_root=tmp_path / "data", log_root=tmp_path / "logs",

@@ -48,9 +48,8 @@ class AutopullConfig:
     llm_daily_budget_usd: float
     llm_model: str
 
-    gmail_client_id: str
-    gmail_client_secret: str
-    gmail_refresh_token: str
+    gmail_username: str
+    gmail_app_password: str
     gmail_notify_from: str
     gmail_notify_to: str
 
@@ -70,9 +69,8 @@ def load(require_gmail: bool = False) -> AutopullConfig:
         idempotency_window_min=_int("GC_AUTOPULL_IDEMPOTENCY_WINDOW_MIN", 15),
         llm_daily_budget_usd=_float("GC_AUTOPULL_LLM_DAILY_BUDGET_USD", 1.00),
         llm_model=os.getenv("GC_AUTOPULL_LLM_MODEL", "claude-sonnet-4-6"),
-        gmail_client_id=os.getenv("GMAIL_OAUTH_CLIENT_ID", ""),
-        gmail_client_secret=os.getenv("GMAIL_OAUTH_CLIENT_SECRET", ""),
-        gmail_refresh_token=os.getenv("GMAIL_OAUTH_REFRESH_TOKEN", ""),
+        gmail_username=os.getenv("GMAIL_USERNAME", ""),
+        gmail_app_password=os.getenv("GMAIL_APP_PASSWORD", ""),
         gmail_notify_from=os.getenv("GMAIL_NOTIFY_FROM", ""),
         gmail_notify_to=os.getenv("GMAIL_NOTIFY_TO", ""),
         anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
@@ -86,9 +84,8 @@ def load(require_gmail: bool = False) -> AutopullConfig:
     # ever reaching the kill-switch short-circuit.
     if require_gmail and cfg.enabled:
         for k, v in [
-            ("GMAIL_OAUTH_CLIENT_ID", cfg.gmail_client_id),
-            ("GMAIL_OAUTH_CLIENT_SECRET", cfg.gmail_client_secret),
-            ("GMAIL_OAUTH_REFRESH_TOKEN", cfg.gmail_refresh_token),
+            ("GMAIL_USERNAME", cfg.gmail_username),
+            ("GMAIL_APP_PASSWORD", cfg.gmail_app_password),
         ]:
             if not v:
                 raise ConfigError(f"{k} is required when Gmail is enabled")

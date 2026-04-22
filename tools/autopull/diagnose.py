@@ -73,11 +73,10 @@ def main() -> int:
     required = {
         "GC_EMAIL": "GC login",
         "GC_PASSWORD": "GC password",
-        "GMAIL_OAUTH_CLIENT_ID": "Gmail OAuth",
-        "GMAIL_OAUTH_CLIENT_SECRET": "Gmail OAuth",
+        "GMAIL_USERNAME": "Gmail account for 2FA reading + notification send",
+        "GMAIL_APP_PASSWORD": "Generated at myaccount.google.com/apppasswords",
     }
     optional = {
-        "GMAIL_OAUTH_REFRESH_TOKEN": "Needed to actually run; generate via oauth_setup.py",
         "ANTHROPIC_API_KEY": "Only needed if GC_AUTOPULL_LLM_ADAPT=true",
         "N8N_AUTOPULL_STATUS_WEBHOOK": "Optional; n8n fan-out",
         "PUSH_WEBHOOK_URL": "Optional; push notifications",
