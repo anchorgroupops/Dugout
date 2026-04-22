@@ -17,6 +17,23 @@ from tools.autopull import csv_validator as cv
 from tools.autopull.state import StateDB
 
 
+def _chromium_available() -> bool:
+    """Skip gracefully when Python playwright is installed but chromium isn't."""
+    try:
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(headless=True)
+            browser.close()
+        return True
+    except Exception:
+        return False
+
+
+pytestmark = pytest.mark.skipif(
+    not _chromium_available(),
+    reason="Playwright chromium browser not installed (run: playwright install chromium)",
+)
+
+
 @pytest.fixture
 def local_http_server(tmp_path):
     fixtures = Path(__file__).parent / "fixtures"
@@ -53,3 +70,32 @@ def test_download_and_validate_end_to_end(tmp_db_path, tmp_path, local_http_serv
                       known_columns=["Player", "AB", "H", "BB", "K"])
     assert val.accepted is True
     assert val.row_count == 2
+
+
+def test_two_teams_land_in_separate_dirs(tmp_db_path, tmp_path, local_http_server):
+    db = StateDB(tmp_db_path); db.init_schema()
+    le.seed_builtin_strategies(db)
+    engine = le.LocatorEngine(db=db, llm_adapter=None, llm_enabled=False)
+    staging_a = tmp_path / "staging" / "sharks"; staging_a.mkdir(parents=True)
+    staging_b = tmp_path / "staging" / "dolphins"; staging_b.mkdir(parents=True)
+
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=True)
+        ctx = browser.new_context(accept_downloads=True)
+        page = ctx.new_page()
+
+        page.goto(local_http_server, wait_until="networkidle")
+        r1 = engine.find_and_download(page, out_dir=staging_a)
+
+        # Navigate to the dolphins page served by the same fixtures dir
+        base = local_http_server.rsplit("/", 1)[0]
+        page.goto(f"{base}/dolphins_stats_page.html", wait_until="networkidle")
+        r2 = engine.find_and_download(page, out_dir=staging_b)
+        browser.close()
+
+    assert r1.downloaded_path is not None
+    assert r2.downloaded_path is not None
+    assert r1.downloaded_path.read_text() != r2.downloaded_path.read_text()
+    # Dolphins CSV includes the unique player name
+    assert "Finn Green" in r2.downloaded_path.read_text()
+    assert "Finn Green" not in r1.downloaded_path.read_text()
