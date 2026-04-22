@@ -36,5 +36,12 @@ secrets.json
 Dugout/
 # Binary artifacts
 *.apk
+# Coverage / test artifacts
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.pytest_cache/
+.hypothesis/
 # Temp/editor files
 ~
