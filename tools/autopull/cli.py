@@ -156,9 +156,8 @@ def default_runner(*, cfg: config_mod.AutopullConfig,
     team_dir.mkdir(parents=True, exist_ok=True)
 
     gmail_client = g2fa.build_client(
-        client_id=cfg.gmail_client_id,
-        client_secret=cfg.gmail_client_secret,
-        refresh_token=cfg.gmail_refresh_token,
+        username=cfg.gmail_username,
+        app_password=cfg.gmail_app_password,
     )
     gmail_fetcher = lambda: g2fa.fetch_latest_code(gmail_client)
     auth_file = cfg.data_root / "autopull" / "gc_session.json"
@@ -245,21 +244,17 @@ def _build_notifier(cfg: config_mod.AutopullConfig):
     from tools.autopull import gmail_2fa_fetcher as g2fa
     from tools.autopull import notifier as nt
 
-    gmail_client = None
-    if cfg.gmail_client_id and cfg.gmail_refresh_token:
-        gmail_client = g2fa.build_client(
-            client_id=cfg.gmail_client_id,
-            client_secret=cfg.gmail_client_secret,
-            refresh_token=cfg.gmail_refresh_token,
-        )
-
     class _GmailSender:
         def send(self, *, to: str, subject: str, body: str) -> None:
-            if gmail_client is None:
+            if not (cfg.gmail_username and cfg.gmail_app_password):
                 log.info("Gmail not configured, skipping email")
                 return
-            g2fa.send_email(gmail_client, sender=cfg.gmail_notify_from,
-                            to=to, subject=subject, body=body)
+            g2fa.send_email(
+                username=cfg.gmail_username,
+                app_password=cfg.gmail_app_password,
+                sender=cfg.gmail_notify_from or cfg.gmail_username,
+                to=to, subject=subject, body=body,
+            )
 
     class _N8nPoster:
         def post(self, url: str, payload: dict) -> None:

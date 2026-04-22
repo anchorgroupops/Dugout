@@ -38,16 +38,16 @@ def test_parses_numeric_overrides(monkeypatch):
 
 def test_gmail_credentials_required_when_enabled(monkeypatch):
     monkeypatch.setenv("GC_AUTOPULL_ENABLED", "true")
-    for k in ("GMAIL_OAUTH_CLIENT_ID", "GMAIL_OAUTH_CLIENT_SECRET", "GMAIL_OAUTH_REFRESH_TOKEN"):
+    for k in ("GMAIL_USERNAME", "GMAIL_APP_PASSWORD"):
         monkeypatch.delenv(k, raising=False)
-    with pytest.raises(config.ConfigError, match="GMAIL_OAUTH"):
+    with pytest.raises(config.ConfigError, match="GMAIL_USERNAME"):
         config.load(require_gmail=True)
 
 
 def test_gmail_not_required_when_disabled(monkeypatch):
     """Kill-switch off must not require Gmail creds — inert runs need to load."""
     monkeypatch.setenv("GC_AUTOPULL_ENABLED", "false")
-    for k in ("GMAIL_OAUTH_CLIENT_ID", "GMAIL_OAUTH_CLIENT_SECRET", "GMAIL_OAUTH_REFRESH_TOKEN"):
+    for k in ("GMAIL_USERNAME", "GMAIL_APP_PASSWORD"):
         monkeypatch.delenv(k, raising=False)
     cfg = config.load(require_gmail=True)
     assert cfg.enabled is False
