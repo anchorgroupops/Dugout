@@ -25,7 +25,7 @@ teams:
     teams = tr.load(path)
     assert len(teams) == 1
     assert teams[0].name == "The Sharks"
-    assert teams[0].stats_url == "https://web.gc.com/teams/abc123/2026-spring-sharks/stats"
+    assert teams[0].stats_url == "https://web.gc.com/teams/abc123/2026-spring-sharks/season-stats"
 
 
 def test_load_active_filters(tmp_path):

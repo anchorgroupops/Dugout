@@ -32,7 +32,8 @@ class Team:
 
     @property
     def stats_url(self) -> str:
-        return f"https://web.gc.com/teams/{self.id}/{self.season_slug}/stats"
+        # GC's web URL is /season-stats (not /stats as of 2026-04).
+        return f"https://web.gc.com/teams/{self.id}/{self.season_slug}/season-stats"
 
 
 def load(path: Path | None = None) -> list[Team]:
