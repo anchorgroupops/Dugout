@@ -6,11 +6,6 @@ from gc_scraper import GameChangerScraper
 
 ET = ZoneInfo("America/New_York")
 
-try:
-    from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
-except ImportError:
-    sync_playwright = None
-
 DATA_DIR = Path(__file__).parent.parent / "data"
 SHARKS_DIR = DATA_DIR / "sharks"
 TMP_DIR = Path(__file__).parent.parent / ".tmp"
@@ -22,7 +17,15 @@ class ScheduleScraper(GameChangerScraper):
             "last_updated": datetime.now(ET).isoformat(),
             "games": []
         }
-        
+
+        # Import here so a missing playwright install fails at call time with a
+        # clean ImportError, not a silent module-level None that the first call
+        # turns into a confusing `NoneType is not callable`.
+        from playwright.sync_api import (
+            sync_playwright,
+            TimeoutError as PlaywrightTimeoutError,
+        )
+
         page = None
         with sync_playwright() as pw:
             try:

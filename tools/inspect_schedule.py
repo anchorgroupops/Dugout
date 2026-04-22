@@ -2,14 +2,11 @@ import json
 from pathlib import Path
 from gc_scraper import GameChangerScraper
 
-try:
-    from playwright.sync_api import sync_playwright
-except ImportError:
-    sync_playwright = None
-
 TMP_DIR = Path(__file__).parent.parent / ".tmp"
 
 def inspect_schedule_api():
+    from playwright.sync_api import sync_playwright
+
     scraper = GameChangerScraper()
     captured_data = []
 
