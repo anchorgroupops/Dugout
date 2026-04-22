@@ -81,7 +81,10 @@ def load(require_gmail: bool = False) -> AutopullConfig:
         data_root=Path(os.getenv("DUGOUT_DATA_ROOT", "data")),
         log_root=Path(os.getenv("DUGOUT_LOG_ROOT", "logs")),
     )
-    if require_gmail:
+    # Only enforce Gmail credentials when the autopull is actually enabled —
+    # otherwise an inert `enabled=false` run would fail at config load without
+    # ever reaching the kill-switch short-circuit.
+    if require_gmail and cfg.enabled:
         for k, v in [
             ("GMAIL_OAUTH_CLIENT_ID", cfg.gmail_client_id),
             ("GMAIL_OAUTH_CLIENT_SECRET", cfg.gmail_client_secret),

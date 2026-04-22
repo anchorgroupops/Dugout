@@ -44,6 +44,15 @@ def test_gmail_credentials_required_when_enabled(monkeypatch):
         config.load(require_gmail=True)
 
 
+def test_gmail_not_required_when_disabled(monkeypatch):
+    """Kill-switch off must not require Gmail creds — inert runs need to load."""
+    monkeypatch.setenv("GC_AUTOPULL_ENABLED", "false")
+    for k in ("GMAIL_OAUTH_CLIENT_ID", "GMAIL_OAUTH_CLIENT_SECRET", "GMAIL_OAUTH_REFRESH_TOKEN"):
+        monkeypatch.delenv(k, raising=False)
+    cfg = config.load(require_gmail=True)
+    assert cfg.enabled is False
+
+
 def test_bool_parsing(monkeypatch):
     for truthy in ("true", "TRUE", "1", "yes", "on"):
         monkeypatch.setenv("GC_AUTOPULL_ENABLED", truthy)
