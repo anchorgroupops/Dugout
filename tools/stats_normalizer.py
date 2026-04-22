@@ -117,6 +117,8 @@ def _source(row: dict) -> dict:
 
 
 def _pick(d: dict, *keys: str) -> Any:
+    if not isinstance(d, dict):
+        return None
     for k in keys:
         if k in d and d.get(k) not in (None, "", "-", "—"):
             return d.get(k)
@@ -241,7 +243,9 @@ def normalize_batting_advanced_row(row: dict) -> dict:
 
 
 def normalize_pitching_row(row: dict) -> dict:
-    src = row.get("pitching", row or {})
+    row = row or {}
+    pitching = row.get("pitching")
+    src = pitching if isinstance(pitching, dict) else row
     ip = innings_to_float(_pick(src, "ip"))
     er = safe_int(_pick(src, "er"))
     bb = safe_int(_pick(src, "bb"))
@@ -304,7 +308,9 @@ def normalize_pitching_advanced_row(row: dict) -> dict:
 
 
 def normalize_fielding_row(row: dict) -> dict:
-    src = row.get("fielding", row or {})
+    row = row or {}
+    fielding = row.get("fielding")
+    src = fielding if isinstance(fielding, dict) else row
     po = safe_int(_pick(src, "po"))
     a = safe_int(_pick(src, "a"))
     e = safe_int(_pick(src, "e"))

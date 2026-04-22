@@ -50,7 +50,7 @@ GAME_DURATION_HOURS = 2.5        # Assumed max length of a softball game
 PREGAME_WINDOW_HOURS = 1.0       # Time before game to enter PREGAME state
 POST_GAME_DEDUP_MINUTES = 30     # Idempotency guard for post-game trigger
 
-N8N_WEBHOOK_URL = "https://n8n.joelycannoli.com/webhook/gc-alert"
+N8N_WEBHOOK_URL = os.getenv("N8N_WEBHOOK_URL", "").strip()
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 SHARKS_DIR = DATA_DIR / "sharks"
@@ -238,7 +238,13 @@ logging.basicConfig(
 # DAEMON LOGIC
 # ---------------------------------------------------------
 def send_alert(message: str, level: str = "ERROR"):
-    """Sends an alert to the local n8n instance if the session drops or errors occur."""
+    """POST to the configured n8n webhook, or no-op if none is configured.
+
+    Set N8N_WEBHOOK_URL in the environment to enable and point at a matching
+    n8n webhook-triggered workflow.
+    """
+    if not N8N_WEBHOOK_URL:
+        return
     payload = {
         "source": "sync_daemon",
         "level": level,
@@ -1087,8 +1093,11 @@ def run_sync_cycle():
         _set_sync_stage("scraping_schedule")
         if _auth_available:
             logging.info("Scraping Schedule...")
-            sched_scraper = ScheduleScraper()
-            sched_scraper.scrape_schedule()
+            try:
+                sched_scraper = ScheduleScraper()
+                sched_scraper.scrape_schedule()
+            except Exception as e:
+                logging.warning(f"[Sync] Schedule scrape skipped: {e}")
         else:
             logging.info("[Sync] Schedule scrape skipped (auth cooldown).")
 
