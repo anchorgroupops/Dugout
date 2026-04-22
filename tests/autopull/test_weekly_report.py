@@ -35,3 +35,19 @@ def test_post_weekly(monkeypatch, tmp_db_path):
     args, kwargs = poster.call_args
     assert args[0] == "https://x/y"
     assert "total_runs" in args[1]
+
+
+def test_summary_groups_by_team(tmp_db_path):
+    db = StateDB(tmp_db_path); db.init_schema()
+    now = datetime.now(ET)
+    for team, oc in [("sharks", "success"), ("sharks", "success"),
+                     ("dolphins", "failure")]:
+        rid = db.start_run(trigger="cron", team_id=team, started_at=now)
+        db.complete_run(rid, outcome=oc, csv_path=None, rows_ingested=5,
+                        winning_strategy_id=None, duration_ms=100,
+                        llm_fallback_invoked=False, session_refreshed=False,
+                        completed_at=now)
+    summary = wr.build_summary(db, days=7)
+    assert "by_team" in summary
+    assert summary["by_team"]["sharks"]["success"] == 2
+    assert summary["by_team"]["dolphins"]["failure"] == 1

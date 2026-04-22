@@ -23,12 +23,13 @@ def build_summary(db: StateDB, *, days: int = 7) -> dict:
     with db._conn() as c:
         rows = c.execute(
             "SELECT outcome, llm_fallback_invoked, winning_strategy_id, "
-            "session_refreshed, failure_reason "
+            "session_refreshed, failure_reason, team_id "
             "FROM runs WHERE started_at >= ?",
             (cutoff,),
         ).fetchall()
     by_outcome: Counter = Counter()
     by_winner: Counter = Counter()
+    by_team: dict[str, Counter] = {}
     failures: list[str] = []
     llm_count = 0
     refresh_count = 0
@@ -42,11 +43,14 @@ def build_summary(db: StateDB, *, days: int = 7) -> dict:
             refresh_count += 1
         if r["failure_reason"]:
             failures.append(r["failure_reason"])
+        team = r["team_id"] or "sharks"
+        by_team.setdefault(team, Counter())[r["outcome"]] += 1
     return {
         "generated_at": datetime.now(ET).isoformat(),
         "window_days": days,
         "total_runs": len(rows),
         "by_outcome": dict(by_outcome),
+        "by_team": {k: dict(v) for k, v in by_team.items()},
         "top_winning_strategies": by_winner.most_common(5),
         "llm_fallback_invocations": llm_count,
         "session_refreshes": refresh_count,
