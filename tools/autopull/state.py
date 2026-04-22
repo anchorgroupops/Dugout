@@ -1,4 +1,10 @@
-"""SQLite-backed state for autopull: runs, strategies, breakers, schema profiles."""
+"""SQLite-backed state for autopull: runs, strategies, breakers, schema profiles.
+
+Phase 1 (multi-team): `runs` and `schema_profile` gain a `team_id` column.
+Existing rows on-disk are migrated in place with `team_id='sharks'`. The
+`strategies` table stays team-agnostic — the CSV export button is the same
+GC-wide UI for every team, so a learned selector benefits all teams.
+"""
 from __future__ import annotations
 import json
 import math
@@ -17,6 +23,7 @@ CREATE TABLE IF NOT EXISTS runs (
   started_at TEXT NOT NULL,
   completed_at TEXT,
   trigger TEXT NOT NULL,
+  team_id TEXT NOT NULL DEFAULT 'sharks',
   outcome TEXT NOT NULL DEFAULT 'in_progress',
   csv_path TEXT,
   rows_ingested INTEGER,
@@ -49,12 +56,15 @@ CREATE TABLE IF NOT EXISTS circuit_breaker (
 );
 
 CREATE TABLE IF NOT EXISTS schema_profile (
-  observed_at TEXT PRIMARY KEY,
+  team_id TEXT NOT NULL DEFAULT 'sharks',
+  observed_at TEXT NOT NULL,
   column_names_json TEXT NOT NULL,
-  row_count INTEGER NOT NULL
+  row_count INTEGER NOT NULL,
+  PRIMARY KEY(team_id, observed_at)
 );
 
 CREATE INDEX IF NOT EXISTS idx_runs_started ON runs(started_at);
+CREATE INDEX IF NOT EXISTS idx_runs_team ON runs(team_id);
 CREATE INDEX IF NOT EXISTS idx_strategies_enabled ON strategies(enabled);
 """
 
@@ -65,6 +75,7 @@ class RunRow:
     started_at: str
     completed_at: str | None
     trigger: str
+    team_id: str
     outcome: str
     csv_path: str | None
     rows_ingested: int | None
@@ -103,6 +114,10 @@ class StateDB:
 
     def init_schema(self) -> None:
         with self._conn() as c:
+            # Migrate legacy schemas BEFORE CREATE IF NOT EXISTS so
+            # schema_profile without team_id gets rebuilt, not skipped.
+            self._migrate_runs_team_id(c)
+            self._migrate_schema_profile(c)
             c.executescript(SCHEMA_SQL)
 
     def list_tables(self) -> list[str]:
@@ -112,14 +127,62 @@ class StateDB:
             ).fetchall()
             return [r["name"] for r in rows]
 
+    # ---------- migrations ----------
+
+    @staticmethod
+    def _table_exists(conn, name: str) -> bool:
+        row = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+            (name,),
+        ).fetchone()
+        return row is not None
+
+    @staticmethod
+    def _columns(conn, table: str) -> list[str]:
+        return [r["name"] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
+
+    def _migrate_runs_team_id(self, conn) -> None:
+        if not self._table_exists(conn, "runs"):
+            return
+        cols = self._columns(conn, "runs")
+        if "team_id" in cols:
+            return
+        conn.execute(
+            "ALTER TABLE runs ADD COLUMN team_id TEXT NOT NULL DEFAULT 'sharks'"
+        )
+        conn.execute("UPDATE runs SET team_id='sharks' WHERE team_id IS NULL")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_runs_team ON runs(team_id)")
+
+    def _migrate_schema_profile(self, conn) -> None:
+        if not self._table_exists(conn, "schema_profile"):
+            return
+        cols = self._columns(conn, "schema_profile")
+        if "team_id" in cols:
+            return
+        conn.executescript("""
+            CREATE TABLE schema_profile_v2 (
+              team_id TEXT NOT NULL DEFAULT 'sharks',
+              observed_at TEXT NOT NULL,
+              column_names_json TEXT NOT NULL,
+              row_count INTEGER NOT NULL,
+              PRIMARY KEY(team_id, observed_at)
+            );
+            INSERT OR IGNORE INTO schema_profile_v2(team_id, observed_at, column_names_json, row_count)
+              SELECT 'sharks', observed_at, column_names_json, row_count FROM schema_profile;
+            DROP TABLE schema_profile;
+            ALTER TABLE schema_profile_v2 RENAME TO schema_profile;
+        """)
+
     # ---------- runs ----------
 
-    def start_run(self, trigger: str, started_at: datetime | None = None) -> int:
+    def start_run(self, trigger: str, team_id: str = "sharks",
+                  started_at: datetime | None = None) -> int:
         started = (started_at or datetime.now(ET)).isoformat()
         with self._conn() as c:
             cur = c.execute(
-                "INSERT INTO runs(started_at, trigger, outcome) VALUES(?,?,?)",
-                (started, trigger, "in_progress"),
+                "INSERT INTO runs(started_at, trigger, team_id, outcome) "
+                "VALUES(?,?,?,?)",
+                (started, trigger, team_id, "in_progress"),
             )
             return int(cur.lastrowid)
 
@@ -158,14 +221,17 @@ class StateDB:
             ).fetchall()
             return [RunRow(**dict(r)) for r in rows]
 
-    def last_successful_run_within(self, minutes: int) -> RunRow | None:
+    def last_successful_run_within(self, minutes: int,
+                                   team_id: str | None = None) -> RunRow | None:
         cutoff = (datetime.now(ET) - timedelta(minutes=minutes)).isoformat()
+        sql = "SELECT * FROM runs WHERE outcome='success' AND completed_at >= ? "
+        args: list = [cutoff]
+        if team_id is not None:
+            sql += "AND team_id=? "
+            args.append(team_id)
+        sql += "ORDER BY completed_at DESC LIMIT 1"
         with self._conn() as c:
-            r = c.execute(
-                "SELECT * FROM runs WHERE outcome='success' AND completed_at >= ? "
-                "ORDER BY completed_at DESC LIMIT 1",
-                (cutoff,),
-            ).fetchone()
+            r = c.execute(sql, tuple(args)).fetchone()
             return RunRow(**dict(r)) if r else None
 
     # ---------- strategies ----------
@@ -289,21 +355,23 @@ class StateDB:
 
     # ---------- schema ----------
 
-    def record_schema(self, columns: Iterable[str], row_count: int) -> None:
+    def record_schema(self, columns: Iterable[str], row_count: int,
+                      team_id: str = "sharks") -> None:
         cols = sorted(columns)
         now = datetime.now(ET).isoformat()
         with self._conn() as c:
             c.execute(
-                "INSERT OR REPLACE INTO schema_profile(observed_at, column_names_json, row_count) "
-                "VALUES(?,?,?)",
-                (now, json.dumps(cols), row_count),
+                "INSERT OR REPLACE INTO schema_profile(team_id, observed_at, "
+                "column_names_json, row_count) VALUES(?,?,?,?)",
+                (team_id, now, json.dumps(cols), row_count),
             )
 
-    def last_two_schemas(self) -> tuple[list[str] | None, list[str] | None]:
+    def last_two_schemas(self, team_id: str = "sharks") -> tuple[list[str] | None, list[str] | None]:
         with self._conn() as c:
             rows = c.execute(
-                "SELECT column_names_json FROM schema_profile "
-                "ORDER BY observed_at DESC LIMIT 2"
+                "SELECT column_names_json FROM schema_profile WHERE team_id=? "
+                "ORDER BY observed_at DESC LIMIT 2",
+                (team_id,),
             ).fetchall()
         if not rows:
             return None, None
