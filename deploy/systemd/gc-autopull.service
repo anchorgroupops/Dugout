@@ -1,0 +1,14 @@
+[Unit]
+Description=Dugout GC CSV autopull (daily safety-net)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=joelycannoli
+WorkingDirectory=/home/joelycannoli/dugout
+EnvironmentFile=/home/joelycannoli/dugout/.env
+ExecStart=/tmp/dugout-venv/bin/python -m tools.autopull.cli --trigger=cron
+StandardOutput=append:/home/joelycannoli/dugout/logs/autopull.log
+StandardError=append:/home/joelycannoli/dugout/logs/autopull.log
+TimeoutStartSec=600

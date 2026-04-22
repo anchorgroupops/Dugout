@@ -1,0 +1,10 @@
+[Unit]
+Description=Dugout GC CSV autopull (daily 03:00 ET)
+
+[Timer]
+OnCalendar=*-*-* 03:00:00 America/New_York
+Persistent=true
+Unit=gc-autopull.service
+
+[Install]
+WantedBy=timers.target

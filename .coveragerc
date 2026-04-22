@@ -1,0 +1,72 @@
+[run]
+source = .
+omit =
+    tests/*
+    */site-packages/*
+    /tmp/*
+    # Playwright / browser automation — needs live session
+    tools/gc_*.py
+    tools/scrape_*.py
+    tools/parse_plays*.py
+    tools/*_scraper*.py
+    tools/capture_*.py
+    tools/orchestrate_*.py
+    tools/relogin.py
+    tools/save_session.py
+    tools/generate_auth_json.py
+    tools/runtime_ops.py
+    tools/verify_links.py
+    # Device / mobile scrapers
+    tools/frida*.py
+    tools/adb*.py
+    tools/find_adb.py
+    tools/start_frida.py
+    tools/restart_frida.py
+    tools/diag_*.py
+    tools/diagnose_*.py
+    tools/disable_ssl_gc.js
+    tools/parse_app_xml.py
+    # Misnamed diagnostic scripts
+    tools/test_direct_api.py
+    tools/test_gc_login.py
+    # Modal deployment entrypoint
+    tools/modal_app.py
+    # MCP client (network-dependent wrapper)
+    tools/mcp_client.py
+    # YouTube / external fetchers (network)
+    tools/fetch_*.py
+    tools/fetch_web_sources.py
+    tools/fetch_youtube_*.py
+    # Ad-hoc fix / inspection scripts
+    tools/fix_*.py
+    tools/inspect_*.py
+    tools/print_schedule.py
+    tools/check_*.py
+    tools/nb_cleaner.py
+    tools/nb_writer.py
+    tools/gen_b64*.py
+    tools/get_schedule_data.py
+    # Dashboard entrypoints (thin wrappers around Flask)
+    run_dashboard.py
+    dashboard/*
+    # Notebook dedup script (one-shot migration)
+    dedup_notebook.py
+    # 3-line base64 utility scripts
+    gen_b64.py
+    gen_b64_to_file.py
+    # batch_sync.py is the NotebookLM sync engine — heavy external I/O
+    # (Playwright / network / subprocess). Parked for a follow-up coverage PR
+    # that will use a dedicated integration-test job with a mock MCP server.
+    batch_sync.py
+
+[report]
+exclude_lines =
+    pragma: no cover
+    raise NotImplementedError
+    if __name__ == .__main__.:
+    if TYPE_CHECKING:
+    \.\.\.
+
+precision = 1
+skip_covered = False
+show_missing = True

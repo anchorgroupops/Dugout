@@ -37,7 +37,18 @@ if str(_TOOLS_DIR) not in sys.path:
 os.chdir(_ROOT_DIR)
 
 ET = ZoneInfo("America/New_York")
-SHARKS_DIR = _ROOT_DIR / "data" / "sharks"
+SHARKS_DIR = _ROOT_DIR / "data" / "sharks"  # legacy default; new code uses _team_dir(team)
+
+# Import works whether run as `python tools/gc_ingest_pipeline.py` (tools/ on path)
+# or as `python -m tools.gc_ingest_pipeline` (repo root on path).
+try:
+    from team_registry import Team, require_by_slug
+except ImportError:
+    from tools.team_registry import Team, require_by_slug
+
+
+def _team_dir(team: Team) -> Path:
+    return _ROOT_DIR / "data" / team.data_slug
 
 
 # ---------------------------------------------------------------------------
@@ -57,31 +68,43 @@ def _auto_discover_csv() -> Path | None:
 # Pipeline runner
 # ---------------------------------------------------------------------------
 
-def run_pipeline(csv_path: Path, scorebook_path: Path | None, out_path: Path) -> dict:
-    """Execute all pipeline stages and write gc_report.json."""
+def run_pipeline(csv_path: Path, scorebook_path: Path | None, out_path: Path,
+                 team: Team | None = None) -> dict:
+    """Execute all pipeline stages and write gc_report.json.
+
+    Phase 1 multi-team: Stage 1 (CSV ingest) is fully team-parameterized and
+    writes under data/<team.data_slug>/. Stages 2 (SQLite snapshot), 4 (SWOT),
+    5 (lineup), 6 (practice) still target the Sharks only — Phase 2 parameterizes
+    those. Non-Sharks teams skip stages 2/4/5/6 with an informational status.
+    """
+    if team is None:
+        team = require_by_slug("sharks")
+    team_dir = _team_dir(team)
+    is_sharks = team.data_slug == "sharks"
+
     stages: dict = {}
-    SHARKS_DIR.mkdir(parents=True, exist_ok=True)
+    team_dir.mkdir(parents=True, exist_ok=True)
     roster: list = []
 
     # ── Stage 1: CSV ingest ──────────────────────────────────────────────────
-    print(f"[PIPELINE] Stage 1: CSV ingest ({csv_path.name})")
+    print(f"[PIPELINE] Stage 1: CSV ingest ({csv_path.name}) -> {team_dir}")
     try:
         from gc_csv_ingest import parse_gc_csv, build_team_json, build_app_stats_json
 
-        roster = parse_gc_csv(csv_path)
-        team_json = build_team_json(roster, csv_path)
+        roster = parse_gc_csv(csv_path, team_dir=team_dir)
+        team_json = build_team_json(roster, csv_path, team=team, team_dir=team_dir)
         app_stats = build_app_stats_json(roster)
 
-        team_out = SHARKS_DIR / "team.json"
+        team_out = team_dir / "team.json"
         with open(team_out, "w") as f:
             json.dump(team_json, f, indent=2)
-        print(f"[PIPELINE]   Wrote {team_out.name} ({len(roster)} players)")
+        print(f"[PIPELINE]   Wrote {team_out} ({len(roster)} players)")
 
-        app_out = SHARKS_DIR / "app_stats.json"
+        app_out = team_dir / "app_stats.json"
         with open(app_out, "w") as f:
             json.dump(app_stats, f, indent=2)
 
-        season_out = SHARKS_DIR / "season_stats.csv"
+        season_out = team_dir / "season_stats.csv"
         shutil.copy2(csv_path, season_out)
 
         stages["csv_ingest"] = {"status": "ok", "detail": f"{len(roster)} players parsed"}
@@ -90,20 +113,27 @@ def run_pipeline(csv_path: Path, scorebook_path: Path | None, out_path: Path) ->
         print(f"[PIPELINE] FATAL: CSV ingest failed: {exc}")
         raise RuntimeError(f"CSV ingest failed: {exc}") from exc
 
-    # ── Stage 2: SQLite snapshot ─────────────────────────────────────────────
+    # ── Stage 2: SQLite snapshot (Sharks-only in Phase 1) ────────────────────
     print("[PIPELINE] Stage 2: SQLite snapshot")
     snapshot_id: int | None = None
-    try:
-        from stats_db import record_sharks_snapshot
+    if not is_sharks:
+        stages["sqlite_snapshot"] = {
+            "status": "skipped",
+            "detail": f"Phase 1: SQLite snapshot is Sharks-only (team={team.data_slug})",
+        }
+        print(f"[PIPELINE]   skipped (non-Sharks team)")
+    else:
+        try:
+            from stats_db import record_sharks_snapshot
 
-        snapshot_id = record_sharks_snapshot(
-            team_json, source="gc_ingest_pipeline", notes=csv_path.name
-        )
-        stages["sqlite_snapshot"] = {"status": "ok", "detail": f"snapshot_id={snapshot_id}"}
-        print(f"[PIPELINE]   snapshot_id={snapshot_id}")
-    except Exception as exc:
-        stages["sqlite_snapshot"] = {"status": "error", "detail": str(exc)}
-        print(f"[PIPELINE] WARNING: SQLite snapshot failed (non-fatal): {exc}")
+            snapshot_id = record_sharks_snapshot(
+                team_json, source="gc_ingest_pipeline", notes=csv_path.name
+            )
+            stages["sqlite_snapshot"] = {"status": "ok", "detail": f"snapshot_id={snapshot_id}"}
+            print(f"[PIPELINE]   snapshot_id={snapshot_id}")
+        except Exception as exc:
+            stages["sqlite_snapshot"] = {"status": "error", "detail": str(exc)}
+            print(f"[PIPELINE] WARNING: SQLite snapshot failed (non-fatal): {exc}")
 
     # ── Stage 3 (optional): Scorebook OCR ────────────────────────────────────
     scorebook_data: dict | None = None
@@ -127,41 +157,62 @@ def run_pipeline(csv_path: Path, scorebook_path: Path | None, out_path: Path) ->
     else:
         stages["scorebook_ocr"] = {"status": "skipped", "detail": "no --scorebook provided"}
 
-    # ── Stage 4: SWOT analysis ───────────────────────────────────────────────
+    # ── Stage 4: SWOT analysis (Sharks-only in Phase 1) ──────────────────────
     print("[PIPELINE] Stage 4: SWOT analysis")
     swot_result: dict | None = None
-    try:
-        from swot_analyzer import run_sharks_analysis
+    if not is_sharks:
+        stages["swot_analysis"] = {
+            "status": "skipped",
+            "detail": f"Phase 1: SWOT is Sharks-only (team={team.data_slug})",
+        }
+        print(f"[PIPELINE]   skipped (non-Sharks team)")
+    else:
+        try:
+            from swot_analyzer import run_sharks_analysis
 
-        swot_result = run_sharks_analysis()
-        player_count = len((swot_result or {}).get("player_analyses", []))
-        stages["swot_analysis"] = {"status": "ok", "detail": f"{player_count} players analyzed"}
-    except Exception as exc:
-        stages["swot_analysis"] = {"status": "error", "detail": str(exc)}
-        print(f"[PIPELINE] FATAL: SWOT analysis failed: {exc}")
-        raise RuntimeError(f"SWOT analysis failed: {exc}") from exc
+            swot_result = run_sharks_analysis()
+            player_count = len((swot_result or {}).get("player_analyses", []))
+            stages["swot_analysis"] = {"status": "ok", "detail": f"{player_count} players analyzed"}
+        except Exception as exc:
+            stages["swot_analysis"] = {"status": "error", "detail": str(exc)}
+            print(f"[PIPELINE] FATAL: SWOT analysis failed: {exc}")
+            raise RuntimeError(f"SWOT analysis failed: {exc}") from exc
 
-    # ── Stage 5: Lineup optimization ─────────────────────────────────────────
+    # ── Stage 5: Lineup optimization (Sharks-only in Phase 1) ────────────────
     print("[PIPELINE] Stage 5: Lineup optimization")
-    try:
-        from lineup_optimizer import run as run_lineup
+    if not is_sharks:
+        stages["lineup_optimization"] = {
+            "status": "skipped",
+            "detail": f"Phase 1: lineup optimizer is Sharks-only (team={team.data_slug})",
+        }
+        print(f"[PIPELINE]   skipped (non-Sharks team)")
+    else:
+        try:
+            from lineup_optimizer import run as run_lineup
 
-        run_lineup()
-        stages["lineup_optimization"] = {"status": "ok", "detail": "3 strategies generated"}
-    except Exception as exc:
-        stages["lineup_optimization"] = {"status": "error", "detail": str(exc)}
-        print(f"[PIPELINE] WARNING: Lineup optimization failed (non-fatal): {exc}")
+            run_lineup()
+            stages["lineup_optimization"] = {"status": "ok", "detail": "3 strategies generated"}
+        except Exception as exc:
+            stages["lineup_optimization"] = {"status": "error", "detail": str(exc)}
+            print(f"[PIPELINE] WARNING: Lineup optimization failed (non-fatal): {exc}")
 
-    # ── Stage 6: Practice plan ───────────────────────────────────────────────
+    # ── Stage 6: Practice plan (Sharks-only in Phase 1) ──────────────────────
     print("[PIPELINE] Stage 6: Practice plan")
-    try:
-        from practice_gen import run as run_practice
+    if not is_sharks:
+        stages["practice_plan"] = {
+            "status": "skipped",
+            "detail": f"Phase 1: practice plan is Sharks-only (team={team.data_slug})",
+        }
+        print(f"[PIPELINE]   skipped (non-Sharks team)")
+    else:
+        try:
+            from practice_gen import run as run_practice
 
-        run_practice()
-        stages["practice_plan"] = {"status": "ok", "detail": "plan generated"}
-    except Exception as exc:
-        stages["practice_plan"] = {"status": "error", "detail": str(exc)}
-        print(f"[PIPELINE] WARNING: Practice plan failed (non-fatal): {exc}")
+            run_practice()
+            stages["practice_plan"] = {"status": "ok", "detail": "plan generated"}
+        except Exception as exc:
+            stages["practice_plan"] = {"status": "error", "detail": str(exc)}
+            print(f"[PIPELINE] WARNING: Practice plan failed (non-fatal): {exc}")
 
     # ── Stage 7: Assemble report ─────────────────────────────────────────────
     print("[PIPELINE] Stage 7: Assembling gc_report.json")
@@ -344,8 +395,13 @@ Examples:
     )
     parser.add_argument("--csv", metavar="PATH", help="Path to GC CSV export (relative to project root or absolute)")
     parser.add_argument("--scorebook", metavar="PATH", help="Optional: path to scorebook PDF or image")
-    parser.add_argument("--out", metavar="PATH", default="", help="Output path for gc_report.json (default: data/sharks/gc_report.json)")
+    parser.add_argument("--out", metavar="PATH", default="", help="Output path for gc_report.json (default: data/<slug>/gc_report.json)")
+    parser.add_argument("--team", default="sharks",
+                        help="data_slug from config/teams.yaml (default: sharks)")
     args = parser.parse_args()
+
+    team = require_by_slug(args.team)
+    team_dir = _team_dir(team)
 
     # Resolve CSV path
     if args.csv:
@@ -374,7 +430,7 @@ Examples:
             scorebook_path = None
 
     # Resolve output path
-    out_path = Path(args.out) if args.out else SHARKS_DIR / "gc_report.json"
+    out_path = Path(args.out) if args.out else team_dir / "gc_report.json"
     if not out_path.is_absolute():
         out_path = _ROOT_DIR / out_path
 
@@ -385,7 +441,7 @@ Examples:
     print()
 
     try:
-        report = run_pipeline(csv_path, scorebook_path, out_path)
+        report = run_pipeline(csv_path, scorebook_path, out_path, team=team)
         stages = report.get("stages", {})
         passed = sum(1 for s in stages.values() if s["status"] in ("ok", "skipped"))
         total = len(stages)

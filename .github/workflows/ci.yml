@@ -53,20 +53,19 @@ jobs:
           python-version: "3.11"
           cache: pip
 
-      - run: pip install -r requirements.txt
-
-      - name: Smoke-test stats_normalizer
-        run: python -c "from stats_normalizer import safe_float; print('stats_normalizer OK')"
-        working-directory: tools
-
-      - name: Smoke-test swot_analyzer
-        run: python -c "from swot_analyzer import compute_derived_stats; print('swot_analyzer OK')"
-        working-directory: tools
-
-      - name: Smoke-test lineup_optimizer
-        run: python -c "from lineup_optimizer import compute_batting_score; print('lineup_optimizer OK')"
-        working-directory: tools
+      - run: pip install -r requirements-dev.txt
 
       - name: Smoke-test sync_daemon (syntax check)
         run: python -c "import py_compile; py_compile.compile('sync_daemon.py', doraise=True); print('sync_daemon OK')"
         working-directory: tools
+
+      - name: Run pytest with coverage
+        run: pytest --cov=. --cov-config=.coveragerc --cov-report=term-missing --cov-report=xml
+
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: coverage.xml
+          retention-days: 14

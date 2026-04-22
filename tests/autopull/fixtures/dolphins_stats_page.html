@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head><title>Dolphins Stats</title></head>
+<body>
+  <h1>Season Stats — Dolphins</h1>
+  <button data-testid="export-csv" id="dl">Export CSV</button>
+  <script>
+    document.getElementById('dl').addEventListener('click', function() {
+      const blob = new Blob(
+        ["Player,AB,H,BB,K,HBP,RBI,BA,OBP,SLG\n" +
+         "Finn Green,22,10,4,3,0,7,0.455,0.538,0.727\n" +
+         "Marina Blue,19,6,3,6,1,4,0.316,0.391,0.421\n"],
+        {type: "text/csv"}
+      );
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = "season_stats.csv";
+      document.body.appendChild(a); a.click(); a.remove();
+    });
+  </script>
+</body>
+</html>
