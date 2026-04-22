@@ -4035,6 +4035,24 @@ def _record_h2h_from_games():
 def _trigger_post_game_analysis():
     """Run immediately after a game ends: re-scrape, enrich, update SWOT + lineups."""
     logging.info("[Post-Game] Starting post-game analysis pipeline...")
+
+    # Kick the autopull (CSV download + ingest) in a detached subprocess so we
+    # don't block the daemon's state loop. The autopull CLI handles its own
+    # idempotency, kill-switch, and breakers.
+    try:
+        import subprocess
+        import sys as _sys
+        subprocess.Popen(
+            [_sys.executable, "-m", "tools.autopull.cli", "--trigger=postgame"],
+            cwd=str(Path(__file__).resolve().parent.parent),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        logging.info("[Post-Game] autopull postgame trigger dispatched")
+    except Exception as e:
+        logging.warning(f"[Post-Game] autopull postgame trigger failed to dispatch: {e}")
+
     success = False
     try:
         from parse_scorebook_pdf import run as parse_pdfs
