@@ -337,6 +337,10 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    # Load repo-root .env so manual invocations don't silently short-circuit
+    # on GC_AUTOPULL_ENABLED. Existing process env wins (dotenv does not override).
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).resolve().parents[2] / ".env")
     cfg = config_mod.load(require_gmail=True)
     result = run_once(cfg=cfg, trigger=args.trigger, runner=default_runner)
 

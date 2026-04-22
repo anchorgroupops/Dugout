@@ -186,7 +186,7 @@ def record_sharks_snapshot(team_data: dict, source: str = "sync_cycle", notes: s
                 (pkey, number, first, last, display, 1, captured_at),
             )
 
-            b = normalize_batting_row(player.get("batting", player))
+            b = normalize_batting_row(player.get("batting") or player)
             cur.execute(
                 """
                 INSERT INTO batting_snapshots(
@@ -218,7 +218,7 @@ def record_sharks_snapshot(team_data: dict, source: str = "sync_cycle", notes: s
                 ),
             )
 
-            p = normalize_pitching_row(player.get("pitching", player))
+            p = normalize_pitching_row(player.get("pitching") or {})
             cur.execute(
                 """
                 INSERT INTO pitching_snapshots(snapshot_id, player_key, ip, er, bb, h, so, whip, era)
@@ -237,7 +237,7 @@ def record_sharks_snapshot(team_data: dict, source: str = "sync_cycle", notes: s
                 ),
             )
 
-            f = normalize_fielding_row(player.get("fielding", player))
+            f = normalize_fielding_row(player.get("fielding") or {})
             cur.execute(
                 """
                 INSERT INTO fielding_snapshots(snapshot_id, player_key, po, a, e, fpct)
