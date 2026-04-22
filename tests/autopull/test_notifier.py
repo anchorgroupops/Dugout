@@ -4,10 +4,13 @@ from unittest.mock import MagicMock, patch
 from tools.autopull import notifier as n
 
 
-def _summary(outcome="success", failure_reason=None, drift="none"):
+def _summary(outcome="success", failure_reason=None, drift="none",
+             team_slug="sharks", team_name="The Sharks"):
     return n.RunSummary(
         run_id=42,
         trigger="cron",
+        team_slug=team_slug,
+        team_name=team_name,
         outcome=outcome,
         failure_reason=failure_reason,
         csv_path="/tmp/x.csv" if outcome == "success" else None,
@@ -81,3 +84,17 @@ def test_n8n_failure_does_not_break_other_channels(monkeypatch, caplog):
     notifier.emit(_summary(outcome="failure", failure_reason="x"))
     gmail.send.assert_called_once()
     push.notify.assert_called_once()
+
+
+def test_subject_and_push_include_team_name():
+    gmail = MagicMock()
+    n8n = MagicMock()
+    push = MagicMock()
+    notifier = n.Notifier(gmail_sender=gmail, n8n_poster=n8n, pusher=push,
+                          status_webhook_url="https://x/y", notify_to_email="a@b")
+    notifier.emit(_summary(outcome="failure", failure_reason="auth",
+                           team_name="The Dolphins"))
+    subject = gmail.send.call_args.kwargs["subject"]
+    assert "Dolphins" in subject
+    msg = push.notify.call_args[0][0]
+    assert "Dolphins" in msg

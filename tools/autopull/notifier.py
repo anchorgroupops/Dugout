@@ -12,6 +12,8 @@ log = logging.getLogger(__name__)
 class RunSummary:
     run_id: int
     trigger: str
+    team_slug: str
+    team_name: str
     outcome: str                    # 'success' | 'failure' | 'quarantined'
     failure_reason: str | None
     csv_path: str | None
@@ -60,10 +62,11 @@ class Notifier:
     def _send_email(self, s: RunSummary) -> None:
         if not self._to:
             return
-        subject = f"[Dugout Autopull] {s.outcome.upper()} run #{s.run_id}"
+        subject = f"[Dugout Autopull] {s.outcome.upper()} {s.team_name} run #{s.run_id}"
         body_lines = [
             f"Run ID: {s.run_id}",
             f"Trigger: {s.trigger}",
+            f"Team: {s.team_name}",
             f"Outcome: {s.outcome}",
             f"Drift: {s.drift_severity}",
         ]
@@ -84,13 +87,14 @@ class Notifier:
 
     @staticmethod
     def _short_message(s: RunSummary) -> str:
+        tag = f"[{s.team_name}]"
         if s.drift_severity == "critical":
-            return f"GC schema drift CRITICAL (run #{s.run_id})"
+            return f"GC schema drift CRITICAL {tag} (run #{s.run_id})"
         if s.outcome == "failure":
-            return f"GC autopull failed: {s.failure_reason or 'unknown'} (#{s.run_id})"
+            return f"GC autopull failed: {s.failure_reason or 'unknown'} {tag} (#{s.run_id})"
         if s.outcome == "quarantined":
-            return f"GC autopull quarantined: {s.failure_reason or 'bad CSV'} (#{s.run_id})"
-        return f"GC autopull: {s.outcome} (#{s.run_id})"
+            return f"GC autopull quarantined: {s.failure_reason or 'bad CSV'} {tag} (#{s.run_id})"
+        return f"GC autopull: {s.outcome} {tag} (#{s.run_id})"
 
     @staticmethod
     def _safe(channel: str, fn) -> None:
