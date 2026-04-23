@@ -143,7 +143,8 @@ const Practice = ({ team, schedule, isMobile = false, isLandscape = false }) => 
     setLoading(true);
     setError('');
     try {
-      const url = '/data/sharks/practice_insights.json';
+      // Dynamic endpoint — nothing writes practice_insights.json to disk.
+      const url = '/api/practice-insights';
       const res = await fetch(url);
       if (!res.ok) throw new Error(`practice insights status ${res.status}`);
       const data = await res.json();
