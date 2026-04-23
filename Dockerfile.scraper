@@ -28,13 +28,10 @@ COPY scripts/ ./scripts/
 # Create runtime directories (populated by mounted volumes)
 RUN mkdir -p /app/data /app/logs
 
-# Drop root: run as UID 1000 to match the Pi host user (joelycannoli) so
-# bind-mounted /app/data and /app/logs — owned on the host by that user —
-# are writable from inside the container.  The base playwright image
-# already has `pwuser` at UID 1000, so we just chown /app and switch to
-# that UID rather than creating a new named user.
-RUN chown -R 1000:1000 /app
-USER 1000:1000
+# Drop root: run as a dedicated unprivileged user
+RUN groupadd -r sharks && useradd -r -g sharks -d /app -s /sbin/nologin sharks \
+    && chown -R sharks:sharks /app
+USER sharks
 
 # Healthcheck: try Flask API first, fall back to data dir check (docker-compose overrides per service)
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
