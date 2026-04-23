@@ -386,6 +386,11 @@ def _write_json_file(path: Path, data, indent: int = 2):
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=indent)
+        # tempfile.mkstemp creates with mode 0600 (owner only).  Widen to
+        # 0644 so sibling containers (e.g. nginx in sharks_dashboard,
+        # running as a different user) can serve the JSON over the
+        # /data/* static path.
+        os.chmod(tmp_path, 0o644)
         os.replace(tmp_path, str(path))
     except Exception:
         try:
