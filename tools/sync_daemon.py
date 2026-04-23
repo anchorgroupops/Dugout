@@ -2797,6 +2797,71 @@ def handle_sync_status():
     return jsonify({**_SYNC_STATUS, "milestones": milestones})
 
 
+_KICK_STATUS: dict = {
+    "status": "idle",
+    "last_started": "",
+    "last_completed": "",
+    "last_success": None,
+    "error": "",
+}
+_KICK_LOCK = threading.Lock()
+
+
+@app.route('/api/sync/kick', methods=['POST'])
+def handle_sync_kick():
+    """Manually trigger one run_sync_cycle() pass in a background thread.
+
+    For recovery when the sync_daemon container's own 12-hour IDLE loop
+    is too slow (e.g. you just fixed a stale-data bug and don't want to
+    wait until the next scheduled cycle).
+
+    Secured with the same bearer token used by /api/deploy
+    (DEPLOY_WEBHOOK_TOKEN).  Returns 202 immediately; poll
+    /api/sync/kick/status or /api/health to see results.
+    """
+    auth_err = _require_deploy_token()
+    if auth_err:
+        return auth_err
+
+    with _KICK_LOCK:
+        if _KICK_STATUS["status"] == "running":
+            return jsonify({
+                "status": "already_running",
+                "since": _KICK_STATUS["last_started"],
+            }), 409
+        _KICK_STATUS["status"] = "running"
+        _KICK_STATUS["last_started"] = datetime.now(ET).isoformat()
+        _KICK_STATUS["error"] = ""
+
+    def _run():
+        success = False
+        err = ""
+        try:
+            success = bool(run_sync_cycle())
+        except Exception as e:  # noqa: BLE001 — last-ditch guard; run_sync_cycle already has its own
+            err = str(e)
+            logging.exception("[Kick] run_sync_cycle raised uncaught")
+        finally:
+            with _KICK_LOCK:
+                _KICK_STATUS["status"] = "idle"
+                _KICK_STATUS["last_completed"] = datetime.now(ET).isoformat()
+                _KICK_STATUS["last_success"] = success
+                _KICK_STATUS["error"] = err
+
+    threading.Thread(target=_run, daemon=True, name="sync-kick").start()
+    return jsonify({"status": "started", "since": _KICK_STATUS["last_started"]}), 202
+
+
+@app.route('/api/sync/kick/status', methods=['GET'])
+def handle_sync_kick_status():
+    """Report the most recent kick attempt.  Same token as /api/sync/kick."""
+    auth_err = _require_deploy_token()
+    if auth_err:
+        return auth_err
+    with _KICK_LOCK:
+        return jsonify(dict(_KICK_STATUS))
+
+
 _DEPLOY_STATUS: dict = {"status": "idle", "last_triggered": "", "last_completed": "", "error": ""}
 _DEPLOY_LOCK = threading.Lock()
 
