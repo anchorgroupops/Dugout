@@ -16,7 +16,9 @@
       "mcp__a7ff7ca0-0f34-4323-a520-f5ae16c67295__validate_workflow",
       "mcp__a7ff7ca0-0f34-4323-a520-f5ae16c67295__get_sdk_reference",
       "mcp__a7ff7ca0-0f34-4323-a520-f5ae16c67295__search_nodes",
-      "mcp__a7ff7ca0-0f34-4323-a520-f5ae16c67295__create_workflow_from_code"
+      "mcp__a7ff7ca0-0f34-4323-a520-f5ae16c67295__create_workflow_from_code",
+      "Bash(ssh joelycannoli@192.168.7.222:*)",
+      "Bash(ssh joelycannoli@raspberrypi:*)"
     ]
   }
 }
