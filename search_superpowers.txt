@@ -1,0 +1,28 @@
+[?25l[90mΓöé[39m
+[35mΓùÆ[39m  Searching for "superpowers"[999D[J[35mΓùÉ[39m  Searching for "superpowers"[999D[J[35mΓùô[39m  Searching for "superpowers"[999D[J[35mΓùæ[39m  Searching for "superpowers"[999D[J[35mΓùÆ[39m  Searching for "superpowers"[999D[J[35mΓùÉ[39m  Searching for "superpowers"[999D[J[35mΓùô[39m  Searching for "superpowers"[999D[J[35mΓùæ[39m  Searching for "superpowers"[999D[J[35mΓùÆ[39m  Searching for "superpowers".[999D[J[35mΓùÉ[39m  Searching for "superpowers".[999D[J[35mΓùô[39m  Searching for "superpowers".[999D[J[35mΓùæ[39m  Searching for "superpowers".[999D[J[35mΓùÆ[39m  Searching for "superpowers".[999D[J[35mΓùÉ[39m  Searching for "superpowers".[999D[J[35mΓùô[39m  Searching for "superpowers".[999D[J[35mΓùæ[39m  Searching for "superpowers".[999D[J[35mΓùÆ[39m  Searching for "superpowers"..[999D[J[35mΓùÉ[39m  Searching for "superpowers"..[999D[J[35mΓùô[39m  Searching for "superpowers"..[999D[J[35mΓùæ[39m  Searching for "superpowers"..[999D[J[35mΓùÆ[39m  Searching for "superpowers"..[999D[J[35mΓùÉ[39m  Searching for "superpowers"..[999D[J[35mΓùô[39m  Searching for "superpowers"..[999D[J[35mΓùæ[39m  Searching for "superpowers"..[999D[J[35mΓùÆ[39m  Searching for "superpowers"...[999D[J[35mΓùÉ[39m  Searching for "superpowers"...[999D[J[35mΓùô[39m  Searching for "superpowers"...[999D[J[35mΓùæ[39m  Searching for "superpowers"...[999D[J[35mΓùÆ[39m  Searching for "superpowers"...[999D[J[35mΓùÉ[39m  Searching for "superpowers"...[999D[J[35mΓùô[39m  Searching for "superpowers"...[999D[J[35mΓùæ[39m  Searching for "superpowers"...[999D[J[35mΓùÆ[39m  Searching for "superpowers"...[999D[J[35mΓùÉ[39m  Searching for "superpowers"[999D[J[35mΓùô[39m  Searching for "superpowers"[999D[J[35mΓùæ[39m  Searching for "superpowers"[999D[J[35mΓùÆ[39m  Searching for "superpowers"[999D[J[35mΓùÉ[39m  Searching for "superpowers"[999D[J[35mΓùô[39m  Searching for "superpowers"[999D[J[35mΓùæ[39m  Searching for "superpowers"[999D[J[35mΓùÆ[39m  Searching for "superpowers"[999D[J[35mΓùÉ[39m  Searching for "superpowers".[999D[J[35mΓùô[39m  Searching for "superpowers".[999D[J[35mΓùæ[39m  Searching for "superpowers".[999D[J[35mΓùÆ[39m  Searching for "superpowers".[999D[J[35mΓùÉ[39m  Searching for "superpowers".[999D[J[35mΓùô[39m  Searching for "superpowers".[999D[J[35mΓùæ[39m  Searching for "superpowers".[999D[J[35mΓùÆ[39m  Searching for "superpowers".[999D[J[35mΓùÉ[39m  Searching for "superpowers"..[999D[J[35mΓùô[39m  Searching for "superpowers"..[999D[J[35mΓùæ[39m  Searching for "superpowers"..[999D[J[35mΓùÆ[39m  Searching for "superpowers"..[999D[J[35mΓùÉ[39m  Searching for "superpowers"..[999D[J[35mΓùô[39m  Searching for "superpowers"..[999D[J[32mΓùç[39m  Search complete
+[?25h
+[1mFound 5 skills:[22m
+
+  [2m1.[22m [1m[36mSuperpowers: Skill Orchestrator[39m[22m
+     [2mEnforces a disciplined workflow by requiring the invocation of relevaΓÇª[22m
+     [4mhttps://www.skill.fish/skill/superpowers-skill-orchestrator[24m
+
+  [2m2.[22m [1m[36mSuperpowers: Skill Usage Manager[39m[22m
+     [2mEnforces a disciplined protocol for invoking specialized skills beforΓÇª[22m
+     [4mhttps://www.skill.fish/skill/superpowers-skill-usage-manager[24m
+
+  [2m3.[22m [1m[36mSuperpowers: Skills-First Workflow[39m[22m
+     [2mEnforces a disciplined, skills-first approach by requiring Claude toΓÇª[22m
+     [4mhttps://www.skill.fish/skill/superpowers-skills-first-workflow[24m
+
+  [2m4.[22m [1m[36mSuperpowers Skill Orchestrator[39m[22m
+     [2mEnforces a disciplined protocol for discovering and invoking specialiΓÇª[22m
+     [4mhttps://www.skill.fish/skill/superpowers-skill-orchestrator-1[24m
+
+  [2m5.[22m [1m[36mSuperpowers Orchestrator[39m[22m
+     [2mEnforces disciplined skill discovery and invocation to ensure specialΓÇª[22m
+     [4mhttps://www.skill.fish/skill/superpowers-orchestrator-1[24m
+
+[90mΓöé[39m
+[90mΓöö[39m  [2mSearch more at https://www.skill.fish[22m
+

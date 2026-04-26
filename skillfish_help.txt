@@ -1,0 +1,24 @@
+Usage: skillfish add [options] <repo> [skill-name]
+
+Install a skill from a GitHub repository
+
+Arguments:
+  repo           GitHub repository (owner/repo or owner/repo/plugin/skill)
+  skill-name     Install a specific skill by name (from SKILL.md frontmatter)
+
+Options:
+  --force        Overwrite existing skills without prompting
+  -y, --yes      Skip all confirmation prompts
+  --all          Install all skills found in the repository
+  --project      Install to current project (./.claude)
+  --global       Install to home directory (~/.claude)
+  --path <path>  Path to a specific skill in the repository
+  -h, --help     Display help for command
+
+Examples:
+  $ skillfish add owner/repo                  Install from a repository
+  $ skillfish add owner/repo my-skill         Install skill by name
+  $ skillfish add owner/repo --all            Install all skills in repo
+  $ skillfish add owner/repo/plugin/skill     Install a specific skill by path
+  $ skillfish add owner/repo --path path/to   Install skill at specific path
+  $ skillfish add owner/repo --project        Install to current project only

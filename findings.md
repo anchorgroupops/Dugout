@@ -19,3 +19,22 @@
 
 1. **[High]** Performance spikes during manual sync may be due to browser-based scraping; consider moving full scraping logic to a background service if latency increases.
 2. **[Medium]** PWA caching strategy (NetworkFirst) for API data may need adjustment if offline usage is a primary requirement.
+
+## 2026-04-26
+
+### Attempted Fixes
+
+| # | Timestamp | Action / Command | Output (truncated) | Result |
+| --- | --------- | ---------------- | ------------------ | ------ |
+| 1 | 00:41 | `npx skillfish add obra/superpowers` | Interactive prompt hung | ❌ Failed |
+| 2 | 00:44 | `$env:CI="true"; npx skillfish add ...`| Interactive prompt hung | ❌ Failed |
+| 3 | 00:45 | `git clone https://.../superpowers.git` | `Copy-Item -Recurse` succeeded | ✅ Success |
+
+### Session Summary
+
+**Worked:** Bypassed `skillfish` interactive prompt bugs by directly cloning the `superpowers` repository and copying the 14 skills to the global `~/.gemini/antigravity/skills/` directory.
+**Failed:** Automated installation using `npx skillfish` failed due to blocking interactive prompts not respecting `--all`, `--yes`, or `CI=true` logic in the current version.
+**Next Steps:**
+
+1. Leverage the newly installed `audit-website` skill to perform a comprehensive audit of the Dugout application dashboard.
+2. Utilize the Superpowers orchestrator and specialized subagents for future complex workflows as outlined in the global W.R.A.P.S. framework.

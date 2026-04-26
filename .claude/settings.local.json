@@ -18,7 +18,20 @@
       "mcp__a7ff7ca0-0f34-4323-a520-f5ae16c67295__search_nodes",
       "mcp__a7ff7ca0-0f34-4323-a520-f5ae16c67295__create_workflow_from_code",
       "Bash(ssh joelycannoli@192.168.7.222:*)",
-      "Bash(ssh joelycannoli@raspberrypi:*)"
+      "Bash(ssh joelycannoli@raspberrypi:*)",
+      "Bash(git stash *)",
+      "Bash(gh api *)",
+      "Bash(npm audit *)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); vulns=d.get\\('vulnerabilities',{}\\); [print\\(k, v['severity'], v.get\\('fixAvailable'\\)\\) for k,v in vulns.items\\(\\)]\")",
+      "Bash(pip list *)",
+      "Bash(python3 -c ' *)",
+      "Bash(gh auth *)",
+      "Bash(node -e \"const l=require\\('./package-lock.json'\\); const p=l.packages; ['@xmldom/xmldom','postcss','esbuild','vite'].forEach\\(n => { const k=Object.keys\\(p\\).find\\(k=>k.endsWith\\('/'+n\\) && !k.includes\\('node_modules/node_modules'\\)\\); if\\(k\\) console.log\\(n, p[k].version\\); }\\);\")",
+      "Bash(curl -s \"https://api.github.com/repos/anchorgroupops/Dugout/actions/runs?per_page=3&branch=main\")",
+      "Bash(curl *)",
+      "Bash(git fetch *)",
+      "Bash(git *)",
+      "mcp__claude_ai_Raspberry_Pi__pi_run_command"
     ]
   }
 }
