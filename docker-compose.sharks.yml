@@ -10,6 +10,8 @@ services:
     build:
       context: ./client
       dockerfile: Dockerfile
+      args:
+        VITE_SPOTIFY_CLIENT_ID: ${VITE_SPOTIFY_CLIENT_ID:-}
     container_name: sharks_dashboard
     restart: unless-stopped
     depends_on:

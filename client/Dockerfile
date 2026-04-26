@@ -7,6 +7,10 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci --prefer-offline
 
+# Spotify public client ID — not a secret, safe to bake into the image.
+ARG VITE_SPOTIFY_CLIENT_ID
+ENV VITE_SPOTIFY_CLIENT_ID=$VITE_SPOTIFY_CLIENT_ID
+
 # Copy source and build.
 # VITE_SKIP_DATA_SYNC=1 suppresses the sync:data prebuild hook in Docker;
 # data is mounted as a volume at runtime, not baked into the image.

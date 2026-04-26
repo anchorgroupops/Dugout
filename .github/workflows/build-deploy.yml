@@ -37,6 +37,8 @@ jobs:
           tags: |
             ghcr.io/${{ env.OWNER }}/sharks-dashboard:latest
             ghcr.io/${{ env.OWNER }}/sharks-dashboard:${{ github.sha }}
+          build-args: |
+            VITE_SPOTIFY_CLIENT_ID=0f24c048c5af4e8aaf82da48482ec1fd
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
