@@ -479,7 +479,7 @@ function App() {
         </nav>
       )}
 
-      <main className="animate-fade-in">
+      <main id="main-content" className="animate-fade-in">
         {/* Desktop hero */}
         {!isMobile && (
           <div style={{ marginBottom: '2rem' }}>
