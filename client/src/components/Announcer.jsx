@@ -210,13 +210,17 @@ function PlayerCard({ player, onSavePhonetics, onRender }) {
     }
   };
 
-  const handlePreview = () => {
+  const handlePreview = async () => {
     if (previewing) {
       stopAudio();
       setPreviewing(false);
     } else if (player.announcer_audio_url) {
       setPreviewing(true);
-      playClip(player.announcer_audio_url, () => setPreviewing(false));
+      try {
+        await playClip(player.announcer_audio_url, () => setPreviewing(false));
+      } catch {
+        setPreviewing(false);
+      }
     }
   };
 
@@ -509,7 +513,7 @@ function NowPlayingView({ roster, lineups, onBack }) {
       }
     }
 
-    return roster.filter(p => p.is_active && p.status === 'ready');
+    return roster.filter(p => p.is_active);
   })();
 
   const current = battingOrder[currentIdx] || null;
@@ -899,7 +903,7 @@ function useWorkerStatus() {
   return workerStatus;
 }
 
-function WizardModal({ onClose, roster }) {
+function WizardModal({ onClose, roster, onAddSong }) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -909,6 +913,9 @@ function WizardModal({ onClose, roster }) {
   const [spotifyResults, setSpotifyResults] = useState([]);
   const [spotifyQuery, setSpotifyQuery] = useState('');
   const [spotifyLoading, setSpotifyLoading] = useState(false);
+  // Player selector for adding songs from Catalog/Spotify tabs
+  const [selectedPlayerId, setSelectedPlayerId] = useState(() => roster[0]?.id || '');
+  const [addingId, setAddingId] = useState(null); // tracks which row is being added
 
   useEffect(() => {
     import('../services/SpotifyService').then(({ isAuthenticated }) => {
@@ -954,9 +961,31 @@ function WizardModal({ onClose, roster }) {
     startAuth();
   };
 
+  const handleAdd = async (rowId, url, label, startMs) => {
+    if (!selectedPlayerId || !url) return;
+    setAddingId(rowId);
+    try {
+      await onAddSong(selectedPlayerId, url, label, startMs || 0);
+    } finally {
+      setAddingId(null);
+    }
+  };
+
+  // Player selector shown in Catalog and Spotify tabs
+  const PlayerSelector = () => (
+    <div className="announcer-wizard-player-selector">
+      <label>Add to:</label>
+      <select value={selectedPlayerId} onChange={e => setSelectedPlayerId(e.target.value)}>
+        {roster.map(p => (
+          <option key={p.id} value={p.id}>#{p.number} {p.first} {p.last}</option>
+        ))}
+      </select>
+    </div>
+  );
+
   return createPortal(
     <div className="announcer-modal-overlay" onClick={onClose}>
-      <div className="announcer-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 520 }}>
+      <div className="announcer-modal glass-panel" onClick={e => e.stopPropagation()} style={{ maxWidth: 520 }}>
         <div className="announcer-modal-header">
           <h3><Wand2 size={16} /> Music Wizard</h3>
           <button className="announcer-modal-close" onClick={onClose}><X size={18} /></button>
@@ -975,6 +1004,7 @@ function WizardModal({ onClose, roster }) {
 
         {tab === 'search' && (
           <div className="announcer-wizard-body">
+            <PlayerSelector />
             <form onSubmit={handleSearch} className="announcer-wizard-search-form">
               <input
                 className="announcer-song-input"
@@ -999,6 +1029,15 @@ function WizardModal({ onClose, roster }) {
                       <span className="announcer-song-start-badge">{(row.optimal_start_ms / 1000).toFixed(1)}s</span>
                     )}
                     <span className="announcer-wizard-energy" title="Energy score">{Math.round(row.energy_score * 100)}%</span>
+                    <button
+                      className="announcer-btn announcer-btn-secondary"
+                      style={{ padding: '2px 8px', fontSize: '0.72rem' }}
+                      disabled={addingId === row.id || !selectedPlayerId}
+                      onClick={() => handleAdd(row.id, row.audio_url || row.url, row.title, row.optimal_start_ms)}
+                    >
+                      {addingId === row.id ? <RefreshCw size={11} className="sync-spin" /> : <Plus size={11} />}
+                      Add
+                    </button>
                   </div>
                 </div>
               ))}
@@ -1023,20 +1062,36 @@ function WizardModal({ onClose, roster }) {
                   {sugg.length === 0 && !loading && (
                     <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>No suggestions</p>
                   )}
-                  {sugg.map((row, i) => (
-                    <div key={i} className="announcer-wizard-result-row">
-                      <div className="announcer-wizard-result-info">
-                        <span className="announcer-wizard-result-title">{row.title}</span>
-                        <span className="announcer-wizard-result-artist">{row.artist}</span>
+                  {sugg.map((row, i) => {
+                    const rowKey = `${pid}-${i}`;
+                    return (
+                      <div key={i} className="announcer-wizard-result-row">
+                        <div className="announcer-wizard-result-info">
+                          <span className="announcer-wizard-result-title">{row.title}</span>
+                          <span className="announcer-wizard-result-artist">{row.artist}</span>
+                        </div>
+                        <div className="announcer-wizard-result-meta">
+                          {row.optimal_start_ms > 0 && (
+                            <span className="announcer-song-start-badge">{(row.optimal_start_ms / 1000).toFixed(1)}s</span>
+                          )}
+                          <span className="announcer-wizard-energy">{Math.round((row.energy_score || 0) * 100)}%</span>
+                          <button
+                            className="announcer-btn announcer-btn-secondary"
+                            style={{ padding: '2px 8px', fontSize: '0.72rem' }}
+                            disabled={addingId === rowKey}
+                            onClick={async () => {
+                              setAddingId(rowKey);
+                              try { await onAddSong(pid, row.audio_url || row.url, row.title, row.optimal_start_ms || 0); }
+                              finally { setAddingId(null); }
+                            }}
+                          >
+                            {addingId === rowKey ? <RefreshCw size={11} className="sync-spin" /> : <Plus size={11} />}
+                            Add
+                          </button>
+                        </div>
                       </div>
-                      <div className="announcer-wizard-result-meta">
-                        {row.optimal_start_ms > 0 && (
-                          <span className="announcer-song-start-badge">{(row.optimal_start_ms / 1000).toFixed(1)}s</span>
-                        )}
-                        <span className="announcer-wizard-energy">{Math.round((row.energy_score || 0) * 100)}%</span>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               );
             })}
@@ -1057,6 +1112,7 @@ function WizardModal({ onClose, roster }) {
               </div>
             ) : (
               <>
+                <PlayerSelector />
                 <form onSubmit={handleSpotifySearch} className="announcer-wizard-search-form">
                   <input
                     className="announcer-song-input"
@@ -1090,6 +1146,15 @@ function WizardModal({ onClose, roster }) {
                             preload="none"
                           />
                         )}
+                        <button
+                          className="announcer-btn announcer-btn-secondary"
+                          style={{ padding: '2px 8px', fontSize: '0.72rem' }}
+                          disabled={addingId === track.spotify_id || !selectedPlayerId}
+                          onClick={() => handleAdd(track.spotify_id, track.preview_url, `${track.title} — ${track.artist}`, 0)}
+                        >
+                          {addingId === track.spotify_id ? <RefreshCw size={11} className="sync-spin" /> : <Plus size={11} />}
+                          Add
+                        </button>
                       </div>
                     </div>
                   ))}
@@ -1232,6 +1297,16 @@ export default function Announcer({ lineups }) {
     }
   };
 
+  const handleAddSongFromWizard = async (playerId, url, label, startMs) => {
+    const res = await fetch(`/api/announcer/songs/${playerId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Origin': window.location.origin },
+      body: JSON.stringify({ song_url: url, song_label: label, optimal_start_ms: startMs || 0 }),
+    });
+    if (!res.ok) throw new Error('Failed to add song');
+    await fetchRoster();
+  };
+
   const handleAddSub = async (data) => {
     startPolling();
     const res = await fetch('/api/announcer/add-sub', {
@@ -1315,7 +1390,7 @@ export default function Announcer({ lineups }) {
         <AddSubModal onClose={() => setShowAddSub(false)} onAdd={handleAddSub} />
       )}
       {showWizard && (
-        <WizardModal onClose={() => setShowWizard(false)} roster={roster} />
+        <WizardModal onClose={() => setShowWizard(false)} roster={roster} onAddSong={handleAddSongFromWizard} />
       )}
     </div>
   );
