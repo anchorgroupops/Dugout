@@ -3,9 +3,11 @@ import { createPortal } from 'react-dom';
 import {
   Mic, Music, Play, Square, SkipBack, SkipForward,
   ChevronDown, ChevronUp, RefreshCw, UserPlus, Save,
-  AlertCircle, CheckCircle, Clock, Volume2, Settings2, List
+  AlertCircle, CheckCircle, Clock, Volume2, Settings2, List,
+  Zap, Target, Activity
 } from 'lucide-react';
-import { playIntro, playClip, stop as stopAudio, preload, cleanup } from '../utils/audioController';
+import { playIntro, playClip, stop as stopAudio, preload, cleanup, detectBPM, calcBeatOffset, loadBuffer } from '../utils/audioController';
+import WorkerBadge from './WorkerBadge';
 
 function StatusLed({ status }) {
   const colors = {
@@ -102,6 +104,8 @@ function PlayerCard({ player, onSavePhonetics, onRender }) {
   const [saving, setSaving] = useState(false);
   const [rendering, setRendering] = useState(false);
   const [previewing, setPreviewing] = useState(false);
+  const [bpmResult, setBpmResult] = useState(null);
+  const [bpmLoading, setBpmLoading] = useState(false);
 
   const numWord = numToWord(player.number);
   const displayName = phonetic || `${player.first} ${player.last}`;
@@ -132,6 +136,25 @@ function PlayerCard({ player, onSavePhonetics, onRender }) {
     } else if (player.announcer_audio_url) {
       setPreviewing(true);
       playClip(player.announcer_audio_url, () => setPreviewing(false));
+    }
+  };
+
+  const handleDetectBPM = async () => {
+    const url = walkupUrl.trim();
+    if (!url) return;
+    setBpmLoading(true);
+    try {
+      const buf = await loadBuffer(url);
+      const result = detectBPM(buf);
+      setBpmResult(result);
+      if (result) {
+        const offset = calcBeatOffset(result.bpm);
+        setIntroTs(offset);
+      }
+    } catch {
+      setBpmResult(null);
+    } finally {
+      setBpmLoading(false);
     }
   };
 
@@ -182,10 +205,17 @@ function PlayerCard({ player, onSavePhonetics, onRender }) {
           </div>
           <div className="announcer-form-row">
             <div className="announcer-form-group" style={{ flex: 1 }}>
-              <label>Walk-up Song URL</label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                Walk-up Song URL
+                {bpmResult && (
+                  <span style={{ fontSize: '0.7rem', background: 'var(--warning, #facc15)', color: '#000', borderRadius: 4, padding: '1px 6px', fontWeight: 700 }}>
+                    ♩ {bpmResult.bpm} BPM
+                  </span>
+                )}
+              </label>
               <input
                 value={walkupUrl}
-                onChange={e => setWalkupUrl(e.target.value)}
+                onChange={e => { setWalkupUrl(e.target.value); setBpmResult(null); }}
                 placeholder="https://example.com/walkup.mp3"
                 maxLength={500}
                 type="url"
@@ -204,6 +234,25 @@ function PlayerCard({ player, onSavePhonetics, onRender }) {
               />
             </div>
           </div>
+          {walkupUrl.trim() && (
+            <div style={{ marginBottom: '0.5rem' }}>
+              <button
+                type="button"
+                onClick={handleDetectBPM}
+                disabled={bpmLoading}
+                className="announcer-btn announcer-btn-secondary"
+                style={{ fontSize: '0.75rem', padding: '3px 10px' }}
+              >
+                {bpmLoading ? <RefreshCw size={12} className="sync-spin" /> : <Activity size={12} />}
+                {bpmLoading ? 'Analyzing…' : 'Auto-set Duck Point'}
+              </button>
+              {bpmResult === null && !bpmLoading && walkupUrl && (
+                <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginLeft: 8 }}>
+                  Click to detect BPM and auto-fill duck timing
+                </span>
+              )}
+            </div>
+          )}
 
           <div className="announcer-preview-text">
             <Mic size={14} /> <em>{previewText}</em>
@@ -241,6 +290,15 @@ function NowPlayingView({ roster, lineups, onBack }) {
   const [currentIdx, setCurrentIdx] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState({ elapsed: 0, duration: 0 });
+  const [gameState, setGameState] = useState(() => {
+    try {
+      const saved = localStorage.getItem('apex_game_state');
+      return saved ? JSON.parse(saved) : DEFAULT_GAME_STATE;
+    } catch { return DEFAULT_GAME_STATE; }
+  });
+  const [showGamePanel, setShowGamePanel] = useState(false);
+  const [showHalo, setShowHalo] = useState(false);
+  const [announcementPreview, setAnnouncementPreview] = useState('');
 
   // Build batting order from lineups or fall back to roster order
   const battingOrder = (() => {
@@ -266,6 +324,53 @@ function NowPlayingView({ roster, lineups, onBack }) {
   const current = battingOrder[currentIdx] || null;
   const progressPct = progress.duration > 0 ? Math.min(100, (progress.elapsed / progress.duration) * 100) : 0;
 
+  const pushGameState = useCallback(async (next) => {
+    setGameState(next);
+    localStorage.setItem('apex_game_state', JSON.stringify(next));
+    try {
+      await fetch('/api/announcer/game-state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(next),
+      });
+    } catch { /* non-critical */ }
+  }, []);
+
+  const updateGameField = (field, value) => {
+    pushGameState({ ...gameState, [field]: value });
+  };
+
+  const toggleBase = (idx) => {
+    const bases = [...gameState.bases];
+    bases[idx] = !bases[idx];
+    pushGameState({ ...gameState, bases });
+  };
+
+  // Fetch server game state on mount
+  useEffect(() => {
+    fetch('/api/announcer/game-state')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data) setGameState({ ...DEFAULT_GAME_STATE, ...data }); })
+      .catch(() => {});
+  }, []);
+
+  // Halo achievement: trigger re-render with achievement context then auto-play
+  const triggerHaloAchievement = useCallback(async (achievementKey) => {
+    if (!current) return;
+    const newState = { ...gameState, achievement: achievementKey };
+    await pushGameState(newState);
+    // Request a fresh render with achievement context
+    try {
+      await fetch(`/api/announcer/render/${current.id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ game_context: newState }),
+      });
+    } catch { /* best-effort */ }
+    // Clear achievement after trigger
+    setTimeout(() => pushGameState({ ...newState, achievement: null }), 2000);
+  }, [current, gameState, pushGameState]);
+
   const handlePlay = async () => {
     if (!current) return;
     if (playing) {
@@ -274,11 +379,13 @@ function NowPlayingView({ roster, lineups, onBack }) {
       return;
     }
     setPlaying(true);
+    const introTs = current.intro_timestamp ?? 5;
     try {
       await playIntro({
         walkupUrl: current.walkup_song_url || '',
         clipUrl: current.announcer_audio_url || '',
-        introTimestamp: current.intro_timestamp ?? 5,
+        introTimestamp: introTs,
+        autoBPM: introTs === 0,
         onEnd: () => setPlaying(false),
         onProgress: (p) => setProgress(p),
       });
@@ -324,14 +431,111 @@ function NowPlayingView({ roster, lineups, onBack }) {
     );
   }
 
+  const isHighStakes = gameState.bases.every(Boolean) && gameState.outs >= 2;
+
   return (
     <div className="announcer-now-playing">
       <div className="announcer-np-header">
         <button onClick={onBack} className="announcer-btn announcer-btn-secondary" aria-label="Back to roster">
           <List size={16} /> Roster
         </button>
-        <span className="announcer-np-position">{currentIdx + 1} of {battingOrder.length}</span>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <button
+            onClick={() => setShowHalo(true)}
+            className="announcer-btn announcer-btn-accent"
+            style={{ padding: '4px 10px', fontSize: '0.75rem' }}
+            aria-label="Halo achievement"
+          >
+            <Zap size={14} /> Achievement
+          </button>
+          <button
+            onClick={() => setShowGamePanel(v => !v)}
+            className={`announcer-btn ${showGamePanel ? 'announcer-btn-primary' : 'announcer-btn-secondary'}`}
+            style={{ padding: '4px 10px', fontSize: '0.75rem' }}
+            aria-label="Toggle game state panel"
+          >
+            <Target size={14} /> Game State
+          </button>
+          <span className="announcer-np-position">{currentIdx + 1} / {battingOrder.length}</span>
+        </div>
       </div>
+
+      {showGamePanel && (
+        <div className="announcer-np-game-state glass-panel" style={{ padding: '0.75rem', marginBottom: '0.5rem' }}>
+          <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+            {/* Inning */}
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+              <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Inning</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <button className="announcer-btn announcer-btn-round" style={{ width: 24, height: 24, fontSize: '1rem' }}
+                  onClick={() => updateGameField('inning', Math.max(1, gameState.inning - 1))}>−</button>
+                <span style={{ fontWeight: 800, fontSize: '1.1rem', minWidth: 20, textAlign: 'center' }}>{gameState.inning}</span>
+                <button className="announcer-btn announcer-btn-round" style={{ width: 24, height: 24, fontSize: '1rem' }}
+                  onClick={() => updateGameField('inning', Math.min(15, gameState.inning + 1))}>+</button>
+              </div>
+              <div style={{ display: 'flex', gap: 4 }}>
+                {['top', 'bottom'].map(h => (
+                  <button key={h} onClick={() => updateGameField('half', h)}
+                    className={`announcer-btn ${gameState.half === h ? 'announcer-btn-primary' : 'announcer-btn-secondary'}`}
+                    style={{ padding: '2px 6px', fontSize: '0.65rem' }}>{h === 'top' ? '▲' : '▼'}</button>
+                ))}
+              </div>
+            </div>
+
+            {/* Outs */}
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+              <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Outs</span>
+              <div style={{ display: 'flex', gap: 4 }}>
+                {[0, 1, 2].map(o => (
+                  <button key={o} onClick={() => updateGameField('outs', o)}
+                    className={`announcer-btn ${gameState.outs === o ? 'announcer-btn-primary' : 'announcer-btn-secondary'}`}
+                    style={{ width: 28, height: 28, padding: 0, fontWeight: 800 }}>{o}</button>
+                ))}
+              </div>
+            </div>
+
+            {/* Bases */}
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+              <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Bases</span>
+              <BaseDiamond bases={gameState.bases} onToggle={toggleBase} />
+            </div>
+
+            {/* Score */}
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+              <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Score</span>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: '0.6rem', opacity: 0.7 }}>Us</div>
+                  <div style={{ display: 'flex', gap: 3 }}>
+                    <button className="announcer-btn announcer-btn-round" style={{ width: 20, height: 20, fontSize: '0.75rem' }}
+                      onClick={() => updateGameField('score_us', Math.max(0, gameState.score_us - 1))}>−</button>
+                    <span style={{ fontWeight: 800, minWidth: 20, textAlign: 'center' }}>{gameState.score_us}</span>
+                    <button className="announcer-btn announcer-btn-round" style={{ width: 20, height: 20, fontSize: '0.75rem' }}
+                      onClick={() => updateGameField('score_us', gameState.score_us + 1)}>+</button>
+                  </div>
+                </div>
+                <span style={{ opacity: 0.5 }}>–</span>
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: '0.6rem', opacity: 0.7 }}>Them</div>
+                  <div style={{ display: 'flex', gap: 3 }}>
+                    <button className="announcer-btn announcer-btn-round" style={{ width: 20, height: 20, fontSize: '0.75rem' }}
+                      onClick={() => updateGameField('score_them', Math.max(0, gameState.score_them - 1))}>−</button>
+                    <span style={{ fontWeight: 800, minWidth: 20, textAlign: 'center' }}>{gameState.score_them}</span>
+                    <button className="announcer-btn announcer-btn-round" style={{ width: 20, height: 20, fontSize: '0.75rem' }}
+                      onClick={() => updateGameField('score_them', gameState.score_them + 1)}>+</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {isHighStakes && (
+            <div style={{ marginTop: '0.5rem', padding: '4px 8px', background: 'rgba(250,204,21,0.15)', borderRadius: 6, fontSize: '0.75rem', color: 'var(--warning, #facc15)', fontWeight: 700 }}>
+              HIGH STAKES — Script will automatically intensify
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="announcer-np-card glass-panel">
         <div className="announcer-np-jersey">#{current?.number || '?'}</div>
@@ -359,7 +563,101 @@ function NowPlayingView({ roster, lineups, onBack }) {
           <SkipForward size={24} />
         </button>
       </div>
+
+      {showHalo && (
+        <HaloOverlay
+          onSelect={triggerHaloAchievement}
+          onClose={() => setShowHalo(false)}
+        />
+      )}
     </div>
+  );
+}
+
+const HALO_ACHIEVEMENTS = [
+  { key: 'triple_rbi',   label: 'Triple Kill',   desc: '3 RBI' },
+  { key: 'quad_rbi',     label: 'Overkill',       desc: '4 RBI' },
+  { key: '3_strikeouts', label: 'Killtacular',    desc: '3 Ks' },
+  { key: '4_strikeouts', label: 'Running Riot',   desc: '4 Ks' },
+  { key: '5_strikeouts', label: 'Rampage',        desc: '5 Ks' },
+  { key: 'grand_slam',   label: 'Monster Kill',   desc: 'Grand Slam' },
+  { key: 'cycle',        label: 'Perfection',     desc: 'Hit for Cycle' },
+];
+
+const DEFAULT_GAME_STATE = {
+  inning: 1, half: 'top', outs: 0,
+  score_us: 0, score_them: 0,
+  bases: [false, false, false],
+  achievement: null,
+};
+
+function BaseDiamond({ bases, onToggle }) {
+  // bases = [1B, 2B, 3B]
+  const occupied = 'var(--warning, #facc15)';
+  const empty = 'rgba(255,255,255,0.15)';
+  const baseStyle = (idx) => ({
+    width: 18, height: 18,
+    background: bases[idx] ? occupied : empty,
+    border: '2px solid rgba(255,255,255,0.4)',
+    transform: 'rotate(45deg)',
+    cursor: 'pointer',
+    borderRadius: 2,
+    transition: 'background 0.15s',
+  });
+  return (
+    <div style={{ position: 'relative', width: 60, height: 60, flexShrink: 0 }}>
+      {/* 2B — top center */}
+      <div style={{ position: 'absolute', top: 0, left: '50%', transform: 'translateX(-50%)' }}
+           onClick={() => onToggle(1)} title="2nd base">
+        <div style={baseStyle(1)} />
+      </div>
+      {/* 3B — left */}
+      <div style={{ position: 'absolute', top: '50%', left: 0, transform: 'translateY(-50%)' }}
+           onClick={() => onToggle(2)} title="3rd base">
+        <div style={baseStyle(2)} />
+      </div>
+      {/* 1B — right */}
+      <div style={{ position: 'absolute', top: '50%', right: 0, transform: 'translateY(-50%)' }}
+           onClick={() => onToggle(0)} title="1st base">
+        <div style={baseStyle(0)} />
+      </div>
+      {/* Home plate — bottom center */}
+      <div style={{ position: 'absolute', bottom: 0, left: '50%', transform: 'translateX(-50%)' }}>
+        <div style={{ width: 18, height: 18, background: 'rgba(255,255,255,0.3)', border: '2px solid rgba(255,255,255,0.4)', transform: 'rotate(45deg)', borderRadius: 2 }} />
+      </div>
+    </div>
+  );
+}
+
+function HaloOverlay({ onSelect, onClose }) {
+  return createPortal(
+    <div className="announcer-modal-overlay" onClick={onClose}>
+      <div className="announcer-modal glass-panel" onClick={e => e.stopPropagation()} style={{ maxWidth: 340 }}>
+        <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Zap size={18} style={{ color: 'var(--warning, #facc15)' }} /> Halo Achievement
+        </h3>
+        <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.75rem' }}>
+          Select an achievement to render a special Steitzer-style call.
+        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+          {HALO_ACHIEVEMENTS.map(a => (
+            <button
+              key={a.key}
+              className="announcer-btn announcer-btn-accent"
+              style={{ flexDirection: 'column', padding: '0.5rem', textAlign: 'center', height: 'auto' }}
+              onClick={() => { onSelect(a.key); onClose(); }}
+            >
+              <span style={{ fontWeight: 700, fontSize: '0.85rem' }}>{a.label}</span>
+              <span style={{ fontSize: '0.7rem', opacity: 0.75 }}>{a.desc}</span>
+            </button>
+          ))}
+        </div>
+        <button onClick={onClose} className="announcer-btn announcer-btn-secondary" style={{ marginTop: '0.75rem', width: '100%' }}>
+          Cancel
+        </button>
+      </div>
+    </div>,
+    document.body
   );
 }
 
@@ -376,6 +674,32 @@ function numToWord(num) {
   return words[String(num).trim()] || String(num);
 }
 
+function useWorkerStatus() {
+  const [workerStatus, setWorkerStatus] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const poll = async () => {
+      try {
+        const res = await fetch('/api/announcer/worker-status');
+        if (res.ok && !cancelled) setWorkerStatus(await res.json());
+      } catch {
+        // leave previous value on network error
+      }
+    };
+
+    poll();
+    const id = setInterval(poll, 10_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
+
+  return workerStatus;
+}
+
 export default function Announcer({ lineups }) {
   const [view, setView] = useState('roster'); // 'roster' | 'nowplaying'
   const [roster, setRoster] = useState([]);
@@ -385,6 +709,9 @@ export default function Announcer({ lineups }) {
   const [showAddSub, setShowAddSub] = useState(false);
   const [error, setError] = useState('');
   const pollRef = useRef(null);
+  const renderToRef = useRef(null);
+  const pollStopToRef = useRef(null);
+  const workerStatus = useWorkerStatus();
 
   const fetchRoster = useCallback(async () => {
     try {
@@ -419,7 +746,12 @@ export default function Announcer({ lineups }) {
     }
   }, []);
 
-  useEffect(() => () => { stopPolling(); cleanup(); }, [stopPolling]);
+  useEffect(() => () => {
+    stopPolling();
+    cleanup();
+    if (renderToRef.current) clearTimeout(renderToRef.current);
+    if (pollStopToRef.current) clearTimeout(pollStopToRef.current);
+  }, [stopPolling]);
 
   const handleRenderAll = async () => {
     setRenderAllLoading(true);
@@ -431,10 +763,10 @@ export default function Announcer({ lineups }) {
         body: '{}',
       });
       // Keep polling for updates — don't await completion
-      setTimeout(() => {
+      renderToRef.current = setTimeout(() => {
+        renderToRef.current = null;
         setRenderAllLoading(false);
-        // Poll a few more times then stop
-        setTimeout(stopPolling, 30000);
+        pollStopToRef.current = setTimeout(stopPolling, 30000);
       }, 5000);
     } catch {
       setRenderAllLoading(false);
@@ -450,7 +782,7 @@ export default function Announcer({ lineups }) {
         headers: { 'Content-Type': 'application/json', 'Origin': window.location.origin },
         body: '{}',
       });
-      setTimeout(() => { fetchRoster(); stopPolling(); }, 5000);
+      renderToRef.current = setTimeout(() => { renderToRef.current = null; fetchRoster(); stopPolling(); }, 5000);
     } catch { /* handled by polling */ }
   };
 
@@ -474,7 +806,7 @@ export default function Announcer({ lineups }) {
     });
     if (!res.ok) throw new Error('Failed to add player');
     await fetchRoster();
-    setTimeout(stopPolling, 10000);
+    pollStopToRef.current = setTimeout(stopPolling, 10000);
   };
 
   if (loading) return <div className="loader" />;
@@ -496,6 +828,7 @@ export default function Announcer({ lineups }) {
           <Mic size={22} /> The Announcer
         </h2>
         <div className="announcer-header-actions">
+          <WorkerBadge workerStatus={workerStatus} />
           <button onClick={() => setView('nowplaying')} className="announcer-btn announcer-btn-accent">
             <Play size={14} /> Now Playing
           </button>

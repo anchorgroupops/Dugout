@@ -31,6 +31,7 @@ ET = ZoneInfo("America/New_York")
 DATA_DIR = Path(__file__).parent.parent / "data"
 ANNOUNCER_DIR = DATA_DIR / "sharks" / "announcer"
 CLIPS_DIR = ANNOUNCER_DIR / "clips"
+ARCHIVE_DIR = ANNOUNCER_DIR / "archive"
 ROSTER_FILE = ANNOUNCER_DIR / "roster.json"
 VOICE_PROFILES_FILE = ANNOUNCER_DIR / "voice_profiles.json"
 
@@ -73,6 +74,7 @@ def _resolve_secret(name: str, default: str = "") -> str:
 def _ensure_dirs():
     ANNOUNCER_DIR.mkdir(parents=True, exist_ok=True)
     CLIPS_DIR.mkdir(parents=True, exist_ok=True)
+    ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _atomic_write_json(path: Path, data, indent: int = 2):
@@ -131,16 +133,45 @@ class TTSProvider(ABC):
         pass
 
 
-class ReplicateTTS(TTSProvider):
-    """Qwen3-TTS via Replicate API in clone mode."""
+class LocalVLLMTTS(TTSProvider):
+    """Local FastAPI TTS service (announcer_api.py) for on-device inference."""
 
-    API_URL = "https://api.replicate.com/v1/models/qwen/qwen3-tts/predictions"
+    @property
+    def name(self) -> str:
+        return "local_vllm"
+
+    def synthesize(self, text: str, voice_config: dict) -> bytes:
+        base_url = os.getenv("LOCAL_TTS_URL", "").rstrip("/")
+        if not base_url:
+            raise RuntimeError("LOCAL_TTS_URL not set")
+        payload = {
+            "text": text,
+            "voice_design": {
+                "pitch": -2.0,
+                "energy": 1.3,
+                "speaking_rate": 0.92,
+                "emotion_exaggeration": 0.85,
+                "speaker_style": "announcer",
+            },
+            "reference_audio_url": voice_config.get("reference_audio_url", ""),
+            "reference_transcript": voice_config.get("reference_transcript", ""),
+        }
+        resp = requests.post(f"{base_url}/synthesize", json=payload, timeout=15, stream=True)
+        if resp.status_code != 200:
+            raise RuntimeError(f"Local TTS returned {resp.status_code}: {resp.text[:200]}")
+        return resp.content
+
+
+class ReplicateTTS(TTSProvider):
+    """Qwen3-TTS-1.7B-VoiceDesign via Replicate API with ICL clone mode."""
+
+    API_URL = "https://api.replicate.com/v1/models/qwen/qwen3-tts-1.7b-voicedesign/predictions"
     POLL_INTERVAL = 2.0
     MAX_POLL_SECONDS = 120
 
     @property
     def name(self) -> str:
-        return "replicate_qwen3_tts"
+        return "replicate_qwen3_tts_voicedesign"
 
     def synthesize(self, text: str, voice_config: dict) -> bytes:
         token = _resolve_secret("REPLICATE_API_TOKEN")
@@ -164,6 +195,12 @@ class ReplicateTTS(TTSProvider):
                 "reference_audio": ref_audio,
                 "reference_text": ref_text,
                 "language": "en",
+                "voice_design": {
+                    "pitch": -2.0,
+                    "energy": 1.3,
+                    "speaking_rate": 0.92,
+                },
+                "emotion_exaggeration": 0.85,
             }
         }
 
@@ -207,6 +244,39 @@ class ReplicateTTS(TTSProvider):
         if resp.status_code != 200:
             raise RuntimeError(f"Failed to download audio from Replicate: {resp.status_code}")
         return resp.content
+
+
+class Replicate06bTTS(ReplicateTTS):
+    """Qwen3-TTS-0.6B via Replicate — Cloud Mirror for Quick Render failover.
+
+    Uses *identical* ICL clone parameters (same Steitzer reference audio + transcript)
+    so Quick Render fallback audio is indistinguishable in vocal character from Best Quality.
+    Only the model size differs: 0.6B is faster and cheaper, not weaker in voice consistency.
+    """
+
+    # Override with the 0.6B model endpoint.  Configurable via REPLICATE_06B_MODEL_ID
+    # in case Replicate renames the model slug.
+    @property
+    def _api_url(self) -> str:
+        slug = os.getenv(
+            "REPLICATE_06B_MODEL_ID",
+            "qwen/qwen3-tts-0.6b-voicedesign",
+        )
+        return f"https://api.replicate.com/v1/models/{slug}/predictions"
+
+    # Accessing API_URL is done via self._api_url in synthesize; override parent attr too
+    API_URL = ""  # unused — _api_url property takes precedence
+
+    MAX_POLL_SECONDS = 30  # 0.6B is faster than 1.7B
+
+    @property
+    def name(self) -> str:
+        return "replicate_qwen3_tts_0.6b"
+
+    def synthesize(self, text: str, voice_config: dict) -> bytes:
+        # Temporarily patch API_URL so parent synthesize() hits the right endpoint
+        self.API_URL = self._api_url
+        return super().synthesize(text, voice_config)
 
 
 class ElevenLabsTTS(TTSProvider):
@@ -272,12 +342,35 @@ class MockTTS(TTSProvider):
 
 
 def get_tts_provider() -> TTSProvider:
-    """Return the best available TTS provider."""
+    """Return the best available TTS provider for Best Quality renders.
+
+    Priority: local vLLM → Replicate Qwen3-TTS 1.7B VoiceDesign → ElevenLabs → Mock
+    """
+    if os.getenv("LOCAL_TTS_URL", "").strip():
+        return LocalVLLMTTS()
     if _resolve_secret("REPLICATE_API_TOKEN"):
         return ReplicateTTS()
     if _resolve_secret("ELEVENLABS_API_KEY"):
         return ElevenLabsTTS()
     logging.info("[Announcer] No TTS API keys configured — using mock provider")
+    return MockTTS()
+
+
+def get_quick_tts_provider() -> TTSProvider:
+    """Return provider for Quick Render (Pi-side, speed-optimised).
+
+    Priority: local vLLM (0.6B quantized) → Replicate 0.6B Cloud Mirror → ElevenLabs → Mock
+
+    The Replicate 0.6B Cloud Mirror uses identical ICL clone parameters (same Steitzer
+    reference audio + transcript) so vocal character is consistent regardless of tier.
+    """
+    if os.getenv("LOCAL_TTS_URL", "").strip():
+        return LocalVLLMTTS()
+    if _resolve_secret("REPLICATE_API_TOKEN"):
+        return Replicate06bTTS()
+    if _resolve_secret("ELEVENLABS_API_KEY"):
+        return ElevenLabsTTS()
+    logging.info("[Announcer] No TTS API keys configured — using mock provider for quick render")
     return MockTTS()
 
 
@@ -331,22 +424,73 @@ def _number_to_word(num: str) -> str:
     return words.get(str(num).strip(), str(num))
 
 
-def build_announcement_text(player: dict) -> str:
-    """Build the TTS announcement text for a player."""
+_HALO_SCRIPTS: dict[str, str] = {
+    "triple_rbi":    "Triple Kill!",
+    "quad_rbi":      "Overkill!",
+    "3_strikeouts":  "Killtacular!",
+    "4_strikeouts":  "Running Riot!",
+    "5_strikeouts":  "Rampage!",
+    "grand_slam":    "Monster Kill!",
+    "cycle":         "Perfection!",
+}
+
+
+def build_situational_announcement(player: dict, game_context: dict | None = None) -> str:
+    """Build a game-state-aware TTS script with Halo-style achievements.
+
+    game_context shape:
+      {"inning": int, "outs": int, "bases": [bool, bool, bool],
+       "score_us": int, "score_them": int, "achievement": str|None}
+    """
     first = (player.get("first") or "").strip()
     last = (player.get("last") or "").strip()
     number = str(player.get("number") or "").strip()
     phonetic_hint = (player.get("phonetic_hint") or "").strip()
     tts_instruction = (player.get("tts_instruction") or "").strip()
 
-    name = phonetic_hint if phonetic_hint else f"{first} {last}"
+    name = phonetic_hint if phonetic_hint else f"{first} {last}".strip()
     name = _apply_phonetics(name)
     num_word = _number_to_word(number)
 
-    base = f"Now batting, number {num_word}, {name}!"
-    if tts_instruction:
-        base = f"{tts_instruction}. {base}"
-    return base
+    ctx = game_context or {}
+    achievement = ctx.get("achievement") or ""
+    bases = ctx.get("bases") or [False, False, False]
+    outs = int(ctx.get("outs") or 0)
+    score_us = int(ctx.get("score_us") or 0)
+    score_them = int(ctx.get("score_them") or 0)
+    bases_loaded = all(bases[:3]) if len(bases) >= 3 else False
+    high_stakes = bases_loaded and outs >= 2
+    trailing = score_them > score_us
+
+    if achievement and achievement in _HALO_SCRIPTS:
+        halo_call = _HALO_SCRIPTS[achievement]
+        script = f"[breath] {halo_call} [pause:0.3s] That's number {num_word}, {name}!"
+    elif high_stakes:
+        urgency = "with the game on the line" if trailing else "with the bases juiced"
+        script = (
+            f"[breath] Stepping into the box {urgency}... "
+            f"[pause:0.5s] Number {num_word}, {name}!"
+        )
+    elif bases_loaded:
+        script = (
+            f"[breath] Bases loaded... [pause:0.3s] "
+            f"Now batting, number {num_word}, {name}!"
+        )
+    else:
+        script = f"[breath] Now batting, number {num_word}, {name}! [pause:0.3s]"
+
+    if tts_instruction and not achievement:
+        script = f"{tts_instruction}. {script}"
+
+    return script
+
+
+def build_announcement_text(player: dict, game_context: dict | None = None) -> str:
+    """Build the TTS announcement text for a player.
+
+    Delegates to build_situational_announcement when game_context is provided.
+    """
+    return build_situational_announcement(player, game_context)
 
 
 def _bootstrap_roster_from_team() -> list[dict]:
@@ -441,7 +585,92 @@ def update_player(player_id: str, updates: dict) -> dict | None:
 # Render Operations
 # ---------------------------------------------------------------------------
 
-def render_player_audio(player_id: str) -> dict:
+def archive_and_transcode(audio_bytes: bytes, player_id: str) -> tuple[Path, Path]:
+    """Save a lossless FLAC master and 192kbps MP3 proxy from raw audio bytes.
+
+    FFmpeg Stadium Wrap chain (Best Quality):
+      compand      → broadcast hard compression (attack 10ms, decay 200ms)
+      equalizer    → +4dB low shelf at 150 Hz (Steitzer sub-bass boom)
+      extrastereo  → m=2.5 stereo widening (fills the stadium)
+
+    Returns (flac_path, mp3_path). Raises RuntimeError if FFmpeg is not in PATH.
+    """
+    import subprocess
+    import tempfile
+
+    ts = datetime.now(ET).strftime("%Y%m%d_%H%M%S")
+    safe_id = _sanitize_player_id(player_id)
+
+    archive_player_dir = ARCHIVE_DIR / safe_id
+    archive_player_dir.mkdir(parents=True, exist_ok=True)
+    clips_player_dir = CLIPS_DIR / safe_id
+    clips_player_dir.mkdir(parents=True, exist_ok=True)
+
+    flac_path = archive_player_dir / f"{ts}.flac"
+    mp3_path = clips_player_dir / f"{ts}.mp3"
+
+    # Detect input format from magic bytes
+    is_mp3 = audio_bytes[:3] == b"ID3" or (len(audio_bytes) >= 2 and audio_bytes[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"))
+    suffix = ".mp3" if is_mp3 else ".wav"
+
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp.write(audio_bytes)
+        tmp_path = Path(tmp.name)
+
+    try:
+        # Pass 1 — encode to 24-bit/48kHz FLAC archive master
+        result = subprocess.run(
+            ["ffmpeg", "-y", "-i", str(tmp_path),
+             "-ar", "48000", "-c:a", "flac", "-sample_fmt", "s32",
+             str(flac_path)],
+            capture_output=True, timeout=60,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"FFmpeg FLAC encode failed: {result.stderr.decode(errors='replace')[:300]}"
+            )
+
+        # Pass 2 — Stadium Wrap filter chain → 192kbps MP3
+        # Splits signal: dry path + reverb path, mixed 80/20
+        filtergraph = (
+            "[0:a]"
+            "compand=attacks=0.01:decays=0.2"
+            ":points=-80/-80|-45/-30|-27/-20|0/-13:gain=6,"
+            "equalizer=f=150:t=l:width_type=o:width=2:g=4"
+            "[processed];"
+            "[processed]asplit=2[dry][wet];"
+            "[wet]aecho=0.8:1.0:50|75|100:0.4|0.3|0.2[rev];"
+            "[dry][rev]amix=inputs=2:weights=0.8:0.2,"
+            "extrastereo=m=2.5[out]"
+        )
+        result = subprocess.run(
+            ["ffmpeg", "-y", "-i", str(flac_path),
+             "-filter_complex", filtergraph,
+             "-map", "[out]",
+             "-ar", "48000", "-ac", "2",
+             "-c:a", "libmp3lame", "-q:a", "2",
+             str(mp3_path)],
+            capture_output=True, timeout=60,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"FFmpeg Stadium Wrap failed: {result.stderr.decode(errors='replace')[:300]}"
+            )
+    finally:
+        try:
+            tmp_path.unlink()
+        except OSError:
+            pass
+
+    logging.info(
+        "[Announcer] archive_and_transcode: %s → FLAC %dkB + MP3 %dkB",
+        player_id, flac_path.stat().st_size // 1024, mp3_path.stat().st_size // 1024,
+    )
+    return flac_path, mp3_path
+
+
+def render_player_audio(player_id: str, game_context: dict | None = None,
+                        quality: str = "best") -> dict:
     """Render TTS audio for a single player. Returns updated player dict."""
     player = get_player_by_id(player_id)
     if not player:
@@ -450,32 +679,49 @@ def render_player_audio(player_id: str) -> dict:
     update_player(player_id, {"status": "rendering", "error_message": ""})
 
     try:
-        provider = get_tts_provider()
+        provider = get_quick_tts_provider() if quality == "quick" else get_tts_provider()
         voice = get_default_voice_profile()
-        text = build_announcement_text(player)
+        text = build_announcement_text(player, game_context)
         audio_bytes = provider.synthesize(text, voice)
 
         if len(audio_bytes) > MAX_TTS_OUTPUT_BYTES:
             raise RuntimeError(f"TTS output too large ({len(audio_bytes)} bytes, max {MAX_TTS_OUTPUT_BYTES})")
 
-        # Save clip — sanitize player_id for safe filesystem path
-        ts = datetime.now(ET).strftime("%Y%m%d_%H%M%S")
-        safe_id = _sanitize_player_id(player_id)
-        player_clip_dir = CLIPS_DIR / safe_id
-        player_clip_dir.mkdir(parents=True, exist_ok=True)
-        clip_path = player_clip_dir / f"{ts}.mp3"
-        clip_path.write_bytes(audio_bytes)
-
-        # Build URL path (served by nginx or Flask)
-        clip_url = f"/announcer-clips/{safe_id}/{ts}.mp3"
+        # Best quality: archive FLAC master + Stadium Wrap → MP3
+        if quality == "best":
+            try:
+                _, mp3_path = archive_and_transcode(audio_bytes, player_id)
+                safe_id = _sanitize_player_id(player_id)
+                clip_url = f"/announcer-clips/{safe_id}/{mp3_path.name}"
+            except Exception as e:
+                # FFmpeg not available (e.g., dev environment) — fall back to raw MP3
+                logging.warning("[Announcer] archive_and_transcode failed (%s) — saving raw bytes", e)
+                ts = datetime.now(ET).strftime("%Y%m%d_%H%M%S")
+                safe_id = _sanitize_player_id(player_id)
+                player_clip_dir = CLIPS_DIR / safe_id
+                player_clip_dir.mkdir(parents=True, exist_ok=True)
+                clip_path = player_clip_dir / f"{ts}.mp3"
+                clip_path.write_bytes(audio_bytes)
+                clip_url = f"/announcer-clips/{safe_id}/{ts}.mp3"
+        else:
+            # Quick render — save raw MP3 directly, no archiving
+            ts = datetime.now(ET).strftime("%Y%m%d_%H%M%S")
+            safe_id = _sanitize_player_id(player_id)
+            player_clip_dir = CLIPS_DIR / safe_id
+            player_clip_dir.mkdir(parents=True, exist_ok=True)
+            clip_path = player_clip_dir / f"{ts}.mp3"
+            clip_path.write_bytes(audio_bytes)
+            clip_url = f"/announcer-clips/{safe_id}/{ts}.mp3"
 
         updated = update_player(player_id, {
             "status": "ready",
             "announcer_audio_url": clip_url,
             "rendered_at": datetime.now(ET).isoformat(),
+            "render_quality": quality,
             "error_message": "",
         })
-        logging.info("[Announcer] Rendered %s via %s (%d bytes)", player_id, provider.name, len(audio_bytes))
+        logging.info("[Announcer] Rendered %s via %s (%d bytes, quality=%s)",
+                     player_id, provider.name, len(audio_bytes), quality)
         return updated or player
 
     except Exception as e:

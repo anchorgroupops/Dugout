@@ -73,6 +73,19 @@ DEFAULT_FALLBACK_VOICE_ID = "EXAVITQu4vr4xnSDxMaL"
 _SECRET_CACHE: dict[str, str] | None = None
 _SYNC_STATUS: dict = {"stage": "idle", "last_completed": "", "progress": 0}
 
+# In-memory live game state — persists for the duration of the process.
+# Coaches update this via POST /api/announcer/game-state during a game.
+_LIVE_GAME_STATE: dict = {
+    "inning": 1,
+    "half": "top",       # "top" | "bottom"
+    "outs": 0,
+    "score_us": 0,
+    "score_them": 0,
+    "bases": [False, False, False],  # [1B, 2B, 3B]
+    "achievement": None,
+    "updated_at": "",
+}
+
 # Ordered sync stages with progress percentages and display labels
 _SYNC_STAGES = [
     ("starting",           5,  "Starting"),
@@ -3875,6 +3888,56 @@ def _validate_player_id(player_id: str):
     return _validate_path_slug(player_id, "player_id")
 
 
+@app.route('/api/announcer/game-state', methods=['GET'])
+def handle_announcer_game_state_get():
+    """Return current live game state."""
+    return jsonify(_LIVE_GAME_STATE)
+
+
+@app.route('/api/announcer/game-state', methods=['POST'])
+def handle_announcer_game_state_set():
+    """Update live game state. Accepted fields are validated and merged."""
+    blocked = _guard_mutating_request()
+    if blocked:
+        return blocked
+
+    data = request.get_json(silent=True) or {}
+
+    if "inning" in data:
+        try:
+            _LIVE_GAME_STATE["inning"] = max(1, min(20, int(data["inning"])))
+        except (TypeError, ValueError):
+            pass
+
+    if "half" in data and data["half"] in ("top", "bottom"):
+        _LIVE_GAME_STATE["half"] = data["half"]
+
+    if "outs" in data:
+        try:
+            _LIVE_GAME_STATE["outs"] = max(0, min(2, int(data["outs"])))
+        except (TypeError, ValueError):
+            pass
+
+    for score_key in ("score_us", "score_them"):
+        if score_key in data:
+            try:
+                _LIVE_GAME_STATE[score_key] = max(0, int(data[score_key]))
+            except (TypeError, ValueError):
+                pass
+
+    if "bases" in data:
+        raw = data["bases"]
+        if isinstance(raw, list) and len(raw) >= 3:
+            _LIVE_GAME_STATE["bases"] = [bool(raw[0]), bool(raw[1]), bool(raw[2])]
+
+    if "achievement" in data:
+        ach = data["achievement"]
+        _LIVE_GAME_STATE["achievement"] = str(ach)[:64] if ach else None
+
+    _LIVE_GAME_STATE["updated_at"] = datetime.now(ET).isoformat()
+    return jsonify(_LIVE_GAME_STATE)
+
+
 @app.route('/api/announcer/roster', methods=['GET'])
 def handle_announcer_roster():
     """Return all active players with announcer metadata."""
@@ -3890,7 +3953,13 @@ def handle_announcer_roster():
 
 @app.route('/api/announcer/render/<player_id>', methods=['POST'])
 def handle_announcer_render(player_id):
-    """Trigger TTS render for a single player (runs in background thread)."""
+    """Trigger TTS render for a single player.
+
+    Routing:
+      quality=best + Mac alive  → enqueue job in render_queue (Mac polling worker)
+      quality=best + Mac offline → demote to quality=quick + draft_quality=true
+      quality=quick              → background thread on Pi (LocalVLLM or Replicate 0.6B)
+    """
     blocked = _guard_mutating_request()
     if blocked:
         return blocked
@@ -3905,14 +3974,38 @@ def handle_announcer_render(player_id):
     if not player:
         return jsonify({"error": "player_not_found"}), 404
 
+    req_data = request.get_json(silent=True) or {}
+    game_context = req_data.get("game_context") or dict(_LIVE_GAME_STATE)
+    requested_quality = str(req_data.get("quality") or "best")
+    if requested_quality not in ("quick", "best"):
+        requested_quality = "best"
+
+    adb = _announcer_db()
+
+    if requested_quality == "best" and adb.is_worker_alive(max_age_seconds=_MAC_HEARTBEAT_MAX_AGE):
+        # Mac is online — enqueue for Best Quality render
+        job = adb.enqueue_render(player_id, game_context, quality="best")
+        logging.info("[Announcer] Queued best-quality render: player=%s job=%s", player_id, job["id"])
+        return jsonify({"status": "queued", "quality": "best", "job_id": job["id"],
+                        "player_id": player_id}), 202
+
+    # Mac offline or quick explicitly requested — render on Pi
+    effective_quality = "quick"
+    draft = requested_quality == "best"  # was best but Mac unavailable
+
     def _bg_render():
         try:
-            render_player_audio(player_id)
+            render_player_audio(player_id, game_context=game_context, quality="quick")
+            if draft:
+                # Flag as draft so Mac re-renders when it comes back online
+                job = adb.enqueue_render(player_id, game_context, quality="best")
+                adb.update_job_status(job["id"], "PENDING", draft_quality=True)
         except Exception as e:
             logging.error("[Announcer] bg render failed for %s: %s", player_id, e)
 
     threading.Thread(target=_bg_render, daemon=True).start()
-    return jsonify({"status": "rendering", "player_id": player_id}), 202
+    return jsonify({"status": "rendering", "quality": effective_quality,
+                    "draft_quality": draft, "player_id": player_id}), 202
 
 
 @app.route('/api/announcer/render-all', methods=['POST'])
@@ -3970,7 +4063,7 @@ def handle_announcer_phonetics(player_id):
     if not updated:
         return jsonify({"error": "player_not_found"}), 404
 
-    preview = build_announcement_text(updated)
+    preview = build_announcement_text(updated, game_context=dict(_LIVE_GAME_STATE))
     return jsonify({"status": "ok", "player": updated, "announcement_preview": preview})
 
 
@@ -4072,6 +4165,314 @@ def handle_announcer_voice_profiles():
     except Exception as e:
         logging.error("[Announcer] voice profiles error: %s", e)
         return jsonify({"error": "voice_profiles_failed"}), 500
+
+
+# ---------------------------------------------------------------------------
+# Announcer — Deep-Render & Shuffle routes
+# ---------------------------------------------------------------------------
+
+def _announcer_db():
+    """Lazy import + init of announcer_db to avoid circular imports at startup."""
+    import announcer_db as _adb
+    _adb.init_db()
+    return _adb
+
+
+_MAC_HEARTBEAT_MAX_AGE = int(os.getenv("MAC_HEARTBEAT_MAX_AGE", "30"))
+
+
+@app.route('/api/announcer/heartbeat', methods=['POST'])
+def handle_announcer_heartbeat():
+    """Mac render worker posts here every 30s to signal availability."""
+    blocked = _guard_mutating_request()
+    if blocked:
+        return blocked
+
+    data = request.get_json(silent=True) or {}
+    worker_id = str(data.get("worker_id") or "mac")[:64]
+    version = str(data.get("version") or "")[:32]
+
+    _announcer_db().update_heartbeat(worker_id, version)
+    return jsonify({"status": "ok", "worker_id": worker_id})
+
+
+@app.route('/api/announcer/render-queue', methods=['GET'])
+def handle_announcer_render_queue_get():
+    """Mac polls for PENDING best-quality jobs."""
+    adb = _announcer_db()
+    jobs = adb.get_pending_jobs(quality="best")
+    return jsonify({"jobs": jobs})
+
+
+@app.route('/api/announcer/render-queue/<job_id>', methods=['PATCH'])
+def handle_announcer_render_queue_claim(job_id):
+    """Mac claims a job (PENDING → PROCESSING) to prevent Pi failover."""
+    blocked = _guard_mutating_request()
+    if blocked:
+        return blocked
+
+    data = request.get_json(silent=True) or {}
+    worker_id = str(data.get("worker_id") or "mac")[:64]
+    new_status = str(data.get("status") or "PROCESSING")
+
+    if new_status not in ("PROCESSING", "COMPLETED", "FAILED"):
+        return jsonify({"error": "invalid_status"}), 400
+
+    adb = _announcer_db()
+    job = adb.get_job(job_id)
+    if not job:
+        return jsonify({"error": "job_not_found"}), 404
+
+    if new_status == "PROCESSING":
+        claimed = adb.claim_next_job.__module__ and True  # ensure init
+        # Use direct update for explicit claim by worker
+        adb.update_job_status.__func__ if hasattr(adb.update_job_status, "__func__") else None
+        import sqlite3 as _sq3
+        from announcer_db import _conn as _adb_conn, DB_PATH as _ADB_PATH
+        from datetime import datetime, timezone as _tz
+        now = datetime.now(_tz.utc).isoformat()
+        with _adb_conn() as conn:
+            conn.execute(
+                "UPDATE render_queue SET status='PROCESSING', worker_id=?, claimed_at=? WHERE id=?",
+                (worker_id, now, job_id),
+            )
+    else:
+        error = str(data.get("error") or "")[:500] if new_status == "FAILED" else None
+        draft = bool(data.get("draft_quality", False))
+        adb.update_job_status(job_id, new_status, error=error, draft_quality=draft)
+
+    updated = adb.get_job(job_id)
+    return jsonify({"status": "ok", "job": updated})
+
+
+@app.route('/api/announcer/render-complete/<job_id>', methods=['POST'])
+def handle_announcer_render_complete(job_id):
+    """Mac uploads finished FLAC master + MP3 proxy after Best Quality render.
+
+    Expects multipart/form-data with fields:
+      mp3  — 192kbps MP3 proxy (required)
+      flac — 24-bit/48kHz FLAC archive master (optional)
+    """
+    blocked = _guard_mutating_request()
+    if blocked:
+        return blocked
+
+    adb = _announcer_db()
+    job = adb.get_job(job_id)
+    if not job:
+        return jsonify({"error": "job_not_found"}), 404
+
+    mp3_file = request.files.get("mp3")
+    flac_file = request.files.get("flac")
+
+    if not mp3_file:
+        return jsonify({"error": "mp3_required"}), 400
+
+    from announcer_engine import CLIPS_DIR, ARCHIVE_DIR, _sanitize_player_id
+    player_id = job["player_id"]
+    safe_id = _sanitize_player_id(player_id)
+
+    import time as _t
+    ts = datetime.now(ET).strftime("%Y%m%d_%H%M%S")
+
+    # Save MP3 proxy
+    clips_player_dir = CLIPS_DIR / safe_id
+    clips_player_dir.mkdir(parents=True, exist_ok=True)
+    mp3_path = clips_player_dir / f"{ts}.mp3"
+    mp3_file.save(str(mp3_path))
+
+    # Save FLAC master (optional)
+    if flac_file:
+        archive_player_dir = ARCHIVE_DIR / safe_id
+        archive_player_dir.mkdir(parents=True, exist_ok=True)
+        flac_path = archive_player_dir / f"{ts}.flac"
+        flac_file.save(str(flac_path))
+
+    # Mark job COMPLETED
+    adb.update_job_status(job_id, "COMPLETED", draft_quality=False)
+
+    # Update roster entry with new clip URL
+    from announcer_engine import update_player
+    clip_url = f"/announcer-clips/{safe_id}/{ts}.mp3"
+    update_player(player_id, {
+        "status": "ready",
+        "announcer_audio_url": clip_url,
+        "rendered_at": datetime.now(ET).isoformat(),
+        "render_quality": "best",
+        "error_message": "",
+    })
+
+    logging.info("[Announcer] render-complete: job=%s player=%s mp3=%s", job_id, player_id, mp3_path)
+    return jsonify({"status": "ok", "clip_url": clip_url})
+
+
+@app.route('/api/announcer/render-status/<player_id>', methods=['GET'])
+def handle_announcer_render_status(player_id):
+    """SSE stream — pushes render quality label every 2s.
+
+    Quality labels:
+      'Archival Quality' — Best Quality render completed (FLAC master exists)
+      'Field Quality'    — Quick Render or draft_quality fallback
+      'Rendering'        — in-flight
+      'Idle'             — no recent job
+    """
+    invalid = _validate_player_id(player_id)
+    if invalid:
+        return invalid
+
+    def _generate():
+        import time
+        adb = _announcer_db()
+        while True:
+            job = adb.get_player_render_status(player_id)
+            if job:
+                status = job["status"]
+                if status == "COMPLETED":
+                    label = "Field Quality" if job["draft_quality"] else "Archival Quality"
+                elif status in ("PENDING", "PROCESSING"):
+                    label = "Rendering"
+                else:
+                    label = "Error"
+                payload = {
+                    "status": status,
+                    "quality": job["quality"],
+                    "draft_quality": bool(job["draft_quality"]),
+                    "quality_label": label,
+                    "job_id": job["id"],
+                }
+            else:
+                payload = {"status": "idle", "quality_label": "Idle"}
+
+            yield f"data: {json.dumps(payload)}\n\n"
+            time.sleep(2)
+
+    from flask import Response, stream_with_context
+    return Response(
+        stream_with_context(_generate()),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.route('/api/announcer/songs/<player_id>', methods=['GET'])
+def handle_announcer_songs_get(player_id):
+    """List the walk-up song pool for a player."""
+    invalid = _validate_player_id(player_id)
+    if invalid:
+        return invalid
+
+    adb = _announcer_db()
+    songs = adb.get_player_songs(player_id)
+    return jsonify({"player_id": player_id, "songs": songs})
+
+
+@app.route('/api/announcer/songs/<player_id>', methods=['POST'])
+def handle_announcer_songs_add(player_id):
+    """Add a song to a player's walk-up pool."""
+    blocked = _guard_mutating_request()
+    if blocked:
+        return blocked
+    invalid = _validate_player_id(player_id)
+    if invalid:
+        return invalid
+
+    data = request.get_json(silent=True) or {}
+    song_url = (data.get("song_url") or "").strip()[:500]
+    song_label = (data.get("song_label") or "").strip()[:200]
+
+    if not song_url:
+        return jsonify({"error": "song_url_required"}), 400
+
+    parsed = urlparse(song_url)
+    if parsed.scheme not in ("http", "https"):
+        return jsonify({"error": "song_url must be http(s)"}), 400
+
+    adb = _announcer_db()
+    songs = adb.add_player_song(player_id, song_url, song_label)
+    return jsonify({"player_id": player_id, "songs": songs}), 201
+
+
+@app.route('/api/announcer/songs/<player_id>/<int:song_id>', methods=['DELETE'])
+def handle_announcer_songs_delete(player_id, song_id):
+    """Remove a song from a player's walk-up pool."""
+    blocked = _guard_mutating_request()
+    if blocked:
+        return blocked
+    invalid = _validate_player_id(player_id)
+    if invalid:
+        return invalid
+
+    adb = _announcer_db()
+    adb.remove_player_song(song_id, player_id)
+    songs = adb.get_player_songs(player_id)
+    return jsonify({"player_id": player_id, "songs": songs})
+
+
+@app.route('/api/announcer/worker-status', methods=['GET'])
+def handle_announcer_worker_status():
+    """Return full render worker health payload for the PWA Worker Status Badge.
+
+    Response shape:
+      hub_status: "ONLINE" (always — Pi is responding)
+      primary_worker: { id, status (ACTIVE|STANDBY|OFFLINE), last_heartbeat, queue_depth }
+      failover_worker: { id, status: "READY" }
+      current_mode: "ELITE" (Mac alive) | "RAPID" (failover active)
+    """
+    adb = _announcer_db()
+    hb = adb.get_heartbeat_info()
+    pending_count = len(adb.get_pending_jobs(quality="best"))
+    alive = adb.is_worker_alive(max_age_seconds=_MAC_HEARTBEAT_MAX_AGE)
+
+    if hb:
+        # ACTIVE = alive and has jobs to work; STANDBY = alive, queue empty
+        worker_status = ("ACTIVE" if pending_count > 0 else "STANDBY") if alive else "OFFLINE"
+        last_heartbeat = hb.get("last_seen_at")
+        worker_id = hb.get("worker_id", "mac")
+    else:
+        worker_status = "OFFLINE"
+        last_heartbeat = None
+        worker_id = "mac"
+
+    return jsonify({
+        "hub_status": "ONLINE",
+        "primary_worker": {
+            "id": worker_id,
+            "status": worker_status,
+            "last_heartbeat": last_heartbeat,
+            "queue_depth": pending_count,
+        },
+        "failover_worker": {
+            "id": os.getenv("PI_WORKER_ID", "Pi-5-Edge"),
+            "status": "READY",
+        },
+        "current_mode": "ELITE" if alive else "RAPID",
+    })
+
+
+@app.route('/api/announcer/next-songs', methods=['GET'])
+def handle_announcer_next_songs():
+    """Peek (no-commit) the next walk-up song for up to 3 players.
+
+    Query params:
+      player_ids — comma-separated player IDs
+      session    — game session ID (defaults to today's date)
+    """
+    raw_ids = request.args.get("player_ids", "")
+    session_id = request.args.get("session", datetime.now(ET).strftime("%Y-%m-%d"))
+
+    player_ids = [p.strip() for p in raw_ids.split(",") if p.strip()][:3]
+    if not player_ids:
+        return jsonify({"error": "player_ids_required"}), 400
+
+    from announcer_engine import _sanitize_player_id
+    safe_ids = [_sanitize_player_id(pid) for pid in player_ids]
+
+    adb = _announcer_db()
+    preview = adb.peek_next_songs(safe_ids, session_id)
+    return jsonify({"session": session_id, "next_songs": preview})
 
 
 def _record_h2h_from_games():

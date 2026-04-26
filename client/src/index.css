@@ -1216,7 +1216,75 @@ input[type="checkbox"]:checked::after {
 
 .announcer-header-actions {
   display: flex;
+  align-items: center;
   gap: var(--space-xs);
+}
+
+/* Worker Status Badge */
+@keyframes worker-badge-glow {
+  0%, 100% { box-shadow: 0 0 6px var(--badge-glow), 0 0 12px var(--badge-glow); }
+  50%       { box-shadow: 0 0 12px var(--badge-glow), 0 0 24px var(--badge-glow); }
+}
+
+@keyframes worker-badge-ping {
+  0%   { transform: scale(1);   opacity: 0.8; }
+  70%  { transform: scale(2.4); opacity: 0; }
+  100% { transform: scale(2.4); opacity: 0; }
+}
+
+.worker-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.6rem 0.25rem 0.45rem;
+  border-radius: 99px;
+  border: 1px solid var(--badge-border);
+  background: var(--badge-bg);
+  font-family: var(--font-heading, monospace);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  color: var(--badge-color);
+  cursor: default;
+  user-select: none;
+  animation: worker-badge-glow 2.5s ease-in-out infinite;
+}
+
+.worker-badge-ping {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex-shrink: 0;
+  position: relative;
+}
+
+.worker-badge-ping--active {
+  background: var(--badge-color);
+}
+
+.worker-badge-ping--active::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: var(--badge-color);
+  animation: worker-badge-ping 1.8s ease-out infinite;
+}
+
+.worker-badge-queue {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 99px;
+  background: var(--badge-color);
+  color: #0a0f1a;
+  font-size: 0.65rem;
+  font-weight: 800;
+  line-height: 1;
 }
 
 /* Stats Bar */
