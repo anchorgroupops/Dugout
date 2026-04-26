@@ -154,24 +154,9 @@ def _load_secret_cache() -> dict[str, str]:
     global _SECRET_CACHE
     if isinstance(_SECRET_CACHE, dict):
         return _SECRET_CACHE
-
+    # CSV-based secret loading (Windows legacy) was removed with runtime_ops.
+    # All secrets now come from .env / environment variables via _resolve_secret.
     _SECRET_CACHE = {}
-    try:
-        from runtime_ops import extract_secrets_from_csv  # lazy import; no CLI side effects
-    except Exception:
-        return _SECRET_CACHE
-
-    for path in _candidate_secrets_csv_paths():
-        try:
-            if not path.exists():
-                continue
-            found = extract_secrets_from_csv(path)
-            if isinstance(found, dict):
-                _SECRET_CACHE = {k: str(v).strip() for k, v in found.items() if str(v).strip()}
-                if _SECRET_CACHE:
-                    return _SECRET_CACHE
-        except Exception:
-            continue
     return _SECRET_CACHE
 
 

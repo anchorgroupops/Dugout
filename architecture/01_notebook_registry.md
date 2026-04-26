@@ -30,10 +30,7 @@ Shutdown → Always write updated registry before exit
 
 | Type | Description | Tools Used |
 |---|---|---|
-| `youtube_channel` | Sources are videos from specific YouTube channels | `fetch_youtube_channel.py` |
-| `youtube_topic` | Sources are YouTube videos matching keywords | `fetch_youtube_topic.py` |
-| `forum` | Sources are forum/community pages (Reddit, etc.) | `fetch_web_sources.py` |
-| `documentation` | Sources are official docs/changelogs | `fetch_web_sources.py`, Firecrawl |
+| `documentation` | Sources are official docs/changelogs | Firecrawl |
 | `project` | Static project reference — manually managed | None (read-only) |
 | `mixed` | Multiple source types | Multiple fetchers |
 | `unclassified` | Not yet configured | None — suggestion generated |
