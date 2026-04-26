@@ -137,6 +137,20 @@ function App() {
     return () => clearInterval(intervalId);
   }, [fetchData]);
 
+  // Handle Spotify OAuth callback — SPA catches /spotify-callback via nginx try_files
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('code');
+    if (code && window.location.pathname === '/spotify-callback') {
+      import('./services/SpotifyService').then(({ handleCallback }) => {
+        handleCallback(code).catch(console.error).finally(() => {
+          window.history.replaceState({}, '', '/');
+          setCurrentView('announcer');
+        });
+      });
+    }
+  }, []);
+
   useEffect(() => {
     const onResize = () => {
       const w = window.innerWidth;

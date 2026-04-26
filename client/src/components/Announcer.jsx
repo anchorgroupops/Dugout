@@ -110,7 +110,9 @@ function PlayerCard({ player, onSavePhonetics, onRender }) {
   const [songsLoading, setSongsLoading] = useState(false);
   const [newSongUrl, setNewSongUrl] = useState('');
   const [newSongLabel, setNewSongLabel] = useState('');
+  const [newSongOptimalStart, setNewSongOptimalStart] = useState(0);
   const [addingSong, setAddingSong] = useState(false);
+  const [detecting, setDetecting] = useState(false);
 
   useEffect(() => {
     if (!expanded) return;
@@ -124,6 +126,34 @@ function PlayerCard({ player, onSavePhonetics, onRender }) {
     return () => { cancelled = true; };
   }, [expanded, player.id]);
 
+  const _spotifyTrackId = (url) => {
+    const m = url.match(/open\.spotify\.com\/track\/([A-Za-z0-9]+)/);
+    return m ? m[1] : null;
+  };
+
+  const handleDetectStart = async () => {
+    const trackId = _spotifyTrackId(newSongUrl);
+    if (!trackId) return;
+    setDetecting(true);
+    try {
+      const { getAudioAnalysis, getToken } = await import('../services/SpotifyService');
+      const token = await getToken();
+      if (!token) return;
+      const analysis = await getAudioAnalysis(trackId);
+      const res = await fetch('/api/announcer/optimal-start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ audio_analysis: analysis }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setNewSongOptimalStart(data.optimal_start_ms || 0);
+      }
+    } catch { /* silent — optional feature */ } finally {
+      setDetecting(false);
+    }
+  };
+
   const handleAddSong = async () => {
     const url = newSongUrl.trim();
     if (!url) return;
@@ -132,13 +162,18 @@ function PlayerCard({ player, onSavePhonetics, onRender }) {
       const res = await fetch(`/api/announcer/songs/${player.id}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ song_url: url, song_label: newSongLabel.trim() }),
+        body: JSON.stringify({
+          song_url: url,
+          song_label: newSongLabel.trim(),
+          optimal_start_ms: newSongOptimalStart || 0,
+        }),
       });
       if (res.ok) {
         const data = await res.json();
         setSongs(data.songs || []);
         setNewSongUrl('');
         setNewSongLabel('');
+        setNewSongOptimalStart(0);
       }
     } finally {
       setAddingSong(false);
@@ -348,7 +383,7 @@ function PlayerCard({ player, onSavePhonetics, onRender }) {
               <input
                 className="announcer-song-input"
                 value={newSongUrl}
-                onChange={e => setNewSongUrl(e.target.value)}
+                onChange={e => { setNewSongUrl(e.target.value); setNewSongOptimalStart(0); }}
                 onKeyDown={e => e.key === 'Enter' && handleAddSong()}
                 placeholder="https://… audio URL"
                 type="url"
@@ -362,6 +397,18 @@ function PlayerCard({ player, onSavePhonetics, onRender }) {
                 placeholder="Label"
                 maxLength={100}
               />
+              {_spotifyTrackId(newSongUrl) && (
+                <button
+                  onClick={handleDetectStart}
+                  disabled={detecting}
+                  className="announcer-btn announcer-btn-secondary"
+                  style={{ flexShrink: 0, fontSize: '0.72rem', padding: '4px 8px' }}
+                  title="Detect optimal start point via Spotify audio analysis"
+                >
+                  {detecting ? <RefreshCw size={11} className="sync-spin" /> : '⚡'}
+                  {newSongOptimalStart > 0 ? `${(newSongOptimalStart / 1000).toFixed(1)}s` : 'Start'}
+                </button>
+              )}
               <button
                 onClick={handleAddSong}
                 disabled={addingSong || !newSongUrl.trim()}
@@ -825,7 +872,17 @@ function WizardModal({ onClose, roster }) {
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [suggestions, setSuggestions] = useState({});
-  const [tab, setTab] = useState('search'); // 'search' | 'roster'
+  const [tab, setTab] = useState('search'); // 'search' | 'roster' | 'spotify'
+  const [spotifyAuthed, setSpotifyAuthed] = useState(false);
+  const [spotifyResults, setSpotifyResults] = useState([]);
+  const [spotifyQuery, setSpotifyQuery] = useState('');
+  const [spotifyLoading, setSpotifyLoading] = useState(false);
+
+  useEffect(() => {
+    import('../services/SpotifyService').then(({ isAuthenticated }) => {
+      setSpotifyAuthed(isAuthenticated());
+    });
+  }, []);
 
   useEffect(() => {
     if (tab !== 'roster') return;
@@ -847,6 +904,24 @@ function WizardModal({ onClose, roster }) {
     } finally { setLoading(false); }
   };
 
+  const handleSpotifySearch = async (e) => {
+    e.preventDefault();
+    if (!spotifyQuery.trim()) return;
+    setSpotifyLoading(true);
+    try {
+      const { searchTracks } = await import('../services/SpotifyService');
+      const tracks = await searchTracks(spotifyQuery, 15);
+      setSpotifyResults(tracks);
+    } catch { /* token may have expired */ } finally {
+      setSpotifyLoading(false);
+    }
+  };
+
+  const handleSpotifyConnect = async () => {
+    const { startAuth } = await import('../services/SpotifyService');
+    startAuth();
+  };
+
   return createPortal(
     <div className="announcer-modal-overlay" onClick={onClose}>
       <div className="announcer-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 520 }}>
@@ -856,10 +931,13 @@ function WizardModal({ onClose, roster }) {
         </div>
         <div className="announcer-wizard-tabs">
           <button className={`announcer-wizard-tab${tab === 'search' ? ' active' : ''}`} onClick={() => setTab('search')}>
-            Catalog Search
+            Catalog
           </button>
           <button className={`announcer-wizard-tab${tab === 'roster' ? ' active' : ''}`} onClick={() => setTab('roster')}>
-            Roster Suggestions
+            Roster
+          </button>
+          <button className={`announcer-wizard-tab${tab === 'spotify' ? ' active' : ''}`} onClick={() => setTab('spotify')}>
+            Spotify
           </button>
         </div>
 
@@ -930,6 +1008,65 @@ function WizardModal({ onClose, roster }) {
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {tab === 'spotify' && (
+          <div className="announcer-wizard-body">
+            {!spotifyAuthed ? (
+              <div className="announcer-wizard-spotify-connect">
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '1rem' }}>
+                  Connect Spotify to search 100M+ tracks and auto-detect optimal start points.
+                  30-second previews are free. Full playback requires Spotify Premium.
+                </p>
+                <button className="announcer-btn announcer-btn-primary" onClick={handleSpotifyConnect}>
+                  Connect Spotify
+                </button>
+              </div>
+            ) : (
+              <>
+                <form onSubmit={handleSpotifySearch} className="announcer-wizard-search-form">
+                  <input
+                    className="announcer-song-input"
+                    value={spotifyQuery}
+                    onChange={e => setSpotifyQuery(e.target.value)}
+                    placeholder="Search Spotify…"
+                    autoFocus
+                  />
+                  <button type="submit" className="announcer-btn announcer-btn-primary" disabled={spotifyLoading}>
+                    {spotifyLoading ? <RefreshCw size={13} className="sync-spin" /> : 'Search'}
+                  </button>
+                </form>
+                <div className="announcer-wizard-results">
+                  {spotifyResults.map(track => (
+                    <div key={track.spotify_id} className="announcer-wizard-result-row">
+                      <div className="announcer-wizard-result-info">
+                        <span className="announcer-wizard-result-title">{track.title}</span>
+                        <span className="announcer-wizard-result-artist">{track.artist}</span>
+                      </div>
+                      <div className="announcer-wizard-result-meta">
+                        {track.duration_ms && (
+                          <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>
+                            {Math.floor(track.duration_ms / 60000)}:{String(Math.floor((track.duration_ms % 60000) / 1000)).padStart(2, '0')}
+                          </span>
+                        )}
+                        {track.preview_url && (
+                          <audio
+                            src={track.preview_url}
+                            controls
+                            style={{ height: 22, width: 140 }}
+                            preload="none"
+                          />
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  {spotifyResults.length === 0 && !spotifyLoading && spotifyQuery && (
+                    <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '1rem' }}>No results</p>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         )}
       </div>

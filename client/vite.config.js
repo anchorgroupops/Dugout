@@ -43,6 +43,19 @@ export default defineConfig(({ mode }) => ({
             },
           },
           {
+            // Cache announcer TTS clips with CacheFirst (1-year immutable after render)
+            urlPattern: ({ url }) => url.pathname.startsWith('/announcer-clips/'),
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'announcer-clips',
+              expiration: {
+                maxEntries: 300,
+                maxAgeSeconds: 365 * 24 * 60 * 60,
+              },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+          {
             // Cache API data (GameChanger stats, SWOT, lineups) with NetworkFirst strategy
             urlPattern: ({ url }) => url.pathname.startsWith('/api/') || url.pathname.endsWith('.json'),
             handler: 'NetworkFirst',
