@@ -4476,6 +4476,117 @@ def handle_announcer_next_songs():
 
 
 # ---------------------------------------------------------------------------
+# Game Lineup (GC sync for Announcer NowPlayingView)
+# ---------------------------------------------------------------------------
+
+@app.route('/api/announcer/game-lineup', methods=['GET'])
+def handle_announcer_game_lineup():
+    """Return the batting order for the current/most-recent game.
+
+    Priority:
+      1. Most recent named game file where >50% of jersey numbers belong to
+         the Sharks roster (GC box-score order = actual batting order).
+      2. Recommended optimizer lineup from lineups.json.
+
+    Returns:
+      {source, source_label, game_date, players: [{id,first,last,number,slot}]}
+    """
+    import json as _json
+    from pathlib import Path as _Path
+
+    roster = _load_roster_players()
+    roster_by_number = {str(p.get("number", "")).strip(): p for p in roster if p.get("number")}
+
+    games_dir = SHARKS_DIR / "games"
+    named = sorted(
+        [f for f in games_dir.glob("[0-9]*.json")],
+        reverse=True,  # newest file-name first (YYYY-MM-DD_... sorts correctly)
+    )
+
+    for game_file in named:
+        try:
+            data = _json.loads(game_file.read_text(encoding="utf-8"))
+            if isinstance(data, list):
+                data = data[0]
+            batting = data.get("sharks_batting", [])
+            if not batting:
+                continue
+
+            # Validate that this is Sharks batting (≥50% jersey number matches)
+            batt_numbers = [str(p.get("number", "")).strip() for p in batting]
+            hit = sum(1 for n in batt_numbers if n in roster_by_number)
+            if hit < max(1, len(batting) * 0.5):
+                continue  # Opponent batting captured in this slot — skip
+
+            players = []
+            for slot, bp in enumerate(batting, 1):
+                num = str(bp.get("number", "")).strip()
+                rp = roster_by_number.get(num)
+                if rp:
+                    players.append({
+                        "id": rp.get("id", ""),
+                        "first": rp["first"],
+                        "last": rp["last"],
+                        "number": num,
+                        "slot": slot,
+                    })
+                else:
+                    # Name-only fallback (abbreviated GC name "R. VanDeusen")
+                    raw = bp.get("name", "")
+                    parts = raw.split()
+                    first = parts[0].rstrip(".") if parts else ""
+                    last = " ".join(parts[1:]) if len(parts) > 1 else ""
+                    players.append({
+                        "id": "",
+                        "first": first,
+                        "last": last,
+                        "number": num,
+                        "slot": slot,
+                    })
+
+            if players:
+                return jsonify({
+                    "source": "gc_game",
+                    "source_label": f"GC {data.get('date', game_file.stem[:10])} vs {data.get('opponent', '?')}",
+                    "game_date": data.get("date", game_file.stem[:10]),
+                    "players": players,
+                })
+        except Exception:
+            continue
+
+    # Fallback: optimizer recommended lineup
+    lineups_path = SHARKS_DIR / "lineups.json"
+    if lineups_path.exists():
+        try:
+            lineups = _json.loads(lineups_path.read_text(encoding="utf-8"))
+            strategy = lineups.get("recommended_strategy", "balanced")
+            entry = lineups.get(strategy) or lineups.get("balanced") or {}
+            lineup_list = entry.get("lineup", [])
+            if lineup_list:
+                players = []
+                for p in sorted(lineup_list, key=lambda x: x.get("slot", 999)):
+                    num = str(p.get("number", "")).strip()
+                    rp = roster_by_number.get(num)
+                    players.append({
+                        "id": rp.get("id", "") if rp else "",
+                        "first": p.get("first", ""),
+                        "last": p.get("last", ""),
+                        "number": num,
+                        "slot": p.get("slot", len(players) + 1),
+                    })
+                return jsonify({
+                    "source": "optimizer",
+                    "source_label": f"Optimizer ({strategy})",
+                    "game_date": None,
+                    "players": players,
+                })
+        except Exception:
+            pass
+
+    return jsonify({"source": "none", "source_label": "Roster order", "game_date": None, "players": []})
+
+
+# ---------------------------------------------------------------------------
 # Music Wizard routes
 # ---------------------------------------------------------------------------
 

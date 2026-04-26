@@ -466,25 +466,50 @@ function NowPlayingView({ roster, lineups, onBack }) {
   const [showGamePanel, setShowGamePanel] = useState(false);
   const [showHalo, setShowHalo] = useState(false);
   const [announcementPreview, setAnnouncementPreview] = useState('');
+  const [gcLineup, setGcLineup] = useState(null); // {source, source_label, players}
 
-  // Build batting order from lineups or fall back to roster order
+  // Fetch GC-synced batting order on mount
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/announcer/game-lineup')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data && !cancelled) setGcLineup(data); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  // Build batting order: GC game → optimizer lineup → active roster
   const battingOrder = (() => {
+    // Priority 1: GC game or optimizer lineup from /api/announcer/game-lineup
+    if (gcLineup?.players?.length) {
+      return gcLineup.players
+        .map(p => {
+          // Match against full roster by id, then jersey number, then name
+          return roster.find(r =>
+            (p.id && r.id === p.id) ||
+            String(r.number) === String(p.number) ||
+            `${r.first} ${r.last}`.toLowerCase() === `${p.first} ${p.last}`.toLowerCase()
+          ) || null;
+        })
+        .filter(Boolean);
+    }
+
+    // Priority 2: lineups.json — use recommended_strategy's lineup array (key is 'lineup', not 'order')
     if (lineups) {
-      for (const key of Object.keys(lineups)) {
-        const val = lineups[key];
-        if (val && typeof val === 'object' && Array.isArray(val.order)) {
-          return val.order
-            .map(name => {
-              const lower = name.toLowerCase();
-              return roster.find(p =>
-                `${p.first} ${p.last}`.toLowerCase() === lower ||
-                p.first.toLowerCase() === lower
-              );
-            })
-            .filter(Boolean);
-        }
+      const strategy = lineups.recommended_strategy || 'balanced';
+      const entry = lineups[strategy] || lineups.balanced;
+      const lineup = entry?.lineup;
+      if (Array.isArray(lineup) && lineup.length) {
+        return lineup
+          .sort((a, b) => (a.slot || 0) - (b.slot || 0))
+          .map(p => roster.find(r =>
+            String(r.number) === String(p.number) ||
+            `${r.first} ${r.last}`.toLowerCase() === `${p.first} ${p.last}`.toLowerCase()
+          ))
+          .filter(Boolean);
       }
     }
+
     return roster.filter(p => p.is_active && p.status === 'ready');
   })();
 
@@ -624,6 +649,14 @@ function NowPlayingView({ roster, lineups, onBack }) {
             <Target size={14} /> Game State
           </button>
           <span className="announcer-np-position">{currentIdx + 1} / {battingOrder.length}</span>
+          {gcLineup?.source_label && (
+            <span
+              className={`announcer-lineup-source${gcLineup.source === 'gc_game' ? ' announcer-lineup-source--gc' : ''}`}
+              title={gcLineup.source === 'gc_game' ? 'Batting order from GameChanger — re-ingest CSV to refresh' : 'Batting order from lineup optimizer'}
+            >
+              {gcLineup.source === 'gc_game' ? '⚾' : '📊'} {gcLineup.source_label}
+            </span>
+          )}
         </div>
       </div>
 
