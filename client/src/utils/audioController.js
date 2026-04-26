@@ -216,6 +216,14 @@ export async function playIntro({ walkupUrl, clipUrl, introTimestamp = 5, autoBP
 
   if (!isPlaying) return; // User called stop() while loading
 
+  // Nothing to play — clean up and fire onEnd immediately
+  if (!walkupBuf && !clipBuf) {
+    isPlaying = false;
+    onEndCallback = null;
+    if (onEnd) onEnd();
+    return;
+  }
+
   // BPM beat-matching: auto-set intro timestamp when autoBPM is enabled
   // and no explicit timestamp was provided (introTimestamp === 0).
   if (autoBPM && walkupBuf && introTimestamp === 0) {
@@ -252,6 +260,14 @@ export async function playIntro({ walkupUrl, clipUrl, introTimestamp = 5, autoBP
     }, 250);
   }
 
+  const finish = () => {
+    if (progressInterval) clearInterval(progressInterval);
+    isPlaying = false;
+    const cb = onEndCallback;
+    onEndCallback = null;
+    if (cb) cb();
+  };
+
   // Schedule ducking and clip playback
   if (clipBuf) {
     const duckDelay = walkupBuf ? Math.max(0, introTimestamp) * 1000 : 0;
@@ -273,40 +289,25 @@ export async function playIntro({ walkupUrl, clipUrl, introTimestamp = 5, autoBP
 
       clipSource.onended = () => {
         if (!isPlaying) return;
-        // Restore music volume
         if (walkupBuf && walkupSource) {
+          // Restore music volume; walkupSource.onended handles finish()
           const now = audioCtx.currentTime;
           walkupGain.gain.setValueAtTime(DUCK_LEVEL, now);
           walkupGain.gain.linearRampToValueAtTime(1.0, now + DUCK_RAMP_MS / 1000);
+        } else {
+          // Clip-only — sequence ends when clip ends
+          finish();
         }
       };
     }, duckDelay);
-
-    // If no walkup, the clip ending means the sequence is done
-    if (!walkupBuf) {
-      const clipSrc = await new Promise(resolve => {
-        const checkTimer = setTimeout(() => {
-          resolve(clipSource);
-        }, duckDelay + 50);
-        if (!isPlaying) { clearTimeout(checkTimer); resolve(null); }
-      });
-      if (clipSrc) {
-        clipSrc.onended = () => {
-          if (progressInterval) clearInterval(progressInterval);
-          isPlaying = false;
-          if (onEndCallback) onEndCallback();
-        };
-      }
-    }
   }
 
   // If walkup exists, it controls overall sequence end
   if (walkupSource) {
-    walkupSource.onended = () => {
-      if (progressInterval) clearInterval(progressInterval);
-      isPlaying = false;
-      if (onEndCallback) onEndCallback();
-    };
+    walkupSource.onended = () => finish();
+  } else if (!clipBuf) {
+    // No walkup, no clip — already handled by the guard above, but just in case
+    finish();
   }
 }
 
