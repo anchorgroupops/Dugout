@@ -25,8 +25,8 @@ export default defineConfig(({ mode }) => ({
     {
       name: 'css-preload',
       transformIndexHtml: {
-        enforce: 'post',
-        transform(html) {
+        order: 'post',
+        handler(html) {
           return html.replace(
             /(<link rel="stylesheet" crossorigin href="([^"]+\.css)">)/g,
             '<link rel="preload" as="style" href="$2">$1'
