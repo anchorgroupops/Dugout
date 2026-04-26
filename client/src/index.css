@@ -1491,6 +1491,127 @@ input[type="checkbox"]:checked::after {
   gap: var(--space-sm);
 }
 
+/* Song Pool */
+.announcer-song-pool {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding-top: var(--space-sm);
+  margin-top: var(--space-xs);
+}
+
+.announcer-song-pool-header {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: var(--space-xs);
+}
+
+.announcer-song-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 99px;
+  background: var(--primary-glow);
+  color: var(--primary-color);
+  font-size: 0.65rem;
+  font-weight: 700;
+}
+
+.announcer-song-empty {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  padding: 3px 0 var(--space-xs);
+}
+
+.announcer-song-list {
+  list-style: none;
+  margin: 0 0 var(--space-xs);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.announcer-song-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: 4px 6px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 0.78rem;
+}
+
+.announcer-song-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-main);
+}
+
+.announcer-song-plays {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.announcer-song-delete {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 4px;
+  flex-shrink: 0;
+  padding: 0;
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.announcer-song-delete:hover {
+  color: var(--danger);
+  background: rgba(179, 74, 57, 0.14);
+}
+
+.announcer-song-add {
+  display: flex;
+  gap: var(--space-xs);
+  align-items: center;
+}
+
+.announcer-song-input {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--surface-border);
+  border-radius: 6px;
+  padding: 0.35rem 0.55rem;
+  color: var(--text-main);
+  font-family: var(--font-base);
+  font-size: 0.8rem;
+  transition: border-color var(--transition-fast);
+  min-width: 0;
+  flex: 1;
+}
+
+.announcer-song-input:focus {
+  outline: none;
+  border-color: var(--primary-color);
+}
+
+.announcer-song-label-input {
+  flex: 0 0 100px;
+}
+
 .announcer-preview-text {
   display: flex;
   align-items: center;

@@ -4,7 +4,7 @@ import {
   Mic, Music, Play, Square, SkipBack, SkipForward,
   ChevronDown, ChevronUp, RefreshCw, UserPlus, Save,
   AlertCircle, CheckCircle, Clock, Volume2, Settings2, List,
-  Zap, Target, Activity
+  Zap, Target, Activity, Plus, X
 } from 'lucide-react';
 import { playIntro, playClip, stop as stopAudio, preload, cleanup, detectBPM, calcBeatOffset, loadBuffer } from '../utils/audioController';
 import WorkerBadge from './WorkerBadge';
@@ -106,6 +106,52 @@ function PlayerCard({ player, onSavePhonetics, onRender }) {
   const [previewing, setPreviewing] = useState(false);
   const [bpmResult, setBpmResult] = useState(null);
   const [bpmLoading, setBpmLoading] = useState(false);
+  const [songs, setSongs] = useState([]);
+  const [songsLoading, setSongsLoading] = useState(false);
+  const [newSongUrl, setNewSongUrl] = useState('');
+  const [newSongLabel, setNewSongLabel] = useState('');
+  const [addingSong, setAddingSong] = useState(false);
+
+  useEffect(() => {
+    if (!expanded) return;
+    let cancelled = false;
+    setSongsLoading(true);
+    fetch(`/api/announcer/songs/${player.id}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (!cancelled && data) setSongs(data.songs || []); })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setSongsLoading(false); });
+    return () => { cancelled = true; };
+  }, [expanded, player.id]);
+
+  const handleAddSong = async () => {
+    const url = newSongUrl.trim();
+    if (!url) return;
+    setAddingSong(true);
+    try {
+      const res = await fetch(`/api/announcer/songs/${player.id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ song_url: url, song_label: newSongLabel.trim() }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setSongs(data.songs || []);
+        setNewSongUrl('');
+        setNewSongLabel('');
+      }
+    } finally {
+      setAddingSong(false);
+    }
+  };
+
+  const handleDeleteSong = async (songId) => {
+    const res = await fetch(`/api/announcer/songs/${player.id}/${songId}`, { method: 'DELETE' });
+    if (res.ok) {
+      const data = await res.json();
+      setSongs(data.songs || []);
+    }
+  };
 
   const numWord = numToWord(player.number);
   const displayName = phonetic || `${player.first} ${player.last}`;
@@ -253,6 +299,75 @@ function PlayerCard({ player, onSavePhonetics, onRender }) {
               )}
             </div>
           )}
+
+          <div className="announcer-song-pool">
+            <div className="announcer-song-pool-header">
+              <Music size={13} />
+              Walk-up Pool
+              {songs.length > 0 && (
+                <span className="announcer-song-count">{songs.length}</span>
+              )}
+            </div>
+
+            {songsLoading ? (
+              <div className="announcer-song-empty">
+                <RefreshCw size={11} className="sync-spin" /> Loading…
+              </div>
+            ) : songs.length === 0 ? (
+              <div className="announcer-song-empty">
+                No songs — add URLs below to enable LRU shuffle during games.
+              </div>
+            ) : (
+              <ul className="announcer-song-list">
+                {songs.map(song => (
+                  <li key={song.id} className="announcer-song-item">
+                    <span className="announcer-song-label" title={song.song_url}>
+                      {song.song_label || song.song_url.split('/').pop().split('?')[0] || song.song_url}
+                    </span>
+                    {song.play_count > 0 && (
+                      <span className="announcer-song-plays">×{song.play_count}</span>
+                    )}
+                    <button
+                      className="announcer-song-delete"
+                      onClick={() => handleDeleteSong(song.id)}
+                      aria-label="Remove song"
+                    >
+                      <X size={12} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            <div className="announcer-song-add">
+              <input
+                className="announcer-song-input"
+                value={newSongUrl}
+                onChange={e => setNewSongUrl(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleAddSong()}
+                placeholder="https://… audio URL"
+                type="url"
+                maxLength={500}
+              />
+              <input
+                className="announcer-song-input announcer-song-label-input"
+                value={newSongLabel}
+                onChange={e => setNewSongLabel(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleAddSong()}
+                placeholder="Label"
+                maxLength={100}
+              />
+              <button
+                onClick={handleAddSong}
+                disabled={addingSong || !newSongUrl.trim()}
+                className="announcer-btn announcer-btn-secondary"
+                style={{ flexShrink: 0, fontSize: '0.75rem', padding: '4px 10px' }}
+              >
+                {addingSong ? <RefreshCw size={12} className="sync-spin" /> : <Plus size={12} />}
+                Add
+              </button>
+            </div>
+          </div>
 
           <div className="announcer-preview-text">
             <Mic size={14} /> <em>{previewText}</em>
