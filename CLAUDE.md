@@ -15,6 +15,7 @@ Deterministic softball analyzer and training aid for **The Sharks** (PCLL). Maxi
 - **Ingest CSV + Scorebook**: `python tools/gc_ingest_pipeline.py --csv <path> --scorebook <path>`
 - **Optimize Lineup**: `python tools/lineup_optimizer.py`
 - **Generate Practice**: `python tools/practice_gen.py`
+- **Autopull CSV** (Pi, scheduled): `python tools/autopull/cli.py pull`
 - **NotebookLM Sync**: `python tools/notebooklm_sync.py`
 - **Modal Deploy**: `modal deploy tools/modal_app.py`
 
@@ -30,3 +31,11 @@ Deterministic softball analyzer and training aid for **The Sharks** (PCLL). Maxi
 - **Scorebook Optional**: Scorebook image/PDF parsing is a low-priority supplement via `tools/scorebook_ocr.py`.
 - **Deterministic**: All SWOT and lineup outcomes must be formula-driven.
 - **Mobile-First**: Frontend components must be responsive for dugout use.
+
+## What Belongs Here
+This repo is **softball-only**. Do not add:
+- NotebookLM Librarian application code (api.py, batch_sync.py, run_dashboard.py)
+- YouTube/web-crawling fetchers unrelated to softball
+- BlueStacks / Frida / ADB tools (Playwright handles GC automation)
+- Windows-path scripts (`H:\Repos\...` hardcoded paths)
+- Duplicate scraper variants — one scraper per function only

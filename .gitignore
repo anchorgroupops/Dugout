@@ -49,3 +49,16 @@ htmlcov/
 
 # squirrelscan CLI
 squirrel.toml
+
+# Output files that tools write — should stay in logs/ not repo root
+tools/*.txt
+tools/*.log
+*.log
+
+# Frida / Android debug binaries
+tools/frida-server*
+tools/*.xz
+tools/*.js
+
+# Windows-path scripts (never cross-compile correctly)
+gen_b64*.py
