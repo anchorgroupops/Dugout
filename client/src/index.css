@@ -1287,6 +1287,125 @@ input[type="checkbox"]:checked::after {
   line-height: 1;
 }
 
+/* Song start-time badge (shown on song items with known optimal_start_ms) */
+.announcer-song-start-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(130, 203, 195, 0.14);
+  border: 1px solid rgba(130, 203, 195, 0.28);
+  color: var(--primary-color);
+  font-size: 0.65rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+/* Music Wizard modal */
+.announcer-wizard-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--surface-border);
+}
+
+.announcer-wizard-tab {
+  flex: 1;
+  padding: var(--space-sm) var(--space-md);
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color var(--transition-fast), background var(--transition-fast);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+
+.announcer-wizard-tab.active {
+  color: var(--primary-color);
+  border-bottom-color: var(--primary-color);
+}
+
+.announcer-wizard-tab:hover:not(.active) {
+  background: var(--primary-glow);
+  color: var(--text-main);
+}
+
+.announcer-wizard-body {
+  padding: var(--space-md);
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.announcer-wizard-search-form {
+  display: flex;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-md);
+}
+
+.announcer-wizard-results {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.announcer-wizard-result-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.announcer-wizard-result-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.announcer-wizard-result-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.announcer-wizard-result-artist {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.announcer-wizard-result-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.announcer-wizard-energy {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.announcer-wizard-player-section {
+  margin-bottom: var(--space-md);
+}
+
+.announcer-wizard-player-name {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--primary-color);
+  margin-bottom: 4px;
+}
+
 /* Stats Bar */
 .announcer-stats-bar {
   padding: var(--space-sm) var(--space-md);

@@ -46,6 +46,44 @@ def _conn() -> Iterator[sqlite3.Connection]:
 # Schema migrations
 # ---------------------------------------------------------------------------
 
+_V2_COLUMN_ALTERS = [
+    "ALTER TABLE player_songs ADD COLUMN source          TEXT DEFAULT 'url'",
+    "ALTER TABLE player_songs ADD COLUMN source_id       TEXT",
+    "ALTER TABLE player_songs ADD COLUMN optimal_start_ms INTEGER DEFAULT 0",
+    "ALTER TABLE player_songs ADD COLUMN duration_ms     INTEGER",
+]
+
+_SCHEMA_V2_NEW_TABLES = """
+CREATE TABLE IF NOT EXISTS walkup_catalog (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    rank             INTEGER UNIQUE,
+    title            TEXT NOT NULL,
+    artist           TEXT NOT NULL,
+    spotify_id       TEXT,
+    apple_id         TEXT,
+    optimal_start_ms INTEGER DEFAULT 0,
+    duration_ms      INTEGER,
+    energy_score     REAL DEFAULT 0.0,
+    tags             TEXT DEFAULT '[]'
+);
+
+CREATE INDEX IF NOT EXISTS idx_wc_rank   ON walkup_catalog(rank);
+CREATE INDEX IF NOT EXISTS idx_wc_energy ON walkup_catalog(energy_score DESC);
+
+CREATE TABLE IF NOT EXISTS music_auth (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider      TEXT NOT NULL CHECK(provider IN ('apple','spotify')),
+    access_token  TEXT,
+    refresh_token TEXT,
+    expires_at    TEXT,
+    scope         TEXT,
+    updated_at    TEXT NOT NULL,
+    UNIQUE(provider)
+);
+
+INSERT OR IGNORE INTO schema_version VALUES (2);
+"""
+
 _SCHEMA_V1 = """
 CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY);
 
@@ -113,6 +151,15 @@ def init_db() -> None:
         if current < 1:
             conn.executescript(_SCHEMA_V1)
             log.info("[announcer_db] Applied schema v1")
+
+        if current < 2:
+            for sql in _V2_COLUMN_ALTERS:
+                try:
+                    conn.execute(sql)
+                except sqlite3.OperationalError:
+                    pass  # column already exists
+            conn.executescript(_SCHEMA_V2_NEW_TABLES)
+            log.info("[announcer_db] Applied schema v2")
 
 
 # ---------------------------------------------------------------------------
@@ -240,15 +287,25 @@ def requeue_stale_jobs(stale_seconds: int = 120) -> int:
 # Player Songs
 # ---------------------------------------------------------------------------
 
-def add_player_song(player_id: str, song_url: str, song_label: str = "") -> list[dict]:
+def add_player_song(
+    player_id: str,
+    song_url: str,
+    song_label: str = "",
+    source: str = "url",
+    source_id: str | None = None,
+    optimal_start_ms: int = 0,
+    duration_ms: int | None = None,
+) -> list[dict]:
     """Add a song to a player's pool. Ignores duplicates. Returns updated pool."""
     now = datetime.now(timezone.utc).isoformat()
     with _conn() as conn:
         conn.execute(
             """INSERT OR IGNORE INTO player_songs
-               (player_id, song_url, song_label, created_at)
-               VALUES (?, ?, ?, ?)""",
-            (player_id, song_url, song_label, now),
+               (player_id, song_url, song_label, source, source_id,
+                optimal_start_ms, duration_ms, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (player_id, song_url, song_label, source, source_id,
+             optimal_start_ms, duration_ms, now),
         )
     return get_player_songs(player_id)
 
@@ -434,3 +491,123 @@ def is_worker_alive(max_age_seconds: int = 30) -> bool:
             return age <= max_age_seconds
         except Exception:
             return False
+
+
+# ---------------------------------------------------------------------------
+# Walkup Catalog
+# ---------------------------------------------------------------------------
+
+def upsert_catalog_entry(entry: dict) -> None:
+    """Insert or replace a catalog entry. `entry` must have title, artist, rank."""
+    now = datetime.now(timezone.utc).isoformat()
+    with _conn() as conn:
+        conn.execute(
+            """INSERT INTO walkup_catalog
+               (rank, title, artist, spotify_id, apple_id,
+                optimal_start_ms, duration_ms, energy_score, tags)
+               VALUES (:rank, :title, :artist, :spotify_id, :apple_id,
+                       :optimal_start_ms, :duration_ms, :energy_score, :tags)
+               ON CONFLICT(rank) DO UPDATE SET
+                 title=excluded.title, artist=excluded.artist,
+                 spotify_id=excluded.spotify_id, apple_id=excluded.apple_id,
+                 optimal_start_ms=excluded.optimal_start_ms,
+                 duration_ms=excluded.duration_ms,
+                 energy_score=excluded.energy_score,
+                 tags=excluded.tags""",
+            {
+                "rank": entry.get("rank"),
+                "title": entry["title"],
+                "artist": entry["artist"],
+                "spotify_id": entry.get("spotify_id"),
+                "apple_id": entry.get("apple_id"),
+                "optimal_start_ms": entry.get("optimal_start_ms", 0),
+                "duration_ms": entry.get("duration_ms"),
+                "energy_score": entry.get("energy_score", 0.0),
+                "tags": json.dumps(entry.get("tags", [])),
+            },
+        )
+
+
+def search_catalog(query: str, limit: int = 20) -> list[dict]:
+    """Full-text search over title + artist. Returns rows ordered by rank."""
+    pattern = f"%{query}%"
+    with _conn() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """SELECT * FROM walkup_catalog
+               WHERE title LIKE ? OR artist LIKE ?
+               ORDER BY rank ASC NULLS LAST, energy_score DESC
+               LIMIT ?""",
+            (pattern, pattern, limit),
+        )
+        rows = [dict(r) for r in cur.fetchall()]
+        for r in rows:
+            r["tags"] = json.loads(r["tags"])
+        return rows
+
+
+def get_catalog_suggestions(tags: list[str], limit: int = 10) -> list[dict]:
+    """Return high-energy catalog entries matching any of the given tags."""
+    with _conn() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT * FROM walkup_catalog ORDER BY energy_score DESC LIMIT 200"
+        )
+        all_rows = [dict(r) for r in cur.fetchall()]
+        for r in all_rows:
+            r["tags"] = json.loads(r["tags"])
+
+        if not tags:
+            return all_rows[:limit]
+
+        scored = []
+        for r in all_rows:
+            matches = sum(1 for t in tags if t in r["tags"])
+            if matches:
+                scored.append((matches, r))
+        scored.sort(key=lambda x: (-x[0], -x[1]["energy_score"]))
+        return [r for _, r in scored[:limit]]
+
+
+def get_catalog_count() -> int:
+    with _conn() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM walkup_catalog")
+        return cur.fetchone()[0]
+
+
+# ---------------------------------------------------------------------------
+# Music Auth (OAuth tokens for Apple / Spotify)
+# ---------------------------------------------------------------------------
+
+def store_music_auth(
+    provider: str,
+    access_token: str,
+    refresh_token: str | None = None,
+    expires_at: str | None = None,
+    scope: str | None = None,
+) -> None:
+    """Upsert OAuth credentials for a music provider."""
+    now = datetime.now(timezone.utc).isoformat()
+    with _conn() as conn:
+        conn.execute(
+            """INSERT INTO music_auth
+               (provider, access_token, refresh_token, expires_at, scope, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?)
+               ON CONFLICT(provider) DO UPDATE SET
+                 access_token=excluded.access_token,
+                 refresh_token=excluded.refresh_token,
+                 expires_at=excluded.expires_at,
+                 scope=excluded.scope,
+                 updated_at=excluded.updated_at""",
+            (provider, access_token, refresh_token, expires_at, scope, now),
+        )
+
+
+def get_music_auth(provider: str) -> dict | None:
+    """Return stored OAuth record for provider, or None."""
+    with _conn() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM music_auth WHERE provider = ?", (provider,))
+        row = cur.fetchone()
+        return dict(row) if row else None

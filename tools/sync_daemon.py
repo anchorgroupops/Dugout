@@ -4475,6 +4475,201 @@ def handle_announcer_next_songs():
     return jsonify({"session": session_id, "next_songs": preview})
 
 
+# ---------------------------------------------------------------------------
+# Music Wizard routes
+# ---------------------------------------------------------------------------
+
+@app.route('/api/announcer/music-wizard', methods=['GET'])
+def handle_music_wizard():
+    """Return catalog suggestions for every player in the roster.
+
+    Query params:
+      session — optional game session label (unused, reserved)
+    """
+    _guard_mutating_request()  # not mutating, but require same-host
+    from music_wizard import auto_match_roster, WALKUP_CATALOG
+    adb = _announcer_db()
+
+    # Ensure catalog is seeded
+    if adb.get_catalog_count() == 0:
+        with adb._conn() as conn:
+            from music_wizard import seed_catalog
+            seed_catalog(conn)
+
+    catalog_rows = adb.search_catalog("", limit=200) or WALKUP_CATALOG
+    players = _load_roster_players()
+    suggestions = auto_match_roster(players, catalog_rows)
+    return jsonify({"suggestions": suggestions})
+
+
+@app.route('/api/announcer/catalog/search', methods=['GET'])
+def handle_catalog_search():
+    """Search the walkup catalog.
+
+    Query params:
+      q     — search string (title or artist)
+      limit — max results (default 20)
+    """
+    query = request.args.get("q", "").strip()
+    limit = min(int(request.args.get("limit", 20)), 100)
+    adb = _announcer_db()
+    rows = adb.search_catalog(query, limit=limit)
+    return jsonify({"results": rows, "count": len(rows)})
+
+
+@app.route('/api/announcer/optimal-start', methods=['POST'])
+def handle_optimal_start():
+    """Compute optimal_start_ms from Spotify audio analysis JSON.
+
+    Body: {"audio_analysis": <Spotify audio-analysis object>}
+    Returns: {"optimal_start_ms": int}
+    """
+    _guard_mutating_request()
+    body = request.get_json(silent=True) or {}
+    analysis = body.get("audio_analysis")
+    if not analysis:
+        return jsonify({"error": "audio_analysis_required"}), 400
+    from music_wizard import find_optimal_start_ms
+    ms = find_optimal_start_ms(analysis)
+    return jsonify({"optimal_start_ms": ms})
+
+
+@app.route('/api/announcer/music-auth/<provider>', methods=['GET', 'POST'])
+def handle_music_auth(provider):
+    """Store or retrieve OAuth tokens for a music provider (apple|spotify)."""
+    if provider not in ("apple", "spotify"):
+        return jsonify({"error": "unknown_provider"}), 400
+    adb = _announcer_db()
+    if request.method == "GET":
+        record = adb.get_music_auth(provider)
+        if not record:
+            return jsonify({"authenticated": False}), 200
+        # Return safe fields only — never expose tokens over the wire
+        return jsonify({
+            "authenticated": True,
+            "provider": record["provider"],
+            "scope": record["scope"],
+            "expires_at": record["expires_at"],
+            "updated_at": record["updated_at"],
+        })
+    # POST — store tokens (called from PWA after OAuth callback)
+    _guard_mutating_request()
+    body = request.get_json(silent=True) or {}
+    access_token = body.get("access_token")
+    if not access_token:
+        return jsonify({"error": "access_token_required"}), 400
+    adb.store_music_auth(
+        provider=provider,
+        access_token=access_token,
+        refresh_token=body.get("refresh_token"),
+        expires_at=body.get("expires_at"),
+        scope=body.get("scope"),
+    )
+    return jsonify({"stored": True, "provider": provider})
+
+
+@app.route('/api/announcer/csv-import', methods=['POST'])
+def handle_csv_import():
+    """Bulk-import walk-up songs from a CSV file.
+
+    Multipart form field: file (CSV)
+    CSV columns: player_number, song_url, song_label, start_time_sec
+    Matches players by jersey number.
+    Returns: {"imported": int, "skipped": int, "errors": [...]}
+    """
+    _guard_mutating_request()
+    if "file" not in request.files:
+        return jsonify({"error": "file_required"}), 400
+
+    import csv
+    import io
+
+    file = request.files["file"]
+    content = file.read().decode("utf-8", errors="replace")
+    reader = csv.DictReader(io.StringIO(content))
+
+    players = _load_roster_players()
+    number_to_id = {str(p.get("number", "")).strip(): p["id"] for p in players if p.get("number")}
+
+    adb = _announcer_db()
+    imported = 0
+    skipped = 0
+    errors = []
+
+    for i, row in enumerate(reader):
+        try:
+            number = str(row.get("player_number", "")).strip()
+            song_url = str(row.get("song_url", "")).strip()
+            if not number or not song_url:
+                skipped += 1
+                continue
+            player_id = number_to_id.get(number)
+            if not player_id:
+                skipped += 1
+                continue
+            start_sec = row.get("start_time_sec", "0").strip()
+            optimal_ms = int(float(start_sec) * 1000) if start_sec else 0
+            label = str(row.get("song_label", "")).strip()
+            adb.add_player_song(
+                player_id=player_id,
+                song_url=song_url,
+                song_label=label,
+                optimal_start_ms=optimal_ms,
+            )
+            imported += 1
+        except Exception as exc:
+            errors.append({"row": i + 2, "error": str(exc)})
+
+    return jsonify({"imported": imported, "skipped": skipped, "errors": errors})
+
+
+@app.route('/api/announcer/licensing-info', methods=['GET'])
+def handle_licensing_info():
+    """Return music licensing information for the venue operator."""
+    return jsonify({
+        "disclaimer": (
+            "Playing copyrighted music publicly requires a performance license. "
+            "For youth sports venues, obtain licenses from ASCAP, BMI, and SESAC."
+        ),
+        "providers": [
+            {
+                "name": "ASCAP",
+                "url": "https://www.ascap.com/music-users/types/sports",
+                "description": "Covers ASCAP-registered works (pop, rock, R&B, country)",
+            },
+            {
+                "name": "BMI",
+                "url": "https://www.bmi.com/licensing",
+                "description": "Covers BMI-registered works",
+            },
+            {
+                "name": "SESAC",
+                "url": "https://www.sesac.com/licensing/",
+                "description": "Covers SESAC-registered works (Bob Dylan, Neil Diamond, etc.)",
+            },
+            {
+                "name": "Feed.fm / Tuned Global",
+                "url": "https://www.feed.fm",
+                "description": "B2B pre-cleared music service — all rights included, no separate license needed",
+            },
+        ],
+        "voice_only_mode": "Set localStorage key 'announcer_voice_only' to '1' to disable music playback.",
+    })
+
+
+def _load_roster_players() -> list[dict]:
+    """Return a minimal player list [{id, number, first, last}] from the roster JSON."""
+    roster_path = SHARKS_DIR / "roster.json"
+    if not roster_path.exists():
+        return []
+    try:
+        with open(roster_path) as f:
+            data = json.load(f)
+        return data if isinstance(data, list) else data.get("players", [])
+    except Exception:
+        return []
+
+
 def _record_h2h_from_games():
     """Scan game JSON files and insert h2h records for any new games."""
     games_dir = SHARKS_DIR / "games"

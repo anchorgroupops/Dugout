@@ -4,7 +4,7 @@ import {
   Mic, Music, Play, Square, SkipBack, SkipForward,
   ChevronDown, ChevronUp, RefreshCw, UserPlus, Save,
   AlertCircle, CheckCircle, Clock, Volume2, Settings2, List,
-  Zap, Target, Activity, Plus, X
+  Zap, Target, Activity, Plus, X, Upload, Wand2
 } from 'lucide-react';
 import { playIntro, playClip, stop as stopAudio, preload, cleanup, detectBPM, calcBeatOffset, loadBuffer } from '../utils/audioController';
 import WorkerBadge from './WorkerBadge';
@@ -324,6 +324,11 @@ function PlayerCard({ player, onSavePhonetics, onRender }) {
                     <span className="announcer-song-label" title={song.song_url}>
                       {song.song_label || song.song_url.split('/').pop().split('?')[0] || song.song_url}
                     </span>
+                    {song.optimal_start_ms > 0 && (
+                      <span className="announcer-song-start-badge" title="Optimal start point">
+                        {(song.optimal_start_ms / 1000).toFixed(1)}s
+                      </span>
+                    )}
                     {song.play_count > 0 && (
                       <span className="announcer-song-plays">×{song.play_count}</span>
                     )}
@@ -815,6 +820,124 @@ function useWorkerStatus() {
   return workerStatus;
 }
 
+function WizardModal({ onClose, roster }) {
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [suggestions, setSuggestions] = useState({});
+  const [tab, setTab] = useState('search'); // 'search' | 'roster'
+
+  useEffect(() => {
+    if (tab !== 'roster') return;
+    setLoading(true);
+    fetch('/api/announcer/music-wizard')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data) setSuggestions(data.suggestions || {}); })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [tab]);
+
+  const handleSearch = async (e) => {
+    e.preventDefault();
+    if (!query.trim()) return;
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/announcer/catalog/search?q=${encodeURIComponent(query)}&limit=20`);
+      if (res.ok) { const data = await res.json(); setResults(data.results || []); }
+    } finally { setLoading(false); }
+  };
+
+  return createPortal(
+    <div className="announcer-modal-overlay" onClick={onClose}>
+      <div className="announcer-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 520 }}>
+        <div className="announcer-modal-header">
+          <h3><Wand2 size={16} /> Music Wizard</h3>
+          <button className="announcer-modal-close" onClick={onClose}><X size={18} /></button>
+        </div>
+        <div className="announcer-wizard-tabs">
+          <button className={`announcer-wizard-tab${tab === 'search' ? ' active' : ''}`} onClick={() => setTab('search')}>
+            Catalog Search
+          </button>
+          <button className={`announcer-wizard-tab${tab === 'roster' ? ' active' : ''}`} onClick={() => setTab('roster')}>
+            Roster Suggestions
+          </button>
+        </div>
+
+        {tab === 'search' && (
+          <div className="announcer-wizard-body">
+            <form onSubmit={handleSearch} className="announcer-wizard-search-form">
+              <input
+                className="announcer-song-input"
+                value={query}
+                onChange={e => setQuery(e.target.value)}
+                placeholder="Search title or artist…"
+                autoFocus
+              />
+              <button type="submit" className="announcer-btn announcer-btn-primary" disabled={loading}>
+                {loading ? <RefreshCw size={13} className="sync-spin" /> : 'Search'}
+              </button>
+            </form>
+            <div className="announcer-wizard-results">
+              {results.map(row => (
+                <div key={row.id} className="announcer-wizard-result-row">
+                  <div className="announcer-wizard-result-info">
+                    <span className="announcer-wizard-result-title">{row.title}</span>
+                    <span className="announcer-wizard-result-artist">{row.artist}</span>
+                  </div>
+                  <div className="announcer-wizard-result-meta">
+                    {row.optimal_start_ms > 0 && (
+                      <span className="announcer-song-start-badge">{(row.optimal_start_ms / 1000).toFixed(1)}s</span>
+                    )}
+                    <span className="announcer-wizard-energy" title="Energy score">{Math.round(row.energy_score * 100)}%</span>
+                  </div>
+                </div>
+              ))}
+              {results.length === 0 && !loading && query && (
+                <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '1rem' }}>No results</p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {tab === 'roster' && (
+          <div className="announcer-wizard-body">
+            {loading && <div className="loader" style={{ margin: '2rem auto' }} />}
+            {roster.map(player => {
+              const pid = player.id;
+              const sugg = suggestions[pid] || [];
+              return (
+                <div key={pid} className="announcer-wizard-player-section">
+                  <div className="announcer-wizard-player-name">
+                    #{player.number} {player.first} {player.last}
+                  </div>
+                  {sugg.length === 0 && !loading && (
+                    <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>No suggestions</p>
+                  )}
+                  {sugg.map((row, i) => (
+                    <div key={i} className="announcer-wizard-result-row">
+                      <div className="announcer-wizard-result-info">
+                        <span className="announcer-wizard-result-title">{row.title}</span>
+                        <span className="announcer-wizard-result-artist">{row.artist}</span>
+                      </div>
+                      <div className="announcer-wizard-result-meta">
+                        {row.optimal_start_ms > 0 && (
+                          <span className="announcer-song-start-badge">{(row.optimal_start_ms / 1000).toFixed(1)}s</span>
+                        )}
+                        <span className="announcer-wizard-energy">{Math.round((row.energy_score || 0) * 100)}%</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 export default function Announcer({ lineups }) {
   const [view, setView] = useState('roster'); // 'roster' | 'nowplaying'
   const [roster, setRoster] = useState([]);
@@ -822,6 +945,9 @@ export default function Announcer({ lineups }) {
   const [loading, setLoading] = useState(true);
   const [renderAllLoading, setRenderAllLoading] = useState(false);
   const [showAddSub, setShowAddSub] = useState(false);
+  const [showWizard, setShowWizard] = useState(false);
+  const [csvImporting, setCsvImporting] = useState(false);
+  const csvInputRef = useRef(null);
   const [error, setError] = useState('');
   const pollRef = useRef(null);
   const renderToRef = useRef(null);
@@ -912,6 +1038,31 @@ export default function Announcer({ lineups }) {
     }
   };
 
+  const handleCsvImport = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    setCsvImporting(true);
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const res = await fetch('/api/announcer/csv-import', {
+        method: 'POST',
+        headers: { 'Origin': window.location.origin },
+        body: form,
+      });
+      if (res.ok) {
+        const data = await res.json();
+        await fetchRoster();
+        if (data.errors?.length) {
+          setError(`CSV import: ${data.imported} songs added, ${data.skipped} skipped, ${data.errors.length} errors`);
+        }
+      }
+    } catch { /* silent — user will see no change */ } finally {
+      setCsvImporting(false);
+    }
+  };
+
   const handleAddSub = async (data) => {
     startPolling();
     const res = await fetch('/api/announcer/add-sub', {
@@ -962,6 +1113,13 @@ export default function Announcer({ lineups }) {
         <button onClick={() => setShowAddSub(true)} className="announcer-btn announcer-btn-secondary">
           <UserPlus size={14} /> Add Sub
         </button>
+        <button onClick={() => setShowWizard(true)} className="announcer-btn announcer-btn-secondary" title="Music Wizard">
+          <Wand2 size={14} /> Wizard
+        </button>
+        <label className={`announcer-btn announcer-btn-secondary${csvImporting ? ' announcer-btn--loading' : ''}`} title="Import songs from CSV">
+          <Upload size={14} />
+          <input ref={csvInputRef} type="file" accept=".csv" onChange={handleCsvImport} style={{ display: 'none' }} />
+        </label>
         <button onClick={fetchRoster} className="announcer-btn announcer-btn-secondary" aria-label="Refresh roster">
           <RefreshCw size={14} />
         </button>
@@ -986,6 +1144,9 @@ export default function Announcer({ lineups }) {
 
       {showAddSub && (
         <AddSubModal onClose={() => setShowAddSub(false)} onAdd={handleAddSub} />
+      )}
+      {showWizard && (
+        <WizardModal onClose={() => setShowWizard(false)} roster={roster} />
       )}
     </div>
   );
