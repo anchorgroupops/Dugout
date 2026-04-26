@@ -23,13 +23,13 @@ export default defineConfig(({ mode }) => ({
     // Add <link rel="preload" as="style"> before every extracted CSS stylesheet
     // so the browser (and squirrelscan) sees the CSS outside the critical chain.
     {
-      name: 'css-preload',
+      name: 'css-async',
       transformIndexHtml: {
         order: 'post',
         handler(html) {
           return html.replace(
-            /(<link rel="stylesheet" crossorigin href="([^"]+\.css)">)/g,
-            '<link rel="preload" as="style" href="$2">$1'
+            /<link rel="stylesheet" crossorigin href="([^"]+\.css)">/g,
+            '<link rel="preload" as="style" href="$1" onload="this.onload=null;this.rel=\'stylesheet\'"><noscript><link rel="stylesheet" href="$1"></noscript>'
           );
         }
       }
