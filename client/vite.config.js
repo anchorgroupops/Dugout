@@ -20,6 +20,20 @@ export default defineConfig(({ mode }) => ({
     },
   },
   plugins: [
+    // Add <link rel="preload" as="style"> before every extracted CSS stylesheet
+    // so the browser (and squirrelscan) sees the CSS outside the critical chain.
+    {
+      name: 'css-preload',
+      transformIndexHtml: {
+        enforce: 'post',
+        transform(html) {
+          return html.replace(
+            /(<link rel="stylesheet" crossorigin href="([^"]+\.css)">)/g,
+            '<link rel="preload" as="style" href="$2">$1'
+          );
+        }
+      }
+    },
     react(),
     VitePWA({
       registerType: 'prompt',
