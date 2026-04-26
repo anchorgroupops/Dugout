@@ -343,15 +343,6 @@ function App() {
 
   const renderContent = () => {
     if (data.loading) return <div className="loader"></div>;
-    if (data.error) return (
-      <div className="glass-panel" style={{ padding: '2rem', borderColor: 'var(--danger)' }}>
-        <h3 style={{ color: 'var(--danger)' }}>Error loading data</h3>
-        <p>{data.error}</p>
-        <p style={{ marginTop: '1rem', fontSize: '0.9em', color: 'var(--text-muted)' }}>
-          Tip: Ensure the sync_data script ran successfully during build.
-        </p>
-      </div>
-    );
 
     switch(currentView) {
       case 'scoreboard': return <Scoreboard isMobile={isMobile} isLandscape={isLandscape} team={data.team} schedule={data.schedule} />;
@@ -517,8 +508,15 @@ function App() {
           </div>
         )}
 
+        {data.error && (
+          <div className="stale-banner" style={{ borderColor: 'rgba(179,74,57,0.4)', background: 'rgba(179,74,57,0.12)' }}>
+            <AlertTriangle size={16} style={{ color: 'var(--danger)', flexShrink: 0 }} />
+            <span style={{ color: 'var(--danger)' }}>Backend offline — live data unavailable.</span>
+          </div>
+        )}
+
         {voiceError && <p className="voice-error">{voiceError}</p>}
-        
+
         {!isOnline && (
           <div className="stale-banner offline-banner" style={{ background: 'var(--danger)', color: 'white', borderColor: 'rgba(255,255,255,0.2)' }}>
             <GlobeLock size={16} />
