@@ -465,7 +465,6 @@ function NowPlayingView({ roster, lineups, onBack }) {
   });
   const [showGamePanel, setShowGamePanel] = useState(false);
   const [showHalo, setShowHalo] = useState(false);
-  const [announcementPreview, setAnnouncementPreview] = useState('');
   const [gcLineup, setGcLineup] = useState(null); // {source, source_label, players}
 
   // Fetch GC-synced batting order on mount
