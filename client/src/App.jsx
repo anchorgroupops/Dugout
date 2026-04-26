@@ -4,15 +4,15 @@ import { formatDateTime, formatRelative } from './utils/formatDate';
 import { usePWAInstall } from './utils/usePWAInstall';
 import { useOnlineStatus } from './utils/useOnlineStatus';
 import Roster from './components/Roster';
-import Swot from './components/Swot';
 import Lineup from './components/Lineup';
-import Games from './components/Games';
-import League from './components/League';
-import Practice from './components/Practice';
-import Scouting from './components/Scouting';
 import Scoreboard from './components/Scoreboard';
-import Announcer from './components/Announcer';
 import ErrorBoundary from './components/ErrorBoundary';
+const Swot = React.lazy(() => import('./components/Swot'));
+const Games = React.lazy(() => import('./components/Games'));
+const League = React.lazy(() => import('./components/League'));
+const Practice = React.lazy(() => import('./components/Practice'));
+const Scouting = React.lazy(() => import('./components/Scouting'));
+const Announcer = React.lazy(() => import('./components/Announcer'));
 
 
 function SyncProgressBar({ progress, stage, milestones }) {
@@ -541,7 +541,9 @@ function App() {
         )}
 
         <ErrorBoundary key={currentView}>
-          {renderContent()}
+          <React.Suspense fallback={<div className="loader"></div>}>
+            {renderContent()}
+          </React.Suspense>
         </ErrorBoundary>
       </main>
 
