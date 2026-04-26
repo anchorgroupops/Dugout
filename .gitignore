@@ -46,3 +46,6 @@ htmlcov/
 .hypothesis/
 # Temp/editor files
 ~
+
+# squirrelscan CLI
+squirrel.toml
