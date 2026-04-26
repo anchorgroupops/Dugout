@@ -28,10 +28,41 @@
     <link rel="apple-touch-icon" href="/pwa-192x192.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/pwa-192x192.png" />
     <link rel="apple-touch-icon" sizes="152x152" href="/pwa-192x192.png" />
+    <link rel="preload" href="/registerSW.js" as="script" />
+    <script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"WebApplication","name":"The Sharks PCLL Softball Dashboard","description":"Game-day coaching dashboard for The Sharks, Palm Coast Little League 12U Girls Softball. Lineup optimizer, SWOT analysis, opponent scouting, and practice generator.","url":"https://dugout.joelycannoli.com/","applicationCategory":"SportsApplication","operatingSystem":"Web","inLanguage":"en","author":{"@type":"Organization","name":"The Sharks PCLL Softball Coaching Staff"},"datePublished":"2026-02-01","dateModified":"2026-04-26"}
+    </script>
   </head>
   <body>
     <a href="#main-content" class="sr-only sr-only-focusable">Skip to main content</a>
     <div id="root"><main id="main-content"><h1 class="sr-only">The Sharks PCLL Softball Dashboard</h1></main></div>
+    <noscript>
+      <div style="font-family:sans-serif;max-width:800px;margin:2rem auto;padding:0 1rem;line-height:1.6">
+        <nav style="margin-bottom:1.5rem">
+          <a href="/">Dashboard</a> &middot; <a href="/about">About</a> &middot; <a href="/privacy">Privacy Policy</a> &middot; <a href="/contact">Contact</a>
+        </nav>
+        <h1>The Sharks Softball Dashboard</h1>
+        <p>This app requires JavaScript. Please enable JavaScript in your browser to use the coaching dashboard.</p>
+        <h2>About This Dashboard</h2>
+        <p>The Sharks Softball Dashboard is the official game-day coaching tool for The Sharks, a 12U Girls Softball team competing in the Palm Coast Little League (PCLL) Spring 2026 season in Palm Coast, Florida. Built for dugout use on mobile devices, it provides zero-tap decision support during live games.</p>
+        <h2>Features</h2>
+        <ul>
+          <li><strong>Lineup Optimizer</strong> — Data-driven batting order recommendations based on player availability, batting averages, and historical performance data exported from GameChanger.</li>
+          <li><strong>SWOT Analysis</strong> — Opponent scouting with strengths, weaknesses, opportunities, and threats analysis for each rival team in the Palm Coast Little League division.</li>
+          <li><strong>Game Statistics</strong> — Comprehensive batting averages, on-base percentages, slugging percentages, and fielding statistics for all Sharks players across the entire season.</li>
+          <li><strong>Practice Generator</strong> — Customized practice plans targeting specific weaknesses identified from recent game performance and season-long statistical trends.</li>
+          <li><strong>Apex Announcer</strong> — A walk-up music and player introduction system using text-to-speech and the Web Audio API for exciting game-day announcements.</li>
+          <li><strong>Player Availability</strong> — Per-game availability tracking that automatically integrates into lineup recommendations and batting order suggestions.</li>
+        </ul>
+        <h2>The Sharks &mdash; Palm Coast Little League Spring 2026</h2>
+        <p>The Sharks compete in the Palm Coast Little League, located in Palm Coast, Florida. The Spring 2026 season features regular season games against division rivals including the Ravens, Peppers, and Riptide Rebels at PCLL fields throughout Palm Coast.</p>
+        <p>All statistics are sourced from GameChanger, the official sports statistics platform used by Palm Coast Little League. The dashboard ingests CSV exports from GameChanger and processes them through a Python analytics pipeline to generate insights and recommendations for the coaching staff.</p>
+        <p>This dashboard is a private tool maintained by the coaching staff of The Sharks. It is not a public service and is intended solely for use by authorized coaching personnel during PCLL 12U Girls Softball games and practices.</p>
+        <nav style="margin-top:1.5rem">
+          <a href="/about">About</a> &middot; <a href="/privacy">Privacy Policy</a> &middot; <a href="/contact">Contact</a>
+        </nav>
+      </div>
+    </noscript>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
