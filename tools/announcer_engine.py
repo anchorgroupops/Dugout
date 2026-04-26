@@ -341,18 +341,30 @@ class MockTTS(TTSProvider):
         return buf.getvalue()
 
 
+def _has_replicate_voice_ref() -> bool:
+    """True only when REPLICATE_API_TOKEN + ANNOUNCER_VOICE_REF_URL are both set."""
+    return bool(
+        _resolve_secret("REPLICATE_API_TOKEN") and
+        os.getenv("ANNOUNCER_VOICE_REF_URL", "").strip()
+    )
+
+
 def get_tts_provider() -> TTSProvider:
     """Return the best available TTS provider for Best Quality renders.
 
     Priority: local vLLM → Replicate Qwen3-TTS 1.7B VoiceDesign → ElevenLabs → Mock
+
+    Replicate requires both REPLICATE_API_TOKEN and ANNOUNCER_VOICE_REF_URL (ICL clone
+    mode needs a reference audio clip).  Without the reference URL it will always error,
+    so we skip it and fall through to ElevenLabs or Mock.
     """
     if os.getenv("LOCAL_TTS_URL", "").strip():
         return LocalVLLMTTS()
-    if _resolve_secret("REPLICATE_API_TOKEN"):
+    if _has_replicate_voice_ref():
         return ReplicateTTS()
     if _resolve_secret("ELEVENLABS_API_KEY"):
         return ElevenLabsTTS()
-    logging.info("[Announcer] No TTS API keys configured — using mock provider")
+    logging.info("[Announcer] No TTS provider fully configured — using mock provider")
     return MockTTS()
 
 
@@ -366,11 +378,11 @@ def get_quick_tts_provider() -> TTSProvider:
     """
     if os.getenv("LOCAL_TTS_URL", "").strip():
         return LocalVLLMTTS()
-    if _resolve_secret("REPLICATE_API_TOKEN"):
+    if _has_replicate_voice_ref():
         return Replicate06bTTS()
     if _resolve_secret("ELEVENLABS_API_KEY"):
         return ElevenLabsTTS()
-    logging.info("[Announcer] No TTS API keys configured — using mock provider for quick render")
+    logging.info("[Announcer] No TTS provider fully configured — using mock provider for quick render")
     return MockTTS()
 
 
