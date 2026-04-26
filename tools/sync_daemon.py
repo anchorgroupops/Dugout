@@ -4486,17 +4486,16 @@ def handle_music_wizard():
     Query params:
       session — optional game session label (unused, reserved)
     """
-    _guard_mutating_request()  # not mutating, but require same-host
-    from music_wizard import auto_match_roster, WALKUP_CATALOG
-    adb = _announcer_db()
+    import announcer_db as adb_mod
+    from music_wizard import auto_match_roster, WALKUP_CATALOG, seed_catalog
+    _announcer_db()  # ensure init_db() ran
 
-    # Ensure catalog is seeded
-    if adb.get_catalog_count() == 0:
-        with adb._conn() as conn:
-            from music_wizard import seed_catalog
+    # Seed catalog on first call
+    if adb_mod.get_catalog_count() == 0:
+        with adb_mod._conn() as conn:
             seed_catalog(conn)
 
-    catalog_rows = adb.search_catalog("", limit=200) or WALKUP_CATALOG
+    catalog_rows = adb_mod.search_catalog("", limit=200) or WALKUP_CATALOG
     players = _load_roster_players()
     suggestions = auto_match_roster(players, catalog_rows)
     return jsonify({"suggestions": suggestions})
@@ -4577,7 +4576,13 @@ def handle_csv_import():
     Matches players by jersey number.
     Returns: {"imported": int, "skipped": int, "errors": [...]}
     """
-    _guard_mutating_request()
+    # Origin check only — multipart body is not JSON so _guard_mutating_request() would 415
+    origin = _request_origin()
+    if origin and origin not in WRITE_ORIGINS:
+        return jsonify({"error": "forbidden_origin"}), 403
+    if not origin:
+        return jsonify({"error": "origin_required"}), 403
+
     if "file" not in request.files:
         return jsonify({"error": "file_required"}), 400
 
