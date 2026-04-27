@@ -40,7 +40,7 @@ load_dotenv(Path(__file__).parent.parent / ".env", override=False)
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper())
 log = logging.getLogger("announcer_api")
 
-MODEL_ID = "Qwen/Qwen3-TTS-1.7B-VoiceDesign"
+MODEL_ID = "facebook/mms-tts-eng"
 
 # ---------------------------------------------------------------------------
 # Render worker config
@@ -148,11 +148,14 @@ async def startup():
 # ---------------------------------------------------------------------------
 
 def _synth_transformers(text: str, vd: VoiceDesignParams) -> bytes:
-    result = _pipeline(text, forward_params={
-        "pitch_shift": vd.pitch,
-        "energy_scale": vd.energy,
-        "speaking_rate": vd.speaking_rate,
-    })
+    try:
+        result = _pipeline(text, forward_params={
+            "pitch_shift": vd.pitch,
+            "energy_scale": vd.energy,
+            "speaking_rate": vd.speaking_rate,
+        })
+    except (TypeError, ValueError):
+        result = _pipeline(text)
     audio_array = result["audio"]
     sampling_rate = result.get("sampling_rate", 22050)
 
