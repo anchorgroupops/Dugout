@@ -1815,7 +1815,38 @@ input[type="checkbox"]:checked::after {
   display: flex;
   gap: var(--space-xs);
   flex-wrap: wrap;
+  align-items: center;
   padding-top: var(--space-xs);
+}
+
+.announcer-quality-toggle {
+  display: inline-flex;
+  border: 1px solid var(--surface-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.announcer-quality-btn {
+  padding: 0.5rem 0.75rem;
+  font-family: var(--font-base);
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  background: transparent;
+  color: var(--text-secondary);
+  border: none;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.announcer-quality-btn:hover {
+  background: var(--surface-hover, rgba(255,255,255,0.06));
+  color: var(--text-primary);
+}
+
+.announcer-quality-btn.active {
+  background: var(--accent-blue, #3b82f6);
+  color: #fff;
 }
 
 /* Roster List */

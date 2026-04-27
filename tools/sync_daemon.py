@@ -4758,6 +4758,40 @@ def handle_licensing_info():
     })
 
 
+@app.route('/api/announcer/repair', methods=['POST'])
+def handle_announcer_repair():
+    """Self-heal: reset all errored players to pending and re-queue renders."""
+    blocked = _guard_mutating_request()
+    if blocked:
+        return blocked
+    try:
+        from announcer_engine import load_announcer_roster, save_announcer_roster
+        roster = load_announcer_roster()
+        reset_count = sum(1 for p in roster if p.get('status') == 'error')
+        for p in roster:
+            if p.get('status') == 'error':
+                p['status'] = 'pending'
+                p.pop('error_message', None)
+                p.pop('announcer_audio_url', None)
+        save_announcer_roster(roster)
+        logging.info("[Announcer] /repair: reset %d errored players", reset_count)
+        return jsonify({"ok": True, "reset_players": reset_count})
+    except Exception as e:
+        logging.error("[Announcer] repair error: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/announcer/provider-health', methods=['GET'])
+def handle_announcer_provider_health():
+    """Check which TTS providers are live and reachable."""
+    try:
+        from announcer_engine import check_provider_health
+        return jsonify(check_provider_health())
+    except Exception as e:
+        logging.error("[Announcer] provider-health error: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
 def _load_roster_players() -> list[dict]:
     """Return a minimal player list [{id, number, first, last}] from the roster JSON."""
     roster_path = SHARKS_DIR / "roster.json"
@@ -5083,6 +5117,29 @@ def main():
 # Bootstrap from CSV on module import (covers Gunicorn-served API process
 # which never calls main()).  This is a no-op if team.json already exists.
 _bootstrap_from_csv()
+
+
+def _announcer_auto_repair_loop():
+    """Every 15 min: reset errored players to pending so they get re-rendered."""
+    import time
+    while True:
+        time.sleep(900)
+        try:
+            from announcer_engine import load_announcer_roster, save_announcer_roster
+            roster = load_announcer_roster()
+            errored = [p for p in roster if p.get('status') == 'error']
+            if errored:
+                for p in errored:
+                    p['status'] = 'pending'
+                    p.pop('error_message', None)
+                save_announcer_roster(roster)
+                logging.info("[Announcer] Auto-repair: reset %d errored players to pending", len(errored))
+        except Exception as e:
+            logging.error("[Announcer] Auto-repair loop error: %s", e)
+
+
+threading.Thread(target=_announcer_auto_repair_loop, daemon=True, name="announcer-repair").start()
+
 
 if __name__ == "__main__":
     main()

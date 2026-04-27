@@ -386,6 +386,46 @@ def get_quick_tts_provider() -> TTSProvider:
     return MockTTS()
 
 
+def check_provider_health() -> dict:
+    """Quick liveness check for each TTS provider. Used by /api/announcer/provider-health."""
+    import requests as _req
+    results = {"local_tts": False, "replicate": False, "elevenlabs": False, "mock": True}
+
+    local_url = os.getenv("LOCAL_TTS_URL", "").strip()
+    if local_url:
+        try:
+            r = _req.get(f"{local_url}/health", timeout=3)
+            results["local_tts"] = r.status_code == 200
+        except Exception:
+            pass
+
+    replicate_token = _resolve_secret("REPLICATE_API_TOKEN")
+    if replicate_token:
+        try:
+            r = _req.get(
+                "https://api.replicate.com/v1/account",
+                headers={"Authorization": f"Bearer {replicate_token}"},
+                timeout=5,
+            )
+            results["replicate"] = r.status_code == 200
+        except Exception:
+            pass
+
+    el_key = _resolve_secret("ELEVENLABS_API_KEY")
+    if el_key:
+        try:
+            r = _req.get(
+                "https://api.elevenlabs.io/v1/user",
+                headers={"xi-api-key": el_key},
+                timeout=5,
+            )
+            results["elevenlabs"] = r.status_code == 200
+        except Exception:
+            pass
+
+    return results
+
+
 # ---------------------------------------------------------------------------
 # Voice Profiles
 # ---------------------------------------------------------------------------

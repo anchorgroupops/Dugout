@@ -113,6 +113,7 @@ function PlayerCard({ player, onSavePhonetics, onRender }) {
   const [newSongOptimalStart, setNewSongOptimalStart] = useState(0);
   const [addingSong, setAddingSong] = useState(false);
   const [detecting, setDetecting] = useState(false);
+  const [renderQuality, setRenderQuality] = useState('best');
 
   useEffect(() => {
     if (!expanded) return;
@@ -204,7 +205,7 @@ function PlayerCard({ player, onSavePhonetics, onRender }) {
   const handleRender = async () => {
     setRendering(true);
     try {
-      await onRender(player.id);
+      await onRender(player.id, renderQuality);
     } finally {
       setTimeout(() => setRendering(false), 2000);
     }
@@ -440,6 +441,18 @@ function PlayerCard({ player, onSavePhonetics, onRender }) {
               {saving ? <RefreshCw size={14} className="sync-spin" /> : <Save size={14} />}
               {saving ? 'Saving...' : 'Save'}
             </button>
+            <div className="announcer-quality-toggle">
+              <button
+                className={`announcer-quality-btn${renderQuality === 'best' ? ' active' : ''}`}
+                onClick={() => setRenderQuality('best')}
+                title="Best quality — Qwen3-TTS-1.7B (slow)"
+              >Best</button>
+              <button
+                className={`announcer-quality-btn${renderQuality === 'quick' ? ' active' : ''}`}
+                onClick={() => setRenderQuality('quick')}
+                title="Quick render — faster"
+              >Quick</button>
+            </div>
             <button onClick={handleRender} disabled={rendering} className="announcer-btn announcer-btn-primary">
               {rendering ? <RefreshCw size={14} className="sync-spin" /> : <Mic size={14} />}
               {rendering ? 'Rendering...' : 'Re-render'}
@@ -1249,15 +1262,18 @@ export default function Announcer({ lineups }) {
     }
   };
 
-  const handleRender = async (playerId) => {
+  const handleRender = async (playerId, quality = 'best') => {
     startPolling();
     try {
       await fetch(`/api/announcer/render/${playerId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Origin': window.location.origin },
-        body: '{}',
+        body: JSON.stringify({ quality }),
       });
-      renderToRef.current = setTimeout(() => { renderToRef.current = null; fetchRoster(); stopPolling(); }, 5000);
+      renderToRef.current = setTimeout(
+        () => { renderToRef.current = null; fetchRoster(); stopPolling(); },
+        quality === 'best' ? 120000 : 15000,
+      );
     } catch { /* handled by polling */ }
   };
 
