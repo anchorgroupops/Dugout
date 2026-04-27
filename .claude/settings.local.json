@@ -59,7 +59,11 @@
       "PowerShell(cd \"H:\\\\AI\\\\Projects\\\\PCLL\\\\Dugout\"; & \"$env:LOCALAPPDATA\\\\squirrel\\\\bin\\\\squirrel.exe\" audit https://dugout.joelycannoli.com --coverage full --format llm --refresh 2>&1)",
       "mcp__claude_ai_Gmail__search_threads",
       "mcp__claude_ai_Gmail__get_thread",
-      "PowerShell(& \"$env:LOCALAPPDATA\\\\squirrel\\\\bin\\\\squirrel.exe\" audit https://dugout.joelycannoli.com --format llm -C full --refresh 2>&1)"
+      "PowerShell(& \"$env:LOCALAPPDATA\\\\squirrel\\\\bin\\\\squirrel.exe\" audit https://dugout.joelycannoli.com --format llm -C full --refresh 2>&1)",
+      "Bash(claude mcp *)",
+      "Bash(node --input-type=module)",
+      "Bash(npx --yes esbuild --bundle=false src/components/Roster.jsx src/components/Swot.jsx src/components/Lineup.jsx src/components/Games.jsx src/components/Practice.jsx)",
+      "Bash(npx esbuild *)"
     ]
   }
 }
