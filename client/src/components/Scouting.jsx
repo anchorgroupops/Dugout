@@ -54,20 +54,23 @@ export default function Scouting({ isMobile, isLandscape = false }) {
 
   if (loading) return <div className="loader" />;
   if (error) return <p style={{ color: 'var(--danger)', textAlign: 'center' }}>{error}</p>;
-  if (!nextGame?.opponent) {
-    return (
-      <div className="glass-panel animate-fade-in" style={{ padding: 'var(--space-xl)', textAlign: 'center' }}>
-        <p style={{ color: 'var(--text-muted)' }}>No upcoming games scheduled.</p>
-      </div>
-    );
-  }
 
   const recommendation = matchup?.recommendation || '';
   const isInsufficient = matchup?.empty;
 
   return (
     <div className="animate-fade-in">
-      {/* Header card */}
+      {/* No upcoming game banner */}
+      {!nextGame?.opponent && (
+        <div className="glass-panel" style={{ padding: 'var(--space-lg)', textAlign: 'center', marginBottom: 'var(--space-md)' }}>
+          <p style={{ color: 'var(--text-muted)', fontSize: 'var(--text-sm)' }}>
+            No upcoming games scheduled — scouting reports available below.
+          </p>
+        </div>
+      )}
+
+      {/* Header card — only when there is an upcoming game */}
+      {nextGame?.opponent && (
       <div className="glass-panel" style={{
         padding: isMobile ? 'var(--space-lg)' : '1.5rem 1.25rem',
         marginBottom: 'var(--space-md)',
@@ -149,6 +152,7 @@ export default function Scouting({ isMobile, isLandscape = false }) {
           </p>
         )}
       </div>
+      )}
 
       {isInsufficient ? (
         <div className="glass-panel" style={{ padding: 'var(--space-lg)', textAlign: 'center' }}>

@@ -1812,6 +1812,16 @@ def _build_games_feed(include_detail: bool = False) -> list[dict]:
         g.get("source") != "gc_full_scraper_v2" and g.get("date") in gc_dates
     )]
 
+    # Final dedup: collapse any remaining same-date/opponent duplicates (keep first seen)
+    _seen_keys: set = set()
+    deduped: list = []
+    for g in pdf_games:
+        key = ((g.get("date") or "")[:10], _slug(g.get("opponent", "")))
+        if key not in _seen_keys:
+            _seen_keys.add(key)
+            deduped.append(g)
+    pdf_games = deduped
+
     pdf_games.sort(key=lambda x: x.get("date", ""), reverse=True)
     return pdf_games
 
@@ -2588,16 +2598,17 @@ def handle_next_game():
         if not date_str:
             continue
         try:
-            from practice_gen import _parse_event_datetime, _clean_opponent_name
-            start = _parse_event_datetime(date_str, time_str, default_time="12:00 PM")
+            date_part = date_str.strip()
+            time_part = (time_str or "12:00 PM").strip() or "12:00 PM"
+            # Normalise AM/PM spacing: "1:00PM" → "1:00 PM"
+            import re as _re_ng
+            time_part = _re_ng.sub(r'([AP]M)$', r' \1', time_part.replace(' ', ''))
+            start = datetime.strptime(f"{date_part} {time_part}", "%Y-%m-%d %I:%M %p").replace(tzinfo=ET)
         except Exception:
             start = None
         if start and start > now:
             raw_opponent = (game.get("opponent") or "").strip()
-            try:
-                opponent = _clean_opponent_name(raw_opponent)
-            except Exception:
-                opponent = raw_opponent
+            opponent = _clean_opponent_name(raw_opponent)
             # Resolve slug
             slug = None
             for t in teams_list:
@@ -3084,6 +3095,20 @@ def handle_team():
             team["record"] = f"{wins}-{losses}{gp_match}"
     except Exception:
         pass
+
+    # Apply core/borrowed classification from roster_manifest.json
+    manifest_file = SHARKS_DIR / "roster_manifest.json"
+    if manifest_file.exists():
+        try:
+            manifest_data = _read_json_file(manifest_file, default={}) or {}
+            core_names = set(manifest_data.get("core_players", []))
+            for p in team.get("roster", []):
+                full_name = f"{(p.get('first') or '').strip()} {(p.get('last') or '').strip()}".strip()
+                is_core = full_name in core_names
+                p["core"] = is_core
+                p["borrowed"] = not is_core
+        except Exception as _me:
+            logging.warning(f"[Team] roster_manifest apply failed: {_me}")
 
     # Sort roster alphabetically by first name for consistent display
     if isinstance(team.get("roster"), list):
@@ -3812,6 +3837,12 @@ def handle_practice_insights():
             }],
             "recommended_plan": [],
         })
+
+
+@app.route('/api/practice', methods=['GET', 'POST'])
+def handle_practice():
+    """Alias for /api/practice-insights for frontend compatibility."""
+    return handle_practice_insights()
 
 
 @app.route('/api/stats-db/status', methods=['GET'])

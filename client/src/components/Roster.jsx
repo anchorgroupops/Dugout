@@ -406,7 +406,7 @@ const Roster = ({ team, availability, isMobile = false, isLandscape = false }) =
 
   if (!team || !team.roster) return <div className="loader"></div>;
 
-  const filteredRoster = team.roster.filter(p => p.core !== false);
+  const filteredRoster = team.roster;
   const sortedRoster = [...filteredRoster].sort((a, b) => {
     const nameA = `${a.first || ''} ${a.last || ''}`.trim();
     const nameB = `${b.first || ''} ${b.last || ''}`.trim();

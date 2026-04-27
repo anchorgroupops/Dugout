@@ -522,7 +522,9 @@ const Games = ({ gamesData, schedule, isMobile = false, isLandscape = false }) =
     .slice(0, isMobile ? 4 : 10)
     .map((g, i) => ({ ...g, _isNext: i === 0 }));
 
-  const sorted = [...(gamesData || [])].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  const sorted = [...(gamesData || [])]
+    .filter((g, i, arr) => arr.findIndex(x => x.game_id === g.game_id) === i)
+    .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
 
   return (
     <div>

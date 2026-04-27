@@ -374,6 +374,13 @@ const Scoreboard = ({ isMobile = false, isLandscape = false, team, schedule }) =
 
   // Upcoming / no game state
   if (isNoGame) {
+    const record = team?.record || '';
+    const today = new Date().toISOString().slice(0, 10);
+    const nextGame = (schedule?.upcoming || [])
+      .filter(g => g.date >= today)
+      .sort((a, b) => a.date.localeCompare(b.date))[0];
+    const lastGame = (schedule?.past || [])
+      .sort((a, b) => (b.date || '').localeCompare(a.date || ''))[0];
     return (
       <div>
         <h2 className="view-title" style={{ margin: '0 0 var(--space-md)' }}>
@@ -381,11 +388,26 @@ const Scoreboard = ({ isMobile = false, isLandscape = false, team, schedule }) =
         </h2>
         <div className="glass-panel" style={{ padding: '2rem', textAlign: 'center' }}>
           <Clock size={40} color="var(--text-muted)" style={{ marginBottom: '1rem', opacity: 0.5 }} />
-          <p style={{ fontSize: 'var(--text-lg)', color: 'var(--text-muted)' }}>
+          <p style={{ fontSize: 'var(--text-lg)', color: 'var(--text-muted)', marginBottom: '0.75rem' }}>
             No game scheduled today
           </p>
-          <p style={{ fontSize: 'var(--text-sm)', color: 'rgba(255,255,255,0.25)', marginTop: '0.5rem' }}>
-            The scoreboard will activate automatically on game day.
+          {record && (
+            <p style={{ fontSize: 'var(--text-base)', fontWeight: '700', marginBottom: '0.5rem' }}>
+              Season Record: {record}
+            </p>
+          )}
+          {nextGame?.opponent && (
+            <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>
+              Next: {nextGame.opponent}{nextGame.date ? ` · ${nextGame.date}` : ''}
+            </p>
+          )}
+          {lastGame?.opponent && (
+            <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>
+              Last: {lastGame.opponent}{lastGame.result ? ` · ${lastGame.result}` : ''}{lastGame.score ? ` (${lastGame.score})` : ''}
+            </p>
+          )}
+          <p style={{ fontSize: 'var(--text-sm)', color: 'rgba(255,255,255,0.25)', marginTop: '0.75rem' }}>
+            Scoreboard activates automatically on game day.
           </p>
         </div>
       </div>

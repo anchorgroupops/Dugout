@@ -199,7 +199,7 @@ const Lineup = ({
                 `${p.first || ''} ${p.last || ''}`.trim().toLowerCase()
               ));
               team.roster
-                .filter(p => p.core !== false && !p.borrowed)
+                .filter(p => p.core)
                 .forEach(p => {
                   const name = `${p.first || ''} ${p.last || ''}`.trim().toLowerCase();
                   if (name && !lineupNames.has(name)) {
@@ -237,7 +237,7 @@ const Lineup = ({
                 <div style={{ flex: 1, minWidth: isMobile ? '100px' : '120px', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                   <PlayerName name={name} number={player.number} size={isMobile ? 'sm' : 'md'} />
                   <AvailBadge available={avail} />
-                  {player.borrowed && (
+                  {!player.core && (
                     <span style={{
                       background: 'rgba(63, 143, 136, 0.18)', color: 'var(--accent-sub)',
                       padding: '1px 6px', borderRadius: '4px', fontSize: 'var(--text-xs)',

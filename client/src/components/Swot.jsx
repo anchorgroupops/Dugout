@@ -446,7 +446,7 @@ const Swot = ({ swotData, roster, schedule, isMobile = false, isLandscape = fals
   if (!swotData) return <p>Loading SWOT Analysis...</p>;
 
   const evaluations = swotData.player_analyses || swotData.player_evaluations || [];
-  const playersWithSwot = (roster || []).filter(p => p.core !== false).map(player => {
+  const playersWithSwot = (roster || []).map(player => {
     const evaluation = evaluations.find(e =>
       (e.number && String(e.number) === String(player.number)) ||
       (e.name && e.name.toLowerCase() === `${player.first} ${player.last}`.trim().toLowerCase()) ||
@@ -560,7 +560,7 @@ const Swot = ({ swotData, roster, schedule, isMobile = false, isLandscape = fals
         })}
       </div>
 
-      {playersWithSwot.length === 0 && (
+      {(roster || []).length === 0 && (
         <div className="glass-panel" style={{ padding: '2rem', textAlign: 'center' }}>
           <p style={{ color: 'var(--text-muted)' }}>No SWOT data available. Run the scraper to populate player stats.</p>
         </div>
