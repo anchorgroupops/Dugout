@@ -18,12 +18,15 @@ export const Tip = ({ label, children }) => {
 /**
  * StatBadge with built-in tooltip on the label.
  */
-export const TipBadge = ({ label, value }) => {
+export const TipBadge = ({ label, value, dim }) => {
   const explanation = STAT_GLOSSARY[label] || '';
+  const title = dim ? `${explanation}${explanation ? ' \u2014 ' : ''}small sample (< 10 PA)` : explanation;
   return (
-    <div className="stat-badge" title={explanation}>
+    <div className="stat-badge" title={title} style={dim ? { opacity: 0.45 } : undefined}>
       <span className="stat-badge__label">{label}</span>
-      <span className="stat-badge__value">{value ?? '\u2014'}</span>
+      <span className="stat-badge__value">
+        {dim && value && value !== '\u2014' ? `~${value}` : (value ?? '\u2014')}
+      </span>
     </div>
   );
 };

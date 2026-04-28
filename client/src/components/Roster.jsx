@@ -36,9 +36,9 @@ const getStrengthBadges = (player) => {
   const ops = parseFloat(b.ops ?? player.ops);
   const sb = parseFloat(b.sb ?? player.sb);
   const fpct = parseFloat(f.fpct);
-  if (!isNaN(avg) && avg >= 0.350) badges.push({ icon: '\uD83D\uDD25', tip: `AVG ${avg.toFixed(3)}` });
-  if (!isNaN(obp) && obp >= 0.420) badges.push({ icon: '\uD83D\uDC41\uFE0F', tip: `OBP ${obp.toFixed(3)}` });
-  if (!isNaN(ops) && ops >= 0.700) badges.push({ icon: '\uD83D\uDCAA', tip: `OPS ${ops.toFixed(3)}` });
+  if (hasEnoughPA && !isNaN(avg) && avg >= 0.350) badges.push({ icon: '\uD83D\uDD25', tip: `AVG ${avg.toFixed(3)}` });
+  if (hasEnoughPA && !isNaN(obp) && obp >= 0.420) badges.push({ icon: '\uD83D\uDC41\uFE0F', tip: `OBP ${obp.toFixed(3)}` });
+  if (hasEnoughPA && !isNaN(ops) && ops >= 0.700) badges.push({ icon: '\uD83D\uDCAA', tip: `OPS ${ops.toFixed(3)}` });
   if (!isNaN(sb) && sb >= 2) badges.push({ icon: '\u26A1', tip: `${sb} SB` });
   if (!isNaN(fpct) && fpct >= 0.900) badges.push({ icon: '\uD83C\uDFAF', tip: `FPCT ${fpct.toFixed(3)}` });
   return badges;
@@ -52,6 +52,7 @@ const hasData = (obj) => {
 
 const ExpandedStats = ({ player }) => {
   const b = player.batting || {};
+  const ratesDim = (() => { const pa = parseFloat(b.pa ?? player.pa); return isNaN(pa) || pa < MIN_PA; })();
   const ba = player.batting_advanced || {};
   const p = player.pitching || {};
   const pa2 = player.pitching_advanced || {};
@@ -71,10 +72,10 @@ const ExpandedStats = ({ player }) => {
       <div style={sectionStyle}>
         <div className="section-label">Batting</div>
         <div style={rowStyle}>
-          <TipBadge label="AVG" value={fmt3(b.avg ?? player.avg)} />
-          <TipBadge label="OBP" value={fmt3(b.obp ?? player.obp)} />
-          <TipBadge label="SLG" value={fmt3(b.slg ?? player.slg)} />
-          <TipBadge label="OPS" value={fmt3(b.ops ?? player.ops)} />
+          <TipBadge label="AVG" value={fmt3(b.avg ?? player.avg)} dim={ratesDim} />
+          <TipBadge label="OBP" value={fmt3(b.obp ?? player.obp)} dim={ratesDim} />
+          <TipBadge label="SLG" value={fmt3(b.slg ?? player.slg)} dim={ratesDim} />
+          <TipBadge label="OPS" value={fmt3(b.ops ?? player.ops)} dim={ratesDim} />
         </div>
         <div style={rowGapStyle}>
           <TipBadge label="GP" value={fmt(b.gp)} />
@@ -526,13 +527,17 @@ const Roster = ({ team, availability, isMobile = false, isLandscape = false }) =
               </div>
 
               {/* Collapsed: compact summary */}
-              {!isExpanded && (
-                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                  <TipBadge label="AVG" value={fmt3(b.avg ?? player.avg)} />
-                  <TipBadge label="OBP" value={fmt3(b.obp ?? player.obp)} />
-                  <TipBadge label="OPS" value={fmt3(b.ops ?? player.ops)} />
-                </div>
-              )}
+              {!isExpanded && (() => {
+                const pa = parseFloat(b.pa ?? player.pa);
+                const dim = isNaN(pa) || pa < MIN_PA;
+                return (
+                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    <TipBadge label="AVG" value={fmt3(b.avg ?? player.avg)} dim={dim} />
+                    <TipBadge label="OBP" value={fmt3(b.obp ?? player.obp)} dim={dim} />
+                    <TipBadge label="OPS" value={fmt3(b.ops ?? player.ops)} dim={dim} />
+                  </div>
+                );
+              })()}
 
               {/* Expanded: full stats */}
               {isExpanded && <ExpandedStats player={player} />}

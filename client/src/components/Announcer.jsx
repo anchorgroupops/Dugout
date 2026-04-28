@@ -95,7 +95,7 @@ function AddSubModal({ onClose, onAdd }) {
   );
 }
 
-function PlayerCard({ player, onSavePhonetics, onRender }) {
+function PlayerCard({ player, onSavePhonetics, onRender, onRemove }) {
   const [expanded, setExpanded] = useState(false);
   const [phonetic, setPhonetic] = useState(player.phonetic_hint || '');
   const [instruction, setInstruction] = useState(player.tts_instruction || '');
@@ -245,7 +245,16 @@ function PlayerCard({ player, onSavePhonetics, onRender }) {
   };
 
   return (
-    <div className={`announcer-player-card glass-panel ${expanded ? 'expanded' : ''}`}>
+    <div className={`announcer-player-card glass-panel ${expanded ? 'expanded' : ''}${player.is_ghost ? ' announcer-ghost-player' : ''}`}
+      style={player.is_ghost ? { borderLeft: '3px solid var(--warning, #facc15)', opacity: 0.75 } : undefined}>
+      {player.is_ghost && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 12px', background: 'rgba(250,204,21,0.08)', borderBottom: '1px solid rgba(250,204,21,0.2)', fontSize: 'var(--text-xs)', color: 'rgba(250,204,21,0.9)' }}>
+          <span><AlertCircle size={12} style={{ display: 'inline', marginRight: 4 }} />Not on current roster</span>
+          <button onClick={() => onRemove?.(player.id)} style={{ background: 'rgba(250,204,21,0.15)', border: '1px solid rgba(250,204,21,0.3)', borderRadius: 4, color: 'rgba(250,204,21,0.9)', fontSize: 'var(--text-xs)', padding: '2px 8px', cursor: 'pointer' }}>
+            Remove
+          </button>
+        </div>
+      )}
       <button className="announcer-player-header" onClick={() => setExpanded(!expanded)} aria-expanded={expanded}>
         <div className="announcer-player-info">
           <span className="announcer-jersey">#{player.number || '?'}</span>
@@ -1335,6 +1344,16 @@ export default function Announcer({ lineups }) {
     pollStopToRef.current = setTimeout(stopPolling, 10000);
   };
 
+  const handleRemovePlayer = async (playerId) => {
+    try {
+      const res = await fetch(`/api/announcer/player/${playerId}`, {
+        method: 'DELETE',
+        headers: { 'Origin': window.location.origin },
+      });
+      if (res.ok) await fetchRoster();
+    } catch { /* silent */ }
+  };
+
   if (loading) return <div className="loader" />;
 
   if (view === 'nowplaying') {
@@ -1393,6 +1412,7 @@ export default function Announcer({ lineups }) {
             onSavePhonetics={handleSavePhonetics}
             onRender={handleRender}
             onPreview={() => {}}
+            onRemove={handleRemovePlayer}
           />
         ))}
         {roster.length === 0 && (

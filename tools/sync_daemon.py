@@ -1611,15 +1611,30 @@ def handle_availability():
             
         return jsonify({"status": "success"})
     
-    # GET logic
-    if not availability_file.exists():
-        team_file = SHARKS_DIR / "team.json"
-        team_data = _read_json_file(team_file, default={})
-        if not team_data:
-            return jsonify({})
-        return jsonify({f"{p.get('first', '')} {p.get('last', '')}".strip(): p.get("core", True) for p in team_data.get("roster", [])})
-
-    return jsonify(_read_json_file(availability_file, default={}))
+    # GET logic — return saved availability, back-filling any core players not in the file as True
+    saved = _read_json_file(availability_file, default={}) if availability_file.exists() else {}
+    # Load roster to fill gaps
+    team_data = _read_json_file(SHARKS_DIR / "team_enriched.json", default={}) or \
+                _read_json_file(SHARKS_DIR / "team.json", default={}) or {}
+    manifest_data = _read_json_file(SHARKS_DIR / "roster_manifest.json", default={}) or {}
+    core_names = set(manifest_data.get("core_players", []))
+    result = {}
+    for p in team_data.get("roster", []):
+        name = f"{(p.get('first') or '').strip()} {(p.get('last') or '').strip()}".strip()
+        if not name:
+            continue
+        if name in saved:
+            result[name] = saved[name]
+        else:
+            # Default: core players are available, subs are not
+            result[name] = name in core_names
+    # Preserve any extra names in saved (e.g. subs manually toggled in)
+    for name, val in saved.items():
+        if name not in result:
+            result[name] = val
+    if not result:
+        return jsonify(saved)
+    return jsonify(result)
 
 def _build_games_feed(include_detail: bool = False) -> list[dict]:
     """Return parsed scorebook games enriched with W/L from schedule.
@@ -3956,15 +3971,54 @@ def handle_announcer_game_state_set():
 
 @app.route('/api/announcer/roster', methods=['GET'])
 def handle_announcer_roster():
-    """Return all active players with announcer metadata."""
+    """Return all active players with announcer metadata, flagging ghost players."""
     try:
         from announcer_engine import load_announcer_roster, get_roster_stats
         roster = load_announcer_roster()
         stats = get_roster_stats()
+        # Cross-reference with team to detect ghost players (in announcer DB but not on roster)
+        try:
+            team_data = _read_json_file(SHARKS_DIR / "team_enriched.json", default={}) or \
+                        _read_json_file(SHARKS_DIR / "team.json", default={}) or {}
+            manifest_data = _read_json_file(SHARKS_DIR / "roster_manifest.json", default={}) or {}
+            core_names = set(manifest_data.get("core_players", []))
+            team_names = set()
+            for p in team_data.get("roster", []):
+                full = f"{(p.get('first') or '').strip()} {(p.get('last') or '').strip()}".strip()
+                if full:
+                    team_names.add(full)
+            if team_names:
+                for p in roster:
+                    full = f"{(p.get('first') or '').strip()} {(p.get('last') or '').strip()}".strip()
+                    p["is_ghost"] = bool(full and full not in team_names)
+        except Exception as _ge:
+            logging.debug("[Announcer] Ghost detection skipped: %s", _ge)
         return jsonify({"roster": roster, "stats": stats})
     except Exception as e:
         logging.error("[Announcer] roster error: %s", e)
         return jsonify({"error": "announcer_roster_failed"}), 500
+
+
+@app.route('/api/announcer/player/<player_id>', methods=['DELETE'])
+def handle_announcer_player_delete(player_id):
+    """Remove a player from the announcer roster entirely."""
+    blocked = _guard_mutating_request()
+    if blocked:
+        return blocked
+    invalid = _validate_player_id(player_id)
+    if invalid:
+        return invalid
+    try:
+        from announcer_engine import load_announcer_roster, save_announcer_roster
+        roster = load_announcer_roster()
+        new_roster = [p for p in roster if p.get("id") != player_id]
+        if len(new_roster) == len(roster):
+            return jsonify({"error": "player_not_found"}), 404
+        save_announcer_roster(new_roster)
+        return jsonify({"status": "removed", "player_id": player_id})
+    except Exception as e:
+        logging.error("[Announcer] player delete error: %s", e)
+        return jsonify({"error": "delete_failed"}), 500
 
 
 @app.route('/api/announcer/render/<player_id>', methods=['POST'])
