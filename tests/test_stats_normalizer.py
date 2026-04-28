@@ -615,3 +615,49 @@ class TestNormalizePitchingAdvancedFullRow:
         row = {"pitching": {"s_pct": 50, "fip": 2.0}}
         result = normalize_pitching_advanced_full_row(row)
         assert result["s_pct"] == 0.5
+
+
+# ====================================================================
+# Property-based tests (hypothesis)
+# ====================================================================
+from hypothesis import given, settings
+from hypothesis import strategies as st
+
+
+@pytest.mark.property
+class TestSafeFloatProperty:
+    @given(st.one_of(st.integers(), st.floats(allow_nan=False, allow_infinity=False)))
+    def test_numeric_types_never_raise(self, val):
+        result = safe_float(val)
+        assert isinstance(result, float)
+
+    @given(st.text())
+    def test_arbitrary_strings_never_raise(self, val):
+        result = safe_float(val)
+        assert isinstance(result, float)
+
+    @given(st.none())
+    def test_none_returns_default(self, val):
+        assert safe_float(val) == 0.0
+        assert safe_float(val, default=99.0) == 99.0
+
+    @given(st.floats(min_value=0.0, max_value=1.0, allow_nan=False))
+    def test_ratio_roundtrips(self, val):
+        assert safe_float(val) == pytest.approx(val)
+
+
+@pytest.mark.property
+class TestSafeIntProperty:
+    @given(st.one_of(st.integers(), st.floats(allow_nan=False, allow_infinity=False)))
+    def test_numeric_types_never_raise(self, val):
+        result = safe_int(val)
+        assert isinstance(result, int)
+
+    @given(st.text())
+    def test_arbitrary_strings_never_raise(self, val):
+        result = safe_int(val)
+        assert isinstance(result, int)
+
+    @given(st.integers(min_value=-1000, max_value=1000))
+    def test_integer_identity(self, val):
+        assert safe_int(val) == val

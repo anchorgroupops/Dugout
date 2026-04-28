@@ -350,3 +350,59 @@ class TestBuildLineupRationale:
         rationale = _build_lineup_rationale(results)
         assert "balanced" in rationale
         assert "OBP" in rationale
+
+
+# ====================================================================
+# Property-based tests (hypothesis)
+# ====================================================================
+from hypothesis import given, settings
+from hypothesis import strategies as st
+
+
+def _mk_player_from_stats(ab, h, bb, hbp, so, hr, doubles, sb):
+    return _mk_player(
+        "1", "Prop Player",
+        ab=ab, h=h, bb=bb, hbp=hbp, so=so, hr=hr,
+        **{"2b": doubles},
+        sb=sb,
+        pa=ab + bb + hbp,
+    )
+
+
+_nonneg_int = st.integers(min_value=0, max_value=50)
+
+
+@pytest.mark.property
+class TestComputeBattingScoreProperty:
+    @given(
+        ab=st.integers(min_value=1, max_value=50),
+        h=st.integers(min_value=0, max_value=50),
+        bb=_nonneg_int,
+        hbp=_nonneg_int,
+        so=_nonneg_int,
+        hr=_nonneg_int,
+        doubles=_nonneg_int,
+        sb=_nonneg_int,
+    )
+    def test_always_returns_nonnegative_float(self, ab, h, bb, hbp, so, hr, doubles, sb):
+        h = min(h, ab)
+        doubles = min(doubles, h)
+        hr = min(hr, h - doubles)
+        player = _mk_player_from_stats(ab, h, bb, hbp, so, hr, doubles, sb)
+        result = compute_batting_score(player)
+        assert isinstance(result, float)
+        assert result >= 0.0
+
+    @given(
+        ab=st.integers(min_value=1, max_value=50),
+        h=st.integers(min_value=0, max_value=50),
+        bb=_nonneg_int,
+        hbp=_nonneg_int,
+        strategy=st.sampled_from(["balanced", "aggressive", "development"]),
+    )
+    def test_strategy_always_returns_float(self, ab, h, bb, hbp, strategy):
+        h = min(h, ab)
+        player = _mk_player_from_stats(ab, h, bb, hbp, so=0, hr=0, doubles=0, sb=0)
+        result = compute_batting_score(player, strategy)
+        assert isinstance(result, float)
+        assert result >= 0.0
