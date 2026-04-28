@@ -193,7 +193,7 @@ function App() {
         let detail = 'Voice update unavailable';
         try {
           const body = await res.json();
-          if (body?.detail) detail = body.detail;
+          if (body?.detail || body?.message) detail = body.detail || body.message;
         } catch {
           // ignored: non-json response
         }

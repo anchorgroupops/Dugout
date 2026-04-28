@@ -25,7 +25,9 @@ export const TipBadge = ({ label, value, dim }) => {
     <div className="stat-badge" title={title} style={dim ? { opacity: 0.45 } : undefined}>
       <span className="stat-badge__label">{label}</span>
       <span className="stat-badge__value">
-        {dim && value && value !== '\u2014' ? `~${value}` : (value ?? '\u2014')}
+        {dim && value && value !== '\u2014'
+          ? <><span style={{ fontSize: '0.7em', opacity: 0.6, verticalAlign: 'super' }}>~</span>{value}</>
+          : (value ?? '\u2014')}
       </span>
     </div>
   );

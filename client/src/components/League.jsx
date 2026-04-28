@@ -309,6 +309,12 @@ const OpponentDetail = ({ slug, hasRoster }) => {
           </div>
         </div>
       )}
+
+      {(!matchup || matchup.empty) && (!roster || roster.length === 0) && (
+        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', fontStyle: 'italic', paddingTop: '0.25rem' }}>
+          No scouting data yet for this opponent.
+        </div>
+      )}
     </div>
   );
 };
