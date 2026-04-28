@@ -1258,6 +1258,20 @@ def run_sync_cycle():
         if isinstance(enriched_team_data, dict):
             _record_stats_db_snapshot(enriched_team_data, source="sync_cycle")
 
+        # Push voice script to Modal for GPU synthesis
+        try:
+            modal_url = _resolve_secret("MODAL_VOICE_WEBHOOK_URL") or os.getenv("MODAL_VOICE_WEBHOOK_URL", "")
+            if modal_url:
+                ctx = _load_voice_context()
+                script = _build_voice_overview_text(ctx)
+                if script:
+                    r = requests.post(modal_url, json={"script": script}, timeout=30)
+                    logging.info("[Voice] Modal push %s: %s", r.status_code, r.text[:120])
+                else:
+                    logging.debug("[Voice] Skipping Modal push — no voice script generated")
+        except Exception as e:
+            logging.warning("[Voice] Modal push skipped: %s", e)
+
         _set_sync_stage("idle")
         _SYNC_STATUS["last_completed"] = datetime.now(ET).isoformat()
         logging.info("--- Sync Cycle Complete ---")
@@ -3648,9 +3662,33 @@ def handle_voice_update():
     except Exception as e:
         logging.debug("[Voice] ElevenLabs fallback unavailable: %s", e)
 
+    # Try Pi-local TTS (same service used by announcer clips)
+    try:
+        local_tts_url = os.getenv("LOCAL_TTS_URL", "http://localhost:8766")
+        ctx = _load_voice_context()
+        text = _build_voice_overview_text(ctx)
+        tts_resp = requests.post(
+            f"{local_tts_url}/synthesize",
+            json={"text": text, "voice": "default"},
+            timeout=120,
+        )
+        if tts_resp.ok and tts_resp.content:
+            now_iso = datetime.now(ET).isoformat()
+            mp3_out = SHARKS_DIR / "voice_overview_latest.mp3"
+            with open(mp3_out, "wb") as f:
+                f.write(tts_resp.content)
+            _write_json_file(meta_file, {"generated_at": now_iso, "script": text, "provider": "local_tts"})
+            response = Response(tts_resp.content, mimetype="audio/mpeg")
+            response.headers["Content-Disposition"] = 'inline; filename="voice_update.mp3"'
+            response.headers["X-Voice-Generated-At"] = now_iso
+            response.headers["X-Voice-Provider"] = "local_tts"
+            return response
+    except Exception as e:
+        logging.debug("[Voice] Local TTS fallback unavailable: %s", e)
+
     return jsonify({
         "error": "no_voice_available",
-        "message": "Voice update will be generated during the next daily sync (Qwen3-TTS on Modal GPU)."
+        "message": "Voice update unavailable. Add ELEVENLABS_API_KEY to .env or ensure local TTS is running on port 8766."
     }), 404
 
 

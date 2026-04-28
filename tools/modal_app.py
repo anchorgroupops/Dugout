@@ -165,10 +165,22 @@ def daily_scout_job():
 
 @app.function(image=sharks_image, volumes={VOLUME_MOUNT: SESSION_VOLUME}, timeout=600)
 @modal.fastapi_endpoint(method="POST")
-def manual_sync():
-    """Manual trigger via Webhook (POST). Generates voice update only."""
-    daily_scout_job.spawn()
-    return {"status": "triggered", "message": "Voice generation started in background."}
+def manual_sync(request: dict = None):
+    """Manual trigger via Webhook (POST).
+
+    Accepts optional JSON body: {"script": "...voice script text..."}
+    If a script is provided, generates voice directly from it (Pi-push mode).
+    Otherwise falls back to reading team data from the Modal volume.
+    """
+    script = (request or {}).get("script", "").strip() if request else ""
+    if not script:
+        # Legacy: try to build script from volume data
+        sharks_dir = str(Path(VOLUME_MOUNT) / "sharks")
+        script = _build_voice_script(sharks_dir)
+    if script:
+        generate_voice_update.spawn(script)
+        return {"status": "triggered", "message": "Voice generation started in background."}
+    return {"status": "skipped", "reason": "no_script_or_team_data"}
 
 
 @app.function(image=sharks_image, volumes={VOLUME_MOUNT: SESSION_VOLUME}, timeout=600)
