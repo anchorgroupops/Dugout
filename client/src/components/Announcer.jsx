@@ -1205,6 +1205,7 @@ export default function Announcer({ lineups }) {
   const [csvImporting, setCsvImporting] = useState(false);
   const csvInputRef = useRef(null);
   const [error, setError] = useState('');
+  const [showFormer, setShowFormer] = useState(false);
   const pollRef = useRef(null);
   const renderToRef = useRef(null);
   const pollStopToRef = useRef(null);
@@ -1405,7 +1406,7 @@ export default function Announcer({ lineups }) {
       </div>
 
       <div className="announcer-roster-list">
-        {roster.map(player => (
+        {roster.filter(p => !p.is_ghost).map(player => (
           <PlayerCard
             key={player.id}
             player={player}
@@ -1415,9 +1416,31 @@ export default function Announcer({ lineups }) {
             onRemove={handleRemovePlayer}
           />
         ))}
-        {roster.length === 0 && (
+        {roster.filter(p => !p.is_ghost).length === 0 && (
           <div className="glass-panel" style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
             No players found. Make sure team data has been synced.
+          </div>
+        )}
+        {roster.some(p => p.is_ghost) && (
+          <div className="announcer-former-section">
+            <button
+              className="announcer-btn announcer-btn-secondary"
+              style={{ width: '100%', justifyContent: 'space-between', fontSize: '0.8rem', opacity: 0.7 }}
+              onClick={() => setShowFormer(v => !v)}
+            >
+              <span>Former Players ({roster.filter(p => p.is_ghost).length})</span>
+              {showFormer ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+            </button>
+            {showFormer && roster.filter(p => p.is_ghost).map(player => (
+              <PlayerCard
+                key={player.id}
+                player={player}
+                onSavePhonetics={handleSavePhonetics}
+                onRender={handleRender}
+                onPreview={() => {}}
+                onRemove={handleRemovePlayer}
+              />
+            ))}
           </div>
         )}
       </div>
