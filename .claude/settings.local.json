@@ -10,7 +10,8 @@
       "PowerShell(*)",
       "mcp__*",
       "Skill(*)",
-      "Agent(*)"
+      "Agent(*)",
+      "mcp__claude_ai_Gmail__search_threads"
     ]
   }
 }
