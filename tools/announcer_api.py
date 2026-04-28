@@ -184,23 +184,22 @@ def _synth_replicate(text: str, vd: VoiceDesignParams, ref_audio: str, ref_text:
         "Content-Type": "application/json",
         "Prefer": "wait",
     }
-    payload = {
-        "input": {
-            "mode": "clone",
-            "text": text,
-            "reference_audio": ref_audio,
-            "reference_text": ref_text,
-            "language": "en",
-            "voice_design": {
-                "pitch": vd.pitch,
-                "energy": vd.energy,
-                "speaking_rate": vd.speaking_rate,
-            },
-            "emotion_exaggeration": vd.emotion_exaggeration,
-        }
+    from announcer_engine import STEITZER_VOICE_INSTRUCTION
+    best_model_slug = os.getenv("REPLICATE_BEST_MODEL_ID", "qwen/qwen2.5-tts-3b")
+    input_payload: dict = {
+        "text": text,
+        "voice_instruction": STEITZER_VOICE_INSTRUCTION,
+        "language": "en",
     }
+    if ref_audio and ref_text:
+        input_payload["mode"] = "clone"
+        input_payload["reference_audio"] = ref_audio
+        input_payload["reference_text"] = ref_text
+    else:
+        input_payload["mode"] = "design"
+    payload = {"input": input_payload}
     resp = requests.post(
-        "https://api.replicate.com/v1/models/qwen/qwen3-tts-1.7b-voicedesign/predictions",
+        f"https://api.replicate.com/v1/models/{best_model_slug}/predictions",
         json=payload,
         headers=headers,
         timeout=90,

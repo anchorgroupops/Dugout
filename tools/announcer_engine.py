@@ -163,15 +163,23 @@ class LocalVLLMTTS(TTSProvider):
 
 
 class ReplicateTTS(TTSProvider):
-    """Qwen3-TTS-1.7B-VoiceDesign via Replicate API with ICL clone mode."""
+    """Qwen2.5-TTS-3B via Replicate API — Best Quality renderer."""
 
-    API_URL = "https://api.replicate.com/v1/models/qwen/qwen3-tts-1.7b-voicedesign/predictions"
+    # Configurable via REPLICATE_BEST_MODEL_ID env var to allow easy upgrades
+    _DEFAULT_MODEL_SLUG = "qwen/qwen2.5-tts-3b"
+
+    @property
+    def _api_url(self) -> str:
+        slug = os.getenv("REPLICATE_BEST_MODEL_ID", self._DEFAULT_MODEL_SLUG)
+        return f"https://api.replicate.com/v1/models/{slug}/predictions"
+
+    API_URL = ""  # unused — _api_url property takes precedence
     POLL_INTERVAL = 2.0
     MAX_POLL_SECONDS = 120
 
     @property
     def name(self) -> str:
-        return "replicate_qwen3_tts_voicedesign"
+        return "replicate_qwen25_tts_3b"
 
     def synthesize(self, text: str, voice_config: dict) -> bytes:
         token = _resolve_secret("REPLICATE_API_TOKEN")
@@ -180,31 +188,30 @@ class ReplicateTTS(TTSProvider):
 
         ref_audio = voice_config.get("reference_audio_url", "")
         ref_text = voice_config.get("reference_transcript", "")
-        if not ref_audio or not ref_text:
-            raise RuntimeError("Voice profile missing reference_audio_url or reference_transcript")
 
         headers = {
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
             "Prefer": "wait",
         }
-        payload = {
-            "input": {
-                "mode": "clone",
-                "text": text,
-                "reference_audio": ref_audio,
-                "reference_text": ref_text,
-                "language": "en",
-                "voice_design": {
-                    "pitch": -2.0,
-                    "energy": 1.3,
-                    "speaking_rate": 0.92,
-                },
-                "emotion_exaggeration": 0.85,
-            }
-        }
 
-        resp = requests.post(self.API_URL, json=payload, headers=headers, timeout=90)
+        # Qwen2.5-TTS-3B supports voice_instruction for style steering
+        input_payload: dict = {
+            "text": text,
+            "voice_instruction": STEITZER_VOICE_INSTRUCTION,
+            "language": "en",
+        }
+        # Include ICL clone params when a reference clip is configured
+        if ref_audio and ref_text:
+            input_payload["mode"] = "clone"
+            input_payload["reference_audio"] = ref_audio
+            input_payload["reference_text"] = ref_text
+        else:
+            input_payload["mode"] = "design"
+
+        payload = {"input": input_payload}
+
+        resp = requests.post(self._api_url, json=payload, headers=headers, timeout=90)
         if resp.status_code not in (200, 201):
             raise RuntimeError(f"Replicate returned {resp.status_code}: {resp.text[:300]}")
 
@@ -264,19 +271,11 @@ class Replicate06bTTS(ReplicateTTS):
         )
         return f"https://api.replicate.com/v1/models/{slug}/predictions"
 
-    # Accessing API_URL is done via self._api_url in synthesize; override parent attr too
-    API_URL = ""  # unused — _api_url property takes precedence
-
-    MAX_POLL_SECONDS = 30  # 0.6B is faster than 1.7B
+    MAX_POLL_SECONDS = 30  # 0.6B is faster than 3B
 
     @property
     def name(self) -> str:
         return "replicate_qwen3_tts_0.6b"
-
-    def synthesize(self, text: str, voice_config: dict) -> bytes:
-        # Temporarily patch API_URL so parent synthesize() hits the right endpoint
-        self.API_URL = self._api_url
-        return super().synthesize(text, voice_config)
 
 
 class ElevenLabsTTS(TTSProvider):
@@ -477,14 +476,21 @@ def _number_to_word(num: str) -> str:
 
 
 _HALO_SCRIPTS: dict[str, str] = {
-    "triple_rbi":    "Triple Kill!",
-    "quad_rbi":      "Overkill!",
-    "3_strikeouts":  "Killtacular!",
-    "4_strikeouts":  "Running Riot!",
-    "5_strikeouts":  "Rampage!",
-    "grand_slam":    "Monster Kill!",
-    "cycle":         "Perfection!",
+    "triple_rbi":    "Hat trick! Three runs batted in!",
+    "quad_rbi":      "Grand Slam Hero! Four RBI!",
+    "3_strikeouts":  "Strikeout artist! Three up, three down!",
+    "4_strikeouts":  "She is ON FIRE! Four strikeouts!",
+    "5_strikeouts":  "UNTOUCHABLE! Five strikeouts!",
+    "grand_slam":    "Grand. Slam. QUEEN!",
+    "cycle":         "PERFECTION! She hit for the cycle!",
 }
+
+STEITZER_VOICE_INSTRUCTION = (
+    "Speak like Jeff Steitzer, the iconic Halo video game announcer. "
+    "Use a deep, booming, dramatic stadium announcer voice with elongated emphasis on key words. "
+    "Draw out 'Now batting' with gravitas, pause before the number, then announce the name "
+    "with rising energy and excitement. This is for a youth softball game — keep it celebratory and fun."
+)
 
 
 def build_situational_announcement(player: dict, game_context: dict | None = None) -> str:
@@ -516,20 +522,23 @@ def build_situational_announcement(player: dict, game_context: dict | None = Non
 
     if achievement and achievement in _HALO_SCRIPTS:
         halo_call = _HALO_SCRIPTS[achievement]
-        script = f"[breath] {halo_call} [pause:0.3s] That's number {num_word}, {name}!"
+        script = f"[breath] {halo_call} [pause:0.5s] That's number {num_word}... {name}!"
     elif high_stakes:
-        urgency = "with the game on the line" if trailing else "with the bases juiced"
+        urgency = "with the game on the line" if trailing else "with the bases loaded"
         script = (
-            f"[breath] Stepping into the box {urgency}... "
-            f"[pause:0.5s] Number {num_word}, {name}!"
+            f"[breath] NOW BATTING... [pause:0.5s] {urgency}... "
+            f"[pause:0.4s] NUMBEEEER {num_word}... [pause:0.3s] {name}!"
         )
     elif bases_loaded:
         script = (
-            f"[breath] Bases loaded... [pause:0.3s] "
-            f"Now batting, number {num_word}, {name}!"
+            f"[breath] Bases loaded... [pause:0.4s] "
+            f"NOW batting... [pause:0.3s] NUMBEEEER {num_word}... [pause:0.3s] {name}!"
         )
     else:
-        script = f"[breath] Now batting, number {num_word}, {name}! [pause:0.3s]"
+        script = (
+            f"[breath] Now batting... [pause:0.4s] "
+            f"NUMBEEEER {num_word}... [pause:0.3s] {name}!"
+        )
 
     if tts_instruction and not achievement:
         script = f"{tts_instruction}. {script}"

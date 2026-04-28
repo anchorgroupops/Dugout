@@ -454,7 +454,7 @@ function PlayerCard({ player, onSavePhonetics, onRender, onRemove }) {
               <button
                 className={`announcer-quality-btn${renderQuality === 'best' ? ' active' : ''}`}
                 onClick={() => setRenderQuality('best')}
-                title="Best quality — Qwen3-TTS-1.7B (slow)"
+                title="Best quality — Qwen2.5-TTS-3B (slow)"
               >Best</button>
               <button
                 className={`announcer-quality-btn${renderQuality === 'quick' ? ' active' : ''}`}
@@ -800,13 +800,13 @@ function NowPlayingView({ roster, lineups, onBack }) {
 }
 
 const HALO_ACHIEVEMENTS = [
-  { key: 'triple_rbi',   label: 'Triple Kill',   desc: '3 RBI' },
-  { key: 'quad_rbi',     label: 'Overkill',       desc: '4 RBI' },
-  { key: '3_strikeouts', label: 'Killtacular',    desc: '3 Ks' },
-  { key: '4_strikeouts', label: 'Running Riot',   desc: '4 Ks' },
-  { key: '5_strikeouts', label: 'Rampage',        desc: '5 Ks' },
-  { key: 'grand_slam',   label: 'Monster Kill',   desc: 'Grand Slam' },
-  { key: 'cycle',        label: 'Perfection',     desc: 'Hit for Cycle' },
+  { key: 'triple_rbi',   label: 'Hat Trick',        desc: '3 RBI' },
+  { key: 'quad_rbi',     label: 'Grand Slam Hero',  desc: '4 RBI' },
+  { key: '3_strikeouts', label: 'Strikeout Artist', desc: '3 Ks' },
+  { key: '4_strikeouts', label: 'Ace on Fire',      desc: '4 Ks' },
+  { key: '5_strikeouts', label: 'Untouchable',      desc: '5 Ks' },
+  { key: 'grand_slam',   label: 'Grand Slam Queen', desc: 'Grand Slam' },
+  { key: 'cycle',        label: 'Perfection',       desc: 'Hit for Cycle' },
 ];
 
 const DEFAULT_GAME_STATE = {
