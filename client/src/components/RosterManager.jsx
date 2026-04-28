@@ -407,8 +407,8 @@ const RosterManager = ({
 
         {showBorrowForm && (
           <div>
-            {/* Search dropdown */}
-            {!manualMode && (
+            {/* Search dropdown — only shown if league data has been scraped */}
+            {!manualMode && leaguePlayers.length > 0 && (
               <div style={{ marginBottom: '1rem' }}>
                 <PlayerCombobox
                   players={leaguePlayers}
@@ -425,6 +425,23 @@ const RosterManager = ({
                   }}
                 >
                   Or enter player details manually
+                </button>
+              </div>
+            )}
+            {!manualMode && leaguePlayers.length === 0 && (
+              <div style={{ marginBottom: '1rem' }}>
+                <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', margin: '0 0 0.5rem 0' }}>
+                  No league roster data available yet. Enter player details manually.
+                </p>
+                <button
+                  onClick={() => setManualMode(true)}
+                  style={{
+                    background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)',
+                    color: 'var(--text-main)', fontSize: 'var(--text-sm)', cursor: 'pointer',
+                    borderRadius: '6px', padding: '0.4rem 0.9rem',
+                  }}
+                >
+                  Enter manually
                 </button>
               </div>
             )}
