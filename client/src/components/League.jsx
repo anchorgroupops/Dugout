@@ -58,10 +58,12 @@ const League = ({ isMobile = false, isLandscape = false }) => {
                   color: parseInt(standRow.w) > parseInt(standRow.l) ? 'var(--success)' : parseInt(standRow.w) < parseInt(standRow.l) ? 'var(--danger)' : 'var(--text-muted)'
                 }}>{standRow.record}</span>
               )}
-              <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
-                <Users size={11} style={{ display: 'inline', marginRight: '3px', verticalAlign: 'middle' }} />
-                {opp.roster_size} players
-              </span>
+              {opp.roster_size > 0 && (
+                <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
+                  <Users size={11} style={{ display: 'inline', marginRight: '3px', verticalAlign: 'middle' }} />
+                  {opp.roster_size} players
+                </span>
+              )}
             </div>
           </div>
           {isExpanded ? <ChevronUp size={16} color="var(--text-muted)" /> : <ChevronDown size={16} color="var(--text-muted)" />}

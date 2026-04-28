@@ -2571,14 +2571,14 @@ def handle_next_game():
     """Return the next upcoming game with opponent slug and matchup URL."""
     sched_file = SHARKS_DIR / "schedule_manual.json"
     if not sched_file.exists():
-        return jsonify({"error": "Schedule unavailable"}), 503
+        return jsonify({"opponent": None, "slug": None, "date": None, "message": "No schedule on file"})
     try:
         with open(sched_file) as f:
             schedule = json.load(f)
     except Exception:
-        return jsonify({"error": "Schedule unavailable"}), 503
+        return jsonify({"opponent": None, "slug": None, "date": None, "message": "Schedule parse error"})
     if not isinstance(schedule, dict):
-        return jsonify({"error": "Schedule unavailable"}), 503
+        return jsonify({"opponent": None, "slug": None, "date": None, "message": "No upcoming games"})
     now = datetime.now(ET)
     disc_file = SHARKS_DIR / "opponent_discovery.json"
     teams_list = []

@@ -63,7 +63,8 @@
       "Bash(claude mcp *)",
       "Bash(node --input-type=module)",
       "Bash(npx --yes esbuild --bundle=false src/components/Roster.jsx src/components/Swot.jsx src/components/Lineup.jsx src/components/Games.jsx src/components/Practice.jsx)",
-      "Bash(npx esbuild *)"
+      "Bash(npx esbuild *)",
+      "Bash(C:/Users/joely/.claude/plugins/cache/claude-plugins-official/superpowers/5.0.7/skills/brainstorming/scripts/start-server.sh *)"
     ]
   }
 }

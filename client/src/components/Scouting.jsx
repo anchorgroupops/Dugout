@@ -25,31 +25,34 @@ export default function Scouting({ isMobile, isLandscape = false }) {
   const [nextGame, setNextGame] = useState(null);
   const [matchup, setMatchup] = useState(null);
   const [h2h, setH2h] = useState(null);
+  const [opponents, setOpponents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    fetch('/api/next-game')
-      .then(r => r.ok ? r.json() : null)
-      .then(data => {
-        setNextGame(data);
-        if (data?.slug) {
-          return Promise.all([
-            fetch(`/api/matchup/${data.slug}`).then(r => r.ok ? r.json() : null),
-            fetch(`/api/h2h/${data.slug}`).then(r => r.ok ? r.json() : null),
-          ]);
-        }
-        return [null, null];
-      })
-      .then(([m, h]) => {
-        if (m) setMatchup(m);
-        if (h) setH2h(h);
-        setLoading(false);
-      })
-      .catch(() => {
-        setError('Failed to load scouting data');
-        setLoading(false);
-      });
+    Promise.all([
+      fetch('/api/next-game').then(r => r.ok ? r.json() : null).catch(() => null),
+      fetch('/api/opponents').then(r => r.ok ? r.json() : []).catch(() => []),
+    ]).then(([nextData, opps]) => {
+      setNextGame(nextData);
+      setOpponents(opps || []);
+      if (nextData?.slug) {
+        return Promise.all([
+          fetch(`/api/matchup/${nextData.slug}`).then(r => r.ok ? r.json() : null).catch(() => null),
+          fetch(`/api/h2h/${nextData.slug}`).then(r => r.ok ? r.json() : null).catch(() => null),
+        ]);
+      }
+      return [null, null];
+    })
+    .then(([m, h]) => {
+      if (m) setMatchup(m);
+      if (h) setH2h(h);
+      setLoading(false);
+    })
+    .catch(() => {
+      setError('Failed to load scouting data');
+      setLoading(false);
+    });
   }, []);
 
   if (loading) return <div className="loader" />;
@@ -226,10 +229,71 @@ export default function Scouting({ isMobile, isLandscape = false }) {
           )}
         </>
       ) : (
-        <div className="glass-panel" style={{ padding: 'var(--space-lg)', textAlign: 'center' }}>
-          <p style={{ color: 'var(--text-muted)', fontSize: 'var(--text-sm)', margin: 0 }}>
-            No scouting data available for this opponent.
-          </p>
+        nextGame?.opponent && (
+          <div className="glass-panel" style={{ padding: 'var(--space-lg)', textAlign: 'center' }}>
+            <p style={{ color: 'var(--text-muted)', fontSize: 'var(--text-sm)', margin: 0 }}>
+              No scouting data available for this opponent.
+            </p>
+          </div>
+        )
+      )}
+
+      {/* All-opponents grid — always visible */}
+      {opponents.length > 0 && (
+        <div style={{ marginTop: 'var(--space-lg)' }}>
+          <div className="section-label" style={{ marginBottom: 'var(--space-sm)' }}>
+            {nextGame?.opponent ? 'All Division Opponents' : 'Division Opponents'}
+          </div>
+          <div className="card-grid">
+            {opponents.map(opp => {
+              const m = opp.public_game_metrics || {};
+              const rec = typeof opp.record === 'string' ? opp.record
+                : opp.record ? `${opp.record.w || 0}-${opp.record.l || 0}` : null;
+              const isNext = nextGame?.slug && (nextGame.slug === opp.slug || nextGame.opponent?.toLowerCase().includes(opp.slug));
+              return (
+                <div key={opp.slug} className="glass-panel" style={{
+                  padding: 'var(--space-lg)',
+                  borderLeft: isNext ? '3px solid var(--danger)' : undefined,
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
+                    <div>
+                      <div style={{ fontWeight: '700', fontSize: 'var(--text-base)' }}>{opp.team_name}</div>
+                      {isNext && <span style={{ fontSize: 'var(--text-xs)', color: 'var(--danger)', fontWeight: '600' }}>NEXT OPPONENT</span>}
+                    </div>
+                    {rec && (
+                      <span style={{
+                        fontSize: 'var(--text-sm)', fontWeight: '700',
+                        color: 'var(--text-muted)', background: 'rgba(255,255,255,0.06)',
+                        borderRadius: '6px', padding: '2px 8px', border: '1px solid rgba(255,255,255,0.1)',
+                      }}>{rec}</span>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
+                    {m.avg_runs_scored != null && (
+                      <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '4px', padding: '2px 7px' }}>
+                        R/G: {typeof m.avg_runs_scored === 'number' ? m.avg_runs_scored.toFixed(1) : m.avg_runs_scored}
+                      </span>
+                    )}
+                    {m.avg_runs_allowed != null && (
+                      <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '4px', padding: '2px 7px' }}>
+                        RA/G: {typeof m.avg_runs_allowed === 'number' ? m.avg_runs_allowed.toFixed(1) : m.avg_runs_allowed}
+                      </span>
+                    )}
+                    {m.errors_per_game != null && (
+                      <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '4px', padding: '2px 7px' }}>
+                        Err/G: {typeof m.errors_per_game === 'number' ? m.errors_per_game.toFixed(1) : m.errors_per_game}
+                      </span>
+                    )}
+                    {m.big_inning_rate != null && (
+                      <span style={{ fontSize: 'var(--text-xs)', color: 'rgba(251,191,36,0.8)', background: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.15)', borderRadius: '4px', padding: '2px 7px' }}>
+                        Big Inn: {typeof m.big_inning_rate === 'number' ? `${(m.big_inning_rate * 100).toFixed(0)}%` : m.big_inning_rate}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>

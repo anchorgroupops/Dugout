@@ -89,6 +89,7 @@ h1, h2, h3, h4, h5, h6 {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
+  overflow-x: hidden;
 }
 
 main {
@@ -130,8 +131,16 @@ main {
 
 .nav-links {
   display: flex;
-  gap: 1.5rem;
+  gap: 0.25rem;
   align-items: center;
+  overflow-x: auto;
+  flex-wrap: nowrap;
+  max-width: calc(100vw - 220px);
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.nav-links::-webkit-scrollbar {
+  display: none;
 }
 
 .nav-btn {
@@ -140,15 +149,16 @@ main {
   color: var(--text-muted);
   font-family: var(--font-base);
   font-weight: 600;
-  font-size: 1rem;
+  font-size: 0.875rem;
   cursor: pointer;
-  padding: 0.5rem 1rem;
+  padding: 0.5rem 0.75rem;
   border-radius: 8px;
   transition: all var(--transition-fast);
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.35rem;
   white-space: nowrap;
+  flex-shrink: 0;
   min-height: var(--touch-min);
 }
 

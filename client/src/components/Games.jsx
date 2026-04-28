@@ -258,8 +258,11 @@ const PlayerOppBattingRow = ({ player }) => {
 };
 
 // ─── Result badge ─────────────────────────────────────────────────────────────
-const ResultBadge = ({ result }) => {
-  if (!result) return null;
+const ResultBadge = ({ result, hasStats }) => {
+  if (!result) {
+    if (hasStats) return <span className="result-badge" style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text-muted)', border: '1px solid rgba(255,255,255,0.12)' }}>STATS</span>;
+    return null;
+  }
   const upper = result.toUpperCase();
   if (upper === 'W') return <span className="result-badge result-badge--win">WIN</span>;
   if (upper === 'T') return <span className="result-badge result-badge--tie">TIE</span>;
@@ -410,7 +413,7 @@ const GameCard = ({ game, onExpand, isExpanded, gameDetail, isMobile = false, is
               {isHome ? 'HOME' : 'AWAY'}
             </span>
             <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>{dateStr}</span>
-            <ResultBadge result={game.result} />
+            <ResultBadge result={game.result} hasStats={!!game.sharks_totals} />
           </div>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem' }}>
             <h3 style={{ fontSize: isMobile ? 'var(--text-base)' : '1.1rem', margin: 0 }}>vs. {game.opponent}</h3>

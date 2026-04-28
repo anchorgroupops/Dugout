@@ -130,14 +130,19 @@ const Practice = ({ team, schedule, isMobile = false, isLandscape = false }) => 
   }, [team]);
 
   const availablePlayers = useMemo(() => {
-    const all = insights?.available_players || [];
+    const fromApi = insights?.available_players || [];
+    // Fall back to team roster when API returns no players
+    const all = fromApi.length > 0
+      ? fromApi
+      : (team?.roster || []).map(p => `${p.first || ''} ${p.last || ''}`.trim()).filter(Boolean);
     // Only show core Sharks players (no borrowed/subs from other teams)
     if (coreRosterNames.length > 0) {
       const coreSet = new Set(coreRosterNames);
-      return all.filter(n => coreSet.has(n)).sort((a, b) => a.localeCompare(b));
+      const filtered = all.filter(n => coreSet.has(n));
+      return (filtered.length > 0 ? filtered : all).sort((a, b) => a.localeCompare(b));
     }
     return [...all].sort((a, b) => a.localeCompare(b));
-  }, [insights, coreRosterNames]);
+  }, [insights, coreRosterNames, team]);
 
   const fetchInsights = async () => {
     setLoading(true);
@@ -150,7 +155,9 @@ const Practice = ({ team, schedule, isMobile = false, isLandscape = false }) => 
       setInsights(data);
       // On initial load, default to all core roster if available; otherwise use API default
       if (!initialLoaded) {
-        const allPlayers = data.available_players || [];
+        const allPlayers = data.available_players?.length > 0
+          ? data.available_players
+          : (team?.roster || []).map(p => `${p.first || ''} ${p.last || ''}`.trim()).filter(Boolean);
         if (coreRosterNames.length > 0) {
           const coreSet = new Set(coreRosterNames);
           const defaultSelected = allPlayers.filter(n => coreSet.has(n));
