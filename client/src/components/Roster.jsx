@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { TipBadge, PlayerName } from './StatTooltip';
 
+const MIN_PA = 10;
+
 const fmt = (val) => (val !== null && val !== undefined ? String(val) : '\u2014');
 const fmtPct = (val) => {
   if (val === null || val === undefined || val === '') return '\u2014';
@@ -36,6 +38,8 @@ const getStrengthBadges = (player) => {
   const ops = parseFloat(b.ops ?? player.ops);
   const sb = parseFloat(b.sb ?? player.sb);
   const fpct = parseFloat(f.fpct);
+  const pa = parseFloat(b.pa ?? player.pa);
+  const hasEnoughPA = !isNaN(pa) && pa >= MIN_PA;
   if (hasEnoughPA && !isNaN(avg) && avg >= 0.350) badges.push({ icon: '\uD83D\uDD25', tip: `AVG ${avg.toFixed(3)}` });
   if (hasEnoughPA && !isNaN(obp) && obp >= 0.420) badges.push({ icon: '\uD83D\uDC41\uFE0F', tip: `OBP ${obp.toFixed(3)}` });
   if (hasEnoughPA && !isNaN(ops) && ops >= 0.700) badges.push({ icon: '\uD83D\uDCAA', tip: `OPS ${ops.toFixed(3)}` });
