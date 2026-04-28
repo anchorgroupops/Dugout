@@ -1136,6 +1136,19 @@ def run_sync_cycle():
                     stat_scraper = GameChangerScraper()
                     stat_scraper.login(pw)
                     stat_scraper.scrape_team_stats()
+
+                    # Scrape per-player stats for all opponents (same authenticated session)
+                    try:
+                        import json as _json
+                        _discovery_file = SHARKS_DIR / "opponent_discovery.json"
+                        if _discovery_file.exists():
+                            _discovery = _json.loads(_discovery_file.read_text(encoding="utf-8"))
+                            _opponents = _discovery.get("teams", [])
+                            if _opponents:
+                                logging.info("[Sync] Scraping opponent season stats (%d teams)...", len(_opponents))
+                                stat_scraper.scrape_opponent_season_stats(_opponents)
+                    except Exception as _oe:
+                        logging.warning("[Sync] Opponent stat scrape failed (non-fatal): %s", _oe)
             except Exception as e:
                 logging.warning(f"[Sync] Live stat scrape failed; continuing with fallback data: {e}")
         else:

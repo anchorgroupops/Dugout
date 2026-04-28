@@ -1038,6 +1038,99 @@ class GameChangerScraper:
         """Alias to scrape_all_stats for backward compatibility."""
         return self.scrape_all_stats()
 
+    # ------------------------------------------------------------------ #
+    #  Scrape per-player season stats for all opponent teams
+    # ------------------------------------------------------------------ #
+    def scrape_opponent_season_stats(self, opponents: list[dict]) -> dict:
+        """
+        Scrape per-player season stats for each opponent and merge into
+        data/opponents/{slug}/team.json, preserving existing public_game_metrics
+        and record from the discovery file.
+
+        Reuses the current authenticated browser session.
+        """
+        if not self.page:
+            raise RuntimeError("[GC] Not logged in. Call login() first.")
+
+        results = {}
+
+        # Snapshot original instance config so we can restore it after each opponent
+        _orig = {
+            "team_id": self.team_id,
+            "season_slug": self.season_slug,
+            "stats_url": self.stats_url,
+            "team_name": self.team_name,
+            "out_dir": self.out_dir,
+            "use_manifest": self.use_manifest,
+            "roster_manifest_path": self.roster_manifest_path,
+        }
+
+        for opp in opponents:
+            slug = opp.get("slug", "").strip()
+            team_id = opp.get("gc_team_id", "").strip()
+            season_slug = opp.get("gc_season_slug", "").strip()
+            team_name = opp.get("team_name", slug)
+
+            if not slug or not team_id or not season_slug:
+                print(f"[GC] [WARN] Skipping opponent with missing fields: {opp}")
+                continue
+
+            opp_dir = OPPONENTS_DIR / slug
+            opp_team_file = opp_dir / "team.json"
+
+            # Load existing file so we can preserve discovery-sourced fields
+            existing: dict = {}
+            if opp_team_file.exists():
+                try:
+                    existing = json.loads(opp_team_file.read_text(encoding="utf-8"))
+                except Exception:
+                    pass
+
+            print(f"\n[GC] ══ Opponent: {team_name} ({slug}) ══")
+
+            # Redirect scraper at this opponent's stats page
+            self.team_id = team_id
+            self.season_slug = season_slug
+            self.stats_url = f"{GC_BASE_URL}/teams/{team_id}/{season_slug}/season-stats"
+            self.team_name = team_name
+            self.out_dir = opp_dir
+            self.use_manifest = False
+            self.roster_manifest_path = opp_dir / "roster_manifest.json"  # typically absent
+
+            try:
+                team_data = self.scrape_all_stats()
+
+                if team_data:
+                    # Patch back fields that live in opponent_discovery.json
+                    if existing.get("public_game_metrics"):
+                        team_data["public_game_metrics"] = existing["public_game_metrics"]
+                    if team_data.get("record", "0-0") in ("0-0", "") and existing.get("record"):
+                        team_data["record"] = existing["record"]
+
+                    # Re-write the merged file (scrape_all_stats already wrote it; we overwrite)
+                    opp_dir.mkdir(parents=True, exist_ok=True)
+                    with open(opp_team_file, "w", encoding="utf-8") as f:
+                        json.dump(team_data, f, indent=2)
+
+                    n = len(team_data.get("roster", []))
+                    print(f"[GC] [OK] {team_name}: {n} players merged into {opp_team_file}")
+                    results[slug] = {"status": "ok", "players": n}
+                else:
+                    print(f"[GC] [WARN] {team_name}: scrape returned no data — existing file preserved")
+                    results[slug] = {"status": "skipped", "reason": "no_data"}
+
+            except Exception as e:
+                print(f"[GC] [ERROR] {team_name}: {e}")
+                results[slug] = {"status": "error", "reason": str(e)}
+
+            finally:
+                # Always restore original config before next iteration
+                for k, v in _orig.items():
+                    setattr(self, k, v)
+
+        print(f"\n[GC] Opponent scrape complete: {results}")
+        return results
+
     def close(self):
         """Close the browser."""
         if self.context:
@@ -1066,6 +1159,10 @@ def run():
     parser.add_argument("--out-dir", dest="out_dir", default=None, help="Output directory for team.json")
     parser.add_argument("--no-manifest", dest="no_manifest", action="store_true", help="Disable roster manifest core tagging")
     parser.add_argument("--box-scores", dest="box_scores", action="store_true", help="Also scrape per-game box scores")
+    parser.add_argument("--opponents", dest="opponents", action="store_true",
+                        help="Also scrape per-player season stats for all opponents in opponent_discovery.json")
+    parser.add_argument("--opponents-only", dest="opponents_only", action="store_true",
+                        help="Skip Sharks scrape and only scrape opponents")
     args = parser.parse_args()
 
     out_dir = Path(args.out_dir) if args.out_dir else None
@@ -1081,12 +1178,25 @@ def run():
     with sync_playwright() as pw:
         try:
             scraper.login(pw)
-            team = scraper.scrape_all_stats()
-            if team:
-                print(f"[GC] Successfully scraped {len(team.get('roster', []))} players")
-            if args.box_scores:
-                print("[GC] Scraping per-game box scores...")
-                scraper.scrape_game_box_scores()
+
+            if not args.opponents_only:
+                team = scraper.scrape_all_stats()
+                if team:
+                    print(f"[GC] Successfully scraped {len(team.get('roster', []))} players")
+                if args.box_scores:
+                    print("[GC] Scraping per-game box scores...")
+                    scraper.scrape_game_box_scores()
+
+            if args.opponents or args.opponents_only:
+                discovery_file = DATA_DIR / "sharks" / "opponent_discovery.json"
+                if not discovery_file.exists():
+                    print(f"[GC] [WARN] opponent_discovery.json not found at {discovery_file} — skipping opponent scrape")
+                else:
+                    discovery = json.loads(discovery_file.read_text(encoding="utf-8"))
+                    opponents = discovery.get("teams", [])
+                    print(f"\n[GC] Scraping {len(opponents)} opponent teams...")
+                    scraper.scrape_opponent_season_stats(opponents)
+
         except Exception as e:
             print(f"[GC] Error: {e}")
             import traceback
