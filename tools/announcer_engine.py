@@ -72,9 +72,11 @@ def _resolve_secret(name: str, default: str = "") -> str:
 
 
 def _ensure_dirs():
-    ANNOUNCER_DIR.mkdir(parents=True, exist_ok=True)
-    CLIPS_DIR.mkdir(parents=True, exist_ok=True)
-    ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
+    for d in (ANNOUNCER_DIR, CLIPS_DIR, ARCHIVE_DIR):
+        try:
+            d.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            logging.warning("[Announcer] mkdir %s failed: %s", d, e)
 
 
 def _atomic_write_json(path: Path, data, indent: int = 2):
@@ -871,7 +873,11 @@ def _bootstrap_roster_from_team() -> list[dict]:
 
 def load_announcer_roster() -> list[dict]:
     """Load announcer roster, bootstrapping from team.json if needed."""
-    _ensure_dirs()
+    try:
+        _ensure_dirs()
+    except OSError as e:
+        logging.warning("[Announcer] Could not create announcer dirs: %s", e)
+
     roster = _read_json(ROSTER_FILE, default=None)
     if isinstance(roster, list) and roster:
         return roster
@@ -879,9 +885,12 @@ def load_announcer_roster() -> list[dict]:
     # Bootstrap from team data
     roster = _bootstrap_roster_from_team()
     if roster:
-        _atomic_write_json(ROSTER_FILE, roster)
-        logging.info("[Announcer] Bootstrapped roster with %d players", len(roster))
-    return roster
+        try:
+            _atomic_write_json(ROSTER_FILE, roster)
+            logging.info("[Announcer] Bootstrapped roster with %d players", len(roster))
+        except OSError as e:
+            logging.warning("[Announcer] Could not persist bootstrapped roster (permission issue): %s", e)
+    return roster or []
 
 
 def save_announcer_roster(roster: list[dict]):
