@@ -69,7 +69,7 @@ def _normalize_sound_urls(sounds: list[dict]) -> list[dict]:
 def _fetch_sounds_playwright() -> list[dict]:
     """Load the page in Playwright (already on the Pi) — passes Cloudflare cleanly."""
     try:
-        from playwright.sync_api import sync_playwright
+        from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
     except ImportError:
         raise RuntimeError(
             "[Jeff] Playwright not installed. Run: pip install playwright && playwright install chromium"
@@ -80,29 +80,42 @@ def _fetch_sounds_playwright() -> list[dict]:
         browser = pw.chromium.launch(headless=True, args=["--no-sandbox"])
         context = browser.new_context(user_agent=HEADERS["User-Agent"])
         page = context.new_page()
-        page.goto(BOARD_URL, wait_until="networkidle", timeout=30000)
-        page.wait_for_timeout(2000)  # let Vue finish rendering
 
-        sounds = page.evaluate("""
-            () => {
-                const data = window.board_data_inline;
-                if (!data || !data.sounds) return null;
-                const BASE = 'https://www.101soundboards.com';
-                return data.sounds.map(s => ({
-                    ...s,
-                    sound_file_url: (s.sound_file_url || '').startsWith('http')
-                        ? s.sound_file_url : BASE + (s.sound_file_url || ''),
-                    download_url: (s.download_url || '').startsWith('http')
-                        ? s.download_url : BASE + (s.download_url || ''),
-                }));
-            }
-        """)
+        # domcontentloaded is enough — board_data_inline is set in a server-side <script> tag
+        page.goto(BOARD_URL, wait_until="domcontentloaded", timeout=30000)
+
+        # Wait explicitly for the variable to be populated rather than a fixed sleep
+        try:
+            page.wait_for_function(
+                "() => window.board_data_inline "
+                "    && Array.isArray(window.board_data_inline.sounds) "
+                "    && window.board_data_inline.sounds.length > 0",
+                timeout=15000,
+            )
+        except PWTimeout:
+            diag_url = page.url
+            diag_title = page.title()
+            context.close()
+            browser.close()
+            raise RuntimeError(
+                f"[Jeff] board_data_inline never populated. "
+                f"Page after load: {diag_url!r} / {diag_title!r}. "
+                f"Possible Cloudflare challenge — try running with GC_HEADLESS=false to watch."
+            )
+
+        # Serialize inside the browser to avoid Playwright object-transfer quirks
+        raw_json = page.evaluate(
+            "() => JSON.stringify(window.board_data_inline.sounds)"
+        )
         context.close()
         browser.close()
 
+    sounds = json.loads(raw_json)
     if not sounds:
-        raise RuntimeError("[Jeff] board_data_inline.sounds not found — page structure may have changed.")
+        raise RuntimeError("[Jeff] board_data_inline.sounds was empty after serialization.")
 
+    # Normalize relative URLs
+    sounds = _normalize_sound_urls(sounds)
     print(f"[Jeff] Found {len(sounds)} clips via Playwright.")
     return sounds
 
