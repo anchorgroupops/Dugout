@@ -48,11 +48,7 @@ export function lazyWithRetry(factory) {
         return { default: () => null };
       }
 
-      try {
-        return await factory();
-      } catch (err2) {
-        throw err2;
-      }
+      return await factory();
     }
   });
 }
