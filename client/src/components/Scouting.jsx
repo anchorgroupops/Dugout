@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Target, Shield, Swords, AlertTriangle, Calendar, MapPin } from 'lucide-react';
 import { formatDateMMDDYYYY } from '../utils/formatDate';
+import { fetchSharedJson } from '../utils/apiClient';
 
 const BulletCard = ({ title, items, color, icon, emptyText }) => (
   <div className="glass-panel" style={{ padding: 'var(--space-lg)', marginBottom: 'var(--space-sm)' }}>
@@ -31,15 +32,15 @@ export default function Scouting({ isMobile, isLandscape = false }) {
 
   useEffect(() => {
     Promise.all([
-      fetch('/api/next-game').then(r => r.ok ? r.json() : null).catch(() => null),
-      fetch('/api/opponents').then(r => r.ok ? r.json() : []).catch(() => []),
+      fetchSharedJson('/api/next-game', { fallback: null }),
+      fetchSharedJson('/api/opponents', { fallback: [] }),
     ]).then(([nextData, opps]) => {
       setNextGame(nextData);
-      setOpponents(opps || []);
+      setOpponents(Array.isArray(opps) ? opps : []);
       if (nextData?.slug) {
         return Promise.all([
-          fetch(`/api/matchup/${nextData.slug}`).then(r => r.ok ? r.json() : null).catch(() => null),
-          fetch(`/api/h2h/${nextData.slug}`).then(r => r.ok ? r.json() : null).catch(() => null),
+          fetchSharedJson(`/api/matchup/${nextData.slug}`, { fallback: null }),
+          fetchSharedJson(`/api/h2h/${nextData.slug}`, { fallback: null }),
         ]);
       }
       return [null, null];

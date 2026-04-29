@@ -7,12 +7,14 @@ import Roster from './components/Roster';
 import Lineup from './components/Lineup';
 import Scoreboard from './components/Scoreboard';
 import ErrorBoundary from './components/ErrorBoundary';
-const Swot = React.lazy(() => import('./components/Swot'));
-const Games = React.lazy(() => import('./components/Games'));
-const League = React.lazy(() => import('./components/League'));
-const Practice = React.lazy(() => import('./components/Practice'));
-const Scouting = React.lazy(() => import('./components/Scouting'));
-const Announcer = React.lazy(() => import('./components/Announcer'));
+import { lazyWithRetry } from './utils/lazyWithRetry';
+import { isPollingPaused, pausePollingFor } from './utils/apiClient';
+const Swot = lazyWithRetry(() => import('./components/Swot'));
+const Games = lazyWithRetry(() => import('./components/Games'));
+const League = lazyWithRetry(() => import('./components/League'));
+const Practice = lazyWithRetry(() => import('./components/Practice'));
+const Scouting = lazyWithRetry(() => import('./components/Scouting'));
+const Announcer = lazyWithRetry(() => import('./components/Announcer'));
 
 
 function SyncProgressBar({ progress, stage, milestones }) {
@@ -59,24 +61,42 @@ function App() {
   const [syncMilestones, setSyncMilestones] = useState([]);
   const [syncLoading, setSyncLoading] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const [loadingTimedOut, setLoadingTimedOut] = useState(false);
+  // Hydrate team/availability/lineups from localStorage so the UI has
+  // something to show before (or instead of) a successful network fetch.
+  const cachedFromLocal = (() => {
+    try {
+      const raw = window.localStorage.getItem('sharks_data_cache');
+      return raw ? JSON.parse(raw) : null;
+    } catch { return null; }
+  })();
   const [data, setData] = useState({
-    team: null,
-    swot: null,
-    lineups: null,
-    availability: null,
-    games: null,
-    schedule: null,
+    team: cachedFromLocal?.team || null,
+    swot: cachedFromLocal?.swot || null,
+    lineups: cachedFromLocal?.lineups || null,
+    availability: cachedFromLocal?.availability || null,
+    games: cachedFromLocal?.games || null,
+    schedule: cachedFromLocal?.schedule || null,
     loading: true,
-    error: null
+    error: null,
+    isCached: Boolean(cachedFromLocal?.team),
+    cachedAt: cachedFromLocal?.cachedAt || null,
   });
   const audioRef = useRef(null);
   const audioUrlRef = useRef('');
   const syncPollRef = useRef(null);
 
   const fetchWithRetry = useCallback(async (url, retries = 2) => {
+    // Honor global 429 pause window — return a synthetic non-OK response so
+    // callers fall through to last-known cache without thrashing the API.
+    if (isPollingPaused()) return new Response(null, { status: 503, statusText: 'paused-locally' });
     for (let i = 0; i <= retries; i++) {
       try {
         const res = await fetch(url);
+        if (res.status === 429) {
+          pausePollingFor();
+          return res;
+        }
         if (res.ok || i === retries) return res;
       } catch (e) {
         if (i === retries) throw e;
@@ -105,7 +125,14 @@ function App() {
       const games = gamesRes.ok ? await gamesRes.json() : null;
       const schedule = scheduleRes.ok ? await scheduleRes.json() : null;
 
-      setData({ team, swot, lineups, availability, games, schedule, loading: false, error: null });
+      const cachedAt = new Date().toISOString();
+      setData({ team, swot, lineups, availability, games, schedule, loading: false, error: null, isCached: false, cachedAt });
+      setLoadingTimedOut(false);
+      try {
+        window.localStorage.setItem('sharks_data_cache', JSON.stringify({
+          team, swot, lineups, availability, games, schedule, cachedAt,
+        }));
+      } catch { /* localStorage may be full or disabled */ }
 
       // Check pipeline health and sync status (non-blocking)
       try {
@@ -127,14 +154,19 @@ function App() {
       } catch { /* ignore health/sync check failures */ }
     } catch (err) {
       console.error("Data fetch error", err);
-      setData(prev => ({ ...prev, loading: false, error: err.message }));
+      setData(prev => ({ ...prev, loading: false, error: err.message, isCached: Boolean(prev.team) }));
     }
   }, [fetchWithRetry]);
 
   useEffect(() => {
     fetchData();
     const intervalId = setInterval(fetchData, 30000);
-    return () => clearInterval(intervalId);
+    // After 10s, flip the "Loading..." subtitle to an offline fallback.
+    const timeoutId = setTimeout(() => setLoadingTimedOut(true), 10000);
+    return () => {
+      clearInterval(intervalId);
+      clearTimeout(timeoutId);
+    };
   }, [fetchData]);
 
   // Handle Spotify OAuth callback — SPA catches /spotify-callback via nginx try_files
@@ -460,6 +492,8 @@ function App() {
                 key={item.id}
                 className={`nav-btn ${currentView === item.id ? 'active' : ''}`}
                 onClick={() => setCurrentView(item.id)}
+                title={item.label}
+                aria-label={item.label}
               >
                 {item.icon}
                 <span className="nav-label">{item.label}</span>
@@ -478,7 +512,17 @@ function App() {
             </h1>
             <div className="hero-meta-row">
               <p style={{ color: 'var(--text-muted)', fontSize: '1.1rem' }}>
-                {data.team ? `${data.team.league} \u2022 Last Updated: ${formatDateTime(data.team.last_updated)}` : 'Loading...'}
+                {(() => {
+                  if (data.team) {
+                    const offlineSuffix = (data.error || data.isCached) ? '  \u26a0 offline' : '';
+                    return `${data.team.league} \u2022 Last Updated: ${formatDateTime(data.team.last_updated)}${offlineSuffix}`;
+                  }
+                  if (loadingTimedOut || data.error) {
+                    const ts = data.cachedAt ? formatDateTime(data.cachedAt) : 'unknown';
+                    return `Offline \u2014 last updated ${ts}`;
+                  }
+                  return 'Loading...';
+                })()}
               </p>
               {canInstall && (
                 <button 

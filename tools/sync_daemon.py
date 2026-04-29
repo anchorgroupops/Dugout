@@ -3177,6 +3177,39 @@ def handle_team():
     return jsonify(team)
 
 
+@app.route('/api/roster', methods=['GET'])
+def handle_roster():
+    """Return just the roster array from team data.
+
+    Convenience endpoint — same shape as `/api/team` `.roster[]`. Used by
+    components that only need the player list and want to avoid the
+    larger team payload (stats, schedule cross-refs, etc.).
+    """
+    try:
+        team_files = [
+            SHARKS_DIR / "team_enriched.json",
+            SHARKS_DIR / "team_merged.json",
+            SHARKS_DIR / "team.json",
+        ]
+        team = None
+        for tf in team_files:
+            if tf.exists():
+                team = _read_json_file(tf, default=None)
+                if isinstance(team, dict):
+                    break
+        if not isinstance(team, dict):
+            return jsonify({"roster": [], "last_updated": None})
+        roster = team.get("roster", []) or []
+        return jsonify({
+            "roster": roster,
+            "team_name": team.get("team_name"),
+            "last_updated": team.get("last_updated"),
+        })
+    except Exception as e:
+        logging.error("[Roster] route failed: %s", e, exc_info=True)
+        return jsonify({"roster": [], "last_updated": None})
+
+
 @app.route('/api/borrowed-player', methods=['POST'])
 def handle_borrowed_player():
     """Add a borrowed player to roster_manifest.json, optionally trigger stat scrape."""
@@ -4021,31 +4054,117 @@ def handle_announcer_game_state_set():
     return jsonify(_LIVE_GAME_STATE)
 
 
+def _team_roster_fallback() -> list[dict]:
+    """Build a minimal announcer-shaped roster from team data when announcer_engine is unavailable.
+
+    Returns players with the same shape as load_announcer_roster() so the PWA
+    Announcer tab keeps working even if the announcer DB / engine is broken.
+    """
+    import re as _re
+    team_files = [
+        SHARKS_DIR / "team_enriched.json",
+        SHARKS_DIR / "team_merged.json",
+        SHARKS_DIR / "team.json",
+    ]
+    team = None
+    for tf in team_files:
+        if tf.exists():
+            team = _read_json_file(tf, default=None)
+            if isinstance(team, dict):
+                break
+    if not isinstance(team, dict):
+        return []
+    out = []
+    for p in team.get("roster", []) or []:
+        if not isinstance(p, dict):
+            continue
+        first = (p.get("first") or "").strip()
+        last = (p.get("last") or "").strip()
+        number = str(p.get("number") or "").strip()
+        if not first:
+            continue
+        raw_id = f"{number}-{first}-{last}".strip("-").lower()
+        player_id = _re.sub(r"[^a-z0-9_-]", "-", raw_id) or first.lower()
+        out.append({
+            "id": player_id,
+            "first": first,
+            "last": last,
+            "number": number,
+            "phonetic_hint": "",
+            "tts_instruction": "",
+            "walkup_song_url": "",
+            "intro_timestamp": 5.0,
+            "announcer_audio_url": "",
+            "status": "pending",
+            "is_active": True,
+            "rendered_at": "",
+            "error_message": "",
+            "is_ghost": False,
+        })
+    return out
+
+
 @app.route('/api/announcer/roster', methods=['GET'])
 def handle_announcer_roster():
-    """Return all active players with announcer metadata, flagging ghost players."""
+    """Return all active players with announcer metadata, flagging ghost players.
+
+    Hardened: never returns 500. If announcer_engine import or DB access fails,
+    falls back to the team roster with default announcer fields so the PWA
+    Announcer tab can always render the player list.
+    """
+    roster: list[dict] = []
+    stats: dict = {"total": 0, "ready": 0, "pending": 0, "error": 0}
+    fallback_used = False
+    fallback_reason = ""
     try:
-        from announcer_engine import load_announcer_roster, get_roster_stats
-        roster = load_announcer_roster()
         try:
-            stats = get_roster_stats()
-        except Exception as _se:
-            logging.warning("[Announcer] get_roster_stats failed: %s", _se, exc_info=True)
-            active = [p for p in roster if p.get("is_active")]
+            from announcer_engine import load_announcer_roster, get_roster_stats
+        except Exception as _ie:
+            logging.error("[Announcer] engine import failed: %s", _ie, exc_info=True)
+            fallback_used = True
+            fallback_reason = f"engine_import_failed: {_ie}"
+            roster = _team_roster_fallback()
+        else:
+            try:
+                roster = load_announcer_roster() or []
+            except Exception as _le:
+                logging.error("[Announcer] load_announcer_roster failed: %s", _le, exc_info=True)
+                fallback_used = True
+                fallback_reason = f"load_roster_failed: {_le}"
+                roster = _team_roster_fallback()
+
+            if not roster:
+                fallback_used = True
+                fallback_reason = fallback_reason or "empty_roster"
+                roster = _team_roster_fallback()
+
+            if not fallback_used:
+                try:
+                    stats = get_roster_stats()
+                except Exception as _se:
+                    logging.warning("[Announcer] get_roster_stats failed: %s", _se, exc_info=True)
+                    active = [p for p in roster if p.get("is_active")]
+                    stats = {
+                        "total": len(active),
+                        "ready": sum(1 for p in active if p.get("status") == "ready"),
+                        "pending": sum(1 for p in active if p.get("status") in ("pending", "rendering")),
+                        "error": sum(1 for p in active if p.get("status") == "error"),
+                    }
+
+        if fallback_used:
             stats = {
-                "total": len(active),
-                "ready": sum(1 for p in active if p.get("status") == "ready"),
-                "pending": sum(1 for p in active if p.get("status") in ("pending", "rendering")),
-                "error": sum(1 for p in active if p.get("status") == "error"),
+                "total": len(roster),
+                "ready": 0,
+                "pending": len(roster),
+                "error": 0,
             }
+
         # Cross-reference with team to detect ghost players (in announcer DB but not on roster)
         try:
             team_data = _read_json_file(SHARKS_DIR / "team_enriched.json", default={}) or \
                         _read_json_file(SHARKS_DIR / "team.json", default={}) or {}
-            manifest_data = _read_json_file(SHARKS_DIR / "roster_manifest.json", default={}) or {}
-            core_names = set(manifest_data.get("core_players", []))
             team_names = set()
-            for p in team_data.get("roster", []):
+            for p in team_data.get("roster", []) or []:
                 full = f"{(p.get('first') or '').strip()} {(p.get('last') or '').strip()}".strip()
                 if full:
                     team_names.add(full)
@@ -4055,10 +4174,22 @@ def handle_announcer_roster():
                     p["is_ghost"] = bool(full and full not in team_names)
         except Exception as _ge:
             logging.debug("[Announcer] Ghost detection skipped: %s", _ge)
-        return jsonify({"roster": roster, "stats": stats})
+
+        payload = {"roster": roster, "stats": stats}
+        if fallback_used:
+            payload["fallback"] = True
+            payload["fallback_reason"] = fallback_reason
+        return jsonify(payload)
     except Exception as e:
-        logging.error("[Announcer] roster error: %s", e, exc_info=True)
-        return jsonify({"error": "announcer_roster_failed", "detail": str(e)}), 500
+        logging.error("[Announcer] roster route failed catastrophically: %s", e, exc_info=True)
+        # Never return 500 — return an empty offline-shaped payload so the
+        # client doesn't enter a hot retry loop.
+        return jsonify({
+            "roster": [],
+            "stats": {"total": 0, "ready": 0, "pending": 0, "error": 0},
+            "fallback": True,
+            "fallback_reason": f"unhandled: {e}",
+        })
 
 
 @app.route('/api/announcer/player/<player_id>', methods=['DELETE'])
@@ -4649,41 +4780,68 @@ def serve_walkup_audio(filename):
 def handle_announcer_worker_status():
     """Return full render worker health payload for the PWA Worker Status Badge.
 
+    Hardened: never returns 500. If the announcer DB is unavailable, returns a
+    valid OFFLINE/RAPID payload so the badge renders correctly.
+
     Response shape:
       hub_status: "ONLINE" (always — Pi is responding)
       primary_worker: { id, status (ACTIVE|STANDBY|OFFLINE), last_heartbeat, queue_depth }
       failover_worker: { id, status: "READY" }
       current_mode: "ELITE" (Mac alive) | "RAPID" (failover active)
     """
-    adb = _announcer_db()
-    hb = adb.get_heartbeat_info()
-    pending_count = len(adb.get_pending_jobs(quality="best"))
-    alive = adb.is_worker_alive(max_age_seconds=_MAC_HEARTBEAT_MAX_AGE)
-
-    if hb:
-        # ACTIVE = alive and has jobs to work; STANDBY = alive, queue empty
-        worker_status = ("ACTIVE" if pending_count > 0 else "STANDBY") if alive else "OFFLINE"
-        last_heartbeat = hb.get("last_seen_at")
-        worker_id = hb.get("worker_id", "mac")
-    else:
-        worker_status = "OFFLINE"
-        last_heartbeat = None
-        worker_id = "mac"
-
-    return jsonify({
+    failover_id = os.getenv("PI_WORKER_ID", "Pi-5-Edge")
+    offline_payload = {
         "hub_status": "ONLINE",
         "primary_worker": {
-            "id": worker_id,
-            "status": worker_status,
-            "last_heartbeat": last_heartbeat,
-            "queue_depth": pending_count,
+            "id": "mac",
+            "status": "OFFLINE",
+            "last_heartbeat": None,
+            "queue_depth": 0,
         },
-        "failover_worker": {
-            "id": os.getenv("PI_WORKER_ID", "Pi-5-Edge"),
-            "status": "READY",
-        },
-        "current_mode": "ELITE" if alive else "RAPID",
-    })
+        "failover_worker": {"id": failover_id, "status": "READY"},
+        "current_mode": "RAPID",
+    }
+    try:
+        adb = _announcer_db()
+        try:
+            hb = adb.get_heartbeat_info()
+        except Exception as _hbe:
+            logging.warning("[Announcer] heartbeat read failed: %s", _hbe)
+            hb = None
+        try:
+            pending_count = len(adb.get_pending_jobs(quality="best"))
+        except Exception as _pe:
+            logging.warning("[Announcer] pending jobs read failed: %s", _pe)
+            pending_count = 0
+        try:
+            alive = adb.is_worker_alive(max_age_seconds=_MAC_HEARTBEAT_MAX_AGE)
+        except Exception as _ae:
+            logging.warning("[Announcer] alive check failed: %s", _ae)
+            alive = False
+
+        if hb:
+            worker_status = ("ACTIVE" if pending_count > 0 else "STANDBY") if alive else "OFFLINE"
+            last_heartbeat = hb.get("last_seen_at")
+            worker_id = hb.get("worker_id", "mac")
+        else:
+            worker_status = "OFFLINE"
+            last_heartbeat = None
+            worker_id = "mac"
+
+        return jsonify({
+            "hub_status": "ONLINE",
+            "primary_worker": {
+                "id": worker_id,
+                "status": worker_status,
+                "last_heartbeat": last_heartbeat,
+                "queue_depth": pending_count,
+            },
+            "failover_worker": {"id": failover_id, "status": "READY"},
+            "current_mode": "ELITE" if alive else "RAPID",
+        })
+    except Exception as e:
+        logging.error("[Announcer] worker-status route failed: %s", e, exc_info=True)
+        return jsonify(offline_payload)
 
 
 @app.route('/api/announcer/next-songs', methods=['GET'])

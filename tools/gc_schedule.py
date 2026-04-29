@@ -213,13 +213,24 @@ class ScheduleScraper(GameChangerScraper):
                     self.browser.close()
 
         # Parse captured text into structured games
+        parsed = {"upcoming": [], "past": []}
         if text_content:
             parsed = _parse_schedule_text(text_content)
             schedule_data["games"] = parsed.get("upcoming", []) + parsed.get("past", [])
             total = len(schedule_data["games"])
-            print(f"[GC_SCHEDULE] Parsed {total} games ({len(parsed['upcoming'])} upcoming, {len(parsed['past'])} past)")
+            up_n = len(parsed.get("upcoming", []))
+            past_n = len(parsed.get("past", []))
+            print(f"[GC_SCHEDULE] Parsed {total} games ({up_n} upcoming, {past_n} past)")
+            # Verbose preview to help diagnose schema/parser drift on empty results
+            if total == 0:
+                preview = text_content[:1000].replace("\n", " | ")
+                print(f"[GC_SCHEDULE] Parser returned 0 games. Raw preview: {preview!r}")
 
-            # Merge into schedule_manual.json so the API picks it up
+            # Merge into schedule_manual.json so the API picks it up.
+            # GUARD: if the scrape returned 0 games, don't overwrite a
+            # known-good file — only refresh `last_updated` so we know the
+            # scraper ran. The PWA continues serving last-known schedule
+            # while the parser/schema mismatch is fixed.
             manual_file = SHARKS_DIR / "schedule_manual.json"
             existing = {}
             if manual_file.exists():
@@ -228,18 +239,55 @@ class ScheduleScraper(GameChangerScraper):
                         existing = json.load(f)
                 except Exception:
                     existing = {}
-            merged = _merge_schedule(existing, parsed)
-            merged["last_updated"] = datetime.now(ET).isoformat()
+            scraped_total = len(parsed.get("upcoming", []) or []) + len(parsed.get("past", []) or [])
+            existing_total = len(existing.get("upcoming", []) or []) + len(existing.get("past", []) or [])
             SHARKS_DIR.mkdir(parents=True, exist_ok=True)
-            with open(manual_file, "w") as f:
-                json.dump(merged, f, indent=2)
-            print(f"[GC_SCHEDULE] Wrote {manual_file}")
+            if scraped_total == 0 and existing_total > 0:
+                print(
+                    f"[GC_SCHEDULE] Scrape returned 0 parsed games but existing schedule_manual.json "
+                    f"has {existing_total}. Preserving last-known-good content; only refreshing last_updated."
+                )
+                existing["last_updated"] = datetime.now(ET).isoformat()
+                existing["last_empty_scrape_at"] = existing["last_updated"]
+                with open(manual_file, "w") as f:
+                    json.dump(existing, f, indent=2)
+                print(f"[GC_SCHEDULE] Wrote {manual_file} (preserved {existing_total} existing games)")
+            else:
+                merged = _merge_schedule(existing, parsed)
+                merged["last_updated"] = datetime.now(ET).isoformat()
+                with open(manual_file, "w") as f:
+                    json.dump(merged, f, indent=2)
+                print(f"[GC_SCHEDULE] Wrote {manual_file}")
         else:
             print("[GC_SCHEDULE] No text content captured — schedule_manual.json not updated")
 
-        # Also write the raw schedule.json for debugging
+        # Write the raw schedule.json for debugging — but DO NOT clobber a
+        # known-good file with an empty result. If we have zero games AND the
+        # existing file has games, only refresh `last_updated` and bail.
         SHARKS_DIR.mkdir(parents=True, exist_ok=True)
-        with open(SHARKS_DIR / "schedule.json", "w") as f:
+        schedule_path = SHARKS_DIR / "schedule.json"
+        new_count = len(schedule_data.get("games") or [])
+        if new_count == 0 and schedule_path.exists():
+            try:
+                with open(schedule_path) as f:
+                    prev = json.load(f) or {}
+                prev_count = len(prev.get("games") or [])
+                if prev_count > 0:
+                    print(
+                        f"[GC_SCHEDULE] Scrape returned 0 games but existing schedule.json "
+                        f"has {prev_count}. Preserving last-known-good content; only refreshing last_updated."
+                    )
+                    prev["last_updated"] = schedule_data["last_updated"]
+                    if "raw_content" in schedule_data:
+                        prev["raw_content"] = schedule_data["raw_content"]
+                    prev["last_empty_scrape_at"] = schedule_data["last_updated"]
+                    with open(schedule_path, "w") as f:
+                        json.dump(prev, f, indent=2)
+                    return prev
+            except Exception as e:
+                print(f"[GC_SCHEDULE] Could not read existing schedule.json: {e}")
+
+        with open(schedule_path, "w") as f:
             json.dump(schedule_data, f, indent=2)
 
         return schedule_data

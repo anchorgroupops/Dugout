@@ -1014,21 +1014,73 @@ function useWorkerStatus() {
 
   useEffect(() => {
     let cancelled = false;
+    let timeoutId = null;
+    let interval = 5_000; // start fast (5s) per spec
+    const MIN_INTERVAL = 5_000;
+    const MAX_INTERVAL = 60_000;
+    const MAX_CONSECUTIVE_5XX = 3;
+    let consecutive5xx = 0;
+    let stoppedPermanently = false;
+
+    const schedule = (ms) => {
+      if (cancelled || stoppedPermanently) return;
+      timeoutId = setTimeout(poll, ms);
+    };
 
     const poll = async () => {
+      if (cancelled || stoppedPermanently) return;
+
+      // Honor global 429 pause window — skip this tick, retry later.
+      try {
+        const { isPollingPaused } = await import('../utils/apiClient');
+        if (isPollingPaused()) {
+          schedule(Math.min(MAX_INTERVAL, 10_000));
+          return;
+        }
+      } catch { /* ignore */ }
+
       try {
         const res = await fetch('/api/announcer/worker-status');
-        if (res.ok && !cancelled) setWorkerStatus(await res.json());
+        if (res.ok) {
+          if (!cancelled) {
+            try {
+              const data = await res.json();
+              setWorkerStatus(data);
+            } catch { /* ignore parse error, keep prior value */ }
+          }
+          consecutive5xx = 0;
+          interval = MIN_INTERVAL;
+        } else if (res.status >= 500) {
+          consecutive5xx += 1;
+          if (consecutive5xx >= MAX_CONSECUTIVE_5XX) {
+            stoppedPermanently = true;
+            if (!cancelled) {
+              setWorkerStatus({
+                hub_status: 'OFFLINE',
+                primary_worker: { id: 'mac', status: 'OFFLINE', last_heartbeat: null, queue_depth: 0 },
+                failover_worker: { id: 'Pi-5-Edge', status: 'READY' },
+                current_mode: 'OFFLINE',
+              });
+            }
+            return; // do not reschedule
+          }
+          interval = Math.min(MAX_INTERVAL, interval * 2);
+        } else if (res.status === 429) {
+          // Global pause already engaged by apiFetch; here we just back off.
+          interval = Math.min(MAX_INTERVAL, interval * 2);
+        }
       } catch {
-        // leave previous value on network error
+        // Network error — keep prior status, back off gently.
+        interval = Math.min(MAX_INTERVAL, interval * 2);
+      } finally {
+        schedule(interval);
       }
     };
 
     poll();
-    const id = setInterval(poll, 10_000);
     return () => {
       cancelled = true;
-      clearInterval(id);
+      if (timeoutId) clearTimeout(timeoutId);
     };
   }, []);
 

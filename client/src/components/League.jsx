@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Trophy, Users, ChevronDown, ChevronUp, Shield, AlertTriangle } from 'lucide-react';
 import { formatDateMMDDYYYY } from '../utils/formatDate';
 import { TipBadge } from './StatTooltip';
+import { fetchSharedJson } from '../utils/apiClient';
 
 const PCLL_RIVAL_SLUGS = ['peppers', 'riptide'];
 const isDivisionRival = (slug) => PCLL_RIVAL_SLUGS.some(r => String(slug || '').toLowerCase().includes(r));
@@ -12,15 +13,8 @@ const League = ({ isMobile = false, isLandscape = false }) => {
   const [expanded, setExpanded] = useState(null);
 
   useEffect(() => {
-    fetch('/api/standings')
-      .then(r => r.ok ? r.json() : null)
-      .then(setStandings)
-      .catch(() => {});
-
-    fetch('/api/opponents')
-      .then(r => r.ok ? r.json() : [])
-      .then(setOpponents)
-      .catch(() => {});
+    fetchSharedJson('/api/standings', { fallback: null }).then(setStandings).catch(() => {});
+    fetchSharedJson('/api/opponents', { fallback: [] }).then(d => setOpponents(d || [])).catch(() => {});
   }, []);
 
   const standingRows = standings?.standings || [];

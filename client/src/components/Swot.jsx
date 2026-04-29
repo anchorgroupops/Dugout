@@ -3,6 +3,7 @@ import { AlertTriangle, TrendingUp, ShieldAlert, Target, ChevronDown, ChevronUp,
 import { getTodayEST, formatDateMMDDYYYY } from '../utils/formatDate';
 import { TipBadge, PlayerName } from './StatTooltip';
 import OpponentFieldMap from './OpponentFieldMap';
+import { fetchSharedJson } from '../utils/apiClient';
 
 const SwotQuadrant = ({ title, items, color, icon }) => {
   return (
@@ -67,12 +68,12 @@ const MatchupPanel = ({ defaultOpponent, isMobile = false }) => {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    fetch('/api/opponents')
-      .then(r => r.ok ? r.json() : [])
+    fetchSharedJson('/api/opponents', { fallback: [] })
       .then(data => {
-        setOpponents(data);
+        const list = Array.isArray(data) ? data : [];
+        setOpponents(list);
         if (defaultOpponent) {
-          const matched = data.find(o => o.team_name.toLowerCase() === defaultOpponent.toLowerCase() || o.slug === defaultOpponent.toLowerCase().replace(/ /g, '_'));
+          const matched = list.find(o => o.team_name?.toLowerCase() === defaultOpponent.toLowerCase() || o.slug === defaultOpponent.toLowerCase().replace(/ /g, '_'));
           if (matched && selected !== matched.slug) {
             handleSelect(matched.slug);
           }

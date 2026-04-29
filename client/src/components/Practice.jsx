@@ -3,6 +3,7 @@ import { Dumbbell, RefreshCw, Users, Target } from 'lucide-react';
 import { TipBadge } from './StatTooltip';
 import { formatDateMMDDYYYY } from '../utils/formatDate';
 import OpponentFieldMap from './OpponentFieldMap';
+import { fetchSharedJson } from '../utils/apiClient';
 
 const sourceLabel = (src) => {
   if (src === 'practice_rsvp') return 'Current/next practice RSVP';
@@ -109,15 +110,15 @@ const Practice = ({ team, schedule, isMobile = false, isLandscape = false }) => 
     if (!nextGame?.opponent) return;
     const opponentName = nextGame.opponent;
     // Fetch opponents list to resolve slug, then fetch matchup
-    fetch('/api/opponents')
-      .then(r => r.ok ? r.json() : [])
+    fetchSharedJson('/api/opponents', { fallback: [] })
       .then(opponents => {
-        const match = opponents.find(o =>
-          o.team_name.toLowerCase() === opponentName.toLowerCase() ||
+        const list = Array.isArray(opponents) ? opponents : [];
+        const match = list.find(o =>
+          o.team_name?.toLowerCase() === opponentName.toLowerCase() ||
           o.slug === opponentName.toLowerCase().replace(/ /g, '_')
         );
-        if (!match?.slug) return;
-        return fetch(`/api/matchup/${match.slug}`).then(r => r.ok ? r.json() : null);
+        if (!match?.slug) return null;
+        return fetchSharedJson(`/api/matchup/${match.slug}`, { fallback: null });
       })
       .then(data => { if (data) setNextMatchup(data); })
       .catch(() => {/* silent — non-critical */});
@@ -272,28 +273,41 @@ const Practice = ({ team, schedule, isMobile = false, isLandscape = false }) => 
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
             <Users size={16} color="var(--primary-color)" />
             <span style={{ fontWeight: '700' }}>Players At Practice</span>
-            <span style={{ color: 'var(--text-muted)', fontSize: 'var(--text-sm)' }}>({selected.length}/{availablePlayers.length})</span>
+            <span style={{ color: 'var(--text-muted)', fontSize: 'var(--text-sm)' }}>
+              {availablePlayers.length === 0 ? '(loading roster…)' : `(${selected.length}/${availablePlayers.length})`}
+            </span>
           </div>
           <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
-            <button onClick={selectAll} style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text-main)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '6px', padding: '0.5rem 0.625rem', cursor: 'pointer', fontSize: 'var(--text-xs)', minHeight: 'var(--touch-min)' }}>All</button>
-            <button onClick={clearAll} style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text-main)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '6px', padding: '0.5rem 0.625rem', cursor: 'pointer', fontSize: 'var(--text-xs)', minHeight: 'var(--touch-min)' }}>None</button>
+            <button onClick={selectAll} disabled={availablePlayers.length === 0} style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text-main)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '6px', padding: '0.5rem 0.625rem', cursor: availablePlayers.length === 0 ? 'not-allowed' : 'pointer', fontSize: 'var(--text-xs)', minHeight: 'var(--touch-min)', opacity: availablePlayers.length === 0 ? 0.5 : 1 }}>All</button>
+            <button onClick={clearAll} disabled={availablePlayers.length === 0} style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text-main)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '6px', padding: '0.5rem 0.625rem', cursor: availablePlayers.length === 0 ? 'not-allowed' : 'pointer', fontSize: 'var(--text-xs)', minHeight: 'var(--touch-min)', opacity: availablePlayers.length === 0 ? 0.5 : 1 }}>None</button>
           </div>
         </div>
 
-        <div style={{ marginTop: '0.75rem', display: 'grid', gridTemplateColumns: isLandscape ? 'repeat(auto-fill, minmax(160px, 1fr))' : isMobile ? '1fr' : 'repeat(auto-fill, minmax(190px, 1fr))', gap: isLandscape ? '0.3rem' : '0.4rem' }}>
-          {availablePlayers.map(name => (
-            <label key={name} style={{
-              display: 'flex', alignItems: 'center', gap: '0.5rem', background: selected.includes(name) ? 'rgba(4, 101, 104, 0.11)' : 'rgba(255,255,255,0.03)',
-              border: selected.includes(name) ? '1px solid rgba(4, 101, 104, 0.32)' : '1px solid rgba(255,255,255,0.08)', borderRadius: '7px',
-              padding: '0.625rem 0.75rem', cursor: 'pointer', minHeight: 'var(--touch-min)',
-            }}>
-              <input type="checkbox" checked={selected.includes(name)} onChange={() => toggle(name)} />
-              <span style={{ fontSize: 'var(--text-sm)' }}>{name}</span>
-            </label>
-          ))}
-        </div>
+        {availablePlayers.length === 0 ? (
+          <div style={{ marginTop: '0.75rem', display: 'grid', gridTemplateColumns: isLandscape ? 'repeat(auto-fill, minmax(160px, 1fr))' : isMobile ? '1fr' : 'repeat(auto-fill, minmax(190px, 1fr))', gap: isLandscape ? '0.3rem' : '0.4rem' }}>
+            {[0, 1, 2, 3, 4, 5].map(i => (
+              <div key={i} style={{ height: 'var(--touch-min)', borderRadius: '7px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', opacity: 0.5 + (i % 2) * 0.2 }} />
+            ))}
+          </div>
+        ) : (
+          <div style={{ marginTop: '0.75rem', display: 'grid', gridTemplateColumns: isLandscape ? 'repeat(auto-fill, minmax(160px, 1fr))' : isMobile ? '1fr' : 'repeat(auto-fill, minmax(190px, 1fr))', gap: isLandscape ? '0.3rem' : '0.4rem' }}>
+            {availablePlayers.map(name => (
+              <label key={name} style={{
+                display: 'flex', alignItems: 'center', gap: '0.5rem', background: selected.includes(name) ? 'rgba(4, 101, 104, 0.11)' : 'rgba(255,255,255,0.03)',
+                border: selected.includes(name) ? '1px solid rgba(4, 101, 104, 0.32)' : '1px solid rgba(255,255,255,0.08)', borderRadius: '7px',
+                padding: '0.625rem 0.75rem', cursor: 'pointer', minHeight: 'var(--touch-min)',
+              }}>
+                <input type="checkbox" checked={selected.includes(name)} onChange={() => toggle(name)} />
+                <span style={{ fontSize: 'var(--text-sm)' }}>{name}</span>
+              </label>
+            ))}
+          </div>
+        )}
       </div>
 
+      {/* Insights error: only show when /api/practice-insights itself failed.
+          Don't block the page — the player checklist above renders independently
+          from team data, so the user can still pick attendees while we retry. */}
       {error && (
         <div
           className="glass-panel"
@@ -306,8 +320,23 @@ const Practice = ({ team, schedule, isMobile = false, isLandscape = false }) => 
         >
           <RefreshCw size={16} color="var(--danger)" />
           <span style={{ color: 'var(--danger)', fontSize: 'var(--text-sm)', fontWeight: '600' }}>
-            Could not load practice data. Tap to retry.
+            Could not load practice insights. Tap to retry.
           </span>
+        </div>
+      )}
+
+      {/* Insights skeleton while loading */}
+      {!insights && !error && loading && (
+        <div className="glass-panel" style={{ padding: 'var(--space-lg)', marginBottom: 'var(--space-md)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', marginBottom: 'var(--space-sm)' }}>
+            <Target size={16} color="var(--primary-color)" />
+            <span className="section-label" style={{ marginBottom: 0 }}>Most Needed Practice Work</span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(220px, 1fr))', gap: '0.5rem' }}>
+            {[0, 1, 2].map(i => (
+              <div key={i} style={{ height: '110px', borderRadius: '8px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', opacity: 0.4 + (i % 3) * 0.15 }} />
+            ))}
+          </div>
         </div>
       )}
 
@@ -355,8 +384,6 @@ const Practice = ({ team, schedule, isMobile = false, isLandscape = false }) => 
         </>
       )}
 
-      {!insights && !loading && <p style={{ color: 'var(--text-muted)' }}>Loading practice insights...</p>}
-      {!team && <p style={{ color: 'var(--text-muted)' }}>Team data is still loading.</p>}
     </div>
   );
 };
