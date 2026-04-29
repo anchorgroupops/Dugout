@@ -1,9 +1,10 @@
 """
 Modal app for softball-strategy-sharks.
 
-Only GPU tasks (voice generation) run here. GC scraping and data analysis
-run exclusively on the Pi's sync_daemon to avoid 2FA email spam from
-Modal's rotating IPs.
+Voice generation (daily team update) runs here using EdgeTTS — free Microsoft
+Neural voices, no API key, pure HTTP (no GPU needed).
+GC scraping and game analysis run exclusively on the Pi's sync_daemon to avoid
+2FA email spam from Modal's rotating IPs.
 """
 import json
 from pathlib import Path
@@ -18,22 +19,10 @@ app = modal.App("softball-strategy-sharks")
 SESSION_VOLUME = modal.Volume.from_name("softball-gc-session", create_if_missing=True)
 VOLUME_MOUNT = "/vol/softball-gc"
 
-# Minimal image — no Playwright or scraping deps needed (Pi handles that)
+# Single image for all functions — EdgeTTS is pure HTTP, no GPU or torch needed.
 sharks_image = (
-    modal.Image.debian_slim()
-    .pip_install("python-dotenv", "fastapi[standard]")
-)
-
-tts_image = (
     modal.Image.debian_slim(python_version="3.11")
-    .pip_install(
-        "torch==2.3.1",
-        "torchaudio==2.3.1",
-        "transformers>=4.45.0",
-        "soundfile",
-        "numpy",
-        "scipy",
-    )
+    .pip_install("python-dotenv", "fastapi[standard]", "edge-tts>=6.1.9")
 )
 
 
@@ -54,7 +43,6 @@ def _build_voice_script(sharks_dir: str) -> str:
     record = team.get("record", "0-0")
     roster = team.get("roster", [])
 
-    # Top 3 hitters by AVG
     hitters = []
     for p in roster:
         bat = p.get("batting") or p
@@ -70,7 +58,6 @@ def _build_voice_script(sharks_dir: str) -> str:
         parts = [f"{name} batting {avg:.3f}" for name, avg in top3]
         hitter_text = f"Leading the charge at the plate: {', '.join(parts)}."
 
-    # Next game from schedule
     sched_file = Path(sharks_dir) / "schedule_manual.json"
     next_game_text = ""
     if sched_file.exists():
@@ -84,7 +71,7 @@ def _build_voice_script(sharks_dir: str) -> str:
                 g = upcoming[0]
                 opp = g.get("opponent", "their next opponent")
                 ha = "at home" if g.get("home_away") == "home" else "on the road"
-                next_game_text = f"Next up, the Sharks take on the {opp} {ha}."
+                next_game_text = f"Next up, the Sharks take on {opp} {ha}."
         except Exception:
             pass
 
@@ -99,82 +86,73 @@ def _build_voice_script(sharks_dir: str) -> str:
 
 
 @app.function(
-    image=tts_image,
-    gpu="T4",
+    image=sharks_image,
     volumes={VOLUME_MOUNT: SESSION_VOLUME},
-    timeout=300,
-    memory=8192,
+    timeout=120,
 )
 def generate_voice_update(script_text: str, output_path: str = "/vol/softball-gc/sharks/voice_update.mp3"):
-    """Generate TTS audio using Qwen3-TTS on Modal GPU."""
-    import torch
-    import soundfile as sf
-    from transformers import AutoTokenizer, AutoModelForCausalLM
+    """Generate TTS audio using EdgeTTS (Microsoft Neural voices, free, no GPU)."""
+    import asyncio
+    import edge_tts
 
     if not script_text.strip():
         return {"status": "skipped", "reason": "empty script"}
 
-    model_id = "Qwen/Qwen3-TTS"
-    print(f"[TTS] Loading model {model_id}...")
-    tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
-    model = AutoModelForCausalLM.from_pretrained(
-        model_id, torch_dtype=torch.float16, trust_remote_code=True
-    ).to("cuda")
+    voice = "en-US-GuyNeural"
+    print(f"[TTS] Generating {len(script_text)} chars via EdgeTTS ({voice})...")
 
-    print(f"[TTS] Generating speech for {len(script_text)} chars...")
-    inputs = tokenizer(script_text, return_tensors="pt").to("cuda")
-    with torch.no_grad():
-        output = model.generate(**inputs, do_sample=True, temperature=0.7, max_new_tokens=4096)
+    async def _synthesize():
+        communicate = edge_tts.Communicate(script_text, voice)
+        chunks = []
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio":
+                chunks.append(chunk["data"])
+        return b"".join(chunks)
 
-    # TODO: Qwen3-TTS output requires model-specific audio decoding (codec/vocoder),
-    # not raw token-to-float conversion. This may produce garbled/silent output.
-    # Fix: use the model's decode_audio() API or switch to a known-working TTS model.
-    audio_tokens = output[0][inputs["input_ids"].shape[-1]:]
-    audio_np = audio_tokens.cpu().float().numpy()
+    audio_bytes = asyncio.run(_synthesize())
+    if not audio_bytes:
+        return {"status": "error", "reason": "edge_tts returned empty audio"}
 
-    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-    sf.write(output_path, audio_np, samplerate=24000)
-    print(f"[TTS] Saved to {output_path} ({Path(output_path).stat().st_size} bytes)")
-    return {"status": "ok", "path": output_path}
+    out = Path(output_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_bytes(audio_bytes)
+    print(f"[TTS] Saved {len(audio_bytes)} bytes to {output_path}")
+    SESSION_VOLUME.commit()
+    return {"status": "ok", "path": output_path, "bytes": len(audio_bytes)}
 
 
 @app.function(
     image=sharks_image,
     schedule=modal.Cron("0 6 * * *"),
     volumes={VOLUME_MOUNT: SESSION_VOLUME},
-    timeout=600,
+    timeout=180,
 )
 def daily_scout_job():
-    """Daily voice update generation (GPU).
+    """Daily voice update — reads team data from volume, generates EdgeTTS MP3.
 
     GC scraping + analysis runs on the Pi's sync_daemon — not here.
-    This prevents 2FA email spam from Modal's rotating IPs.
     """
     print("[Modal] Daily voice update job started.")
     sharks_dir = str(Path(VOLUME_MOUNT) / "sharks")
     script = _build_voice_script(sharks_dir)
     if script:
-        print("[Modal] Generating voice update (GPU)...")
+        print("[Modal] Generating voice update via EdgeTTS...")
         result = generate_voice_update.remote(script)
-        SESSION_VOLUME.commit()
         print(f"[Modal] Voice update complete: {result}")
         return {"status": "ok", "voice": result}
-    print("[Modal] No team data for voice script — skipping.")
+    print("[Modal] No team data in volume — skipping.")
     return {"status": "skipped", "reason": "no_team_data"}
 
 
-@app.function(image=sharks_image, volumes={VOLUME_MOUNT: SESSION_VOLUME}, timeout=600)
+@app.function(image=sharks_image, volumes={VOLUME_MOUNT: SESSION_VOLUME}, timeout=180)
 @modal.fastapi_endpoint(method="POST")
 def manual_sync(request: dict = None):
     """Manual trigger via Webhook (POST).
 
     Accepts optional JSON body: {"script": "...voice script text..."}
-    If a script is provided, generates voice directly from it (Pi-push mode).
-    Otherwise falls back to reading team data from the Modal volume.
     """
     script = (request or {}).get("script", "").strip() if request else ""
     if not script:
-        # Legacy: try to build script from volume data
         sharks_dir = str(Path(VOLUME_MOUNT) / "sharks")
         script = _build_voice_script(sharks_dir)
     if script:
@@ -183,7 +161,7 @@ def manual_sync(request: dict = None):
     return {"status": "skipped", "reason": "no_script_or_team_data"}
 
 
-@app.function(image=sharks_image, volumes={VOLUME_MOUNT: SESSION_VOLUME}, timeout=600)
+@app.function(image=sharks_image, volumes={VOLUME_MOUNT: SESSION_VOLUME}, timeout=180)
 def trigger_immediate_refresh():
     """Internal manual trigger."""
     return daily_scout_job.remote()

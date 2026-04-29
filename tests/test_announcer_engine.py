@@ -210,18 +210,36 @@ class TestMockTTS:
 # ---------------------------------------------------------------------------
 
 class TestGetTtsProvider:
-    def test_returns_mock_when_no_env_vars(self, monkeypatch):
+    def _no_key_env(self, monkeypatch):
         monkeypatch.delenv("LOCAL_TTS_URL", raising=False)
         monkeypatch.delenv("REPLICATE_API_TOKEN", raising=False)
         monkeypatch.delenv("ELEVENLABS_API_KEY", raising=False)
         monkeypatch.delenv("ANNOUNCER_VOICE_REF_URL", raising=False)
+
+    def test_returns_mock_when_no_env_vars_and_no_packages(self, monkeypatch):
+        from tools import announcer_engine
+        self._no_key_env(monkeypatch)
+        # Simulate environment where optional TTS packages are absent
+        monkeypatch.setattr(announcer_engine.EdgeTTSProvider, "available", lambda self: False)
+        monkeypatch.setattr(announcer_engine.KokoroTTSProvider, "available", lambda self: False)
+        monkeypatch.setattr(announcer_engine.GoogleCloudTTSProvider, "available", lambda self: False)
+        monkeypatch.setattr(announcer_engine.ElevenLabsTTS, "available", lambda self: False)
         provider = get_tts_provider()
         assert isinstance(provider, MockTTS)
 
-    def test_quick_returns_mock_when_no_env_vars(self, monkeypatch):
-        monkeypatch.delenv("LOCAL_TTS_URL", raising=False)
-        monkeypatch.delenv("REPLICATE_API_TOKEN", raising=False)
-        monkeypatch.delenv("ELEVENLABS_API_KEY", raising=False)
-        monkeypatch.delenv("ANNOUNCER_VOICE_REF_URL", raising=False)
+    def test_quick_returns_mock_when_no_env_vars_and_no_packages(self, monkeypatch):
+        from tools import announcer_engine
+        self._no_key_env(monkeypatch)
+        monkeypatch.setattr(announcer_engine.EdgeTTSProvider, "available", lambda self: False)
+        monkeypatch.setattr(announcer_engine.KokoroTTSProvider, "available", lambda self: False)
+        monkeypatch.setattr(announcer_engine.GoogleCloudTTSProvider, "available", lambda self: False)
+        monkeypatch.setattr(announcer_engine.ElevenLabsTTS, "available", lambda self: False)
         provider = get_quick_tts_provider()
         assert isinstance(provider, MockTTS)
+
+    def test_returns_edge_tts_when_package_available(self, monkeypatch):
+        from tools import announcer_engine
+        self._no_key_env(monkeypatch)
+        monkeypatch.setattr(announcer_engine.EdgeTTSProvider, "available", lambda self: True)
+        provider = get_tts_provider()
+        assert isinstance(provider, announcer_engine.EdgeTTSProvider)
