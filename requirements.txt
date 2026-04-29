@@ -40,3 +40,11 @@ PyYAML>=6.0,<7
 
 # Walk-up song search + download (YouTube via yt-dlp, requires ffmpeg for MP3 extraction)
 yt-dlp>=2024.1.0
+
+# TTS providers — free tier chain (install whichever are available on the host)
+# Edge TTS: Microsoft neural voices, no API key, works on Pi
+edge-tts>=6.1.9
+# Kokoro ONNX: local 82M-param model, MIT license, ARM64-compatible, ~300MB download on first use
+# pip install kokoro-onnx   (optional — not pinned here, install manually on Pi/PC)
+# Google Cloud TTS: free tier 1M Neural2 chars/month
+# pip install google-cloud-texttospeech  (optional — needs GOOGLE_APPLICATION_CREDENTIALS)

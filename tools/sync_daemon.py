@@ -5031,6 +5031,29 @@ def handle_announcer_provider_health():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/announcer/tts-probe', methods=['GET'])
+def handle_announcer_tts_probe():
+    """Probe all TTS providers and return ordered availability list.
+
+    Response: {providers: [{name, available, selected, reason}], selected, non_mock_available}
+    Used by opcheck and the pre-render script to pick the best source.
+    """
+    try:
+        from announcer_engine import probe_tts_providers
+        providers = probe_tts_providers()
+        selected = next((p for p in providers if p.get("selected")), None)
+        return jsonify({
+            "providers": providers,
+            "selected": selected["name"] if selected else "mock",
+            "non_mock_available": any(
+                p["available"] and p["name"] != "mock" for p in providers
+            ),
+        })
+    except Exception as e:
+        logging.error("[Announcer] tts-probe error: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
 def _load_roster_players() -> list[dict]:
     """Return a minimal player list [{id, number, first, last}] from the roster JSON."""
     roster_path = SHARKS_DIR / "roster.json"

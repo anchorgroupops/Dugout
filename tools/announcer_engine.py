@@ -119,6 +119,44 @@ def _read_json(path: Path, default=None):
 
 
 # ---------------------------------------------------------------------------
+# TTS text sanitization
+# ---------------------------------------------------------------------------
+
+import re as _re
+
+def _strip_markup_tags(text: str) -> str:
+    """Remove custom TTS markup tags that would be spoken literally.
+
+    Strips [breath], [pause:Xs], [pause:X.Xs] etc. and collapses extra
+    whitespace.  Call this before passing script text to any provider that
+    doesn't natively handle these markers.
+    """
+    text = _re.sub(r'\[breath\]', '', text, flags=_re.IGNORECASE)
+    text = _re.sub(r'\[pause:[^\]]*\]', '', text)
+    text = _re.sub(r'\(\s*(?:breath|breathe|inhale|exhale)\s*\)', '', text, flags=_re.IGNORECASE)
+    text = _re.sub(r'<[^>]+>', '', text)        # strip any stray XML/SSML tags
+    text = _re.sub(r'\s{2,}', ' ', text)
+    return text.strip()
+
+
+def _tags_to_ssml(text: str, voice_name: str) -> str:
+    """Convert custom markup tags to SSML <break> elements.
+
+    Wraps the result in a <speak><voice> block suitable for providers
+    that accept SSML (e.g. Edge TTS, Google Cloud TTS).
+    """
+    text = _re.sub(r'\[breath\]', '<break time="150ms"/>', text, flags=_re.IGNORECASE)
+    text = _re.sub(
+        r'\[pause:(\d+(?:\.\d+)?)s\]',
+        lambda m: f'<break time="{int(float(m.group(1)) * 1000)}ms"/>',
+        text,
+    )
+    text = _re.sub(r'\(\s*(?:breath|breathe|inhale|exhale)\s*\)', '<break time="150ms"/>', text, flags=_re.IGNORECASE)
+    inner = _re.sub(r'\s{2,}', ' ', text).strip()
+    return f'<speak><voice name="{voice_name}">{inner}</voice></speak>'
+
+
+# ---------------------------------------------------------------------------
 # TTS Providers
 # ---------------------------------------------------------------------------
 
@@ -131,6 +169,10 @@ class TTSProvider(ABC):
     @abstractmethod
     def name(self) -> str:
         pass
+
+    def available(self) -> bool:
+        """Fast availability check (no synthesis). Override for key/package checks."""
+        return True
 
 
 class LocalVLLMTTS(TTSProvider):
@@ -320,8 +362,195 @@ class ElevenLabsTTS(TTSProvider):
         return resp.content
 
 
+class EdgeTTSProvider(TTSProvider):
+    """Microsoft Edge TTS via edge-tts package — free, no API key, neural voices.
+
+    Install: pip install edge-tts
+    Voices tried in order: en-US-GuyNeural (deep), en-US-DavisNeural (clear male).
+    Supports SSML pause markup natively.
+    """
+
+    _VOICES = ["en-US-GuyNeural", "en-US-DavisNeural", "en-US-ChristopherNeural"]
+
+    @property
+    def name(self) -> str:
+        return "edge_tts"
+
+    def available(self) -> bool:
+        try:
+            import edge_tts  # noqa: F401
+            return True
+        except ImportError:
+            return False
+
+    def synthesize(self, text: str, voice_config: dict) -> bytes:
+        try:
+            import edge_tts
+            import asyncio
+        except ImportError:
+            raise RuntimeError("edge-tts not installed. Run: pip install edge-tts")
+
+        voice = voice_config.get("edge_tts_voice", self._VOICES[0])
+        # Convert markup to SSML for natural pausing
+        ssml = _tags_to_ssml(text, voice)
+
+        async def _fetch() -> bytes:
+            buf = io.BytesIO()
+            communicate = edge_tts.Communicate(ssml, voice)
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio":
+                    buf.write(chunk["data"])
+            return buf.getvalue()
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                    future = pool.submit(asyncio.run, _fetch())
+                    return future.result(timeout=30)
+            return loop.run_until_complete(_fetch())
+        except RuntimeError:
+            return asyncio.run(_fetch())
+
+
+class KokoroTTSProvider(TTSProvider):
+    """Kokoro-82M via kokoro-onnx — local, MIT license, ARM64-compatible, no GPU needed.
+
+    Install: pip install kokoro-onnx
+    Model auto-downloads (~300 MB) on first use.
+    Voice: am_adam (deep American male announcer).
+    """
+
+    _VOICE = "am_adam"
+
+    @property
+    def name(self) -> str:
+        return "kokoro_onnx"
+
+    def available(self) -> bool:
+        try:
+            import kokoro_onnx  # noqa: F401
+            return True
+        except ImportError:
+            return False
+
+    def _to_mp3(self, samples, sample_rate: int) -> bytes:
+        """Convert numpy float32 samples to MP3 bytes via ffmpeg, or WAV fallback."""
+        import subprocess
+        import tempfile
+        import numpy as np
+
+        samples_int16 = (np.clip(samples, -1.0, 1.0) * 32767).astype(np.int16)
+
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_wav:
+            tmp_wav_path = Path(tmp_wav.name)
+        with wave.open(str(tmp_wav_path), "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(sample_rate)
+            wf.writeframes(samples_int16.tobytes())
+
+        mp3_path = tmp_wav_path.with_suffix(".mp3")
+        try:
+            result = subprocess.run(
+                ["ffmpeg", "-y", "-i", str(tmp_wav_path),
+                 "-codec:a", "libmp3lame", "-q:a", "2", str(mp3_path)],
+                capture_output=True, timeout=30,
+            )
+            if result.returncode == 0 and mp3_path.exists():
+                mp3_bytes = mp3_path.read_bytes()
+                return mp3_bytes
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+        finally:
+            for p in (tmp_wav_path, mp3_path):
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
+
+        # ffmpeg unavailable — return raw WAV bytes
+        return tmp_wav_path.read_bytes() if tmp_wav_path.exists() else b""
+
+    def synthesize(self, text: str, voice_config: dict) -> bytes:
+        try:
+            from kokoro_onnx import Kokoro
+        except ImportError:
+            raise RuntimeError("kokoro-onnx not installed. Run: pip install kokoro-onnx")
+
+        clean = _strip_markup_tags(text)
+        voice = voice_config.get("kokoro_voice", self._VOICE)
+        speed = float(voice_config.get("kokoro_speed", 0.9))
+
+        kokoro = Kokoro.from_pretrained()
+        samples, sample_rate = kokoro.create(clean, voice=voice, speed=speed, lang="en-us")
+        return self._to_mp3(samples, sample_rate)
+
+
+class GoogleCloudTTSProvider(TTSProvider):
+    """Google Cloud TTS — free tier: 1M Neural2 chars/month, 4M Standard chars/month.
+
+    Requires GOOGLE_API_KEY or GOOGLE_APPLICATION_CREDENTIALS in env.
+    Voice: en-US-Neural2-J (deep male, announcer-adjacent).
+    Install: pip install google-cloud-texttospeech
+    """
+
+    _VOICE_NAME = "en-US-Neural2-J"
+    _LANGUAGE = "en-US"
+
+    @property
+    def name(self) -> str:
+        return "google_cloud_tts"
+
+    def available(self) -> bool:
+        try:
+            from google.cloud import texttospeech  # noqa: F401
+            return bool(
+                os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "").strip()
+                or _resolve_secret("GOOGLE_API_KEY")
+            )
+        except ImportError:
+            return False
+
+    def synthesize(self, text: str, voice_config: dict) -> bytes:
+        try:
+            from google.cloud import texttospeech
+        except ImportError:
+            raise RuntimeError(
+                "google-cloud-texttospeech not installed. Run: pip install google-cloud-texttospeech"
+            )
+
+        api_key = _resolve_secret("GOOGLE_API_KEY")
+        client_kwargs = {}
+        if api_key and not os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "").strip():
+            from google.api_core.gapic_v1.client_info import ClientInfo
+            client_kwargs["client_options"] = {"api_key": api_key}
+
+        client = texttospeech.TextToSpeechClient(**client_kwargs)
+
+        voice_name = voice_config.get("google_tts_voice", self._VOICE_NAME)
+        clean = _strip_markup_tags(text)
+
+        synthesis_input = texttospeech.SynthesisInput(text=clean)
+        voice = texttospeech.VoiceSelectionParams(
+            language_code=self._LANGUAGE,
+            name=voice_name,
+        )
+        audio_config = texttospeech.AudioConfig(
+            audio_encoding=texttospeech.AudioEncoding.MP3,
+            speaking_rate=0.90,
+            pitch=-2.0,
+        )
+
+        response = client.synthesize_speech(
+            input=synthesis_input, voice=voice, audio_config=audio_config
+        )
+        return response.audio_content
+
+
 class MockTTS(TTSProvider):
-    """Generates a silent 2-second MP3-like WAV for testing without API keys."""
+    """Generates a silent 2-second WAV for testing without API keys."""
 
     @property
     def name(self) -> str:
@@ -348,55 +577,90 @@ def _has_replicate_voice_ref() -> bool:
     )
 
 
+# Ordered provider registry — probed top-to-bottom at render time.
+# Best Quality chain (Mac/cloud):  LocalVLLM → Replicate3B → EdgeTTS → Kokoro → GoogleCloud → ElevenLabs → Mock
+# Quick chain (Pi-side):           LocalVLLM → Replicate0.6B → EdgeTTS → Kokoro → GoogleCloud → ElevenLabs → Mock
+
+def _build_provider_chain(quick: bool = False) -> list[TTSProvider]:
+    chain: list[TTSProvider] = []
+    if os.getenv("LOCAL_TTS_URL", "").strip():
+        chain.append(LocalVLLMTTS())
+    if _has_replicate_voice_ref():
+        chain.append(Replicate06bTTS() if quick else ReplicateTTS())
+    chain.append(EdgeTTSProvider())
+    chain.append(KokoroTTSProvider())
+    chain.append(GoogleCloudTTSProvider())
+    if _resolve_secret("ELEVENLABS_API_KEY"):
+        chain.append(ElevenLabsTTS())
+    chain.append(MockTTS())
+    return chain
+
+
+def probe_tts_providers() -> list[dict]:
+    """Test every provider in the chain and return their availability status.
+
+    Each entry: {name, available, selected, reason}
+    The first available provider is marked selected=True.
+    This is the source of truth for GET /api/announcer/tts-probe.
+    """
+    chain = _build_provider_chain(quick=False)
+    results = []
+    selected = False
+    for p in chain:
+        try:
+            ok = p.available()
+            reason = "ok" if ok else "not configured"
+        except Exception as e:
+            ok = False
+            reason = str(e)[:120]
+        entry = {"name": p.name, "available": ok, "selected": False, "reason": reason}
+        if ok and not selected:
+            entry["selected"] = True
+            selected = True
+        results.append(entry)
+    return results
+
+
 def get_tts_provider() -> TTSProvider:
     """Return the best available TTS provider for Best Quality renders.
 
-    Priority: local vLLM → Replicate Qwen3-TTS 1.7B VoiceDesign → ElevenLabs → Mock
-
-    Replicate requires both REPLICATE_API_TOKEN and ANNOUNCER_VOICE_REF_URL (ICL clone
-    mode needs a reference audio clip).  Without the reference URL it will always error,
-    so we skip it and fall through to ElevenLabs or Mock.
+    Walks the provider chain in priority order and returns the first available one.
+    Priority: LocalVLLM → Replicate 3B → EdgeTTS → Kokoro → GoogleCloud → ElevenLabs → Mock
     """
-    if os.getenv("LOCAL_TTS_URL", "").strip():
-        return LocalVLLMTTS()
-    if _has_replicate_voice_ref():
-        return ReplicateTTS()
-    if _resolve_secret("ELEVENLABS_API_KEY"):
-        return ElevenLabsTTS()
-    logging.info("[Announcer] No TTS provider fully configured — using mock provider")
+    for provider in _build_provider_chain(quick=False):
+        if provider.available():
+            logging.info("[Announcer] TTS provider selected: %s", provider.name)
+            return provider
     return MockTTS()
 
 
 def get_quick_tts_provider() -> TTSProvider:
     """Return provider for Quick Render (Pi-side, speed-optimised).
 
-    Priority: local vLLM (0.6B quantized) → Replicate 0.6B Cloud Mirror → ElevenLabs → Mock
-
-    The Replicate 0.6B Cloud Mirror uses identical ICL clone parameters (same Steitzer
-    reference audio + transcript) so vocal character is consistent regardless of tier.
+    Priority: LocalVLLM → Replicate 0.6B → EdgeTTS → Kokoro → GoogleCloud → ElevenLabs → Mock
     """
-    if os.getenv("LOCAL_TTS_URL", "").strip():
-        return LocalVLLMTTS()
-    if _has_replicate_voice_ref():
-        return Replicate06bTTS()
-    if _resolve_secret("ELEVENLABS_API_KEY"):
-        return ElevenLabsTTS()
-    logging.info("[Announcer] No TTS provider fully configured — using mock provider for quick render")
+    for provider in _build_provider_chain(quick=True):
+        if provider.available():
+            logging.info("[Announcer] Quick TTS provider selected: %s", provider.name)
+            return provider
     return MockTTS()
 
 
 def check_provider_health() -> dict:
-    """Quick liveness check for each TTS provider. Used by /api/announcer/provider-health."""
+    """Liveness check for each TTS provider. Used by /api/announcer/provider-health."""
     import requests as _req
-    results = {"local_tts": False, "replicate": False, "elevenlabs": False, "mock": True}
+    probe = probe_tts_providers()
+    results = {p["name"]: p["available"] for p in probe}
+    results["selected"] = next((p["name"] for p in probe if p.get("selected")), "mock")
 
+    # Deep ping for network providers
     local_url = os.getenv("LOCAL_TTS_URL", "").strip()
     if local_url:
         try:
             r = _req.get(f"{local_url}/health", timeout=3)
-            results["local_tts"] = r.status_code == 200
+            results["local_tts_ping"] = r.status_code == 200
         except Exception:
-            pass
+            results["local_tts_ping"] = False
 
     replicate_token = _resolve_secret("REPLICATE_API_TOKEN")
     if replicate_token:
@@ -406,9 +670,9 @@ def check_provider_health() -> dict:
                 headers={"Authorization": f"Bearer {replicate_token}"},
                 timeout=5,
             )
-            results["replicate"] = r.status_code == 200
+            results["replicate_ping"] = r.status_code == 200
         except Exception:
-            pass
+            results["replicate_ping"] = False
 
     el_key = _resolve_secret("ELEVENLABS_API_KEY")
     if el_key:
@@ -418,9 +682,9 @@ def check_provider_health() -> dict:
                 headers={"xi-api-key": el_key},
                 timeout=5,
             )
-            results["elevenlabs"] = r.status_code == 200
+            results["elevenlabs_ping"] = r.status_code == 200
         except Exception:
-            pass
+            results["elevenlabs_ping"] = False
 
     return results
 
@@ -742,7 +1006,10 @@ def render_player_audio(player_id: str, game_context: dict | None = None,
     try:
         provider = get_quick_tts_provider() if quality == "quick" else get_tts_provider()
         voice = get_default_voice_profile()
-        text = build_announcement_text(player, game_context)
+        raw_text = build_announcement_text(player, game_context)
+        # EdgeTTS handles SSML natively; all others receive stripped plain text.
+        # This prevents [breath] / [pause:Xs] from being spoken literally.
+        text = raw_text if isinstance(provider, EdgeTTSProvider) else _strip_markup_tags(raw_text)
         audio_bytes = provider.synthesize(text, voice)
 
         if len(audio_bytes) > MAX_TTS_OUTPUT_BYTES:

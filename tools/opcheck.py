@@ -143,6 +143,17 @@ def run_opcheck(base_url: str, include_burst: bool = True) -> dict:
 
     time.sleep(0.5)
 
+    # TTS provider probe — at least one non-mock provider must be available
+    tts_r, tts = _req_json(s, f"{base}/api/announcer/tts-probe")
+    tts_ok = tts_r.status_code == 200 and isinstance(tts, dict)
+    tts_selected = (tts or {}).get("selected", "mock") if tts_ok else "error"
+    tts_non_mock = (tts or {}).get("non_mock_available", False) if tts_ok else False
+    add(
+        "tts_provider_available",
+        tts_ok and tts_non_mock,
+        f"status={tts_r.status_code} selected={tts_selected} non_mock={tts_non_mock}",
+    )
+
     health_r, health = _req_json(s, f"{base}/data/sharks/pipeline_health.json")
     has_required = isinstance(health, dict) and "required_field_coverage" in health
     add("pipeline_health_artifact", health_r.status_code == 200 and has_required, f"status={health_r.status_code}")
