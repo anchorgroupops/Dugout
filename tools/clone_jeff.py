@@ -56,29 +56,87 @@ HEADERS = {
 # Step 1: Fetch sound metadata from the soundboard page
 # ---------------------------------------------------------------------------
 
-def fetch_sounds() -> list[dict]:
-    """Fetch the soundboard page and extract all 93 sound objects from board_data_inline."""
-    print(f"[Jeff] Fetching soundboard page: {BOARD_URL}")
-    resp = requests.get(BOARD_URL, headers=HEADERS, timeout=30)
-    resp.raise_for_status()
-    html = resp.text
+def _normalize_sound_urls(sounds: list[dict]) -> list[dict]:
+    """Expand relative URLs to absolute using the site base."""
+    for s in sounds:
+        for key in ("sound_file_url", "download_url"):
+            val = s.get(key, "") or ""
+            if val and not val.startswith("http"):
+                s[key] = BASE_URL + val
+    return sounds
 
-    # The page embeds: window.board_data_inline = { ... };
-    m = re.search(r"window\.board_data_inline\s*=\s*", html)
-    if not m:
+
+def _fetch_sounds_playwright() -> list[dict]:
+    """Load the page in Playwright (already on the Pi) — passes Cloudflare cleanly."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
         raise RuntimeError(
-            "[Jeff] Could not find window.board_data_inline in page source. "
-            "The site may have changed its structure."
+            "[Jeff] Playwright not installed. Run: pip install playwright && playwright install chromium"
         )
 
-    try:
-        data, _ = json.JSONDecoder().raw_decode(html[m.end():])
-    except json.JSONDecodeError as e:
-        raise RuntimeError(f"[Jeff] Failed to parse board_data_inline JSON: {e}")
+    print("[Jeff] Loading soundboard via Playwright (bypasses Cloudflare)...")
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=True, args=["--no-sandbox"])
+        context = browser.new_context(user_agent=HEADERS["User-Agent"])
+        page = context.new_page()
+        page.goto(BOARD_URL, wait_until="networkidle", timeout=30000)
+        page.wait_for_timeout(2000)  # let Vue finish rendering
 
-    sounds = data.get("sounds", [])
-    print(f"[Jeff] Found {len(sounds)} clips on the board.")
+        sounds = page.evaluate("""
+            () => {
+                const data = window.board_data_inline;
+                if (!data || !data.sounds) return null;
+                const BASE = 'https://www.101soundboards.com';
+                return data.sounds.map(s => ({
+                    ...s,
+                    sound_file_url: (s.sound_file_url || '').startsWith('http')
+                        ? s.sound_file_url : BASE + (s.sound_file_url || ''),
+                    download_url: (s.download_url || '').startsWith('http')
+                        ? s.download_url : BASE + (s.download_url || ''),
+                }));
+            }
+        """)
+        context.close()
+        browser.close()
+
+    if not sounds:
+        raise RuntimeError("[Jeff] board_data_inline.sounds not found — page structure may have changed.")
+
+    print(f"[Jeff] Found {len(sounds)} clips via Playwright.")
     return sounds
+
+
+def fetch_sounds() -> list[dict]:
+    """Fetch all sound metadata. Tries cloudscraper first, falls back to Playwright."""
+
+    # Strategy 1: cloudscraper handles Cloudflare's JS challenge without a full browser.
+    # Install with: pip install cloudscraper
+    try:
+        import cloudscraper
+        scraper = cloudscraper.create_scraper(
+            browser={"browser": "chrome", "platform": "windows", "mobile": False}
+        )
+        print(f"[Jeff] Fetching soundboard via cloudscraper...")
+        resp = scraper.get(BOARD_URL, timeout=30)
+        resp.raise_for_status()
+        html = resp.text
+
+        m = re.search(r"window\.board_data_inline\s*=\s*", html)
+        if m:
+            data, _ = json.JSONDecoder().raw_decode(html[m.end():])
+            sounds = _normalize_sound_urls(data.get("sounds", []))
+            if sounds:
+                print(f"[Jeff] Found {len(sounds)} clips via cloudscraper.")
+                return sounds
+        print("[Jeff] cloudscraper: page loaded but board_data_inline not found — falling back.")
+    except ImportError:
+        print("[Jeff] cloudscraper not installed, trying Playwright...")
+    except Exception as e:
+        print(f"[Jeff] cloudscraper failed ({e}), trying Playwright...")
+
+    # Strategy 2: Playwright is already installed on the Pi for gc_scraper.py.
+    return _fetch_sounds_playwright()
 
 
 # ---------------------------------------------------------------------------
