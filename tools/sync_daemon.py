@@ -3177,14 +3177,8 @@ def handle_team():
     return jsonify(team)
 
 
-@app.route('/api/roster', methods=['GET'])
-def handle_roster():
-    """Return just the roster array from team data.
-
-    Convenience endpoint — same shape as `/api/team` `.roster[]`. Used by
-    components that only need the player list and want to avoid the
-    larger team payload (stats, schedule cross-refs, etc.).
-    """
+def _read_team_roster_payload() -> dict:
+    """Shared helper for /api/roster and /api/players — returns roster + meta."""
     try:
         team_files = [
             SHARKS_DIR / "team_enriched.json",
@@ -3198,16 +3192,48 @@ def handle_roster():
                 if isinstance(team, dict):
                     break
         if not isinstance(team, dict):
-            return jsonify({"roster": [], "last_updated": None})
-        roster = team.get("roster", []) or []
-        return jsonify({
-            "roster": roster,
+            return {"roster": [], "last_updated": None}
+        return {
+            "roster": team.get("roster", []) or [],
             "team_name": team.get("team_name"),
             "last_updated": team.get("last_updated"),
-        })
+        }
     except Exception as e:
-        logging.error("[Roster] route failed: %s", e, exc_info=True)
-        return jsonify({"roster": [], "last_updated": None})
+        logging.error("[Roster helper] failed: %s", e, exc_info=True)
+        return {"roster": [], "last_updated": None}
+
+
+@app.route('/api/roster', methods=['GET'])
+def handle_roster():
+    """Return just the roster array from team data.
+
+    Convenience endpoint — same shape as `/api/team` `.roster[]`. Used by
+    components that only need the player list and want to avoid the
+    larger team payload (stats, schedule cross-refs, etc.).
+    """
+    return jsonify(_read_team_roster_payload())
+
+
+@app.route('/api/players', methods=['GET'])
+def handle_players():
+    """Backwards-compat alias for /api/roster.
+
+    Older builds (and stale-cached service workers) call /api/players. Rather
+    than 404 and log noise into rate limiters, return the same payload as
+    /api/roster so the legacy client can continue functioning during a
+    rolling deploy.
+    """
+    return jsonify(_read_team_roster_payload())
+
+
+@app.route('/api/announcer/players', methods=['GET'])
+def handle_announcer_players_alias():
+    """Backwards-compat alias for /api/announcer/roster.
+
+    Some older builds called /api/announcer/players. Forward to the same
+    handler so a stale-cached client doesn't 404 during deploy churn.
+    """
+    return handle_announcer_roster()
 
 
 @app.route('/api/borrowed-player', methods=['POST'])

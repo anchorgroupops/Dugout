@@ -26,11 +26,32 @@ export default defineConfig(({ mode }) => ({
       injectRegister: 'script-defer',
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg'],
       workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
         cleanupOutdatedCaches: true,
         clientsClaim: true,
         skipWaiting: true,
+        // When a precached JS/CSS chunk fetch fails (404/503 — usually a stale
+        // hash served from disk cache after a deploy), fall back to fetching
+        // index.html. The page reload in main.jsx will then pull the fresh
+        // manifest with the current hashes.
+        navigateFallback: '/index.html',
         runtimeCaching: [
+          {
+            // JS/CSS chunks: NetworkFirst with 3s timeout. If network responds
+            // (even with 404), we trust it over our cached copy. This prevents
+            // the SW from serving a stale hash that the server has already
+            // garbage-collected, which causes 503/404 cascades on deploy.
+            urlPattern: ({ url, request }) =>
+              (request.destination === 'script' || request.destination === 'style') &&
+              /\/assets\/.+\.(js|css)$/.test(url.pathname),
+            handler: 'NetworkFirst',
+            options: {
+              cacheName: 'js-chunks',
+              networkTimeoutSeconds: 3,
+              expiration: { maxEntries: 200, maxAgeSeconds: 7 * 24 * 60 * 60 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
           {
             // Cache static assets (fonts, images) with CacheFirst strategy
             urlPattern: ({ request }) => request.destination === 'image' || request.destination === 'font',
