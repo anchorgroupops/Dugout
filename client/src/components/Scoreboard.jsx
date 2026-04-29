@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Radio, Home, Plane, Clock, Trophy, RefreshCw, ExternalLink, Shield, AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react';
+import { Radio, Home, Plane, Clock, Trophy, RefreshCw, ExternalLink, Shield, AlertTriangle, ChevronDown, ChevronUp, Sun, Eye } from 'lucide-react';
 import { formatDateMMDDYYYY } from '../utils/formatDate';
 import { PlayerName } from './StatTooltip';
 
@@ -25,39 +25,60 @@ const InningDiamond = ({ half }) => {
   );
 };
 
-const LivePulse = () => (
+const LivePulse = ({ outdoor = false }) => (
   <span style={{
-    display: 'inline-flex', alignItems: 'center', gap: '0.35rem',
-    background: 'rgba(218, 54, 51, 0.15)', color: '#ff4444',
-    padding: '3px 10px', borderRadius: '999px', fontSize: 'var(--text-xs)',
-    fontWeight: '800', letterSpacing: '1px', border: '1px solid rgba(218, 54, 51, 0.3)',
+    display: 'inline-flex', alignItems: 'center', gap: outdoor ? '0.5rem' : '0.35rem',
+    background: outdoor ? '#dc2626' : 'rgba(218, 54, 51, 0.15)',
+    color: outdoor ? '#ffffff' : '#ff4444',
+    padding: outdoor ? '6px 16px' : '3px 10px',
+    borderRadius: '999px',
+    fontSize: outdoor ? '0.95rem' : 'var(--text-xs)',
+    fontWeight: '900', letterSpacing: outdoor ? '2px' : '1px',
+    border: outdoor ? '2px solid #ffffff' : '1px solid rgba(218, 54, 51, 0.3)',
+    boxShadow: outdoor ? '0 0 0 3px rgba(220,38,38,0.45)' : 'none',
   }}>
     <span className="live-pulse-dot" />
     LIVE
   </span>
 );
 
-const ScoreBox = ({ label, score, isUs, compact = false }) => (
-  <div style={{
-    display: 'flex', flexDirection: 'column', alignItems: 'center',
-    padding: compact ? '0.4rem 0.75rem' : '0.75rem 1.5rem', borderRadius: compact ? '8px' : '12px',
-    background: isUs ? 'rgba(4, 101, 104, 0.12)' : 'rgba(255,255,255,0.04)',
-    border: `2px solid ${isUs ? 'rgba(4, 101, 104, 0.4)' : 'rgba(255,255,255,0.08)'}`,
-    minWidth: compact ? '70px' : '100px', transition: 'all 0.3s ease',
-    flex: compact ? 1 : undefined, maxWidth: compact ? '120px' : undefined,
-  }}>
-    <span style={{
-      fontSize: compact ? '0.6rem' : 'var(--text-xs)', fontWeight: '700', color: 'var(--text-muted)',
-      textTransform: 'uppercase', letterSpacing: '1px', marginBottom: compact ? '0.1rem' : '0.25rem',
-      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%',
-    }}>{label}</span>
-    <span style={{
-      fontSize: compact ? 'clamp(1.5rem, 6vw, 2.5rem)' : 'clamp(2rem, 8vw, 3.5rem)', fontWeight: '900',
-      color: isUs ? 'var(--primary-color)' : 'var(--text-main)',
-      lineHeight: 1, fontVariantNumeric: 'tabular-nums',
-    }}>{score ?? '-'}</span>
-  </div>
-);
+const ScoreBox = ({ label, score, isUs, compact = false, outdoor = false }) => {
+  // Outdoor: solid panel backgrounds and pure-white scores so they're legible
+  // in direct sunlight. Indoor: keep the original glass aesthetic.
+  const bg = outdoor
+    ? (isUs ? '#0e3f43' : '#1a2540')
+    : (isUs ? 'rgba(4, 101, 104, 0.12)' : 'rgba(255,255,255,0.04)');
+  const border = outdoor
+    ? `3px solid ${isUs ? '#82cbc3' : '#cfd9e6'}`
+    : `2px solid ${isUs ? 'rgba(4, 101, 104, 0.4)' : 'rgba(255,255,255,0.08)'}`;
+  const labelColor = outdoor ? '#ffffff' : 'var(--text-muted)';
+  const scoreColor = outdoor
+    ? '#ffffff'
+    : (isUs ? 'var(--primary-color)' : 'var(--text-main)');
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column', alignItems: 'center',
+      padding: compact ? '0.4rem 0.75rem' : '0.75rem 1.5rem', borderRadius: compact ? '8px' : '12px',
+      background: bg, border,
+      minWidth: compact ? '70px' : '100px', transition: 'all 0.3s ease',
+      flex: compact ? 1 : undefined, maxWidth: compact ? '120px' : undefined,
+      boxShadow: outdoor ? '0 4px 12px rgba(0,0,0,0.45)' : 'none',
+    }}>
+      <span style={{
+        fontSize: compact ? '0.6rem' : 'var(--text-xs)', fontWeight: '800',
+        color: labelColor,
+        textTransform: 'uppercase', letterSpacing: '1px', marginBottom: compact ? '0.1rem' : '0.25rem',
+        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%',
+      }}>{label}</span>
+      <span style={{
+        fontSize: compact ? 'clamp(1.5rem, 6vw, 2.5rem)' : 'clamp(2.2rem, 9vw, 4rem)', fontWeight: '900',
+        color: scoreColor,
+        lineHeight: 1, fontVariantNumeric: 'tabular-nums',
+        textShadow: outdoor ? '0 2px 4px rgba(0,0,0,0.55)' : 'none',
+      }}>{score ?? '-'}</span>
+    </div>
+  );
+};
 
 const BatterRow = ({ player, idx, compact = false }) => {
   const b = player.batting || player;
@@ -86,41 +107,75 @@ const BatterRow = ({ player, idx, compact = false }) => {
 };
 
 
-// ─── Mini Spray Chart (compact SVG for live view) ─────────────────────
+// ─── Spray Charts (compact + outdoor-readable) ─────────────────────
 const ZONE_POLYS = [
-  { id: 'lf',  points: '10,10 55,10 70,80 10,90' },
-  { id: 'lc',  points: '55,10 100,5 100,70 70,80' },
-  { id: 'cf',  points: '100,5 145,10 130,70 100,70' },
-  { id: 'rc',  points: '145,10 190,10 190,80 130,70' },
-  { id: 'rf',  points: '190,10 190,90 130,80 145,10' },
-  { id: 'if3', points: '10,90 70,80 75,130 40,140' },
-  { id: 'ifm', points: '70,80 130,80 120,130 80,130' },
-  { id: 'if1', points: '130,80 190,90 160,140 120,130' },
+  { id: 'lf',  label: 'LF',  points: '10,10 55,10 70,80 10,90',      cx: 38,  cy: 50 },
+  { id: 'lc',  label: 'LC',  points: '55,10 100,5 100,70 70,80',     cx: 80,  cy: 42 },
+  { id: 'cf',  label: 'CF',  points: '100,5 145,10 130,70 100,70',   cx: 120, cy: 40 },
+  { id: 'rc',  label: 'RC',  points: '145,10 190,10 190,80 130,70',  cx: 162, cy: 42 },
+  { id: 'rf',  label: 'RF',  points: '190,10 190,90 130,80 145,10',  cx: 165, cy: 50 },
+  { id: 'if3', label: '3B',  points: '10,90 70,80 75,130 40,140',    cx: 45,  cy: 110 },
+  { id: 'ifm', label: 'SS',  points: '70,80 130,80 120,130 80,130',  cx: 100, cy: 105 },
+  { id: 'if1', label: '1B',  points: '130,80 190,90 160,140 120,130', cx: 153, cy: 110 },
 ];
 
-const MiniSprayChart = ({ zones, size = 100 }) => {
+const MiniSprayChart = ({ zones, size = 100, outdoor = false }) => {
   if (!zones) return null;
+  // Field background: solid dark green outdoors; subtle indoors.
+  // Zone fill: heat ramp (cool → hot) with much higher floor opacity outdoors
+  // so weak zones are still visible against bright sunlight.
+  const fieldBg = outdoor ? '#0f2d18' : 'rgba(15,45,24,0.55)';
+  const diamondStroke = outdoor ? 'rgba(255,255,255,0.95)' : 'rgba(255,255,255,0.55)';
+  const zoneStroke = outdoor ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.30)';
+  const labelFill = outdoor ? '#ffffff' : 'rgba(255,255,255,0.75)';
+  const minFill = outdoor ? 0.42 : 0.20;
+  const maxBoost = outdoor ? 0.55 : 0.70;
+  const showLabels = size >= 140;
   return (
     <svg width={size} height={size * 0.85} viewBox="0 0 200 170" style={{ display: 'block' }}>
-      <rect width="200" height="170" fill="rgba(0,80,0,0.15)" rx="8" />
+      <rect width="200" height="170" fill={fieldBg} rx="8" />
       {ZONE_POLYS.map(z => {
-        const weight = zones[z.id] || 0;
-        const r = Math.round(255 * weight);
-        const g = Math.round(60 * (1 - weight));
-        const opacity = 0.15 + weight * 0.65;
+        const weight = Math.max(0, Math.min(1, zones[z.id] || 0));
+        // Heat ramp: green (#2e8a4d) → yellow (#facc15) → red (#dc2626)
+        let r, g, b;
+        if (weight < 0.5) {
+          const t = weight * 2;
+          r = Math.round(46 + (250 - 46) * t);
+          g = Math.round(138 + (204 - 138) * t);
+          b = Math.round(77 + (21 - 77) * t);
+        } else {
+          const t = (weight - 0.5) * 2;
+          r = Math.round(250 + (220 - 250) * t);
+          g = Math.round(204 + (38 - 204) * t);
+          b = Math.round(21 + (38 - 21) * t);
+        }
+        const opacity = minFill + weight * maxBoost;
         return (
-          <polygon
-            key={z.id}
-            points={z.points}
-            fill={`rgba(${r}, ${g}, 30, ${opacity})`}
-            stroke="rgba(255,255,255,0.15)"
-            strokeWidth="1"
-          />
+          <g key={z.id}>
+            <polygon
+              points={z.points}
+              fill={`rgba(${r}, ${g}, ${b}, ${opacity.toFixed(2)})`}
+              stroke={zoneStroke}
+              strokeWidth={outdoor ? 1.5 : 1}
+            />
+            {showLabels && (
+              <text
+                x={z.cx} y={z.cy} fill={labelFill}
+                fontSize="11" fontWeight="800" textAnchor="middle"
+                style={{ paintOrder: 'stroke', stroke: 'rgba(0,0,0,0.6)', strokeWidth: 2 }}
+              >
+                {z.label}
+              </text>
+            )}
+          </g>
         );
       })}
       {/* Diamond */}
-      <polygon points="100,155 115,140 100,125 85,140" fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth="1.5" />
-      <circle cx="100" cy="155" r="3" fill="var(--primary-color)" opacity="0.8" />
+      <polygon points="100,155 115,140 100,125 85,140"
+               fill={outdoor ? 'rgba(0,0,0,0.45)' : 'none'}
+               stroke={diamondStroke} strokeWidth={outdoor ? 2.2 : 1.5} />
+      <circle cx="100" cy="155" r={outdoor ? 4 : 3}
+              fill={outdoor ? '#82cbc3' : 'var(--primary-color)'} />
     </svg>
   );
 };
@@ -193,6 +248,195 @@ const ScoutingCard = ({ player, expanded, onToggle, compact = false }) => {
           </div>
         </div>
       )}
+    </div>
+  );
+};
+
+// ─── At-Bat Panel — current + on-deck batters with high-contrast spray charts ──
+//
+// This is the PRIMARY in-game artifact: large enough to read from the dugout
+// fence in direct sun. Shows side-by-side cards for the current batter and
+// the on-deck batter, each with a 200px spray chart, danger badge, key
+// slash-line stats, and threat tags. Renders during live play OR pre-game
+// once we have an opponent batting order — so coaches can scout warm-ups too.
+const BatterScoutCard = ({ player, role, outdoor, isMobile }) => {
+  if (!player) return null;
+  const fmtAvg = (v) => v != null ? (v < 1 ? `.${String(v).split('.')[1] || '000'}` : v.toFixed(3)) : '—';
+  const danger = player.danger ?? 0;
+  const dangerColor = danger >= 70 ? '#ff4444' : danger >= 40 ? '#facc15' : '#2ecc71';
+  const isAtBat = role === 'AT BAT';
+
+  // Outdoor mode: solid backgrounds, white text, thicker borders, larger fonts.
+  const cardBg = outdoor ? '#0a1628' : 'rgba(0,0,0,0.35)';
+  const cardBorder = outdoor
+    ? (isAtBat ? '3px solid #ff4444' : '3px solid #82cbc3')
+    : (isAtBat ? '2px solid rgba(255,68,68,0.55)' : '2px solid rgba(130,203,195,0.45)');
+  const roleBg = outdoor
+    ? (isAtBat ? '#ff4444' : '#82cbc3')
+    : (isAtBat ? 'rgba(255,68,68,0.20)' : 'rgba(130,203,195,0.18)');
+  const roleColor = outdoor ? '#000000' : (isAtBat ? '#ff4444' : '#82cbc3');
+  const nameColor = outdoor ? '#ffffff' : 'var(--text-main)';
+  const labelColor = outdoor ? '#cfd9e6' : 'var(--text-muted)';
+  const statValueColor = outdoor ? '#ffffff' : 'var(--text-main)';
+
+  return (
+    <div style={{
+      background: cardBg, border: cardBorder, borderRadius: '12px',
+      padding: isMobile ? '0.6rem' : '0.85rem',
+      display: 'flex', flexDirection: 'column', gap: '0.5rem',
+      boxShadow: outdoor ? '0 4px 14px rgba(0,0,0,0.55)' : 'none',
+    }}>
+      {/* Role chip */}
+      <div style={{
+        display: 'inline-flex', alignSelf: 'flex-start',
+        background: roleBg, color: roleColor,
+        padding: outdoor ? '4px 12px' : '3px 10px',
+        borderRadius: '999px',
+        fontSize: outdoor ? '0.85rem' : '0.7rem',
+        fontWeight: '900', letterSpacing: '1.5px',
+      }}>
+        {role}
+      </div>
+
+      {/* Name + jersey */}
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.4rem', flexWrap: 'wrap' }}>
+        <span style={{
+          fontSize: outdoor ? 'clamp(1.4rem, 5vw, 2rem)' : 'clamp(1.05rem, 4vw, 1.4rem)',
+          fontWeight: '900', color: nameColor, lineHeight: 1.1,
+        }}>
+          {player.name || 'Unknown'}
+        </span>
+        {player.number && (
+          <span style={{
+            fontSize: outdoor ? '1.5rem' : '1.05rem', fontWeight: '900',
+            color: outdoor ? '#82cbc3' : 'var(--primary-color)',
+          }}>
+            #{player.number}
+          </span>
+        )}
+      </div>
+
+      {/* Spray chart + stats column */}
+      <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'flex-start' }}>
+        <div>
+          <MiniSprayChart
+            zones={player.zones}
+            size={isMobile ? 160 : 200}
+            outdoor={outdoor}
+          />
+        </div>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.4rem', minWidth: 0 }}>
+          {/* Danger pill */}
+          <div style={{
+            display: 'inline-flex', alignItems: 'center', gap: '0.3rem', alignSelf: 'flex-start',
+            background: outdoor ? dangerColor : `${dangerColor}22`,
+            color: outdoor ? '#000000' : dangerColor,
+            padding: outdoor ? '4px 12px' : '3px 10px',
+            borderRadius: '6px',
+            fontSize: outdoor ? '0.85rem' : '0.7rem',
+            fontWeight: '900', letterSpacing: '0.5px',
+            border: outdoor ? 'none' : `1px solid ${dangerColor}55`,
+          }}>
+            {danger >= 70 && <AlertTriangle size={outdoor ? 14 : 10} />}
+            {danger >= 70 ? 'HIGH' : danger >= 40 ? 'MED' : 'LOW'} {danger}
+          </div>
+
+          {/* Slash line */}
+          <div style={{
+            display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.25rem',
+            fontSize: outdoor ? '0.95rem' : '0.7rem',
+          }}>
+            {[
+              ['AVG', fmtAvg(player.avg)],
+              ['SLG', fmtAvg(player.slg)],
+              ['OBP', fmtAvg(player.obp)],
+              ['HR',  player.hr ?? '—'],
+              ['SB',  player.sb ?? '—'],
+              ['SO',  player.so ?? '—'],
+            ].map(([k, v]) => (
+              <div key={k} style={{
+                display: 'flex', flexDirection: 'column', alignItems: 'center',
+                background: outdoor ? 'rgba(255,255,255,0.06)' : 'transparent',
+                padding: outdoor ? '4px 6px' : '0',
+                borderRadius: '4px',
+              }}>
+                <span style={{ color: labelColor, fontSize: outdoor ? '0.65rem' : '0.55rem', fontWeight: '700', letterSpacing: '0.5px' }}>{k}</span>
+                <span style={{ color: statValueColor, fontWeight: '900', fontVariantNumeric: 'tabular-nums' }}>{v}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* Threat tags */}
+          {player.tags?.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem', marginTop: '0.1rem' }}>
+              {player.tags.slice(0, 3).map(t => (
+                <span key={t} style={{
+                  background: outdoor ? '#82cbc3' : 'rgba(130,203,195,0.15)',
+                  color: outdoor ? '#000000' : '#82cbc3',
+                  padding: outdoor ? '2px 8px' : '1px 6px',
+                  borderRadius: '3px',
+                  fontSize: outdoor ? '0.7rem' : '0.6rem',
+                  fontWeight: '800',
+                }}>{t}</span>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const AtBatPanel = ({ scouting, livePlay, opponentBatting, outdoor, isMobile }) => {
+  if (!scouting?.has_data) return null;
+  const players = scouting.players || [];
+  if (players.length === 0) return null;
+
+  // Identify current batter — match by jersey number first, then name.
+  const cb = livePlay?.current_batter || {};
+  const cbNum = String(cb.number || '').trim();
+  const cbName = (cb.name || '').trim().toLowerCase();
+  let currentIdx = -1;
+  if (cbNum || cbName) {
+    currentIdx = players.findIndex(p =>
+      (cbNum && String(p.number) === cbNum) ||
+      (cbName && (p.name || '').toLowerCase() === cbName)
+    );
+  }
+
+  // Identify next batter — prefer GC's `live_play.next_batter`, else use the
+  // scouting players array (which mirrors box-score order).
+  const nb = livePlay?.next_batter || null;
+  let nextIdx = -1;
+  if (nb && (nb.number || nb.name)) {
+    const nbNum = String(nb.number || '').trim();
+    const nbName = (nb.name || '').trim().toLowerCase();
+    nextIdx = players.findIndex(p =>
+      (nbNum && String(p.number) === nbNum) ||
+      (nbName && (p.name || '').toLowerCase() === nbName)
+    );
+  }
+  if (nextIdx < 0 && currentIdx >= 0) {
+    nextIdx = (currentIdx + 1) < players.length ? currentIdx + 1 : -1;
+  }
+  // If we still don't know the current batter, use the top of the order so
+  // the panel is never empty when scouting data exists.
+  if (currentIdx < 0) currentIdx = 0;
+  if (nextIdx < 0) nextIdx = currentIdx + 1 < players.length ? currentIdx + 1 : -1;
+
+  const current = players[currentIdx] || null;
+  const onDeck = nextIdx >= 0 ? players[nextIdx] : null;
+
+  return (
+    <div style={{ marginTop: '0.75rem', marginBottom: '0.5rem' }}>
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr',
+        gap: '0.6rem',
+      }}>
+        <BatterScoutCard player={current} role="AT BAT"  outdoor={outdoor} isMobile={isMobile} />
+        <BatterScoutCard player={onDeck}  role="ON DECK" outdoor={outdoor} isMobile={isMobile} />
+      </div>
     </div>
   );
 };
@@ -311,6 +555,19 @@ const Scoreboard = ({ isMobile = false, isLandscape = false, team, schedule }) =
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [lastUpdated, setLastUpdated] = useState(null);
+  // Outdoor mode: solid bright backgrounds, white text, larger fonts so the
+  // dugout coach can read this at noon in direct sun.
+  const [outdoor, setOutdoor] = useState(() => {
+    try { return window.localStorage.getItem('sharks_scoreboard_outdoor') === '1'; }
+    catch { return false; }
+  });
+  const toggleOutdoor = useCallback(() => {
+    setOutdoor(prev => {
+      const next = !prev;
+      try { window.localStorage.setItem('sharks_scoreboard_outdoor', next ? '1' : '0'); } catch { /* ignore */ }
+      return next;
+    });
+  }, []);
   const timerRef = useRef(null);
   const mountedRef = useRef(true);
 
@@ -480,7 +737,7 @@ const Scoreboard = ({ isMobile = false, isLandscape = false, team, schedule }) =
         <h2 className="view-title" style={{ margin: 0 }}>
           <Radio size={isMobile ? 20 : 24} color={isLive ? '#ff4444' : 'var(--primary-color)'} /> Scoreboard
         </h2>
-        {isLive && <LivePulse />}
+        {isLive && <LivePulse outdoor={outdoor} />}
         {isFinal && (
           <span style={{
             background: 'rgba(255,255,255,0.08)', color: 'var(--text-muted)',
@@ -489,6 +746,26 @@ const Scoreboard = ({ isMobile = false, isLandscape = false, team, schedule }) =
           }}>FINAL</span>
         )}
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          {/* Outdoor / bright-light mode toggle. Persists in localStorage so
+              the coach doesn't have to re-enable it every time the app reopens. */}
+          <button
+            onClick={toggleOutdoor}
+            title={outdoor ? 'Disable bright-light mode' : 'Enable bright-light mode (high contrast for outdoor use)'}
+            aria-pressed={outdoor}
+            aria-label="Toggle bright-light mode"
+            style={{
+              display: 'flex', alignItems: 'center', gap: '0.3rem',
+              background: outdoor ? '#facc15' : 'var(--primary-glow)',
+              color: outdoor ? '#000000' : 'var(--primary-color)',
+              border: outdoor ? '2px solid #facc15' : '1px solid rgba(4, 101, 104, 0.27)',
+              padding: '0.35rem 0.65rem', borderRadius: '6px',
+              fontSize: 'var(--text-xs)', fontWeight: '700',
+              cursor: 'pointer', minHeight: 'var(--touch-min)', fontFamily: 'inherit',
+            }}
+          >
+            {outdoor ? <Sun size={14} /> : <Eye size={14} />}
+            {outdoor ? 'Bright' : 'Dim'}
+          </button>
           {data.gc_game_id && (
             <a
               href={`https://web.gc.com/teams/${team?.gc_team_id || 'NuGgx6WvP7TO'}/${team?.gc_season_slug || '2026-spring-sharks'}/schedule/${data.gc_game_id}/plays`}
@@ -557,6 +834,7 @@ const Scoreboard = ({ isMobile = false, isLandscape = false, team, schedule }) =
             score={data.sharks_score}
             isUs={true}
             compact={isLandscape}
+            outdoor={outdoor}
           />
           <div style={{
             display: 'flex', flexDirection: 'column', alignItems: 'center',
@@ -582,6 +860,7 @@ const Scoreboard = ({ isMobile = false, isLandscape = false, team, schedule }) =
             score={data.opponent_score}
             isUs={false}
             compact={isLandscape}
+            outdoor={outdoor}
           />
         </div>
 
@@ -646,6 +925,17 @@ const Scoreboard = ({ isMobile = false, isLandscape = false, team, schedule }) =
             </table>
           </div>
         )}
+
+        {/* AT BAT / ON DECK — large high-contrast spray-chart cards.
+            Renders for both live games (with current batter from GC events)
+            and pre-game scouting (with default top-of-order batters). */}
+        <AtBatPanel
+          scouting={data.opponent_scouting}
+          livePlay={data.live_play}
+          opponentBatting={data.opponent_batting}
+          outdoor={outdoor}
+          isMobile={isMobile}
+        />
 
         {/* Live Play + Opponent Scouting */}
         {isLive && <LivePlayPanel livePlay={data.live_play} />}

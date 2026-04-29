@@ -2214,6 +2214,35 @@ def handle_scoreboard():
         except Exception as e:
             logging.debug("[Scoreboard] Live events fetch failed: %s", e)
 
+    # 8. Derive next_batter from the opponent batting order when the events
+    # API didn't supply one. This is the lineup we have on disk (box-score
+    # order) — not perfect when subs come in mid-game, but a solid fallback
+    # so the PWA can ALWAYS show "AT BAT / ON DECK" while live.
+    try:
+        live_play = result.get("live_play") or {}
+        current_batter = (live_play.get("current_batter") or {})
+        if not live_play.get("next_batter") and current_batter:
+            opp_batting = result.get("opponent_batting") or []
+            if isinstance(opp_batting, list) and opp_batting:
+                cur_num = str(current_batter.get("number", "")).strip()
+                cur_name = (current_batter.get("name") or "").strip().lower()
+                idx = -1
+                for i, b in enumerate(opp_batting):
+                    bn = str(b.get("number", "")).strip()
+                    nm = (b.get("name") or b.get("player") or "").strip().lower()
+                    if (cur_num and bn == cur_num) or (cur_name and nm == cur_name):
+                        idx = i
+                        break
+                if idx >= 0 and idx + 1 < len(opp_batting):
+                    nxt = opp_batting[idx + 1]
+                    nxt_name = nxt.get("name") or nxt.get("player") or ""
+                    nxt_num = str(nxt.get("number", "") or "")
+                    if nxt_name or nxt_num:
+                        live_play["next_batter"] = {"name": nxt_name, "number": nxt_num}
+                        result["live_play"] = live_play
+    except Exception as e:
+        logging.debug("[Scoreboard] next_batter derivation failed: %s", e)
+
     return jsonify(result)
 
 
@@ -2404,7 +2433,7 @@ def _build_opponent_scouting(opp_slug: str, live_batting: list) -> dict:
 
 def _fetch_gc_live_events(gc_game_id: str) -> dict | None:
     """Attempt to fetch live play-by-play from GC events API.
-    Returns current batter, runners, outs, last play — or None on failure."""
+    Returns current batter, on-deck batter, runners, outs, last play — or None on failure."""
     gc_api_base = "https://api.team-manager.gc.com"
 
     try:
@@ -2419,14 +2448,15 @@ def _fetch_gc_live_events(gc_game_id: str) -> dict | None:
         if not isinstance(events, list) or not events:
             return None
 
-        # Parse the most recent events to determine game state
-        last_event = events[-1] if events else {}
         current_batter = None
+        next_batter = None
         runners = []
         outs = 0
         last_play = ""
 
-        # Walk backwards through events to find current at-bat and game state
+        # Walk backwards through events to find current at-bat and game state.
+        # Some streams expose `on_deck`/`next_batter` on plate-appearance events;
+        # capture either alongside `current_batter`.
         for ev in reversed(events):
             ev_type = str(ev.get("type", "")).lower()
             ev_data = ev.get("data") or ev
@@ -2437,6 +2467,15 @@ def _fetch_gc_live_events(gc_game_id: str) -> dict | None:
                     "name": batter_info.get("name", ""),
                     "number": str(batter_info.get("number", "")),
                 }
+                # Some GC streams attach the on-deck batter to the same event.
+                on_deck_info = (ev_data.get("on_deck")
+                                or ev_data.get("next_batter")
+                                or ev_data.get("on_deck_batter") or {})
+                if isinstance(on_deck_info, dict) and (on_deck_info.get("name") or on_deck_info.get("number")):
+                    next_batter = {
+                        "name": on_deck_info.get("name", ""),
+                        "number": str(on_deck_info.get("number", "")),
+                    }
 
             if ev_data.get("outs") is not None:
                 outs = int(ev_data.get("outs", 0))
@@ -2447,7 +2486,7 @@ def _fetch_gc_live_events(gc_game_id: str) -> dict | None:
             if not last_play and ev_data.get("description"):
                 last_play = str(ev_data["description"])[:200]
 
-            if current_batter and last_play:
+            if current_batter and last_play and next_batter:
                 break
 
         if not current_batter and not last_play:
@@ -2455,6 +2494,7 @@ def _fetch_gc_live_events(gc_game_id: str) -> dict | None:
 
         return {
             "current_batter": current_batter,
+            "next_batter": next_batter,
             "outs": outs,
             "runners": runners,
             "last_play": last_play,
