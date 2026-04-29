@@ -1022,6 +1022,12 @@ function numToWord(num) {
 
 function useWorkerStatus() {
   const [workerStatus, setWorkerStatus] = useState(null);
+  // Permanently-stopped flag is exposed so the badge can render a manual
+  // "Refresh" button and the consumer can call restart() to resume polling.
+  const [stopped, setStopped] = useState(false);
+  // Increment to force the polling effect to re-run from scratch (used by
+  // the manual refresh button after the 3-strike permanent stop).
+  const [resetTick, setResetTick] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -1032,6 +1038,7 @@ function useWorkerStatus() {
     const MAX_CONSECUTIVE_5XX = 3;
     let consecutive5xx = 0;
     let stoppedPermanently = false;
+    setStopped(false);
 
     const schedule = (ms) => {
       if (cancelled || stoppedPermanently) return;
@@ -1042,13 +1049,17 @@ function useWorkerStatus() {
       if (cancelled || stoppedPermanently) return;
 
       // Honor global 429 pause window — skip this tick, retry later.
+      let apiClient = null;
       try {
-        const { isPollingPaused } = await import('../utils/apiClient');
-        if (isPollingPaused()) {
-          schedule(Math.min(MAX_INTERVAL, 10_000));
+        apiClient = await import('../utils/apiClient');
+        if (apiClient.isPollingPaused()) {
+          // Resume polling at the soonest a couple seconds after the pause
+          // expires; otherwise keep the normal cadence.
+          const remaining = Math.max(2_000, apiClient.getPausedUntil() - Date.now() + 1_000);
+          schedule(Math.min(MAX_INTERVAL, remaining));
           return;
         }
-      } catch { /* ignore */ }
+      } catch { /* apiClient unavailable — degrade gracefully */ }
 
       try {
         const res = await fetch('/api/announcer/worker-status');
@@ -1061,7 +1072,14 @@ function useWorkerStatus() {
           }
           consecutive5xx = 0;
           interval = MIN_INTERVAL;
-        } else if (res.status >= 500) {
+        } else if (res.status === 429) {
+          // 429 is the canary for nginx-level rate limiting from the
+          // entire app. Pause every poller for 60s, not just this one.
+          if (apiClient && typeof apiClient.pausePollingFor === 'function') {
+            apiClient.pausePollingFor(60_000);
+          }
+          interval = Math.min(MAX_INTERVAL, interval * 2);
+        } else if (res.status >= 500 || res.status >= 400) {
           consecutive5xx += 1;
           if (consecutive5xx >= MAX_CONSECUTIVE_5XX) {
             stoppedPermanently = true;
@@ -1071,13 +1089,13 @@ function useWorkerStatus() {
                 primary_worker: { id: 'mac', status: 'OFFLINE', last_heartbeat: null, queue_depth: 0 },
                 failover_worker: { id: 'Pi-5-Edge', status: 'READY' },
                 current_mode: 'OFFLINE',
+                stopped: true,
+                error: 'worker unavailable',
               });
+              setStopped(true);
             }
             return; // do not reschedule
           }
-          interval = Math.min(MAX_INTERVAL, interval * 2);
-        } else if (res.status === 429) {
-          // Global pause already engaged by apiFetch; here we just back off.
           interval = Math.min(MAX_INTERVAL, interval * 2);
         }
       } catch {
@@ -1093,9 +1111,14 @@ function useWorkerStatus() {
       cancelled = true;
       if (timeoutId) clearTimeout(timeoutId);
     };
+  }, [resetTick]);
+
+  const restart = useCallback(() => {
+    setStopped(false);
+    setResetTick(t => t + 1);
   }, []);
 
-  return workerStatus;
+  return { workerStatus, stopped, restart };
 }
 
 function WizardModal({ onClose, roster, onAddSong }) {
@@ -1382,7 +1405,7 @@ export default function Announcer({ lineups }) {
   const pollRef = useRef(null);
   const renderToRef = useRef(null);
   const pollStopToRef = useRef(null);
-  const workerStatus = useWorkerStatus();
+  const { workerStatus, stopped: workerStopped, restart: restartWorkerPoll } = useWorkerStatus();
 
   const fetchRoster = useCallback(async () => {
     try {
@@ -1548,6 +1571,20 @@ export default function Announcer({ lineups }) {
         </h2>
         <div className="announcer-header-actions">
           <WorkerBadge workerStatus={workerStatus} />
+          {workerStopped && (
+            <button
+              onClick={restartWorkerPoll}
+              title="Worker offline — tap to retry"
+              aria-label="Retry worker connection"
+              className="announcer-btn announcer-btn-secondary"
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: '0.3rem',
+                padding: '0.35rem 0.55rem', fontSize: '0.7rem', fontWeight: '700',
+              }}
+            >
+              <RefreshCw size={12} /> Retry
+            </button>
+          )}
           <button onClick={() => setView('nowplaying')} className="announcer-btn announcer-btn-accent">
             <Play size={14} /> Now Playing
           </button>

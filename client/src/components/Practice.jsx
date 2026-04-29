@@ -1,9 +1,24 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Dumbbell, RefreshCw, Users, Target } from 'lucide-react';
+import { Dumbbell, RefreshCw, Users, Target, AlertTriangle } from 'lucide-react';
 import { TipBadge } from './StatTooltip';
 import { formatDateMMDDYYYY } from '../utils/formatDate';
 import OpponentFieldMap from './OpponentFieldMap';
-import { fetchSharedJson } from '../utils/apiClient';
+import { fetchSharedJson, getLocalCachedJson, setLocalCachedJson } from '../utils/apiClient';
+
+const formatRelativeAge = (iso) => {
+  if (!iso) return 'unknown';
+  try {
+    const ms = Date.now() - new Date(iso).getTime();
+    if (!isFinite(ms) || ms < 0) return 'just now';
+    const m = Math.round(ms / 60000);
+    if (m < 1) return 'just now';
+    if (m < 60) return `${m}m ago`;
+    const h = Math.round(m / 60);
+    if (h < 24) return `${h}h ago`;
+    const d = Math.round(h / 24);
+    return `${d}d ago`;
+  } catch { return 'unknown'; }
+};
 
 const sourceLabel = (src) => {
   if (src === 'practice_rsvp') return 'Current/next practice RSVP';
@@ -96,7 +111,15 @@ const SessionItem = ({ item, index }) => (
 );
 
 const Practice = ({ team, schedule, isMobile = false, isLandscape = false }) => {
-  const [insights, setInsights] = useState(null);
+  // Hydrate from localStorage so the priorities section has SOMETHING to show
+  // immediately (and stays populated when /api/practice-insights is down).
+  const initialCache = (() => {
+    const c = getLocalCachedJson('practice-insights');
+    return c ? c : null;
+  })();
+  const [insights, setInsights] = useState(initialCache?.value || null);
+  const [insightsFromCache, setInsightsFromCache] = useState(Boolean(initialCache));
+  const [insightsCacheAt, setInsightsCacheAt] = useState(initialCache?.savedAt || null);
   const [selected, setSelected] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -154,6 +177,15 @@ const Practice = ({ team, schedule, isMobile = false, isLandscape = false }) => 
       if (!res.ok) throw new Error(`practice insights status ${res.status}`);
       const data = await res.json();
       setInsights(data);
+      setInsightsFromCache(false);
+      setInsightsCacheAt(null);
+      // Persist to localStorage with never-downgrade semantics — only
+      // useful payloads (with `needs` or `recommended_plan`) are written.
+      const writable = data && (
+        (Array.isArray(data.needs) && data.needs.length > 0) ||
+        (Array.isArray(data.recommended_plan) && data.recommended_plan.length > 0)
+      );
+      if (writable) setLocalCachedJson('practice-insights', data);
       // On initial load, default to all core roster if available; otherwise use API default
       if (!initialLoaded) {
         const allPlayers = data.available_players?.length > 0
@@ -305,27 +337,59 @@ const Practice = ({ team, schedule, isMobile = false, isLandscape = false }) => 
         )}
       </div>
 
-      {/* Insights error: only show when /api/practice-insights itself failed.
-          Don't block the page — the player checklist above renders independently
-          from team data, so the user can still pick attendees while we retry. */}
-      {error && (
+      {/* Stale-cache banner — when we're showing cached insights because the
+          live fetch is failing. Sits ABOVE the cached content rather than
+          replacing it, so coaches still see priorities. */}
+      {insights && insightsFromCache && error && (
+        <div
+          onClick={() => fetchInsights()}
+          style={{
+            display: 'flex', alignItems: 'center', gap: '0.5rem',
+            marginBottom: 'var(--space-sm)', padding: '6px 10px', borderRadius: '6px',
+            background: 'rgba(168, 116, 33, 0.15)',
+            border: '1px solid rgba(168, 116, 33, 0.30)',
+            color: 'var(--warning, #facc15)',
+            fontSize: 'var(--text-xs)', fontWeight: '700', cursor: 'pointer',
+          }}
+        >
+          <AlertTriangle size={12} />
+          <span>Showing cached practice insights (last updated {formatRelativeAge(insightsCacheAt)}) — tap to retry</span>
+        </div>
+      )}
+
+      {/* Insights error — recoverable empty state. Shown only when the live
+          fetch failed AND there's no cached payload to fall back to. The
+          dashed border + "Tap to retry" affordance differentiates this from
+          a permanent missing-section. */}
+      {error && !insights && (
         <div
           className="glass-panel"
           onClick={() => fetchInsights()}
+          role="button"
+          tabIndex={0}
+          aria-label="Practice insights unavailable. Tap to retry."
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') fetchInsights(); }}
           style={{
             padding: 'var(--space-lg)', marginBottom: 'var(--space-md)', cursor: 'pointer',
-            display: 'flex', alignItems: 'center', gap: '0.75rem',
-            background: 'rgba(179, 74, 57, 0.12)', border: '1px solid rgba(179, 74, 57, 0.3)',
+            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem',
+            background: 'rgba(179, 74, 57, 0.08)',
+            border: '2px dashed rgba(179, 74, 57, 0.45)',
+            textAlign: 'center',
           }}
         >
-          <RefreshCw size={16} color="var(--danger)" />
-          <span style={{ color: 'var(--danger)', fontSize: 'var(--text-sm)', fontWeight: '600' }}>
-            Could not load practice insights. Tap to retry.
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <RefreshCw size={18} color="var(--danger)" />
+            <span style={{ color: 'var(--danger)', fontSize: 'var(--text-base)', fontWeight: '700' }}>
+              Practice insights unavailable
+            </span>
+          </div>
+          <span style={{ color: 'var(--text-muted)', fontSize: 'var(--text-xs)' }}>
+            No cached priorities on this device. Tap anywhere on this card to retry.
           </span>
         </div>
       )}
 
-      {/* Insights skeleton while loading */}
+      {/* Insights skeleton while loading and we don't yet have cache. */}
       {!insights && !error && loading && (
         <div className="glass-panel" style={{ padding: 'var(--space-lg)', marginBottom: 'var(--space-md)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', marginBottom: 'var(--space-sm)' }}>
@@ -334,7 +398,12 @@ const Practice = ({ team, schedule, isMobile = false, isLandscape = false }) => 
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(220px, 1fr))', gap: '0.5rem' }}>
             {[0, 1, 2].map(i => (
-              <div key={i} style={{ height: '110px', borderRadius: '8px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', opacity: 0.4 + (i % 3) * 0.15 }} />
+              <div key={i} className="practice-skeleton-shimmer" style={{
+                height: '110px', borderRadius: '8px',
+                background: 'rgba(255,255,255,0.03)',
+                border: '1px solid rgba(255,255,255,0.06)',
+                opacity: 0.4 + (i % 3) * 0.15,
+              }} />
             ))}
           </div>
         </div>

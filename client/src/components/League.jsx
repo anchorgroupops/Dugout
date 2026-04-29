@@ -1,20 +1,50 @@
 import React, { useState, useEffect } from 'react';
-import { Trophy, Users, ChevronDown, ChevronUp, Shield, AlertTriangle } from 'lucide-react';
+import { Trophy, Users, ChevronDown, ChevronUp, Shield, AlertTriangle, WifiOff } from 'lucide-react';
 import { formatDateMMDDYYYY } from '../utils/formatDate';
 import { TipBadge } from './StatTooltip';
-import { fetchSharedJson } from '../utils/apiClient';
+import { fetchSharedJson, fetchWithLocalCache } from '../utils/apiClient';
 
 const PCLL_RIVAL_SLUGS = ['peppers', 'riptide'];
 const isDivisionRival = (slug) => PCLL_RIVAL_SLUGS.some(r => String(slug || '').toLowerCase().includes(r));
 
+const formatRelativeAge = (iso) => {
+  if (!iso) return 'unknown';
+  try {
+    const ms = Date.now() - new Date(iso).getTime();
+    if (!isFinite(ms) || ms < 0) return 'just now';
+    const m = Math.round(ms / 60000);
+    if (m < 1) return 'just now';
+    if (m < 60) return `${m}m ago`;
+    const h = Math.round(m / 60);
+    if (h < 24) return `${h}h ago`;
+    const d = Math.round(h / 24);
+    return `${d}d ago`;
+  } catch { return 'unknown'; }
+};
+
 const League = ({ isMobile = false, isLandscape = false }) => {
   const [standings, setStandings] = useState(null);
+  const [standingsMeta, setStandingsMeta] = useState({ fromCache: false, savedAt: null, error: null });
+  const [standingsLoaded, setStandingsLoaded] = useState(false);
   const [opponents, setOpponents] = useState([]);
   const [expanded, setExpanded] = useState(null);
 
   useEffect(() => {
-    fetchSharedJson('/api/standings', { fallback: null }).then(setStandings).catch(() => {});
-    fetchSharedJson('/api/opponents', { fallback: [] }).then(d => setOpponents(d || [])).catch(() => {});
+    let cancelled = false;
+    fetchWithLocalCache('/api/standings', 'standings').then(result => {
+      if (cancelled) return;
+      setStandings(result.value);
+      setStandingsMeta({
+        fromCache: result.fromCache,
+        savedAt: result.savedAt,
+        error: result.error || (result.httpStatus ? `HTTP ${result.httpStatus}` : null),
+      });
+      setStandingsLoaded(true);
+    });
+    fetchSharedJson('/api/opponents', { fallback: [] })
+      .then(d => { if (!cancelled) setOpponents(d || []); })
+      .catch(() => {});
+    return () => { cancelled = true; };
   }, []);
 
   const standingRows = standings?.standings || [];
@@ -91,8 +121,33 @@ const League = ({ isMobile = false, isLandscape = false }) => {
           </div>
         )}
 
-        {standingRows.length === 0 && (
+        {standingRows.length === 0 && !standingsLoaded && (
           <div style={{ color: 'var(--text-muted)', fontSize: 'var(--text-sm)', padding: '0.5rem' }}>Loading standings...</div>
+        )}
+        {standingRows.length === 0 && standingsLoaded && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: '0.5rem',
+            padding: '0.75rem', borderRadius: '6px',
+            background: 'rgba(179, 74, 57, 0.10)',
+            border: '1px solid rgba(179, 74, 57, 0.25)',
+            color: 'var(--danger)', fontSize: 'var(--text-sm)',
+          }}>
+            <WifiOff size={14} />
+            <span>Standings unavailable — no cached data on this device.</span>
+          </div>
+        )}
+        {standingsMeta.fromCache && standingRows.length > 0 && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: '0.4rem',
+            marginBottom: '0.5rem', padding: '4px 10px', borderRadius: '4px',
+            background: 'rgba(168, 116, 33, 0.15)',
+            border: '1px solid rgba(168, 116, 33, 0.30)',
+            color: 'var(--warning, #facc15)',
+            fontSize: 'var(--text-xs)', fontWeight: '700',
+          }}>
+            <AlertTriangle size={12} />
+            <span>Stale data — last updated {formatRelativeAge(standingsMeta.savedAt)}</span>
+          </div>
         )}
 
         {(!isMobile || isLandscape) && (

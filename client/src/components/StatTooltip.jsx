@@ -17,18 +17,41 @@ export const Tip = ({ label, children }) => {
 
 /**
  * StatBadge with built-in tooltip on the label.
+ *
+ * Small-sample marker: when `dim=true`, attach an `sm` chip to the LABEL
+ * rather than prefixing the value. The previous implementation used a
+ * superscripted `~` immediately before the number, which visually merged
+ * with values \u2265 1.000 (e.g. an OPS of 2.000 read as "~-2.000" / "negative
+ * two") because the tilde glyph at 0.7em sat at the same horizontal level
+ * as a minus sign would. Putting the marker on the label removes any chance
+ * of that collision and keeps numeric values clean.
  */
 export const TipBadge = ({ label, value, dim }) => {
   const explanation = STAT_GLOSSARY[label] || '';
   const title = dim ? `${explanation}${explanation ? ' \u2014 ' : ''}small sample (< 10 PA)` : explanation;
+  const displayValue = (value === undefined || value === null || value === '') ? '\u2014' : value;
   return (
-    <div className="stat-badge" title={title} style={dim ? { opacity: 0.45 } : undefined}>
-      <span className="stat-badge__label">{label}</span>
-      <span className="stat-badge__value">
-        {dim && value && value !== '\u2014'
-          ? <><span style={{ fontSize: '0.7em', opacity: 0.6, verticalAlign: 'super' }}>~</span>{value}</>
-          : (value ?? '\u2014')}
+    <div className="stat-badge" title={title} style={dim ? { opacity: 0.55 } : undefined}>
+      <span className="stat-badge__label">
+        {label}
+        {dim && (
+          <span
+            aria-label="small sample"
+            style={{
+              display: 'inline-block', marginLeft: '3px',
+              padding: '0 4px', borderRadius: '3px',
+              background: 'rgba(168, 116, 33, 0.25)',
+              color: 'var(--warning, #facc15)',
+              fontSize: '0.55em', fontWeight: '800',
+              letterSpacing: '0.5px', verticalAlign: 'middle',
+              lineHeight: 1.4,
+            }}
+          >
+            sm
+          </span>
+        )}
       </span>
+      <span className="stat-badge__value">{displayValue}</span>
     </div>
   );
 };
@@ -39,7 +62,11 @@ export const TipBadge = ({ label, value, dim }) => {
  */
 export const PlayerName = ({ name, number, first, last, size = 'md' }) => {
   const displayName = name || `${first || ''} ${last || ''}`.trim() || '\u2014';
-  const displayNum = number != null && number !== '' ? `#${number}` : '';
+  // Show `#?` placeholder when GameChanger hasn't supplied a jersey number
+  // (sub players who haven't been issued one yet). An empty string would
+  // render as a blank circle which looks broken.
+  const numStr = number == null ? '' : String(number).trim();
+  const displayNum = numStr !== '' ? `#${numStr}` : '#?';
   const fontSize = size === 'sm' ? 'var(--text-sm)' : size === 'xs' ? 'var(--text-xs)' : 'var(--text-base)';
 
   return (

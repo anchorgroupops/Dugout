@@ -465,14 +465,15 @@ const Roster = ({ team, availability, isMobile = false, isLandscape = false }) =
               }}
               onClick={() => setExpandedPlayer(isExpanded ? null : playerKey)}
             >
-              {/* Watermark number */}
+              {/* Watermark number — fall back to "?" when GC hasn't issued
+                  one yet (e.g. brand-new sub players). */}
               {!isMobile && (
                 <div style={{
                   position: 'absolute', top: '-15px', right: '-10px',
                   fontSize: '4rem', fontWeight: '900', opacity: '0.05',
                   fontFamily: 'var(--font-heading)'
                 }}>
-                  {player.number}
+                  {(player.number != null && String(player.number).trim() !== '') ? player.number : '?'}
                 </div>
               )}
 
@@ -496,7 +497,7 @@ const Roster = ({ team, availability, isMobile = false, isLandscape = false }) =
                     : '#444',
                   transition: 'all 0.3s ease'
                 }}>
-                  {player.number}
+                  {(player.number != null && String(player.number).trim() !== '') ? player.number : '?'}
                 </div>
                 <div style={{ flex: 1 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>

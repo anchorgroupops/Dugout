@@ -81,6 +81,7 @@ function App() {
     error: null,
     isCached: Boolean(cachedFromLocal?.team),
     cachedAt: cachedFromLocal?.cachedAt || null,
+    staleKeys: [],
   });
   const audioRef = useRef(null);
   const audioUrlRef = useRef('');
@@ -125,14 +126,58 @@ function App() {
       const games = gamesRes.ok ? await gamesRes.json() : null;
       const schedule = scheduleRes.ok ? await scheduleRes.json() : null;
 
+      // "Never downgrade" cache policy: if a fresh fetch produced a null /
+      // empty value but our previous cache had real data, keep the prior
+      // value. This prevents the Games tab from emptying out and the
+      // Schedule from disappearing when the upstream scraper has a bad day.
+      // We MERGE rather than overwrite — every key independently chooses
+      // between the new value and the prior cached value.
+      const isUseful = (v) => {
+        if (v == null) return false;
+        if (Array.isArray(v)) return v.length > 0;
+        if (typeof v === 'object') {
+          // For schedule: {upcoming:[], past:[]} is empty even though it's an object
+          if (Array.isArray(v.upcoming) || Array.isArray(v.past)) {
+            return (v.upcoming?.length || 0) + (v.past?.length || 0) > 0;
+          }
+          return Object.keys(v).length > 0;
+        }
+        return true;
+      };
+      // Read the latest cached values FRESHLY from localStorage rather than
+      // relying on the closure value (which would be stale on the 2nd+ fetch
+      // since this useCallback only re-creates when fetchWithRetry changes).
+      let priorCache = null;
+      try {
+        const raw = window.localStorage.getItem('sharks_data_cache');
+        priorCache = raw ? JSON.parse(raw) : null;
+      } catch { priorCache = null; }
+
+      const merged = {
+        team:         isUseful(team)         ? team         : (priorCache?.team         ?? team),
+        swot:         isUseful(swot)         ? swot         : (priorCache?.swot         ?? swot),
+        lineups:      isUseful(lineups)      ? lineups      : (priorCache?.lineups      ?? lineups),
+        availability: isUseful(availability) ? availability : (priorCache?.availability ?? availability),
+        games:        isUseful(games)        ? games        : (priorCache?.games        ?? null),
+        schedule:     isUseful(schedule)     ? schedule     : (priorCache?.schedule     ?? null),
+      };
+      // Track which keys came from the prior cache so we can surface a
+      // "stale" indicator in components that depend on them.
+      const staleKeys = [];
+      if (!isUseful(games) && isUseful(priorCache?.games)) staleKeys.push('games');
+      if (!isUseful(schedule) && isUseful(priorCache?.schedule)) staleKeys.push('schedule');
+
       const cachedAt = new Date().toISOString();
-      setData({ team, swot, lineups, availability, games, schedule, loading: false, error: null, isCached: false, cachedAt });
+      setData({ ...merged, loading: false, error: null, isCached: false, cachedAt, staleKeys });
       setLoadingTimedOut(false);
       try {
         window.localStorage.setItem('sharks_data_cache', JSON.stringify({
-          team, swot, lineups, availability, games, schedule, cachedAt,
+          ...merged, cachedAt,
         }));
       } catch { /* localStorage may be full or disabled */ }
+      if (staleKeys.length > 0) {
+        console.warn('[Cache] preserving prior values for empty/null fetch result:', staleKeys);
+      }
 
       // Check pipeline health and sync status (non-blocking)
       try {
