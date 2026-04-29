@@ -4802,6 +4802,176 @@ def serve_walkup_audio(filename):
     return send_from_directory(str(WALKUP_DIR), filename, mimetype='audio/mpeg')
 
 
+# ---------------------------------------------------------------------------
+# Apex Music Fetcher — local-file scan, URL ingest, LRP "next" endpoint
+# ---------------------------------------------------------------------------
+
+@app.route('/audio/music/<player_id>/<filename>', methods=['GET'])
+def serve_music_clip(player_id, filename):
+    """Serve a normalized hook clip from data/music/clips/<player_id>/."""
+    try:
+        from music_ingest import serve_music_path
+    except ImportError as e:
+        logging.error("[Music] serve import failed: %s", e)
+        return '', 503
+    target = serve_music_path(player_id, filename)
+    if not target:
+        return '', 404
+    return send_from_directory(str(target.parent), target.name, mimetype='audio/mpeg')
+
+
+@app.route('/api/music/scan/<player_id>', methods=['POST'])
+def handle_music_scan(player_id):
+    """Index local files in data/music/raw/<player_id>/ and produce hooks.
+
+    Idempotent — files already registered with normalized hooks are skipped.
+    """
+    blocked = _guard_mutating_request()
+    if blocked:
+        return blocked
+    invalid = _validate_player_id(player_id)
+    if invalid:
+        return invalid
+    try:
+        from music_ingest import scan_local_files, ffmpeg_available
+        if not ffmpeg_available():
+            return jsonify({'error': 'ffmpeg_unavailable', 'detail': 'Install ffmpeg on the Pi'}), 503
+        results = scan_local_files(player_id)
+        return jsonify({'player_id': player_id, 'tracks': results, 'count': len(results)})
+    except Exception as e:
+        logging.error("[Music] scan failed for %s: %s", player_id, e, exc_info=True)
+        return jsonify({'error': 'scan_failed', 'detail': str(e)}), 500
+
+
+@app.route('/api/music/ingest', methods=['POST'])
+def handle_music_ingest():
+    """Ingest a URL via yt-dlp → trim hook → -14 LUFS normalize.
+
+    Body: {player_id, url, hook_start_ms?, hook_duration_s?, label?}
+    Returns: {song_id, file_path, label, duration_ms, normalized_lufs, hook_start_ms}
+
+    Synchronous: blocks until the hook clip is written to disk. The PWA
+    "Add Song" UI shows a progress spinner during this call.
+    """
+    blocked = _guard_mutating_request()
+    if blocked:
+        return blocked
+
+    data = request.get_json(silent=True) or {}
+    player_id = (data.get('player_id') or '').strip()
+    url = (data.get('url') or '').strip()
+    hook_start_ms = data.get('hook_start_ms')
+    hook_duration_s = int(data.get('hook_duration_s') or 18)
+    label = (data.get('label') or '').strip()[:200] or None
+
+    if not re.match(r'^[A-Za-z0-9_-]+$', player_id) or len(player_id) > 80:
+        return jsonify({'error': 'invalid_player_id'}), 400
+    if not re.match(r'^https?://', url) or len(url) > 1024:
+        return jsonify({'error': 'invalid_url'}), 400
+    if hook_duration_s < 5 or hook_duration_s > 60:
+        return jsonify({'error': 'hook_duration_out_of_range', 'detail': '5-60s'}), 400
+    if hook_start_ms is not None:
+        try:
+            hook_start_ms = int(hook_start_ms)
+            if hook_start_ms < 0 or hook_start_ms > 600_000:
+                raise ValueError("out of range")
+        except (TypeError, ValueError):
+            return jsonify({'error': 'invalid_hook_start_ms'}), 400
+
+    try:
+        from music_ingest import ingest_url, ffmpeg_available, has_yt_dlp
+        if not has_yt_dlp():
+            return jsonify({'error': 'yt_dlp_not_installed'}), 503
+        if not ffmpeg_available():
+            return jsonify({'error': 'ffmpeg_unavailable'}), 503
+        result = ingest_url(player_id, url,
+                            hook_start_ms=hook_start_ms,
+                            hook_duration_s=hook_duration_s,
+                            label=label)
+        return jsonify(result), 201
+    except Exception as e:
+        logging.error("[Music] ingest failed for %s/%s: %s", player_id, url, e, exc_info=True)
+        return jsonify({'error': 'ingest_failed', 'detail': str(e)}), 500
+
+
+@app.route('/api/music/next/<player_id>', methods=['GET'])
+def handle_music_next(player_id):
+    """Pick the next walk-up song for `player_id` and commit the play.
+
+    Query params:
+      session — game session id (default: today YYYY-MM-DD ET)
+      peek    — '1' to NOT commit (used for pre-buffering)
+
+    Response:
+      {
+        audio_url:        "/audio/music/<player_id>/<slug>-hook.mp3" (or original song_url),
+        song_id:          int,
+        song_label:       str,
+        bpm_offset_ms:    int,
+        bpm:              float | null,
+        duration_ms:      int,
+        optimal_start_ms: int,
+        play_count:       int,
+        committed:        bool,
+        source:           "local" | "url" | ...,
+      }
+    """
+    invalid = _validate_player_id(player_id)
+    if invalid:
+        return invalid
+    session_id = (request.args.get('session') or
+                  datetime.now(ET).strftime('%Y-%m-%d'))[:32]
+    peek = request.args.get('peek') == '1'
+
+    try:
+        adb = _announcer_db()
+        chosen = adb.pick_walkup_song(player_id, session_id, commit=not peek)
+        if not chosen:
+            return jsonify({'error': 'no_songs_in_pool', 'player_id': player_id}), 404
+
+        audio_url = chosen.get('file_path') or chosen.get('song_url') or ''
+        return jsonify({
+            'audio_url':        audio_url,
+            'song_id':          chosen.get('id'),
+            'song_label':       chosen.get('song_label') or '',
+            'bpm':              chosen.get('bpm'),
+            'bpm_offset_ms':    chosen.get('bpm_offset_ms') or 0,
+            'duration_ms':      chosen.get('duration_ms'),
+            'optimal_start_ms': chosen.get('optimal_start_ms') or 0,
+            'play_count':       chosen.get('play_count') or 0,
+            'last_played_at':   chosen.get('last_played_at'),
+            'committed':        not peek,
+            'source':           chosen.get('source') or 'url',
+            'session':          session_id,
+        })
+    except Exception as e:
+        logging.error("[Music] next lookup failed for %s: %s", player_id, e, exc_info=True)
+        return jsonify({'error': 'next_failed', 'detail': str(e)}), 500
+
+
+@app.route('/api/music/songs/<player_id>/<int:song_id>/active', methods=['POST'])
+def handle_music_set_active(player_id, song_id):
+    """Toggle a song's is_active flag without dropping play-history.
+
+    Body: {is_active: bool}
+    """
+    blocked = _guard_mutating_request()
+    if blocked:
+        return blocked
+    invalid = _validate_player_id(player_id)
+    if invalid:
+        return invalid
+    data = request.get_json(silent=True) or {}
+    is_active = bool(data.get('is_active', True))
+    try:
+        adb = _announcer_db()
+        adb.set_song_active(song_id, player_id, is_active)
+        return jsonify({'song_id': song_id, 'is_active': is_active})
+    except Exception as e:
+        logging.error("[Music] set_active failed: %s", e, exc_info=True)
+        return jsonify({'error': 'set_active_failed', 'detail': str(e)}), 500
+
+
 @app.route('/api/announcer/worker-status', methods=['GET'])
 def handle_announcer_worker_status():
     """Return full render worker health payload for the PWA Worker Status Badge.

@@ -78,6 +78,24 @@ export default defineConfig(({ mode }) => ({
             },
           },
           {
+            // Walk-up music hooks — CacheFirst because hook clips are immutable
+            // (the URL contains the song slug). Keeps the bumper instant even
+            // when field Wi-Fi drops mid-game.
+            urlPattern: ({ url }) =>
+              url.pathname.startsWith('/audio/music/') ||
+              url.pathname.startsWith('/audio/walkup/'),
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'walkup-music',
+              expiration: {
+                maxEntries: 200,
+                maxAgeSeconds: 365 * 24 * 60 * 60,
+              },
+              cacheableResponse: { statuses: [0, 200, 206] },
+              rangeRequests: true,
+            },
+          },
+          {
             // Cache API data (GameChanger stats, SWOT, lineups) with NetworkFirst strategy
             urlPattern: ({ url }) => url.pathname.startsWith('/api/') || url.pathname.endsWith('.json'),
             handler: 'NetworkFirst',

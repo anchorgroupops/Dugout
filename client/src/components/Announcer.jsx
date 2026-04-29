@@ -7,6 +7,7 @@ import {
   Zap, Target, Activity, Plus, X, Upload, Wand2, Search, Download
 } from 'lucide-react';
 import { playIntro, playClip, stop as stopAudio, preload, cleanup, detectBPM, calcBeatOffset, loadBuffer } from '../utils/audioController';
+import { usePrebuffer } from '../utils/usePrebuffer';
 import WorkerBadge from './WorkerBadge';
 
 function StatusLed({ status }) {
@@ -650,6 +651,16 @@ function NowPlayingView({ roster, lineups, onBack }) {
 
   const current = battingOrder[currentIdx] || null;
   const progressPct = progress.duration > 0 ? Math.min(100, (progress.elapsed / progress.duration) * 100) : 0;
+
+  // Anticipatory walk-up audio pre-buffering — fetch + decode + SW-cache
+  // the next 3 batters' hooks so taps on "Play" are instant even if the
+  // field's Wi-Fi drops for 30s.
+  usePrebuffer({
+    lineup: battingOrder,
+    currentIndex: currentIdx,
+    lookahead: 3,
+    enabled: battingOrder.length > 0,
+  });
 
   const pushGameState = useCallback(async (next) => {
     setGameState(next);
