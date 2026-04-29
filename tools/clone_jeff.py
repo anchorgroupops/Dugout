@@ -120,8 +120,13 @@ def _fetch_sounds_playwright() -> list[dict]:
     return sounds
 
 
+class _YouTubeFallback(Exception):
+    """Raised when all soundboard strategies fail — main() switches to YouTube source."""
+
+
 def fetch_sounds() -> list[dict]:
-    """Fetch all sound metadata. Tries cloudscraper first, falls back to Playwright."""
+    """Fetch all sound metadata. Tries cloudscraper first, falls back to Playwright.
+    Raises _YouTubeFallback if both strategies fail (Cloudflare Turnstile blocking)."""
 
     # Strategy 1: cloudscraper handles Cloudflare's JS challenge without a full browser.
     # Install with: pip install cloudscraper
@@ -149,7 +154,81 @@ def fetch_sounds() -> list[dict]:
         print(f"[Jeff] cloudscraper failed ({e}), trying Playwright...")
 
     # Strategy 2: Playwright is already installed on the Pi for gc_scraper.py.
-    return _fetch_sounds_playwright()
+    try:
+        return _fetch_sounds_playwright()
+    except Exception as e:
+        print(f"[Jeff] Playwright failed ({e})")
+        raise _YouTubeFallback("Soundboard blocked by Cloudflare Turnstile — switching to YouTube fallback.")
+
+
+# ---------------------------------------------------------------------------
+# Step 1b: YouTube fallback (when 101soundboards.com is Cloudflare-blocked)
+# ---------------------------------------------------------------------------
+
+# Known YouTube sources for Jeff Steitzer / Halo Reach announcer audio.
+# cGsuGAb5NUQ — Halo Reach All Voiced Announcer Medals (primary, works without Node.js)
+# F0YHb1nAV-g — All Other Voiced Lines (may require JS runtime)
+# tx7AjnxP3P8 — Multiplayer Best Bits (may require JS runtime)
+_YT_SOURCES = [
+    ("cGsuGAb5NUQ", "halo_reach_announcer_medals"),
+    ("F0YHb1nAV-g", "halo_reach_voiced_lines"),
+    ("tx7AjnxP3P8", "halo_reach_best_bits"),
+]
+
+
+def _fetch_sounds_youtube(out_dir: Path) -> list[Path]:
+    """Download Jeff Steitzer audio from YouTube sources as MP3 fallback.
+    Returns list of downloaded MP3 paths."""
+    try:
+        import yt_dlp
+    except ImportError:
+        raise RuntimeError(
+            "[Jeff] yt-dlp not installed. Run: pip install yt-dlp\n"
+            "       Also ensure ffmpeg is on PATH for MP3 extraction."
+        )
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    downloaded: list[Path] = []
+
+    ydl_opts = {
+        "format": "bestaudio/best",
+        "postprocessors": [{
+            "key": "FFmpegExtractAudio",
+            "preferredcodec": "mp3",
+            "preferredquality": "192",
+        }],
+        "quiet": True,
+        "no_warnings": True,
+    }
+
+    for video_id, label in _YT_SOURCES:
+        out_path = out_dir / f"yt_{video_id}.mp3"
+        if out_path.exists() and out_path.stat().st_size > 10_000:
+            print(f"[Jeff] Cached YT source: {out_path.name}")
+            downloaded.append(out_path)
+            continue
+
+        url = f"https://www.youtube.com/watch?v={video_id}"
+        opts = {**ydl_opts, "outtmpl": str(out_dir / f"yt_{video_id}.%(ext)s")}
+        print(f"[Jeff] Downloading YT source: {label} ({video_id}) ...")
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                ydl.download([url])
+            if out_path.exists() and out_path.stat().st_size > 10_000:
+                print(f"[Jeff] OK: {out_path.name} ({out_path.stat().st_size // 1024}KB)")
+                downloaded.append(out_path)
+            else:
+                print(f"[Jeff] WARN: {label} — output missing or too small, skipping.")
+        except Exception as e:
+            print(f"[Jeff] SKIP {label}: {e}")
+
+    if not downloaded:
+        raise RuntimeError(
+            "[Jeff] All YouTube sources failed. Check yt-dlp version and ffmpeg installation."
+        )
+
+    print(f"[Jeff] YouTube fallback: {len(downloaded)}/{len(_YT_SOURCES)} sources downloaded.")
+    return downloaded
 
 
 # ---------------------------------------------------------------------------
@@ -226,8 +305,12 @@ def concat_clips(clips: list[Path], out_dir: Path) -> Path | None:
     concat_list = out_dir.parent / "concat_list.txt"
     combined = out_dir.parent / "jeff_combined.mp3"
 
-    # Sort by duration (longest first) then by filename for determinism
-    sorted_clips = sorted(clips, key=lambda p: int(p.stem.split("_")[0]))
+    # Sort by clip ID then by filename — handles both "123_name.mp3" and "yt_xyz.mp3"
+    def _sort_key(p: Path):
+        part = p.stem.split("_")[0]
+        return (int(part) if part.isdigit() else 0, p.stem)
+
+    sorted_clips = sorted(clips, key=_sort_key)
 
     with open(concat_list, "w", encoding="utf-8") as f:
         for clip in sorted_clips:
@@ -352,8 +435,12 @@ def main():
             sys.exit(1)
         print(f"[Jeff] Using {len(clips)} cached clips from {out_dir}")
     else:
-        sounds = fetch_sounds()
-        clips = download_clips(sounds, out_dir)
+        try:
+            sounds = fetch_sounds()
+            clips = download_clips(sounds, out_dir)
+        except _YouTubeFallback as e:
+            print(f"[Jeff] {e}")
+            clips = _fetch_sounds_youtube(out_dir)
 
     if not clips:
         print("[Jeff] ERROR: No clips available to upload.")
