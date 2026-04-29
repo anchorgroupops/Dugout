@@ -4,7 +4,7 @@ import {
   Mic, Music, Play, Square, SkipBack, SkipForward,
   ChevronDown, ChevronUp, RefreshCw, UserPlus, Save,
   AlertCircle, CheckCircle, Clock, Volume2, Settings2, List,
-  Zap, Target, Activity, Plus, X, Upload, Wand2
+  Zap, Target, Activity, Plus, X, Upload, Wand2, Search, Download
 } from 'lucide-react';
 import { playIntro, playClip, stop as stopAudio, preload, cleanup, detectBPM, calcBeatOffset, loadBuffer } from '../utils/audioController';
 import WorkerBadge from './WorkerBadge';
@@ -114,6 +114,10 @@ function PlayerCard({ player, onSavePhonetics, onRender, onRemove }) {
   const [addingSong, setAddingSong] = useState(false);
   const [detecting, setDetecting] = useState(false);
   const [renderQuality, setRenderQuality] = useState('best');
+  const [songSearch, setSongSearch] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const [downloadingId, setDownloadingId] = useState(null);
 
   useEffect(() => {
     if (!expanded) return;
@@ -186,6 +190,51 @@ function PlayerCard({ player, onSavePhonetics, onRender, onRemove }) {
     if (res.ok) {
       const data = await res.json();
       setSongs(data.songs || []);
+    }
+  };
+
+  const handleSongSearch = async () => {
+    const q = songSearch.trim();
+    if (!q) return;
+    setSearching(true);
+    setSearchResults([]);
+    try {
+      const r = await fetch(`/api/announcer/songs/search?q=${encodeURIComponent(q)}`);
+      if (r.ok) {
+        const d = await r.json();
+        setSearchResults(d.results || []);
+      }
+    } catch { /* silent */ } finally {
+      setSearching(false);
+    }
+  };
+
+  const handleDownloadAndAdd = async (result) => {
+    setDownloadingId(result.video_id);
+    try {
+      // Download to Pi local storage
+      const dlRes = await fetch('/api/announcer/songs/download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ video_id: result.video_id, title: result.title }),
+      });
+      if (!dlRes.ok) return;
+      const dlData = await dlRes.json();
+
+      // Auto-add to this player's walk-up pool
+      const addRes = await fetch(`/api/announcer/songs/${player.id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ song_url: dlData.file_url, song_label: result.title }),
+      });
+      if (addRes.ok) {
+        const addData = await addRes.json();
+        setSongs(addData.songs || []);
+        setSearchResults([]);
+        setSongSearch('');
+      }
+    } catch { /* silent */ } finally {
+      setDownloadingId(null);
     }
   };
 
@@ -393,13 +442,74 @@ function PlayerCard({ player, onSavePhonetics, onRender, onRemove }) {
               </ul>
             )}
 
+            {/* YouTube search */}
+            <div style={{ display: 'flex', gap: 6, margin: '8px 0 4px' }}>
+              <input
+                className="announcer-song-input"
+                style={{ flex: 1 }}
+                value={songSearch}
+                onChange={e => setSongSearch(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleSongSearch()}
+                placeholder="Search YouTube for a walk-up song…"
+                maxLength={200}
+              />
+              <button
+                onClick={handleSongSearch}
+                disabled={searching || !songSearch.trim()}
+                className="announcer-btn announcer-btn-secondary"
+                style={{ flexShrink: 0, fontSize: '0.75rem', padding: '4px 10px' }}
+              >
+                {searching ? <RefreshCw size={12} className="sync-spin" /> : <Search size={12} />}
+                {searching ? 'Searching…' : 'Search'}
+              </button>
+            </div>
+            {searchResults.length > 0 && (
+              <ul style={{ listStyle: 'none', margin: '0 0 8px', padding: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {searchResults.map(r => {
+                  const mins = r.duration ? Math.floor(r.duration / 60) : 0;
+                  const secs = r.duration ? String(r.duration % 60).padStart(2, '0') : '';
+                  const dur = r.duration ? `${mins}:${secs}` : '';
+                  return (
+                    <li
+                      key={r.video_id}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 6,
+                        background: 'rgba(255,255,255,0.04)', borderRadius: 6,
+                        padding: '4px 8px', fontSize: 'var(--text-xs)',
+                      }}
+                    >
+                      <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {r.title}
+                      </span>
+                      {dur && (
+                        <span style={{ color: 'var(--text-muted)', flexShrink: 0, fontSize: '0.7rem' }}>{dur}</span>
+                      )}
+                      <button
+                        onClick={() => handleDownloadAndAdd(r)}
+                        disabled={downloadingId === r.video_id}
+                        className="announcer-btn announcer-btn-secondary"
+                        style={{ flexShrink: 0, fontSize: '0.7rem', padding: '3px 8px' }}
+                        title="Download to Pi and add to pool"
+                      >
+                        {downloadingId === r.video_id
+                          ? <RefreshCw size={11} className="sync-spin" />
+                          : <Download size={11} />}
+                        {downloadingId === r.video_id ? 'Saving…' : 'Add'}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+
+            {/* Manual URL entry (fallback / paste direct links) */}
             <div className="announcer-song-add">
               <input
                 className="announcer-song-input"
                 value={newSongUrl}
                 onChange={e => { setNewSongUrl(e.target.value); setNewSongOptimalStart(0); }}
                 onKeyDown={e => e.key === 'Enter' && handleAddSong()}
-                placeholder="https://… audio URL"
+                placeholder="…or paste a direct audio URL"
                 type="url"
                 maxLength={500}
               />

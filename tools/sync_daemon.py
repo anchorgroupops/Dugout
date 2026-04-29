@@ -54,6 +54,7 @@ N8N_WEBHOOK_URL = os.getenv("N8N_WEBHOOK_URL", "").strip()
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 SHARKS_DIR = DATA_DIR / "sharks"
+WALKUP_DIR = SHARKS_DIR / "walkup"
 LOG_DIR = Path(__file__).parent.parent / "logs"
 CONFIG_DIR = Path(__file__).parent.parent / "config"
 SCOREBOOKS_DIR = Path(__file__).parent.parent / "Scorebooks"
@@ -1298,7 +1299,7 @@ def run_sync_cycle():
 # ---------------------------------------------------------
 # API SERVER (Flask)
 # ---------------------------------------------------------
-from flask import Flask, Response, jsonify, request
+from flask import Flask, Response, jsonify, request, send_from_directory
 from flask_cors import CORS
 import threading
 from werkzeug.exceptions import BadRequest, RequestEntityTooLarge, HTTPException
@@ -4530,6 +4531,108 @@ def handle_announcer_songs_delete(player_id, song_id):
     adb.remove_player_song(song_id, player_id)
     songs = adb.get_player_songs(player_id)
     return jsonify({"player_id": player_id, "songs": songs})
+
+
+@app.route('/api/announcer/songs/search', methods=['GET'])
+def handle_song_search():
+    """YouTube walk-up song search via yt-dlp.
+
+    Query params:
+      q     — search string (required)
+      limit — max results 1-20 (default 8)
+
+    Returns: [{video_id, title, uploader, duration, thumbnail}]
+    """
+    q = request.args.get('q', '').strip()[:200]
+    if not q:
+        return jsonify({'error': 'q_required'}), 400
+    limit = min(int(request.args.get('limit', 8)), 20)
+    try:
+        import yt_dlp  # installed via requirements.txt
+        ydl_opts = {
+            'quiet': True,
+            'extract_flat': True,
+            'no_warnings': True,
+            'default_search': f'ytsearch{limit}',
+        }
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(f"ytsearch{limit}:{q}", download=False)
+        results = [
+            {
+                'video_id': e.get('id'),
+                'title': e.get('title'),
+                'uploader': e.get('uploader') or e.get('channel'),
+                'duration': e.get('duration'),
+                'thumbnail': e.get('thumbnail'),
+            }
+            for e in (info.get('entries') or [])
+            if e.get('id')
+        ]
+        return jsonify({'results': results, 'query': q})
+    except ImportError:
+        return jsonify({'error': 'yt_dlp_not_installed', 'detail': 'Run: pip install yt-dlp on the Pi'}), 503
+    except Exception as e:
+        logging.error("[Walkup] Search error: %s", e)
+        return jsonify({'error': 'search_failed', 'detail': str(e)}), 500
+
+
+@app.route('/api/announcer/songs/download', methods=['POST'])
+def handle_song_download():
+    """Download a YouTube video as a local MP3 walk-up song.
+
+    Body: {video_id: "11charYTid", title: "Song Title"}
+    Returns: {status, file_url: "/audio/walkup/{id}.mp3", title}
+    """
+    blocked = _guard_mutating_request()
+    if blocked:
+        return blocked
+
+    data = request.get_json(silent=True) or {}
+    video_id = (data.get('video_id') or '').strip()
+    title = (data.get('title') or '').strip()[:200]
+
+    if not re.match(r'^[A-Za-z0-9_-]{11}$', video_id):
+        return jsonify({'error': 'invalid_video_id'}), 400
+
+    WALKUP_DIR.mkdir(parents=True, exist_ok=True)
+    out_mp3 = WALKUP_DIR / f"{video_id}.mp3"
+
+    if out_mp3.exists() and out_mp3.stat().st_size > 10000:
+        return jsonify({'status': 'cached', 'file_url': f'/audio/walkup/{video_id}.mp3', 'title': title})
+
+    try:
+        import yt_dlp
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',
+            }],
+            'outtmpl': str(WALKUP_DIR / f'{video_id}.%(ext)s'),
+            'quiet': True,
+            'no_warnings': True,
+        }
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([f"https://www.youtube.com/watch?v={video_id}"])
+
+        if out_mp3.exists() and out_mp3.stat().st_size > 10000:
+            logging.info("[Walkup] Downloaded: %s → %s", video_id, out_mp3.name)
+            return jsonify({'status': 'downloaded', 'file_url': f'/audio/walkup/{video_id}.mp3', 'title': title})
+        return jsonify({'error': 'download_failed', 'detail': 'MP3 not found after extraction — ffmpeg may be missing'}), 500
+    except ImportError:
+        return jsonify({'error': 'yt_dlp_not_installed', 'detail': 'Run: pip install yt-dlp on the Pi'}), 503
+    except Exception as e:
+        logging.error("[Walkup] Download error for %s: %s", video_id, e)
+        return jsonify({'error': 'download_failed', 'detail': str(e)}), 500
+
+
+@app.route('/audio/walkup/<filename>', methods=['GET'])
+def serve_walkup_audio(filename):
+    """Serve a locally downloaded walk-up song MP3."""
+    if not re.match(r'^[A-Za-z0-9_-]+\.mp3$', filename):
+        return '', 404
+    return send_from_directory(str(WALKUP_DIR), filename, mimetype='audio/mpeg')
 
 
 @app.route('/api/announcer/worker-status', methods=['GET'])

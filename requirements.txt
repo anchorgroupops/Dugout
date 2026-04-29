@@ -37,3 +37,6 @@ anthropic>=0.40.0
 
 # Multi-team registry
 PyYAML>=6.0,<7
+
+# Walk-up song search + download (YouTube via yt-dlp, requires ffmpeg for MP3 extraction)
+yt-dlp>=2024.1.0
