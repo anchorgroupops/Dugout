@@ -232,7 +232,7 @@ const Practice = ({ team, schedule, isMobile = false, isLandscape = false }) => 
       const dateStr = nextGame.date ? ` on ${formatDateMMDDYYYY(nextGame.date)}` : '';
       return `No practice RSVP found; planning from roster/availability before next event (${nextGame.opponent}${dateStr})`;
     }
-    return 'No practice date metadata found';
+    return 'Next game: TBD — generating priorities from full roster';
   })();
 
   return (

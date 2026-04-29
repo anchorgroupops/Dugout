@@ -4027,7 +4027,17 @@ def handle_announcer_roster():
     try:
         from announcer_engine import load_announcer_roster, get_roster_stats
         roster = load_announcer_roster()
-        stats = get_roster_stats()
+        try:
+            stats = get_roster_stats()
+        except Exception as _se:
+            logging.warning("[Announcer] get_roster_stats failed: %s", _se, exc_info=True)
+            active = [p for p in roster if p.get("is_active")]
+            stats = {
+                "total": len(active),
+                "ready": sum(1 for p in active if p.get("status") == "ready"),
+                "pending": sum(1 for p in active if p.get("status") in ("pending", "rendering")),
+                "error": sum(1 for p in active if p.get("status") == "error"),
+            }
         # Cross-reference with team to detect ghost players (in announcer DB but not on roster)
         try:
             team_data = _read_json_file(SHARKS_DIR / "team_enriched.json", default={}) or \
@@ -4047,8 +4057,8 @@ def handle_announcer_roster():
             logging.debug("[Announcer] Ghost detection skipped: %s", _ge)
         return jsonify({"roster": roster, "stats": stats})
     except Exception as e:
-        logging.error("[Announcer] roster error: %s", e)
-        return jsonify({"error": "announcer_roster_failed"}), 500
+        logging.error("[Announcer] roster error: %s", e, exc_info=True)
+        return jsonify({"error": "announcer_roster_failed", "detail": str(e)}), 500
 
 
 @app.route('/api/announcer/player/<player_id>', methods=['DELETE'])

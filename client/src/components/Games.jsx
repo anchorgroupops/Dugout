@@ -30,7 +30,7 @@ const fmt3 = (v) => {
   if (v == null || v === '') return null;
   if (typeof v === 'string' && v.startsWith('.')) return v;
   const n = parseFloat(v);
-  if (isNaN(n)) return null;
+  if (isNaN(n) || n === 0) return null;
   const s = n.toFixed(3);
   return (n >= 0 && n < 1) ? s.replace(/^0/, '') : s;
 };
@@ -257,10 +257,19 @@ const PlayerOppBattingRow = ({ player }) => {
   );
 };
 
+// ─── Normalise opponent names ─────────────────────────────────────────────────
+const normaliseOpponent = (raw) => {
+  if (!raw) return 'Unknown Opponent';
+  const s = String(raw).trim();
+  if (!s || /^TBD/i.test(s) || s === '-') return 'Unknown Opponent';
+  return s;
+};
+
 // ─── Result badge ─────────────────────────────────────────────────────────────
-const ResultBadge = ({ result, hasStats }) => {
+const ResultBadge = ({ result, hasStats, isPast }) => {
   if (!result) {
     if (hasStats) return <span className="result-badge" style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text-muted)', border: '1px solid rgba(255,255,255,0.12)' }}>STATS</span>;
+    if (isPast) return <span className="result-badge" style={{ background: 'rgba(255,255,255,0.04)', color: 'var(--text-muted)', border: '1px solid rgba(255,255,255,0.08)' }}>N/A</span>;
     return null;
   }
   const upper = result.toUpperCase();
@@ -356,8 +365,10 @@ const GameCard = ({ game, onExpand, isExpanded, gameDetail, isMobile = false, is
   const t = game.sharks_totals || {};
   const isHome = game.sharks_side === 'home';
   const dateStr = game.date ? formatDateMMDDYYYY(game.date) : 'Unknown Date';
+  const isPast = !game.date || game.date <= getTodayEST();
   const isWin = game.result === 'W';
   const isTie = game.result === 'T';
+  const opponent = normaliseOpponent(game.opponent);
   // Score can be a string ("20-9") or an object ({sharks:20, opponent:9})
   let sharksScore = null, oppScore = null;
   const rawScore = game.score;
@@ -413,10 +424,10 @@ const GameCard = ({ game, onExpand, isExpanded, gameDetail, isMobile = false, is
               {isHome ? 'HOME' : 'AWAY'}
             </span>
             <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>{dateStr}</span>
-            <ResultBadge result={game.result} hasStats={!!game.sharks_totals} />
+            <ResultBadge result={game.result} hasStats={!!game.sharks_totals} isPast={isPast} />
           </div>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem' }}>
-            <h3 style={{ fontSize: isMobile ? 'var(--text-base)' : '1.1rem', margin: 0 }}>vs. {game.opponent}</h3>
+            <h3 style={{ fontSize: isMobile ? 'var(--text-base)' : '1.1rem', margin: 0 }}>vs. {opponent}</h3>
             {sharksScore != null && (
               <span style={{
                 fontSize: isMobile ? '1.5rem' : '1.75rem',
@@ -484,7 +495,7 @@ const ScheduleRow = ({ game }) => {
             NEXT &#9654;
           </span>
         )}
-        vs. {game.opponent}
+        vs. {normaliseOpponent(game.opponent)}
       </span>
       {game.time && <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>{game.time}</span>}
     </div>

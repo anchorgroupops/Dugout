@@ -14,7 +14,7 @@ const fmt3 = (val) => {
   if (val === null || val === undefined || val === '') return '\u2014';
   if (typeof val === 'string' && val.startsWith('.')) return val;
   const n = parseFloat(val);
-  if (isNaN(n)) return '\u2014';
+  if (isNaN(n) || n === 0) return '\u2014';
   const s = n.toFixed(3);
   return (n >= 0 && n < 1) ? s.replace(/^0/, '') : s;
 };

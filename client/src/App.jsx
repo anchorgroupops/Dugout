@@ -314,29 +314,28 @@ function App() {
   // All nav items for desktop
   const navItems = [
     { id: 'scoreboard', label: 'Live', icon: <Radio size={18} /> },
+    { id: 'announcer', label: 'Announcer', icon: <Mic size={18} /> },
+    { id: 'practice', label: 'Practice', icon: <Dumbbell size={18} /> },
+    { id: 'roster', label: 'Roster', icon: <Users size={18} /> },
     { id: 'scout', label: 'Scout', icon: <Target size={18} /> },
     { id: 'swot', label: 'SWOT', icon: <Activity size={18} /> },
-    { id: 'roster', label: 'Roster', icon: <Users size={18} /> },
     { id: 'lineups', label: 'Lineups', icon: <ListOrdered size={18} /> },
     { id: 'games', label: 'Games', icon: <Calendar size={18} /> },
     { id: 'league', label: 'League', icon: <Trophy size={18} /> },
-    { id: 'practice', label: 'Practice', icon: <Dumbbell size={18} /> },
-    { id: 'announcer', label: 'Announcer', icon: <Mic size={18} /> }
   ];
 
   // Mobile: 4 primary bottom tabs + "More" overflow
-  // Live scoreboard gets primary position for game-day dugout use
   const primaryNavItems = [
     { id: 'scoreboard', label: 'Live', icon: <Radio size={22} /> },
-    { id: 'scout', label: 'Scout', icon: <Target size={22} /> },
-    { id: 'lineups', label: 'Lineups', icon: <ListOrdered size={22} /> },
-    { id: 'practice', label: 'Practice', icon: <Dumbbell size={22} /> },
     { id: 'announcer', label: 'Announcer', icon: <Mic size={22} /> },
+    { id: 'practice', label: 'Practice', icon: <Dumbbell size={22} /> },
+    { id: 'roster', label: 'Roster', icon: <Users size={22} /> },
   ];
 
   const overflowNavItems = [
+    { id: 'scout', label: 'Scout', icon: <Activity size={20} /> },
     { id: 'swot', label: 'SWOT', icon: <Activity size={20} /> },
-    { id: 'roster', label: 'Roster', icon: <Users size={20} /> },
+    { id: 'lineups', label: 'Lineups', icon: <ListOrdered size={20} /> },
     { id: 'games', label: 'Games', icon: <Calendar size={20} /> },
     { id: 'league', label: 'League', icon: <Trophy size={20} /> },
   ];
@@ -463,7 +462,7 @@ function App() {
                 onClick={() => setCurrentView(item.id)}
               >
                 {item.icon}
-                {item.label}
+                <span className="nav-label">{item.label}</span>
               </button>
             ))}
           </div>

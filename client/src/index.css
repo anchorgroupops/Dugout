@@ -1,4 +1,12 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Outfit:wght@400;600;700;800&display=swap');
+@import '@fontsource/inter/400.css';
+@import '@fontsource/inter/500.css';
+@import '@fontsource/inter/600.css';
+@import '@fontsource/inter/700.css';
+@import '@fontsource/inter/800.css';
+@import '@fontsource/outfit/400.css';
+@import '@fontsource/outfit/600.css';
+@import '@fontsource/outfit/700.css';
+@import '@fontsource/outfit/800.css';
 
 :root {
   --bg-color: #060d1c;
@@ -171,6 +179,11 @@ main {
   color: var(--primary-color);
   background: var(--primary-glow);
   box-shadow: 0 0 0 1px rgba(4, 101, 104, 0.22);
+}
+
+@media (max-width: 950px) {
+  .nav-label { display: none; }
+  .nav-btn { padding: 0.5rem 0.6rem; min-width: 38px; justify-content: center; }
 }
 
 /* Logo Avatar */
