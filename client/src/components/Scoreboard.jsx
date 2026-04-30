@@ -387,7 +387,7 @@ const BatterScoutCard = ({ player, role, outdoor, isMobile }) => {
   );
 };
 
-const AtBatPanel = ({ scouting, livePlay, opponentBatting, outdoor, isMobile }) => {
+const AtBatPanel = ({ scouting, livePlay, outdoor, isMobile }) => {
   if (!scouting?.has_data) return null;
   const players = scouting.players || [];
   if (players.length === 0) return null;
@@ -932,7 +932,6 @@ const Scoreboard = ({ isMobile = false, isLandscape = false, team, schedule }) =
         <AtBatPanel
           scouting={data.opponent_scouting}
           livePlay={data.live_play}
-          opponentBatting={data.opponent_batting}
           outdoor={outdoor}
           isMobile={isMobile}
         />
