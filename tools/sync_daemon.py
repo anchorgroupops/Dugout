@@ -5915,6 +5915,66 @@ def main():
 _bootstrap_from_csv()
 
 
+def _bootstrap_static_fallbacks():
+    """Seed /data/sharks/*.json static-fallback files at container startup.
+
+    Each route handler that owns a static cache (announcer roster, opponents,
+    standings, practice insights) writes its fallback after a successful
+    response. But on a fresh deploy the file may not yet exist, and if the
+    handler later starts 502'ing the frontend's static-file fallback chain
+    has nothing to read.
+
+    Solution: hit each handler exactly once at module import via Flask's
+    test_client. Each one's existing "write static fallback on success"
+    branch then seeds the file. test_client invokes the route in-process —
+    no socket, no auth, no rate-limiter.
+
+    Also: regenerate swot_analysis.json if it's older than app_stats.json,
+    so the SWOT page never shows stats older than the underlying source.
+    """
+    try:
+        client = app.test_client()
+        for ep in (
+            '/api/announcer/roster',
+            '/api/opponents',
+            '/api/standings',
+            '/api/practice-insights',
+        ):
+            try:
+                resp = client.get(ep)
+                logging.info("[Bootstrap-static] %s -> %s", ep, resp.status_code)
+            except Exception as e:
+                logging.warning("[Bootstrap-static] %s -> %s", ep, e)
+    except Exception as e:
+        logging.warning("[Bootstrap-static] handler-seed failed: %s", e)
+
+    # SWOT staleness check: regen if the source app_stats.json is newer
+    # than the derived swot_analysis.json. Avoids the user seeing AVG/OBP
+    # values that pre-date the latest CSV ingest.
+    try:
+        app_stats_file = SHARKS_DIR / "app_stats.json"
+        swot_file = SHARKS_DIR / "swot_analysis.json"
+        needs_regen = (
+            app_stats_file.exists() and
+            (not swot_file.exists() or
+             app_stats_file.stat().st_mtime > swot_file.stat().st_mtime)
+        )
+        if needs_regen:
+            logging.info(
+                "[Bootstrap-static] SWOT stale (app_stats mtime > swot mtime) — regenerating"
+            )
+            try:
+                from swot_analyzer import run_sharks_analysis
+                run_sharks_analysis()
+            except Exception as _se:
+                logging.warning("[Bootstrap-static] SWOT regen failed: %s", _se)
+    except Exception as e:
+        logging.warning("[Bootstrap-static] SWOT staleness check failed: %s", e)
+
+
+_bootstrap_static_fallbacks()
+
+
 def _announcer_auto_repair_loop():
     """Every 15 min: reset errored players to pending so they get re-rendered."""
     import time
