@@ -3,7 +3,7 @@ import { Dumbbell, RefreshCw, Users, Target, AlertTriangle } from 'lucide-react'
 import { TipBadge } from './StatTooltip';
 import { formatDateMMDDYYYY } from '../utils/formatDate';
 import OpponentFieldMap from './OpponentFieldMap';
-import { fetchSharedJson, getLocalCachedJson, setLocalCachedJson } from '../utils/apiClient';
+import { fetchSharedJson, getLocalCachedJson, setLocalCachedJson, isPollingPaused } from '../utils/apiClient';
 
 const formatRelativeAge = (iso) => {
   if (!iso) return 'unknown';
@@ -171,6 +171,19 @@ const Practice = ({ team, schedule, isMobile = false, isLandscape = false }) => 
   const fetchInsights = async () => {
     setLoading(true);
     setError('');
+    // When apiClient has globally paused polling (recent 429), skip the
+    // live call entirely and fall straight through to the cache chain
+    // below. This keeps the rate-limit cascade from flaring back up.
+    if (isPollingPaused() && (insights || getLocalCachedJson('practice-insights'))) {
+      const lc = getLocalCachedJson('practice-insights');
+      if (lc?.value) {
+        setInsights(lc.value);
+        setInsightsFromCache(true);
+        setInsightsCacheAt(lc.savedAt || null);
+        setLoading(false);
+        return;
+      }
+    }
     try {
       const url = '/api/practice-insights';
       const res = await fetch(url);
@@ -203,6 +216,22 @@ const Practice = ({ team, schedule, isMobile = false, isLandscape = false }) => 
       // If preserveSelection is true (user toggled checkboxes), keep current selection
     } catch (e) {
       console.error('Failed to load practice insights', e);
+      // Static-file fallback when API and localStorage both empty.
+      // (apiClient already restored from LS into `insights` on mount; if
+      // we're here and `insights` is still null, hit the static file.)
+      try {
+        const sRes = await fetch('/data/sharks/practice_insights.json', { cache: 'no-store' });
+        if (sRes.ok) {
+          const sData = await sRes.json();
+          if (Array.isArray(sData?.needs) && sData.needs.length) {
+            setInsights(sData);
+            setInsightsFromCache(true);
+            setInsightsCacheAt(sData.generated_at || null);
+            setError('');
+            return;
+          }
+        }
+      } catch { /* truly nothing available */ }
       setError('Failed to load practice insights');
     } finally {
       setLoading(false);

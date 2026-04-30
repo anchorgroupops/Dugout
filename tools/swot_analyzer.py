@@ -414,8 +414,27 @@ def analyze_team(team_data: dict) -> dict:
         "threats": team_threats,
     }
 
+    # Capture the source app_stats.json mtime so the consumer can tell
+    # whether SWOT was generated before or after the most recent stats
+    # refresh. (The actual derived_stats values are recomputed from the
+    # enriched team_data here, but knowing the input vintage is useful.)
+    try:
+        import os as _os
+        from datetime import datetime as _dt, timezone as _tz
+        app_stats_path = SHARKS_DIR / "app_stats.json"
+        app_stats_mtime = (
+            _dt.fromtimestamp(_os.path.getmtime(app_stats_path), tz=_tz.utc).isoformat()
+            if app_stats_path.exists() else None
+        )
+        last_updated = _dt.now(_tz.utc).isoformat()
+    except Exception:
+        app_stats_mtime = None
+        last_updated = None
+
     return {
         "team_name": team_data.get("team_name", "Unknown"),
+        "last_updated": last_updated,
+        "source_app_stats_mtime": app_stats_mtime,
         "player_analyses": player_analyses,
         "team_swot": team_swot,
     }

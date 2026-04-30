@@ -214,7 +214,7 @@ const ScoutingCard = ({ player, expanded, onToggle, compact = false }) => {
         }}
       >
         <span style={{ fontWeight: '800', color: 'var(--text-muted)', minWidth: '28px' }}>
-          #{player.number || '?'}
+          #{player.number || '—'}
         </span>
         <span style={{ flex: 1, fontWeight: '600' }}>{player.name}</span>
         <DangerBadge danger={player.danger} />

@@ -22,11 +22,15 @@ const BulletCard = ({ title, items, color, icon, emptyText }) => (
   </div>
 );
 
+const OPPONENTS_LS_KEY = 'sharks_opponents_cache';
+
 export default function Scouting({ isMobile, isLandscape = false }) {
   const [nextGame, setNextGame] = useState(null);
   const [matchup, setMatchup] = useState(null);
   const [h2h, setH2h] = useState(null);
   const [opponents, setOpponents] = useState([]);
+  const [opponentsCached, setOpponentsCached] = useState(false);
+  const [opponentsCachedAt, setOpponentsCachedAt] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -34,13 +38,92 @@ export default function Scouting({ isMobile, isLandscape = false }) {
     Promise.all([
       fetchSharedJson('/api/next-game', { fallback: null }),
       fetchSharedJson('/api/opponents', { fallback: [] }),
-    ]).then(([nextData, opps]) => {
-      setNextGame(nextData);
-      setOpponents(Array.isArray(opps) ? opps : []);
-      if (nextData?.slug) {
+    ]).then(async ([nextData, opps]) => {
+      let resolvedNext = nextData;
+      let resolvedOpps = Array.isArray(opps) ? opps : [];
+      let oppsFromCache = false;
+      let oppsCachedAt = null;
+
+      // Opponents fallback chain when /api/opponents 502s/empty:
+      //  1) localStorage cache from a previous successful session
+      //  2) /data/sharks/opponents.json static fallback
+      if (!resolvedOpps.length) {
+        try {
+          const raw = window.localStorage.getItem(OPPONENTS_LS_KEY);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed?.data) && parsed.data.length) {
+              resolvedOpps = parsed.data;
+              oppsFromCache = true;
+              oppsCachedAt = parsed.cachedAt || null;
+            }
+          }
+        } catch { /* ignore */ }
+      }
+      if (!resolvedOpps.length) {
+        try {
+          const sRes = await fetch('/data/sharks/opponents.json', { cache: 'no-store' });
+          if (sRes.ok) {
+            const sData = await sRes.json();
+            const list = Array.isArray(sData?.teams) ? sData.teams : [];
+            if (list.length) {
+              resolvedOpps = list;
+              oppsFromCache = true;
+              oppsCachedAt = sData.last_updated || null;
+            }
+          }
+        } catch { /* ignore */ }
+      }
+      if (!oppsFromCache && resolvedOpps.length) {
+        // Live API hit — refresh the localStorage cache for next time.
+        try {
+          window.localStorage.setItem(OPPONENTS_LS_KEY, JSON.stringify({
+            data: resolvedOpps,
+            cachedAt: new Date().toISOString(),
+          }));
+        } catch { /* localStorage may be full */ }
+      }
+      setOpponentsCached(oppsFromCache);
+      setOpponentsCachedAt(oppsCachedAt);
+
+      // Cross-reference: if /api/next-game returned nothing usable, but
+      // /api/schedule (or the static schedule.json) shows an upcoming
+      // game today/soon, surface it here. This protects against the
+      // schedule-scraper outage that leaves /api/next-game empty.
+      if (!resolvedNext?.opponent) {
+        try {
+          const sched =
+            (await fetchSharedJson('/api/schedule', { fallback: null })) ||
+            (await fetchSharedJson('/data/sharks/schedule.json', { fallback: null }));
+          const todayIso = new Date().toISOString().slice(0, 10);
+          const upcoming =
+            (sched?.upcoming && sched.upcoming.length ? sched.upcoming :
+             sched?.games && sched.games.length ? sched.games : []) || [];
+          const next = upcoming
+            .filter(g => g && g.is_game !== false && (g.date || '') >= todayIso && !g.result)
+            .sort((a, b) => (a.date || '').localeCompare(b.date || ''))[0];
+          if (next) {
+            const cleanOpponent = String(next.opponent || '')
+              .replace(/^@\s*|^vs\.?\s*/i, '')
+              .trim();
+            resolvedNext = {
+              opponent: cleanOpponent,
+              slug: cleanOpponent.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_-]/g, ''),
+              date: next.date,
+              time: next.time,
+              home_away: next.home_away,
+              source: 'schedule_fallback',
+            };
+          }
+        } catch { /* fall through, leave next-game empty */ }
+      }
+
+      setNextGame(resolvedNext);
+      setOpponents(resolvedOpps);
+      if (resolvedNext?.slug) {
         return Promise.all([
-          fetchSharedJson(`/api/matchup/${nextData.slug}`, { fallback: null }),
-          fetchSharedJson(`/api/h2h/${nextData.slug}`, { fallback: null }),
+          fetchSharedJson(`/api/matchup/${resolvedNext.slug}`, { fallback: null }),
+          fetchSharedJson(`/api/h2h/${resolvedNext.slug}`, { fallback: null }),
         ]);
       }
       return [null, null];
@@ -242,8 +325,24 @@ export default function Scouting({ isMobile, isLandscape = false }) {
       {/* All-opponents grid — always visible */}
       {opponents.length > 0 && (
         <div style={{ marginTop: 'var(--space-lg)' }}>
-          <div className="section-label" style={{ marginBottom: 'var(--space-sm)' }}>
+          <div
+            className="section-label"
+            style={{ marginBottom: 'var(--space-sm)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+          >
             {nextGame?.opponent ? 'All Division Opponents' : 'Division Opponents'}
+            {opponentsCached && (
+              <span
+                title={opponentsCachedAt ? `Cached at ${opponentsCachedAt}` : 'Showing cached data'}
+                style={{
+                  fontSize: '10px', textTransform: 'uppercase',
+                  color: '#f0b429', background: 'rgba(240,180,41,0.10)',
+                  border: '1px solid rgba(240,180,41,0.35)', borderRadius: '4px',
+                  padding: '1px 6px', letterSpacing: '0.05em',
+                }}
+              >
+                Cached
+              </span>
+            )}
           </div>
           <div className="card-grid">
             {opponents.map(opp => {

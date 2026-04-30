@@ -1,0 +1,7 @@
+{
+  "_doc": "Sharks-only roster overrides applied AFTER GameChanger CSV parse. Match by case-insensitive 'first last' (or just 'first' when last is blank). Add an entry whenever GC has bad/missing data the manager can't fix at the source. Removing an entry is reversible — the pipeline falls back to GC immediately.",
+  "number_overrides": {
+    "amelia": "TBD"
+  },
+  "name_overrides": {}
+}

@@ -62,11 +62,11 @@ export const TipBadge = ({ label, value, dim }) => {
  */
 export const PlayerName = ({ name, number, first, last, size = 'md' }) => {
   const displayName = name || `${first || ''} ${last || ''}`.trim() || '\u2014';
-  // Show `#?` placeholder when GameChanger hasn't supplied a jersey number
-  // (sub players who haven't been issued one yet). An empty string would
-  // render as a blank circle which looks broken.
+  // Show `#\u2014` (em-dash) when GameChanger hasn't supplied a jersey number
+  // (sub players who haven't been issued one yet). The previous `#?` read
+  // as a data error; `#\u2014` reads as "unassigned".
   const numStr = number == null ? '' : String(number).trim();
-  const displayNum = numStr !== '' ? `#${numStr}` : '#?';
+  const displayNum = numStr !== '' ? `#${numStr}` : '#\u2014';
   const fontSize = size === 'sm' ? 'var(--text-sm)' : size === 'xs' ? 'var(--text-xs)' : 'var(--text-base)';
 
   return (

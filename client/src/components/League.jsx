@@ -31,16 +31,33 @@ const League = ({ isMobile = false, isLandscape = false }) => {
 
   useEffect(() => {
     let cancelled = false;
-    fetchWithLocalCache('/api/standings', 'standings').then(result => {
+    (async () => {
+      const result = await fetchWithLocalCache('/api/standings', 'standings');
       if (cancelled) return;
-      setStandings(result.value);
-      setStandingsMeta({
+      let value = result.value;
+      let meta = {
         fromCache: result.fromCache,
         savedAt: result.savedAt,
         error: result.error || (result.httpStatus ? `HTTP ${result.httpStatus}` : null),
-      });
+      };
+      const hasRows = Array.isArray(value?.standings) && value.standings.length > 0;
+      // Static-file fallback when both API and localStorage came up empty.
+      if (!hasRows) {
+        try {
+          const sRes = await fetch('/data/sharks/standings.json', { cache: 'no-store' });
+          if (sRes.ok) {
+            const sData = await sRes.json();
+            if (Array.isArray(sData?.standings) && sData.standings.length) {
+              value = sData;
+              meta = { fromCache: true, savedAt: sData.last_updated || null, error: meta.error };
+            }
+          }
+        } catch { /* ignore */ }
+      }
+      setStandings(value);
+      setStandingsMeta(meta);
       setStandingsLoaded(true);
-    });
+    })();
     fetchSharedJson('/api/opponents', { fallback: [] })
       .then(d => { if (!cancelled) setOpponents(d || []); })
       .catch(() => {});

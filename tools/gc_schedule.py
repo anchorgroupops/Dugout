@@ -21,6 +21,61 @@ _TIME_RE = re.compile(r'^\d{1,2}:\d{2}\s*(AM|PM)$', re.I)
 _RESULT_RE = re.compile(r'^[WLT]\s+\d+[-–]\d+$', re.I)
 
 
+def _alert_empty_scrape(text_chars: int = 0) -> None:
+    """Record that the schedule scraper returned 0 parsed games.
+
+    Updates `data/sharks/pipeline_health.json` (creating it if needed) with
+    a `schedule_empty_streak` counter and a `last_empty_scrape_at` timestamp.
+    Triggers a stderr WARN line on every empty run AND a louder alert when
+    the streak hits 3+ — at that point the GameChanger UI/parser has almost
+    certainly drifted and a human needs to look at it.
+    """
+    import sys
+    SHARKS_DIR.mkdir(parents=True, exist_ok=True)
+    health_file = SHARKS_DIR / "pipeline_health.json"
+    health = {}
+    if health_file.exists():
+        try:
+            with open(health_file) as f:
+                health = json.load(f) or {}
+        except Exception:
+            health = {}
+    streak = int(health.get("schedule_empty_streak") or 0) + 1
+    now_iso = datetime.now(ET).isoformat()
+    health["schedule_empty_streak"] = streak
+    health["last_empty_scrape_at"] = now_iso
+    health["last_empty_scrape_chars"] = int(text_chars)
+    with open(health_file, "w") as f:
+        json.dump(health, f, indent=2)
+    msg = (f"[GC_SCHEDULE][ALERT] Empty schedule scrape "
+           f"(streak={streak}, captured {text_chars} chars).")
+    print(msg, file=sys.stderr)
+    if streak >= 3:
+        print(
+            "[GC_SCHEDULE][ALERT] 3+ consecutive empty scrapes — likely "
+            "GameChanger parser drift. Inspect data/sharks/pipeline_health.json "
+            "and recent .tmp/schedule_*.png snapshots.",
+            file=sys.stderr,
+        )
+
+
+def _clear_empty_scrape_alert() -> None:
+    """Reset the empty-scrape streak after a successful parse."""
+    health_file = SHARKS_DIR / "pipeline_health.json"
+    if not health_file.exists():
+        return
+    try:
+        with open(health_file) as f:
+            health = json.load(f) or {}
+        if int(health.get("schedule_empty_streak") or 0) > 0:
+            health["schedule_empty_streak"] = 0
+            health["last_successful_scrape_at"] = datetime.now(ET).isoformat()
+            with open(health_file, "w") as f:
+                json.dump(health, f, indent=2)
+    except Exception:
+        pass
+
+
 def _parse_schedule_text(text: str) -> dict:
     """Parse raw GameChanger schedule inner_text into {upcoming, past}."""
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
@@ -225,6 +280,19 @@ class ScheduleScraper(GameChangerScraper):
             if total == 0:
                 preview = text_content[:1000].replace("\n", " | ")
                 print(f"[GC_SCHEDULE] Parser returned 0 games. Raw preview: {preview!r}")
+                # Persist a sticky alert flag so monitoring can pick it up.
+                # _alert_empty_scrape() bumps a counter on consecutive empty
+                # runs and writes to data/sharks/pipeline_health.json.
+                try:
+                    _alert_empty_scrape(text_chars=len(text_content))
+                except Exception as _ae:
+                    print(f"[GC_SCHEDULE] Could not record empty-scrape alert: {_ae}")
+            else:
+                # Reset the empty-scrape streak on any parsed result.
+                try:
+                    _clear_empty_scrape_alert()
+                except Exception:
+                    pass
 
             # Merge into schedule_manual.json so the API picks it up.
             # GUARD: if the scrape returned 0 games, don't overwrite a

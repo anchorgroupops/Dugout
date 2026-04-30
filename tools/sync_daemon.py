@@ -398,9 +398,63 @@ def _write_json_file(path: Path, data, indent: int = 2):
             pass
         raise
 
+def _apply_player_overrides(roster: list[dict]) -> list[dict]:
+    """Apply manual jersey-number / name overrides from config/player_overrides.json.
+
+    GameChanger occasionally emits empty `number` for fill-in players (e.g.
+    Amelia in Spring 2026). The manager can't always fix that at the source,
+    so this pipeline step applies a small, version-controlled override map.
+
+    Match key: lowercased 'first last', falling back to lowercased 'first'
+    when the last name is blank. No-op when the override file is missing.
+    """
+    overrides_file = CONFIG_DIR / "player_overrides.json"
+    if not overrides_file.exists():
+        return roster
+    try:
+        ov = _read_json_file(overrides_file, default={}) or {}
+    except Exception:
+        return roster
+    num_map = {k.lower(): v for k, v in (ov.get("number_overrides") or {}).items()}
+    name_map = {k.lower(): v for k, v in (ov.get("name_overrides") or {}).items()}
+    if not num_map and not name_map:
+        return roster
+    for p in roster or []:
+        if not isinstance(p, dict):
+            continue
+        first = (p.get("first") or "").strip().lower()
+        last = (p.get("last") or "").strip().lower()
+        keys = []
+        if first and last:
+            keys.append(f"{first} {last}")
+        if first:
+            keys.append(first)
+        for key in keys:
+            if key in num_map and not str(p.get("number") or "").strip():
+                override = str(num_map[key]).strip()
+                if override and override.upper() != "TBD":
+                    p["number"] = override
+                    p.setdefault("number_source", "override")
+            if key in name_map:
+                rename = name_map[key]
+                if isinstance(rename, dict):
+                    if rename.get("first"):
+                        p["first"] = rename["first"]
+                    if rename.get("last"):
+                        p["last"] = rename["last"]
+                break
+    return roster
+
+
 def _enrich_team_with_app_stats(team_data: dict) -> dict:
     """Apply app_stats.json stats to Sharks roster (batting, pitching, fielding).
     Keyed by jersey number. Mutates team_data in place and returns it."""
+    # Apply manual overrides first so jersey-number-keyed enrichment below
+    # picks up the corrected number.
+    try:
+        _apply_player_overrides(team_data.get("roster") or [])
+    except Exception as _oe:
+        logging.warning("[Roster] override apply failed: %s", _oe)
     app_stats_file = SHARKS_DIR / "app_stats.json"
     if not app_stats_file.exists():
         return team_data
@@ -2597,37 +2651,68 @@ def handle_standings():
     standings.append(sharks_row)
 
     standings.sort(key=lambda x: (-x["w"], x["l"]))
-    return jsonify({"league": league_name, "standings": standings})
+    payload = {
+        "league": league_name,
+        "standings": standings,
+        "last_updated": datetime.now(ET).isoformat(),
+    }
+    # Persist a static fallback so nginx can serve the table when this
+    # process is rate-limited or down. Only write when standings is
+    # non-empty — never overwrite a good cache with garbage.
+    if standings:
+        try:
+            _write_json_file(SHARKS_DIR / "standings.json", payload)
+        except Exception as _we:
+            logging.warning("[Standings] static cache write failed: %s", _we)
+    return jsonify(payload)
 
 
 @app.route('/api/opponents', methods=['GET'])
 def handle_opponents():
-    """List all scraped opponent teams."""
-    opponents_dir = DATA_DIR / "opponents"
-    teams = []
-    if opponents_dir.exists():
-        for team_dir in opponents_dir.iterdir():
-            if team_dir.is_dir():
-                team_file = team_dir / "team.json"
-                if team_file.exists():
-                    try:
-                        with open(team_file) as f:
-                            td = json.load(f)
-                        teams.append({
-                            "slug": team_dir.name,
-                            "team_name": _canonical_team_name(td.get("team_name", team_dir.name), team_dir.name),
-                            "record": td.get("record", {}),
-                            "gc_team_id": td.get("gc_team_id", ""),
-                            "gc_season_slug": td.get("gc_season_slug", ""),
-                            "roster_size": len(td.get("roster", [])),
-                            "batting_rows": len(td.get("batting_stats", [])),
-                            "pitching_rows": len(td.get("pitching_stats", [])),
-                            "public_game_metrics": td.get("public_game_metrics", {}),
-                        })
-                    except Exception as e:
-                        logging.error(f"Error reading opponent {team_dir.name}: {e}")
-    teams.sort(key=lambda t: t["team_name"].lower())
-    return jsonify(teams)
+    """List all scraped opponent teams.
+
+    Hardened: never returns 500. Persists each successful response to
+    /data/sharks/opponents.json so nginx can serve the static fallback
+    when this Flask process is down.
+    """
+    try:
+        opponents_dir = DATA_DIR / "opponents"
+        teams = []
+        if opponents_dir.exists():
+            for team_dir in opponents_dir.iterdir():
+                if team_dir.is_dir():
+                    team_file = team_dir / "team.json"
+                    if team_file.exists():
+                        try:
+                            with open(team_file) as f:
+                                td = json.load(f)
+                            teams.append({
+                                "slug": team_dir.name,
+                                "team_name": _canonical_team_name(td.get("team_name", team_dir.name), team_dir.name),
+                                "record": td.get("record", {}),
+                                "gc_team_id": td.get("gc_team_id", ""),
+                                "gc_season_slug": td.get("gc_season_slug", ""),
+                                "roster_size": len(td.get("roster", [])),
+                                "batting_rows": len(td.get("batting_stats", [])),
+                                "pitching_rows": len(td.get("pitching_stats", [])),
+                                "public_game_metrics": td.get("public_game_metrics", {}),
+                            })
+                        except Exception as e:
+                            logging.error(f"Error reading opponent {team_dir.name}: {e}")
+        teams.sort(key=lambda t: t["team_name"].lower())
+        # Persist a static fallback for nginx when this process is down.
+        if teams:
+            try:
+                _write_json_file(SHARKS_DIR / "opponents.json", {
+                    "last_updated": datetime.now(ET).isoformat(),
+                    "teams": teams,
+                })
+            except Exception as _we:
+                logging.warning("[Opponents] static cache write failed: %s", _we)
+        return jsonify(teams)
+    except Exception as e:
+        logging.error("[Opponents] handler failed: %s", e, exc_info=True)
+        return jsonify({"error": "service_unavailable", "reason": str(e), "teams": []}), 503
 
 
 @app.route('/api/opponents/<slug>', methods=['GET'])
@@ -3250,8 +3335,30 @@ def handle_roster():
     Convenience endpoint — same shape as `/api/team` `.roster[]`. Used by
     components that only need the player list and want to avoid the
     larger team payload (stats, schedule cross-refs, etc.).
+
+    NOTE on frontend usage (2026-04 audit): the PWA Roster tab does not
+    call this endpoint anymore — it receives roster via App.jsx's
+    `/api/team` fetch, which is enriched from app_stats.json. This route
+    is kept as a public/debug API and as the source for any future
+    tooling that wants a slim payload. If it 502s under load, the Roster
+    tab is unaffected; consumers should gracefully degrade.
     """
-    return jsonify(_read_team_roster_payload())
+    try:
+        payload = _read_team_roster_payload()
+        if not isinstance(payload, dict):
+            payload = {"roster": [], "last_updated": None}
+        return jsonify(payload)
+    except Exception as e:
+        # Mirror the announcer-roster pattern: never bubble a 500 that
+        # gives nginx nothing to forward. Return a 503 with a JSON body so
+        # the client can stop retrying immediately.
+        logging.error("[Roster] handler failed: %s", e, exc_info=True)
+        return jsonify({
+            "roster": [],
+            "last_updated": None,
+            "error": "service_unavailable",
+            "reason": str(e),
+        }), 503
 
 
 @app.route('/api/players', methods=['GET'])
@@ -3969,7 +4076,7 @@ def handle_practice_insights():
                     "focus_players": need.get("focus_players", []),
                 })
 
-        return jsonify({
+        payload = {
             "generated_at": datetime.now(ET).isoformat(),
             "team_name": team.get("team_name", "The Sharks"),
             "default_player_source": default_source,
@@ -3978,7 +4085,17 @@ def handle_practice_insights():
             "available_players": core_names,
             "needs": needs,
             "recommended_plan": recommended_plan,
-        })
+        }
+        # Persist a static fallback so nginx can serve the last-known-good
+        # practice plan when this process is rate-limited or down. Only on
+        # GET (POST requests are session-specific player overrides we don't
+        # want to freeze into the cache).
+        if request.method == "GET" and needs:
+            try:
+                _write_json_file(SHARKS_DIR / "practice_insights.json", payload)
+            except Exception as _we:
+                logging.warning("[PracticeInsights] static cache write failed: %s", _we)
+        return jsonify(payload)
     except Exception as e:
         logging.error(f"[PracticeInsights] Unhandled error: {e}")
         return jsonify({
@@ -4245,17 +4362,30 @@ def handle_announcer_roster():
         if fallback_used:
             payload["fallback"] = True
             payload["fallback_reason"] = fallback_reason
+        # Persist a static cache so nginx can serve the last-known-good
+        # roster directly (under /data/sharks/announcer_roster.json) when
+        # this Flask process is down or returning 502/503. Only write when
+        # we actually have players to avoid overwriting a good cache with
+        # an empty list.
+        if roster:
+            try:
+                static_payload = dict(payload)
+                static_payload["last_updated"] = datetime.now(ET).isoformat()
+                _write_json_file(SHARKS_DIR / "announcer_roster.json", static_payload)
+            except Exception as _we:
+                logging.warning("[Announcer] static roster cache write failed: %s", _we)
         return jsonify(payload)
     except Exception as e:
         logging.error("[Announcer] roster route failed catastrophically: %s", e, exc_info=True)
-        # Never return 500 — return an empty offline-shaped payload so the
-        # client doesn't enter a hot retry loop.
+        # Never return 500 — return a 503 JSON payload so the client knows
+        # to fall back to the static cache instead of hot-retrying.
         return jsonify({
             "roster": [],
             "stats": {"total": 0, "ready": 0, "pending": 0, "error": 0},
             "fallback": True,
             "fallback_reason": f"unhandled: {e}",
-        })
+            "error": "service_unavailable",
+        }), 503
 
 
 @app.route('/api/announcer/player/<player_id>', methods=['DELETE'])

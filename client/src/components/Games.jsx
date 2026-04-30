@@ -268,8 +268,24 @@ const normaliseOpponent = (raw) => {
 // ─── Result badge ─────────────────────────────────────────────────────────────
 const ResultBadge = ({ result, hasStats, isPast }) => {
   if (!result) {
-    if (hasStats) return <span className="result-badge" style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text-muted)', border: '1px solid rgba(255,255,255,0.12)' }}>STATS</span>;
-    if (isPast) return <span className="result-badge" style={{ background: 'rgba(255,255,255,0.04)', color: 'var(--text-muted)', border: '1px solid rgba(255,255,255,0.08)' }}>N/A</span>;
+    // Past game with no W/L recorded yet — show "Result pending" so the
+    // reader understands GameChanger hasn't synced the outcome yet,
+    // rather than the cryptic "STATS" / "N/A" debug tags.
+    if (isPast) {
+      return (
+        <span
+          className="result-badge"
+          title={hasStats ? 'GameChanger stats present but no W/L recorded yet' : 'Game completed; result not yet synced'}
+          style={{
+            background: 'rgba(240,180,41,0.10)',
+            color: '#f0b429',
+            border: '1px solid rgba(240,180,41,0.35)',
+          }}
+        >
+          Result pending
+        </span>
+      );
+    }
     return null;
   }
   const upper = result.toUpperCase();

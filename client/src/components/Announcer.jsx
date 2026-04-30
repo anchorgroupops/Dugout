@@ -307,7 +307,7 @@ function PlayerCard({ player, onSavePhonetics, onRender, onRemove }) {
       )}
       <button className="announcer-player-header" onClick={() => setExpanded(!expanded)} aria-expanded={expanded}>
         <div className="announcer-player-info">
-          <span className="announcer-jersey">#{player.number || '?'}</span>
+          <span className="announcer-jersey">#{player.number || '—'}</span>
           <span className="announcer-player-name">{player.first} {player.last}</span>
           <StatusLed status={player.status} />
         </div>
@@ -884,7 +884,7 @@ function NowPlayingView({ roster, lineups, onBack }) {
       )}
 
       <div className="announcer-np-card glass-panel">
-        <div className="announcer-np-jersey">#{current?.number || '?'}</div>
+        <div className="announcer-np-jersey">#{current?.number || '—'}</div>
         <div className="announcer-np-name">{current?.first} {current?.last}</div>
         <StatusLed status={current?.status || 'pending'} />
       </div>
@@ -1026,19 +1026,59 @@ function useWorkerStatus() {
   // "Refresh" button and the consumer can call restart() to resume polling.
   const [stopped, setStopped] = useState(false);
   // Increment to force the polling effect to re-run from scratch (used by
-  // the manual refresh button after the 3-strike permanent stop).
+  // the manual refresh button after the permanent stop).
   const [resetTick, setResetTick] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
     let timeoutId = null;
-    let interval = 5_000; // start fast (5s) per spec
-    const MIN_INTERVAL = 5_000;
-    const MAX_INTERVAL = 60_000;
-    const MAX_CONSECUTIVE_5XX = 3;
-    let consecutive5xx = 0;
+    // Backoff per spec: BASE 10s, doubles on each failure, cap at 5 minutes.
+    const BASE_DELAY = 10_000;
+    const MAX_DELAY = 300_000; // 5 min
+    // 429-specific: at minimum 120s before the next attempt, regardless
+    // of what Retry-After says. Spec is explicit on this.
+    const MIN_429_WAIT = 120_000;
+    // Stop polling entirely after this many consecutive failures of any
+    // kind (5xx, 4xx, 429, network). Manual restart() required to resume.
+    const MAX_CONSECUTIVE_FAILURES = 5;
+    // Circuit breaker: failures within this rolling window count toward
+    // the disable-until-reload threshold even if separated by a successful
+    // recovery in between.
+    const CIRCUIT_WINDOW_MS = 60_000;
+    const CIRCUIT_THRESHOLD = 5;
+    const failureTimestamps = [];
+    let failures = 0;
+    let interval = BASE_DELAY;
     let stoppedPermanently = false;
     setStopped(false);
+
+    const computeBackoff = () =>
+      Math.min(BASE_DELAY * Math.pow(2, failures), MAX_DELAY);
+
+    const recordFailure = () => {
+      failures += 1;
+      const now = Date.now();
+      failureTimestamps.push(now);
+      // Drop timestamps outside the rolling window.
+      while (failureTimestamps.length && now - failureTimestamps[0] > CIRCUIT_WINDOW_MS) {
+        failureTimestamps.shift();
+      }
+    };
+
+    const stopPermanent = (reason) => {
+      stoppedPermanently = true;
+      if (!cancelled) {
+        setWorkerStatus({
+          hub_status: 'OFFLINE',
+          primary_worker: { id: 'mac', status: 'OFFLINE', last_heartbeat: null, queue_depth: 0 },
+          failover_worker: { id: 'Pi-5-Edge', status: 'READY' },
+          current_mode: 'OFFLINE',
+          stopped: true,
+          error: reason || 'worker unavailable',
+        });
+        setStopped(true);
+      }
+    };
 
     const schedule = (ms) => {
       if (cancelled || stoppedPermanently) return;
@@ -1053,14 +1093,14 @@ function useWorkerStatus() {
       try {
         apiClient = await import('../utils/apiClient');
         if (apiClient.isPollingPaused()) {
-          // Resume polling at the soonest a couple seconds after the pause
-          // expires; otherwise keep the normal cadence.
+          // Resume polling shortly after the pause expires.
           const remaining = Math.max(2_000, apiClient.getPausedUntil() - Date.now() + 1_000);
-          schedule(Math.min(MAX_INTERVAL, remaining));
+          schedule(Math.min(MAX_DELAY, remaining));
           return;
         }
       } catch { /* apiClient unavailable — degrade gracefully */ }
 
+      let nextDelay = interval;
       try {
         const res = await fetch('/api/announcer/worker-status');
         if (res.ok) {
@@ -1070,43 +1110,96 @@ function useWorkerStatus() {
               setWorkerStatus(data);
             } catch { /* ignore parse error, keep prior value */ }
           }
-          consecutive5xx = 0;
-          interval = MIN_INTERVAL;
+          // Only a successful 200 resets the failure counters and cadence.
+          failures = 0;
+          failureTimestamps.length = 0;
+          interval = BASE_DELAY;
+          nextDelay = BASE_DELAY;
         } else if (res.status === 429) {
-          // 429 is the canary for nginx-level rate limiting from the
-          // entire app. Pause every poller for 60s, not just this one.
-          if (apiClient && typeof apiClient.pausePollingFor === 'function') {
-            apiClient.pausePollingFor(60_000);
-          }
-          interval = Math.min(MAX_INTERVAL, interval * 2);
-        } else if (res.status >= 500 || res.status >= 400) {
-          consecutive5xx += 1;
-          if (consecutive5xx >= MAX_CONSECUTIVE_5XX) {
-            stoppedPermanently = true;
-            if (!cancelled) {
-              setWorkerStatus({
-                hub_status: 'OFFLINE',
-                primary_worker: { id: 'mac', status: 'OFFLINE', last_heartbeat: null, queue_depth: 0 },
-                failover_worker: { id: 'Pi-5-Edge', status: 'READY' },
-                current_mode: 'OFFLINE',
-                stopped: true,
-                error: 'worker unavailable',
-              });
-              setStopped(true);
+          // 429 is the canary for nginx-level rate limiting. Treat as
+          // "offline" immediately. Honor Retry-After if present, but
+          // never wait less than MIN_429_WAIT (120s) before retrying,
+          // AND pause every other poller globally.
+          recordFailure();
+          let retryAfterMs = MIN_429_WAIT;
+          const ra = res.headers.get('Retry-After');
+          if (ra) {
+            const asInt = parseInt(ra, 10);
+            if (!Number.isNaN(asInt) && asInt > 0) {
+              retryAfterMs = Math.max(MIN_429_WAIT, asInt * 1000);
+            } else {
+              const asDate = Date.parse(ra);
+              if (!Number.isNaN(asDate)) {
+                retryAfterMs = Math.max(MIN_429_WAIT, asDate - Date.now());
+              }
             }
-            return; // do not reschedule
           }
-          interval = Math.min(MAX_INTERVAL, interval * 2);
+          if (apiClient && typeof apiClient.pausePollingFor === 'function') {
+            apiClient.pausePollingFor(retryAfterMs);
+          }
+          interval = Math.min(MAX_DELAY, retryAfterMs);
+          nextDelay = interval;
+        } else {
+          // Any other non-2xx (4xx, 5xx) — exponential backoff.
+          recordFailure();
+          interval = computeBackoff();
+          nextDelay = interval;
         }
       } catch {
-        // Network error — keep prior status, back off gently.
-        interval = Math.min(MAX_INTERVAL, interval * 2);
-      } finally {
-        schedule(interval);
+        // Network error — count as failure and back off too.
+        recordFailure();
+        interval = computeBackoff();
+        nextDelay = interval;
       }
+
+      // Permanent stop checks. Either condition disables polling until
+      // the user calls restart() (badge "Refresh") or reloads the page.
+      if (failures >= MAX_CONSECUTIVE_FAILURES) {
+        stopPermanent('worker unavailable (too many failures)');
+        return;
+      }
+      if (failureTimestamps.length >= CIRCUIT_THRESHOLD) {
+        stopPermanent('circuit breaker open');
+        return;
+      }
+
+      schedule(nextDelay);
     };
 
-    poll();
+    // Health pre-gate: do not start polling until /api/health returns 200.
+    // Spec: when the backend is already 4xx/5xx-ing, hammering worker-status
+    // is what creates the rate-limit cascade. Re-check health every 30s
+    // until it returns 200, then begin the normal polling loop.
+    const HEALTH_RECHECK_MS = 30_000;
+    const startWhenHealthy = async () => {
+      if (cancelled || stoppedPermanently) return;
+      try {
+        const res = await fetch('/api/health', { cache: 'no-store' });
+        if (res.ok) {
+          poll();
+          return;
+        }
+        // Treat a non-200 health as one strike toward the circuit, so
+        // an unreachable backend at page load doesn't pretend everything
+        // is fine forever.
+        recordFailure();
+        if (failures >= MAX_CONSECUTIVE_FAILURES ||
+            failureTimestamps.length >= CIRCUIT_THRESHOLD) {
+          stopPermanent('backend health check failing');
+          return;
+        }
+      } catch {
+        recordFailure();
+        if (failures >= MAX_CONSECUTIVE_FAILURES ||
+            failureTimestamps.length >= CIRCUIT_THRESHOLD) {
+          stopPermanent('backend unreachable');
+          return;
+        }
+      }
+      timeoutId = setTimeout(startWhenHealthy, HEALTH_RECHECK_MS);
+    };
+    startWhenHealthy();
+
     return () => {
       cancelled = true;
       if (timeoutId) clearTimeout(timeoutId);
@@ -1401,6 +1494,7 @@ export default function Announcer({ lineups }) {
   const [csvImporting, setCsvImporting] = useState(false);
   const csvInputRef = useRef(null);
   const [error, setError] = useState('');
+  const [degradedReason, setDegradedReason] = useState('');
   const [showFormer, setShowFormer] = useState(false);
   const pollRef = useRef(null);
   const renderToRef = useRef(null);
@@ -1408,15 +1502,81 @@ export default function Announcer({ lineups }) {
   const { workerStatus, stopped: workerStopped, restart: restartWorkerPoll } = useWorkerStatus();
 
   const fetchRoster = useCallback(async () => {
+    // Fallback chain when /api/announcer/roster is unavailable (502/503/etc):
+    //   1) /data/sharks/announcer_roster.json — last good cache nginx-served
+    //   2) /data/sharks/app_stats.json        — derive minimal player list
+    const buildFromAppStats = (data) => {
+      const batting = Array.isArray(data?.batting) ? data.batting : [];
+      const seen = new Set();
+      return batting.map((row) => {
+        const fullName = String(row?.name || '').trim();
+        if (!fullName) return null;
+        const parts = fullName.split(/\s+/);
+        const first = parts[0] || fullName;
+        const last = parts.slice(1).join(' ') || '';
+        const number = String(row?.number || '').trim();
+        const id = `${number}-${first}-${last}`
+          .toLowerCase()
+          .replace(/[^a-z0-9_-]/g, '-')
+          .replace(/-+/g, '-')
+          .replace(/^-|-$/g, '') || first.toLowerCase();
+        if (seen.has(id)) return null;
+        seen.add(id);
+        return {
+          id, first, last, number,
+          phonetic_hint: '', tts_instruction: '', walkup_song_url: '',
+          intro_timestamp: 5.0, announcer_audio_url: '',
+          status: 'pending', is_active: true, rendered_at: '',
+          error_message: '', is_ghost: false,
+        };
+      }).filter(Boolean);
+    };
+
     try {
       const res = await fetch('/api/announcer/roster');
       if (!res.ok) throw new Error(`${res.status}`);
       const data = await res.json();
-      setRoster(data.roster || []);
+      const list = data.roster || [];
+      if (!list.length) throw new Error('empty roster from API');
+      setRoster(list);
       setStats(data.stats || { total: 0, ready: 0, pending: 0, error: 0 });
       setError('');
-    } catch (e) {
-      setError(`Failed to load roster: ${e.message}`);
+      setDegradedReason('');
+      return;
+    } catch (apiErr) {
+      // Fallback 1: static cache.
+      try {
+        const sRes = await fetch('/data/sharks/announcer_roster.json', { cache: 'no-store' });
+        if (sRes.ok) {
+          const sData = await sRes.json();
+          const list = sData.roster || [];
+          if (list.length) {
+            setRoster(list);
+            setStats(sData.stats || { total: list.length, ready: 0, pending: list.length, error: 0 });
+            setError('');
+            setDegradedReason(`Using cached roster — live generation unavailable (${apiErr.message})`);
+            return;
+          }
+        }
+      } catch { /* fall through to app_stats */ }
+
+      // Fallback 2: derive from app_stats batting list.
+      try {
+        const aRes = await fetch('/data/sharks/app_stats.json', { cache: 'no-store' });
+        if (aRes.ok) {
+          const aData = await aRes.json();
+          const list = buildFromAppStats(aData);
+          if (list.length) {
+            setRoster(list);
+            setStats({ total: list.length, ready: 0, pending: list.length, error: 0 });
+            setError('');
+            setDegradedReason('Using cached roster — live generation unavailable');
+            return;
+          }
+        }
+      } catch { /* both fallbacks failed */ }
+
+      setError(`Failed to load roster: ${apiErr.message}`);
     } finally {
       setLoading(false);
     }
@@ -1592,6 +1752,19 @@ export default function Announcer({ lineups }) {
       </div>
 
       {error && <div className="voice-error"><AlertCircle size={14} /> {error}</div>}
+      {!error && degradedReason && (
+        <div
+          className="voice-error"
+          role="status"
+          style={{
+            background: 'rgba(240,180,41,0.10)',
+            border: '1px solid rgba(240,180,41,0.35)',
+            color: '#f0b429',
+          }}
+        >
+          <AlertCircle size={14} /> {degradedReason}
+        </div>
+      )}
 
       <StatsBar stats={stats} />
 
@@ -1626,7 +1799,7 @@ export default function Announcer({ lineups }) {
             onRemove={handleRemovePlayer}
           />
         ))}
-        {roster.filter(p => !p.is_ghost).length === 0 && (
+        {roster.filter(p => !p.is_ghost).length === 0 && !degradedReason && (
           <div className="glass-panel" style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
             No players found. Make sure team data has been synced.
           </div>

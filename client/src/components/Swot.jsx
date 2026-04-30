@@ -329,17 +329,70 @@ const getSkillIcon = (text) => {
   return TrendingUp;
 };
 
+// Module-scoped set so the divergence warning fires at most once per
+// player per page session, no matter how many times the card re-renders.
+const _statsDivergenceWarned = new Set();
+
 /** Compact player card with collapsible detail */
 const PlayerSwotCard = ({ player, isMobile, isExpanded, onToggle }) => {
+  // Prefer app_stats.json values (surfaced as `player.batting` after the
+  // team_enriched merge) over swot_analysis.json's derived_stats. The two
+  // can drift if SWOT analyzer ran against an older stats snapshot, and
+  // the live app_stats.json is canonical for batting AVG/OBP/SLG/OPS/PA.
+  const batting = player.batting || {};
   const hitting = player.derivedStats?.hitting || {};
-  const pa = Number(hitting.pa || 0);
+  const numOrZero = (v) => {
+    if (v === null || v === undefined || v === '') return 0;
+    if (typeof v === 'string') {
+      // app_stats stores rates as ".600" or "1.418" strings \u2014 both parseFloat-able.
+      const n = parseFloat(v);
+      return Number.isNaN(n) ? 0 : n;
+    }
+    return Number(v) || 0;
+  };
+  // Divergence warn: if app_stats and swot_analysis disagree by more than
+  // 0.100 on a hitting rate, console.warn so the operator notices the
+  // pipeline drift. Side effect kept in useEffect so React's immutability
+  // rules don't trip on the dedupe Set.
+  useEffect(() => {
+    const key = player?.id;
+    if (!key || _statsDivergenceWarned.has(key)) return;
+    const checks = [['avg', 'ba', 'AVG'], ['obp', 'obp', 'OBP'], ['ops', 'ops', 'OPS']];
+    const diffs = checks
+      .map(([bk, hk, label]) => {
+        const a = numOrZero(batting[bk]);
+        const s = numOrZero(hitting[hk]);
+        return a > 0 && s > 0 && Math.abs(a - s) > 0.1
+          ? `${label}: app_stats=${a.toFixed(3)} vs swot=${s.toFixed(3)}`
+          : null;
+      })
+      .filter(Boolean);
+    if (diffs.length) {
+      const name = `${player.first || ''} ${player.last || ''}`.trim() || key;
+      console.warn(`[stats-divergence] ${name}: ${diffs.join('; ')}`);
+      _statsDivergenceWarned.add(key);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [player?.id]);
+  // Pick the first source that has any non-zero hitting value.
+  const pickRate = (battingKey, hittingKey) => {
+    const fromApp = numOrZero(batting[battingKey]);
+    if (fromApp > 0) return fromApp;
+    return numOrZero(hitting[hittingKey]);
+  };
+  const pa = numOrZero(batting.pa) || numOrZero(hitting.pa);
   const fmtRate = (v) => { const n = Number(v || 0); return n === 0 ? '\u2014' : n.toFixed(3).replace(/^0/, ''); };
   const fmtPct = (v) => { const n = Number(v || 0); return n === 0 ? '\u2014' : `${Math.round(n * 100)}%`; };
-  const avg = fmtRate(hitting.ba);
-  const obp = fmtRate(hitting.obp);
-  const ops = fmtRate(hitting.ops);
-  const kRate = fmtPct(hitting.k_rate);
-  const bbRate = fmtPct(hitting.bb_rate);
+  const avg = fmtRate(pickRate('avg', 'ba'));
+  const obp = fmtRate(pickRate('obp', 'obp'));
+  const ops = fmtRate(pickRate('ops', 'ops'));
+  // K%/BB% rates: app_stats has so/bb counts but the rate fields are
+  // strings if present; swot_analyzer publishes them as 0\u20131 floats.
+  // Prefer app_stats k_pct/bb_pct when present; fall back to derived.
+  const appKRate = numOrZero(batting.k_pct);
+  const appBBRate = numOrZero(batting.bb_pct);
+  const kRate = appKRate > 0 ? `${appKRate.toFixed(0)}%` : fmtPct(hitting.k_rate);
+  const bbRate = appBBRate > 0 ? `${appBBRate.toFixed(0)}%` : fmtPct(hitting.bb_rate);
 
   const strengths = player.swot?.strengths || [];
   const weaknesses = player.swot?.weaknesses || [];

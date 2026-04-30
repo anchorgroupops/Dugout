@@ -153,13 +153,22 @@ function App() {
         priorCache = raw ? JSON.parse(raw) : null;
       } catch { priorCache = null; }
 
+      // Helper: prefer fresh value if useful, else prior-cached value if
+      // useful, else fall back to fresh (which may be null/empty). This
+      // prevents the case where both fresh AND priorCache contain empty
+      // arrays — without it, ?? would keep the empty object indefinitely.
+      const pickUseful = (fresh, prior, defaultEmpty = null) => {
+        if (isUseful(fresh)) return fresh;
+        if (isUseful(prior)) return prior;
+        return fresh ?? defaultEmpty;
+      };
       const merged = {
-        team:         isUseful(team)         ? team         : (priorCache?.team         ?? team),
-        swot:         isUseful(swot)         ? swot         : (priorCache?.swot         ?? swot),
-        lineups:      isUseful(lineups)      ? lineups      : (priorCache?.lineups      ?? lineups),
-        availability: isUseful(availability) ? availability : (priorCache?.availability ?? availability),
-        games:        isUseful(games)        ? games        : (priorCache?.games        ?? null),
-        schedule:     isUseful(schedule)     ? schedule     : (priorCache?.schedule     ?? null),
+        team:         pickUseful(team,         priorCache?.team,         team),
+        swot:         pickUseful(swot,         priorCache?.swot,         swot),
+        lineups:      pickUseful(lineups,      priorCache?.lineups,      lineups),
+        availability: pickUseful(availability, priorCache?.availability, availability),
+        games:        pickUseful(games,        priorCache?.games,        null),
+        schedule:     pickUseful(schedule,     priorCache?.schedule,     null),
       };
       // Track which keys came from the prior cache so we can surface a
       // "stale" indicator in components that depend on them.
@@ -171,9 +180,12 @@ function App() {
       setData({ ...merged, loading: false, error: null, isCached: false, cachedAt, staleKeys });
       setLoadingTimedOut(false);
       try {
-        window.localStorage.setItem('sharks_data_cache', JSON.stringify({
-          ...merged, cachedAt,
-        }));
+        // Never persist a non-useful schedule/games payload — that's how
+        // localStorage.schedule ended up frozen at {upcoming:[], past:[]}.
+        const persisted = { ...merged, cachedAt };
+        if (!isUseful(persisted.schedule)) delete persisted.schedule;
+        if (!isUseful(persisted.games)) delete persisted.games;
+        window.localStorage.setItem('sharks_data_cache', JSON.stringify(persisted));
       } catch { /* localStorage may be full or disabled */ }
       if (staleKeys.length > 0) {
         console.warn('[Cache] preserving prior values for empty/null fetch result:', staleKeys);
@@ -204,12 +216,60 @@ function App() {
   }, [fetchWithRetry]);
 
   useEffect(() => {
-    fetchData();
-    const intervalId = setInterval(fetchData, 30000);
+    // Backoff-aware polling loop. Replace the naive 30s setInterval with
+    // a setTimeout chain that doubles delay on consecutive failed loads
+    // (network OR /api/team !ok) to keep the rate-limit cascade from
+    // re-igniting itself. A successful fetch resets to BASE_INTERVAL.
+    let cancelled = false;
+    let nextTimer = null;
+    const BASE_INTERVAL = 30_000;
+    const MAX_INTERVAL = 300_000; // 5 min
+    let consecutiveFailures = 0;
+
+    const loop = async () => {
+      if (cancelled) return;
+      let success = false;
+      try {
+        await fetchData();
+        // We reach here even on caught errors inside fetchData (it sets
+        // its own error state). Decide success on whether we currently
+        // have team data — that's the critical signal.
+        success = true;
+      } catch {
+        success = false;
+      }
+      // Use the post-fetch React state hook isn't available here, so we
+      // approximate by reading from localStorage: if team was successfully
+      // refreshed in the last loop the cache will hold a fresh value.
+      // Simpler: just trust fetchData not to throw — it logs but resolves.
+      // Instead read /api/health for an authoritative pulse.
+      try {
+        const h = await fetch('/api/health', { cache: 'no-store' });
+        if (!h.ok) success = false;
+      } catch {
+        success = false;
+      }
+
+      if (success) {
+        consecutiveFailures = 0;
+      } else {
+        consecutiveFailures += 1;
+      }
+      const delay = Math.min(
+        BASE_INTERVAL * Math.pow(2, consecutiveFailures),
+        MAX_INTERVAL,
+      );
+      if (cancelled) return;
+      nextTimer = setTimeout(loop, delay);
+    };
+
+    // Initial fire (also paced via the loop helper).
+    loop();
     // After 10s, flip the "Loading..." subtitle to an offline fallback.
     const timeoutId = setTimeout(() => setLoadingTimedOut(true), 10000);
     return () => {
-      clearInterval(intervalId);
+      cancelled = true;
+      if (nextTimer) clearTimeout(nextTimer);
       clearTimeout(timeoutId);
     };
   }, [fetchData]);
