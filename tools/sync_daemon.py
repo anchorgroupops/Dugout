@@ -5972,7 +5972,13 @@ def _bootstrap_static_fallbacks():
         logging.warning("[Bootstrap-static] SWOT staleness check failed: %s", e)
 
 
-_bootstrap_static_fallbacks()
+try:
+    _bootstrap_static_fallbacks()
+except Exception as _be:
+    # Last-resort guard: under no circumstance let bootstrap take down
+    # the gunicorn worker. A missing static file is recoverable; a
+    # crashed worker means /api/health 502 forever.
+    logging.warning("[Bootstrap-static] outer guard caught: %s", _be)
 
 
 def _announcer_auto_repair_loop():
