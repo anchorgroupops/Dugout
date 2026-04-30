@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Radio, Home, Plane, Clock, Trophy, RefreshCw, ExternalLink, Shield, AlertTriangle, ChevronDown, ChevronUp, Sun, Eye } from 'lucide-react';
 import { formatDateMMDDYYYY } from '../utils/formatDate';
+import { fetchWithBackoff } from '../utils/apiClient';
 import { PlayerName } from './StatTooltip';
 
 const POLL_INTERVAL_LIVE = 15000;  // 15s when live
@@ -573,7 +574,7 @@ const Scoreboard = ({ isMobile = false, isLandscape = false, team, schedule }) =
 
   const fetchScoreboard = useCallback(async () => {
     try {
-      const res = await fetch('/api/scoreboard');
+      const res = await fetchWithBackoff('/api/scoreboard');
       if (!res.ok) throw new Error('Scoreboard unavailable');
       const json = await res.json();
       if (mountedRef.current) {

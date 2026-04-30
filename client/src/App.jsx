@@ -8,7 +8,7 @@ import Lineup from './components/Lineup';
 import Scoreboard from './components/Scoreboard';
 import ErrorBoundary from './components/ErrorBoundary';
 import { lazyWithRetry } from './utils/lazyWithRetry';
-import { isPollingPaused, pausePollingFor } from './utils/apiClient';
+import { fetchWithBackoff } from './utils/apiClient';
 const Swot = lazyWithRetry(() => import('./components/Swot'));
 const Games = lazyWithRetry(() => import('./components/Games'));
 const League = lazyWithRetry(() => import('./components/League'));
@@ -87,23 +87,12 @@ function App() {
   const audioUrlRef = useRef('');
   const syncPollRef = useRef(null);
 
-  const fetchWithRetry = useCallback(async (url, retries = 2) => {
-    // Honor global 429 pause window — return a synthetic non-OK response so
-    // callers fall through to last-known cache without thrashing the API.
-    if (isPollingPaused()) return new Response(null, { status: 503, statusText: 'paused-locally' });
-    for (let i = 0; i <= retries; i++) {
-      try {
-        const res = await fetch(url);
-        if (res.status === 429) {
-          pausePollingFor();
-          return res;
-        }
-        if (res.ok || i === retries) return res;
-      } catch (e) {
-        if (i === retries) throw e;
-      }
-      await new Promise(r => setTimeout(r, 300 * (i + 1)));
-    }
+  const fetchWithRetry = useCallback(async (url) => {
+    // Delegate to apiClient's fetchWithBackoff: exponential backoff with
+    // jitter, 429-aware global pause, idempotent-GET-only retry policy.
+    // The previous bespoke linear retry hammered the API on every loop
+    // tick during an outage; backoff cuts that to the bone.
+    return fetchWithBackoff(url);
   }, []);
 
   const fetchData = useCallback(async () => {
@@ -117,9 +106,39 @@ function App() {
         fetchWithRetry('/api/schedule')
       ]);
 
-      if (!teamRes.ok) throw new Error('Failed to load team data');
+      // Graceful team fallback. The previous code threw on a non-OK
+      // /api/team response, which crashed the entire data-loading
+      // pipeline and left every tab showing the "Failed to load team
+      // data" error banner. Instead: try the bundled static fallbacks
+      // (/data/sharks/team.json from the image) and the localStorage
+      // cache, then degrade-but-still-render. If we genuinely have
+      // nothing, pass `team: null` through and let downstream tabs
+      // show their own empty states.
+      let team = null;
+      let teamFromFallback = false;
+      if (teamRes.ok) {
+        try { team = await teamRes.json(); } catch { team = null; }
+      }
+      if (!team || (typeof team === 'object' && !team.roster)) {
+        try {
+          const staticRes = await fetch('/data/sharks/team.json', { cache: 'no-store' });
+          if (staticRes.ok) {
+            team = await staticRes.json();
+            teamFromFallback = true;
+          }
+        } catch { /* fall through to localStorage */ }
+        if (!team) {
+          try {
+            const raw = window.localStorage.getItem('sharks_data_cache');
+            const parsed = raw ? JSON.parse(raw) : null;
+            if (parsed?.team) {
+              team = parsed.team;
+              teamFromFallback = true;
+            }
+          } catch { /* nothing — render empty */ }
+        }
+      }
 
-      const team = await teamRes.json();
       const swot = swotRes.ok ? await swotRes.json() : null;
       const lineups = lineupsRes.ok ? await lineupsRes.json() : null;
       const availability = availRes.ok ? await availRes.json() : {};
@@ -177,7 +196,15 @@ function App() {
       if (!isUseful(schedule) && isUseful(priorCache?.schedule)) staleKeys.push('schedule');
 
       const cachedAt = new Date().toISOString();
-      setData({ ...merged, loading: false, error: null, isCached: false, cachedAt, staleKeys });
+      setData({
+        ...merged,
+        loading: false,
+        error: null,
+        isCached: teamFromFallback,
+        isOffline: teamFromFallback,
+        cachedAt,
+        staleKeys,
+      });
       setLoadingTimedOut(false);
       try {
         // Never persist a non-useful schedule/games payload — that's how

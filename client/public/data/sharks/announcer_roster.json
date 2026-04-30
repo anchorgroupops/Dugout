@@ -1,0 +1,8 @@
+{
+  "_doc": "Empty-state fallback shipped in the image. Served by nginx when /srv/data/sharks/announcer_roster.json is missing on the Pi. Real values are written by sync_daemon's /api/announcer/roster handler. The frontend Announcer falls through to /data/sharks/app_stats.json when this is empty.",
+  "last_updated": null,
+  "roster": [],
+  "stats": {"total": 0, "ready": 0, "pending": 0, "error": 0},
+  "fallback": true,
+  "fallback_reason": "bundled_empty_state"
+}

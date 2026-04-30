@@ -7,6 +7,15 @@ node_modules/
 __pycache__/
 *.pyc
 data/
+# But DO ship the bundled empty-state fallbacks under client/public/data/sharks/.
+# These ride along inside the dashboard image so nginx can serve them when
+# the live Pi data volume hasn't seeded a file yet (fresh deploy, sick API).
+# We re-include only the sharks/ subdir; ad-hoc root-level files in
+# client/public/data/ stay ignored so dev scratch doesn't leak into the
+# image.
+!client/public/data/
+!client/public/data/sharks/
+!client/public/data/sharks/**
 *.db
 .DS_Store
 credentials/

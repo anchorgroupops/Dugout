@@ -1,0 +1,5 @@
+{
+  "_doc": "Empty-state fallback shipped in the image. Served by nginx when /srv/data/sharks/opponents.json is missing on the Pi. Real values are written by sync_daemon's /api/opponents handler.",
+  "last_updated": null,
+  "teams": []
+}

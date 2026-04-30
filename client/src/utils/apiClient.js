@@ -50,6 +50,54 @@ export async function apiFetch(url, options = {}) {
   return res;
 }
 
+// Exponential-backoff fetch with jitter for read-only API polls.
+// On 429 / 5xx / network error: sleep for `min(BASE * 2**attempt + jitter, MAX)`
+// and retry up to `maxRetries` times. Hard-aborts (caller AbortController)
+// pass through unchanged.
+//
+// Use ONLY for idempotent GETs. Do NOT wrap mutating POST/PUT/DELETE — a
+// retry after a successful write that returned a flaky response would
+// double-apply the mutation. Mutations should fail loudly to the caller.
+export async function fetchWithBackoff(url, options = {}, maxRetries = 3) {
+  const BASE = 1000;
+  const MAX = 10_000;
+  const sleep = (attempt) => new Promise((r) =>
+    setTimeout(r, Math.min(BASE * 2 ** attempt + Math.random() * 500, MAX))
+  );
+  // Honor the global pause window on the very first call so we don't burn
+  // a retry slot when we already know the backend is rate-limiting us.
+  if (isPollingPaused()) {
+    return new Response(null, { status: 503, statusText: 'paused-locally' });
+  }
+  let lastErr = null;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const res = await fetch(url, options);
+      if (res.status === 429) {
+        pausePollingFor();
+        if (attempt === maxRetries - 1) return res;
+        await sleep(attempt);
+        continue;
+      }
+      if (res.status >= 500 && res.status < 600) {
+        if (attempt === maxRetries - 1) return res;
+        await sleep(attempt);
+        continue;
+      }
+      return res;
+    } catch (err) {
+      lastErr = err;
+      // Pass-through for caller-initiated aborts.
+      if (err && err.name === 'AbortError') throw err;
+      if (attempt === maxRetries - 1) throw err;
+      await sleep(attempt);
+    }
+  }
+  // Unreachable, but keep TS-friendly.
+  if (lastErr) throw lastErr;
+  return new Response(null, { status: 599, statusText: 'backoff-exhausted' });
+}
+
 // ---------------------------------------------------------------------------
 // Stale-while-revalidate cache for shared GET endpoints
 // ---------------------------------------------------------------------------

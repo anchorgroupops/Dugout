@@ -268,21 +268,30 @@ const normaliseOpponent = (raw) => {
 // ─── Result badge ─────────────────────────────────────────────────────────────
 const ResultBadge = ({ result, hasStats, isPast }) => {
   if (!result) {
-    // Past game with no W/L recorded yet — show "Result pending" so the
-    // reader understands GameChanger hasn't synced the outcome yet,
-    // rather than the cryptic "STATS" / "N/A" debug tags.
+    // Past game branches on whether GameChanger has synced anything:
+    //  • hasStats=true  → final score wasn't entered into GC, but the
+    //    individual at-bats are present. "Score not recorded" — the
+    //    coach can still enter a final score manually if desired.
+    //  • hasStats=false → game is over but no data has flowed yet;
+    //    "Result pending" means the GC sync just hasn't caught up.
     if (isPast) {
+      const label = hasStats ? 'Score not recorded' : 'Result pending';
+      const tip = hasStats
+        ? 'Stats are present but no final W/L was entered in GameChanger'
+        : 'Game completed; GameChanger has not synced the result yet';
       return (
         <span
           className="result-badge"
-          title={hasStats ? 'GameChanger stats present but no W/L recorded yet' : 'Game completed; result not yet synced'}
+          title={tip}
           style={{
-            background: 'rgba(240,180,41,0.10)',
-            color: '#f0b429',
-            border: '1px solid rgba(240,180,41,0.35)',
+            background: hasStats ? 'rgba(255,255,255,0.05)' : 'rgba(240,180,41,0.10)',
+            color: hasStats ? 'var(--text-muted)' : '#f0b429',
+            border: hasStats
+              ? '1px solid rgba(255,255,255,0.15)'
+              : '1px solid rgba(240,180,41,0.35)',
           }}
         >
-          Result pending
+          {label}
         </span>
       );
     }

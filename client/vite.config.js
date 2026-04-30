@@ -23,7 +23,11 @@ export default defineConfig(({ mode }) => ({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      injectRegister: 'script-defer',
+      // Manual registration — we wrap it in main.jsx with stale-SW cleanup
+      // and error handling. The auto-injected `script-defer` flavor was
+      // racing the page load on slow connections and surfacing as
+      // `AbortError: Failed to register a ServiceWorker`.
+      injectRegister: null,
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg'],
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],

@@ -1,0 +1,9 @@
+{
+  "_doc": "Empty-state fallback shipped in the image. Served by nginx when /srv/data/sharks/team_merged.json is missing on the Pi. Real values are written by sync_daemon's merge step.",
+  "team_name": "The Sharks",
+  "league": "PCLL Majors",
+  "season": "Spring 2026",
+  "last_updated": null,
+  "source_teams": ["The Sharks"],
+  "roster": []
+}
