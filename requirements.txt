@@ -1,5 +1,5 @@
 # Core scraper — locked to match Playwright base image
-playwright==1.42.0
+playwright==1.59.0
 
 # Web framework + WSGI server
 flask>=3.0,<4
