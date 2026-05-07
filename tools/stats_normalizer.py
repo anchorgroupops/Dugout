@@ -7,6 +7,7 @@ matchup, SWOT, lineup optimization, and pipeline health checks.
 
 from __future__ import annotations
 
+import math
 import statistics
 from typing import Any, Callable
 
@@ -49,7 +50,8 @@ def safe_float(val: Any, default: float = 0.0) -> float:
     if val is None:
         return default
     if isinstance(val, (int, float)):
-        return float(val)
+        v = float(val)
+        return v if math.isfinite(v) else default
     s = str(val).strip()
     if s in ("", "-", "—", "N/A"):
         return default
@@ -58,7 +60,8 @@ def safe_float(val: Any, default: float = 0.0) -> float:
     if s.endswith("%"):
         s = s[:-1]
     try:
-        return float(s)
+        v = float(s)
+        return v if math.isfinite(v) else default
     except (TypeError, ValueError):
         return default
 
