@@ -103,3 +103,87 @@ def test_runner_exception_recorded_as_failure(tmp_path):
     assert result["outcome"] == "failure"
     assert result["per_team"]["sharks"]["outcome"] == "failure"
     assert "boom" in result["per_team"]["sharks"]["failure_reason"]
+
+
+# ---------------------------------------------------------------------------
+# _breaker_key / _breaker_hours
+# ---------------------------------------------------------------------------
+
+class TestBreakerKey:
+    def test_auth_errors_classified_as_auth(self):
+        assert cli._breaker_key(RuntimeError("auth failure")) == "auth"
+
+    def test_login_errors_classified_as_auth(self):
+        assert cli._breaker_key(RuntimeError("login timeout")) == "auth"
+
+    def test_2fa_errors_classified_as_auth(self):
+        assert cli._breaker_key(RuntimeError("2FA required")) == "auth"
+
+    def test_session_errors_classified_as_auth(self):
+        assert cli._breaker_key(RuntimeError("session expired")) == "auth"
+
+    def test_other_errors_classified_as_download(self):
+        assert cli._breaker_key(RuntimeError("network error")) == "download"
+
+    def test_case_insensitive_matching(self):
+        assert cli._breaker_key(RuntimeError("AUTH failure")) == "auth"
+
+
+class TestBreakerHours:
+    def test_auth_error_returns_24_hours(self):
+        assert cli._breaker_hours(RuntimeError("login failed")) == 24
+
+    def test_download_error_returns_2_hours(self):
+        assert cli._breaker_hours(RuntimeError("connection reset")) == 2
+
+    def test_returns_int(self):
+        assert isinstance(cli._breaker_hours(RuntimeError("err")), int)
+
+
+# ---------------------------------------------------------------------------
+# _summaries_from_result
+# ---------------------------------------------------------------------------
+
+class TestSummariesFromResult:
+    def test_empty_per_team_returns_one_skipped_summary(self):
+        result = {"outcome": "skipped", "reason": "disabled"}
+        summaries = cli._summaries_from_result(result, trigger="cron")
+        assert len(summaries) == 1
+        assert summaries[0].outcome == "skipped"
+        assert summaries[0].trigger == "cron"
+
+    def test_global_failure_returns_single_summary(self):
+        result = {"outcome": "failure", "failure_reason": "bad config"}
+        summaries = cli._summaries_from_result(result, trigger="manual")
+        assert len(summaries) == 1
+        assert summaries[0].team_slug == "*"
+
+    def test_per_team_creates_one_summary_per_team(self, tmp_path):
+        p = tmp_path / "teams.yaml"
+        p.write_text(
+            "teams:\n"
+            "  - {id: a, season_slug: s, name: Sharks, data_slug: sharks, active: true}\n"
+            "  - {id: b, season_slug: s, name: Eagles, data_slug: eagles, active: true}\n"
+        )
+        from tools.autopull import cli as cli_mod
+        result = {
+            "per_team": {
+                "sharks": {"outcome": "success", "run_id": 1, "drift_severity": "none"},
+                "eagles": {"outcome": "failure", "run_id": 2, "failure_reason": "err", "drift_severity": "none"},
+            }
+        }
+        from tools.team_registry import load
+        import tools.team_registry as tr_mod
+        original_load = tr_mod.load
+        # Don't use the real teams.yaml; let require_by_slug fall through to slug name
+        summaries = cli._summaries_from_result(result, trigger="cron")
+        assert len(summaries) == 2
+
+    def test_summary_outcome_from_per_team(self):
+        result = {
+            "per_team": {
+                "sharks": {"outcome": "success", "run_id": 1, "drift_severity": "none"},
+            }
+        }
+        summaries = cli._summaries_from_result(result, trigger="cron")
+        assert summaries[0].outcome == "success"

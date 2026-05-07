@@ -117,3 +117,72 @@ def test_send_email_uses_smtp_with_app_password():
     mock_smtp.assert_called_once_with(g.SMTP_HOST, g.SMTP_PORT)
     smtp_inst.login.assert_called_once_with("fly386@gmail.com", "abcdefghijklmnop")
     smtp_inst.send_message.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# current_max_uid
+# ---------------------------------------------------------------------------
+
+def test_current_max_uid_returns_max():
+    client = MagicMock()
+    client.uid.return_value = ("OK", [b"101 205 150"])
+    result = g.current_max_uid(client)
+    assert result == 205
+
+
+def test_current_max_uid_returns_zero_when_no_messages():
+    client = MagicMock()
+    client.uid.return_value = ("OK", [b""])
+    result = g.current_max_uid(client)
+    assert result == 0
+
+
+def test_current_max_uid_returns_zero_on_non_ok():
+    client = MagicMock()
+    client.uid.return_value = ("NO", [b""])
+    result = g.current_max_uid(client)
+    assert result == 0
+
+
+def test_current_max_uid_single_uid():
+    client = MagicMock()
+    client.uid.return_value = ("OK", [b"42"])
+    result = g.current_max_uid(client)
+    assert result == 42
+
+
+# ---------------------------------------------------------------------------
+# _extract_text
+# ---------------------------------------------------------------------------
+
+def test_extract_text_from_simple_plain_message():
+    from email.message import EmailMessage
+    m = EmailMessage()
+    m.set_content("Hello from GC!")
+    result = g._extract_text(m)
+    assert "Hello from GC!" in result
+
+
+def test_extract_text_from_multipart_message():
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+    msg = MIMEMultipart("alternative")
+    msg.attach(MIMEText("Plain text content", "plain"))
+    msg.attach(MIMEText("<b>HTML content</b>", "html"))
+    result = g._extract_text(msg)
+    assert "Plain text content" in result
+    assert "<b>" not in result  # HTML part skipped
+
+
+def test_extract_text_returns_empty_for_html_only():
+    from email.mime.text import MIMEText
+    msg = MIMEText("<h1>Only HTML</h1>", "html")
+    result = g._extract_text(msg)
+    assert result == ""
+
+
+def test_extract_text_returns_string():
+    from email.message import EmailMessage
+    m = EmailMessage()
+    m.set_content("test")
+    assert isinstance(g._extract_text(m), str)
