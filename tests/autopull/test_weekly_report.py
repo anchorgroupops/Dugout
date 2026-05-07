@@ -101,6 +101,55 @@ def test_summary_recent_failures_collected(tmp_db_path):
     assert "auth expired" in summary["recent_failures"]
 
 
+def test_main_function_calls_requests_post_when_webhook_set(tmp_db_path, monkeypatch, capsys):
+    """main() calls requests.post when webhook URL is non-empty — covers line 79."""
+    from unittest.mock import MagicMock, patch
+
+    fake_cfg = MagicMock()
+    fake_cfg.data_root = tmp_db_path.parent
+    fake_cfg.n8n_weekly_webhook = "https://n8n.local/webhook/test"
+    monkeypatch.setattr("tools.autopull.weekly_report.config_mod.load", lambda: fake_cfg)
+    monkeypatch.setattr(
+        "tools.autopull.weekly_report.StateDB",
+        lambda path: StateDB(tmp_db_path),
+    )
+
+    mock_response = MagicMock()
+    mock_response.raise_for_status = MagicMock()
+    mock_requests = MagicMock()
+    mock_requests.post.return_value = mock_response
+
+    with patch.dict("sys.modules", {"requests": mock_requests}):
+        result = wr.main(argv=["--days", "3"])
+
+    assert result == 0
+    mock_requests.post.assert_called_once()
+
+
+def test_main_function_prints_summary(tmp_db_path, monkeypatch, capsys):
+    """weekly_report.main() initializes DB, builds summary, prints JSON — lines 70-83."""
+    import json as _json
+    from unittest.mock import MagicMock
+
+    # Patch config to point at the tmp DB
+    fake_cfg = MagicMock()
+    fake_cfg.data_root = tmp_db_path.parent
+    fake_cfg.n8n_weekly_webhook = ""  # no webhook → no POST
+    monkeypatch.setattr("tools.autopull.weekly_report.config_mod.load", lambda: fake_cfg)
+
+    # Patch StateDB to use our tmp DB
+    monkeypatch.setattr(
+        "tools.autopull.weekly_report.StateDB",
+        lambda path: StateDB(tmp_db_path),
+    )
+
+    result = wr.main(argv=["--days", "7"])
+    assert result == 0
+    captured = capsys.readouterr().out
+    parsed = _json.loads(captured)
+    assert "total_runs" in parsed
+
+
 def test_post_weekly_skips_post_when_no_webhook(tmp_db_path):
     db = StateDB(tmp_db_path); db.init_schema()
     poster = MagicMock()

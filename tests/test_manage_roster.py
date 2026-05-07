@@ -350,3 +350,61 @@ class TestMain:
     def test_main_exits_early_when_team_missing(self, tmp_files, monkeypatch):
         monkeypatch.setattr("sys.argv", ["manage_roster.py", "list"])
         mr.main()  # should not raise even with no team file
+
+
+# ---------------------------------------------------------------------------
+# TestInteractiveMode — interactive while-loop (lines 91-114)
+# ---------------------------------------------------------------------------
+
+class TestInteractiveMode:
+    """Tests for the interactive mode reached when no CLI args are given."""
+
+    def _setup(self, tmp_files):
+        team = make_team([("Alice", "Smith", 1), ("Bob", "Jones", 2)])
+        (tmp_files / "team_merged.json").write_text(
+            __import__("json").dumps(team))
+
+    def test_quit_immediately(self, tmp_files, monkeypatch, capsys):
+        self._setup(tmp_files)
+        monkeypatch.setattr("sys.argv", ["manage_roster.py"])
+        monkeypatch.setattr("builtins.input", lambda _: "q")
+        mr.main()  # should exit cleanly after first 'q'
+
+    def test_all_active_then_quit(self, tmp_files, monkeypatch):
+        self._setup(tmp_files)
+        monkeypatch.setattr("sys.argv", ["manage_roster.py"])
+        inputs = iter(["a", "q"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+        mr.main()
+        import json as _json
+        data = _json.loads((tmp_files / "availability.json").read_text())
+        assert all(v is True for v in data.values())
+
+    def test_all_inactive_then_quit(self, tmp_files, monkeypatch):
+        self._setup(tmp_files)
+        monkeypatch.setattr("sys.argv", ["manage_roster.py"])
+        inputs = iter(["n", "q"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+        mr.main()
+        import json as _json
+        data = _json.loads((tmp_files / "availability.json").read_text())
+        assert all(v is False for v in data.values())
+
+    def test_toggle_by_index_then_quit(self, tmp_files, monkeypatch):
+        self._setup(tmp_files)
+        monkeypatch.setattr("sys.argv", ["manage_roster.py"])
+        inputs = iter(["1", "q"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+        mr.main()
+        import json as _json
+        data = _json.loads((tmp_files / "availability.json").read_text())
+        assert data.get("Alice Smith") is False
+
+    def test_unknown_command_prints_message_then_quit(self, tmp_files, monkeypatch, capsys):
+        self._setup(tmp_files)
+        monkeypatch.setattr("sys.argv", ["manage_roster.py"])
+        inputs = iter(["?bad?", "q"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+        mr.main()
+        out = capsys.readouterr().out
+        assert "Unknown command" in out

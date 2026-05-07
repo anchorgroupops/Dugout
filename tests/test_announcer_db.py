@@ -88,6 +88,23 @@ class TestInitDb:
         adb.init_db()
         adb.init_db()
 
+    def test_v2_migration_handles_existing_columns(self, tmp_path, monkeypatch):
+        """Lines 159-160: OperationalError on duplicate ALTER is caught and ignored."""
+        db_path = tmp_path / "pre_v2.db"
+        # Set up a schema-v1 DB that already has the V2 columns (simulates partial migration)
+        conn = sqlite3.connect(str(db_path))
+        conn.executescript(adb._SCHEMA_V1)
+        for sql in adb._V2_COLUMN_ALTERS:
+            conn.execute(sql)
+        conn.commit()
+        conn.close()
+
+        monkeypatch.setattr(adb, "DB_PATH", db_path)
+        adb.init_db()  # should not raise; OperationalError is silently caught
+
+        rows = _raw(db_path, "SELECT MAX(version) AS v FROM schema_version")
+        assert rows[0]["v"] >= 2
+
 
 # ===========================================================================
 # TestEnqueueRender

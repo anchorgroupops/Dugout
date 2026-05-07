@@ -177,3 +177,38 @@ class TestWithMockConnection:
                 sys.modules.pop("psycopg2", None)
             else:
                 sys.modules["psycopg2"] = original
+
+    def test_get_conn_connect_exception_returns_none(self, monkeypatch):
+        """psycopg2 imports but connect() raises — lines 60-61 covered."""
+        from unittest.mock import MagicMock
+        import sys
+        mock_psycopg2 = MagicMock()
+        mock_psycopg2.connect.side_effect = RuntimeError("connection refused")
+        original = sys.modules.get("psycopg2")
+        sys.modules["psycopg2"] = mock_psycopg2
+        try:
+            result = db_sync._get_conn()
+            assert result is None
+        finally:
+            if original is None:
+                sys.modules.pop("psycopg2", None)
+            else:
+                sys.modules["psycopg2"] = original
+
+    def test_get_conn_success_returns_connection(self, monkeypatch):
+        """psycopg2 imports and connect() succeeds — line 57 covered."""
+        from unittest.mock import MagicMock
+        import sys
+        fake_conn = MagicMock()
+        mock_psycopg2 = MagicMock()
+        mock_psycopg2.connect.return_value = fake_conn
+        original = sys.modules.get("psycopg2")
+        sys.modules["psycopg2"] = mock_psycopg2
+        try:
+            result = db_sync._get_conn()
+            assert result is fake_conn
+        finally:
+            if original is None:
+                sys.modules.pop("psycopg2", None)
+            else:
+                sys.modules["psycopg2"] = original

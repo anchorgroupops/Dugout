@@ -244,6 +244,68 @@ def test_fetch_noop_exception_is_ignored():
     assert code == "654321"
 
 
+def test_fetch_second_noop_raises_still_returns_none():
+    """First SEARCH fails, second noop() raises (lines 82-83), second SEARCH also fails."""
+    client = MagicMock()
+    # First SEARCH fails (triggers the retry block), noop raises, second SEARCH also fails
+    client.uid.side_effect = [
+        ("NO", [b""]),   # first SEARCH fails → enter retry block
+        ("NO", [b""]),   # second SEARCH also fails → return None, None
+    ]
+    client.noop.side_effect = OSError("noop error")  # covers lines 82-83
+    code, uid = g.fetch_latest_code(client)
+    assert code is None
+    assert uid is None
+
+
+def test_fetch_header_decode_exception_falls_back_to_raw_subject():
+    """make_header raises during subject decode → falls back to raw subject (lines 110-111)."""
+    from unittest.mock import patch
+    client = MagicMock()
+    raw = _build_raw_email("body with code 123456", subject="code 123456")
+    client.uid.side_effect = [
+        ("OK", [b"77"]),
+        ("OK", [(b"77", raw)]),
+    ]
+    with patch("tools.autopull.gmail_2fa_fetcher.email.header.make_header",
+               side_effect=Exception("decode failed")):
+        code, uid = g.fetch_latest_code(client)
+    assert code == "123456"
+
+
+def test_extract_text_multipart_part_decode_exception():
+    """Part get_payload() raises — exception is caught and part is skipped (lines 154-155)."""
+    from unittest.mock import MagicMock
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+
+    msg = MIMEMultipart("alternative")
+    good_part = MIMEText("good text 999888", "plain")
+    msg.attach(good_part)
+
+    # Replace the good part's get_payload to raise on the first plain part
+    parts_list = list(msg.walk())
+    plain_parts = [p for p in parts_list if p.get_content_type() == "text/plain"]
+    if plain_parts:
+        plain_parts[0].get_payload = MagicMock(side_effect=RuntimeError("decode fail"))
+
+    result = g._extract_text(msg)
+    # exception is swallowed; result may be empty
+    assert isinstance(result, str)
+
+
+def test_extract_text_non_multipart_decode_exception():
+    """Non-multipart get_payload() raises — exception is caught (lines 162-163)."""
+    from unittest.mock import MagicMock
+    from email.mime.text import MIMEText
+
+    msg = MIMEText("hello world", "plain")
+    msg.get_payload = MagicMock(side_effect=RuntimeError("payload error"))
+
+    result = g._extract_text(msg)
+    assert result == ""
+
+
 def test_fetch_all_emails_have_no_code_returns_none():
     """All fetched emails lack a 6-digit code — returns None, None."""
     client = MagicMock()

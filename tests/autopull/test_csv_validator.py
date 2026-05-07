@@ -84,6 +84,34 @@ def test_rejects_empty_header_columns(tmp_path):
     assert "column" in result.reason.lower()
 
 
+def test_stop_iteration_on_empty_csv_reader(tmp_path, monkeypatch):
+    """csv.reader yields nothing (StopIteration) for a non-empty file — line 45."""
+    p = tmp_path / "nonempty.csv"
+    p.write_text("x", encoding="utf-8")  # size > 0 bypasses early-exit
+    monkeypatch.setattr(cv.csv, "reader", lambda *a, **kw: iter([]))
+    result = cv.validate(p, known_columns=None)
+    assert result.accepted is False
+    assert "empty" in result.reason.lower()
+
+
+def test_csv_error_during_parse(tmp_path, monkeypatch):
+    """csv.reader raises csv.Error — lines 49-50."""
+    import csv as _csv
+    p = tmp_path / "bad.csv"
+    p.write_text("some,content\n", encoding="utf-8")
+
+    def _error_reader(*a, **kw):
+        def _gen():
+            raise _csv.Error("bad line format")
+            yield  # noqa: unreachable — makes it a generator
+        return _gen()
+
+    monkeypatch.setattr(cv.csv, "reader", _error_reader)
+    result = cv.validate(p, known_columns=None)
+    assert result.accepted is False
+    assert "csv" in result.reason.lower() or "parse" in result.reason.lower()
+
+
 class TestOverlap:
     def test_full_overlap(self):
         assert cv._overlap(["a", "b", "c"], ["a", "b", "c"]) == 1.0

@@ -221,6 +221,36 @@ def test_proposal_is_safe_false_when_selector_missing(tmp_db_path):
     assert engine._proposal_is_safe(None) is False
 
 
+def test_try_strategy_exception_returns_false(tmp_db_path, tmp_path):
+    """_try_strategy catches exception and returns False — lines 141-143."""
+    from tools.autopull.state import StrategyRow
+    db = StateDB(tmp_db_path); db.init_schema()
+    engine = le.LocatorEngine(db=db, llm_adapter=None, llm_enabled=False)
+
+    # A page where the selector IS found but click raises an exception
+    class ExplodingLocator:
+        def count(self): return 1
+        @property
+        def first(self): return self
+        def click(self): raise RuntimeError("playwright exploded")
+
+    class ExplodingPage:
+        def locator(self, sel): return ExplodingLocator()
+        def expect_download(self, timeout=30_000):
+            return MagicMock(__enter__=MagicMock(return_value=MagicMock(value=MagicMock())),
+                             __exit__=MagicMock(return_value=False))
+        def content(self): return ""
+        def screenshot(self, **kw): pass
+
+    strategy = StrategyRow(
+        id=1, kind="css", selector="button.export", description="test",
+        created_at="2026-01-01", last_success_at=None,
+        success_count=0, failure_count=0, source="builtin", enabled=1,
+    )
+    result = engine._try_strategy(ExplodingPage(), strategy, tmp_path / "out.csv")
+    assert result is False
+
+
 def test_proposal_is_safe_true_for_normal_selector(tmp_db_path):
     db = StateDB(tmp_db_path); db.init_schema()
     engine = le.LocatorEngine(db=db, llm_adapter=None, llm_enabled=False)

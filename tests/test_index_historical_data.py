@@ -274,6 +274,39 @@ class TestRunDryRun:
         assert count == 2
 
 
+class TestMain:
+    """Tests for the main() CLI entry point — lines 78-85."""
+
+    def test_main_calls_run_with_dry_run_flag(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(ihd, "run", lambda **kw: calls.append(kw) or 0)
+        monkeypatch.setattr("sys.argv", ["index_historical_data.py", "--dry-run"])
+        ihd.main()
+        assert calls[0]["dry_run"] is True
+
+    def test_main_uses_default_index_and_namespace(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(ihd, "run", lambda **kw: calls.append(kw) or 0)
+        monkeypatch.setattr("sys.argv", ["index_historical_data.py"])
+        ihd.main()
+        assert calls[0]["index_name"] == "softball-sharks"
+        assert calls[0]["namespace"] == "softball"
+
+    def test_main_custom_args_forwarded(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(ihd, "run", lambda **kw: calls.append(kw) or 0)
+        monkeypatch.setattr("sys.argv", [
+            "index_historical_data.py",
+            "--index", "my-index",
+            "--namespace", "my-ns",
+            "--batch-size", "32",
+        ])
+        ihd.main()
+        assert calls[0]["index_name"] == "my-index"
+        assert calls[0]["namespace"] == "my-ns"
+        assert calls[0]["batch_size"] == 32
+
+
 class TestRunLive:
     """Test the non-dry-run path by mocking MemoryEngine."""
 
