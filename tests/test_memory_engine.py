@@ -26,6 +26,7 @@ from memory_engine import (  # noqa: E402  (import after sys.modules patch)
     _content_hash,
     _flatten_metadata,
     _safe_id,
+    MemoryEngine,
 )
 
 
@@ -313,3 +314,32 @@ class TestFlattenMetadata:
     def test_normal_length_key_preserved_exactly(self):
         result = _flatten_metadata({"short_key": 42})
         assert "short_key" in result
+
+
+# ===========================================================================
+# MemoryEngine — init-time guard tests (no real API needed)
+# ===========================================================================
+
+class TestMemoryEngineInit:
+    def test_raises_when_pinecone_key_missing(self, monkeypatch):
+        monkeypatch.delenv("PINECONE_API_KEY", raising=False)
+        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+        monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+        with pytest.raises(ValueError, match="PINECONE_API_KEY"):
+            MemoryEngine()
+
+    def test_raises_when_gemini_key_missing_but_pinecone_set(self, monkeypatch):
+        monkeypatch.setenv("PINECONE_API_KEY", "fake-pinecone-key")
+        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+        monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+        with pytest.raises(ValueError, match="GEMINI_API_KEY"):
+            MemoryEngine()
+
+    def test_raises_value_error_not_other_exception(self, monkeypatch):
+        monkeypatch.delenv("PINECONE_API_KEY", raising=False)
+        try:
+            MemoryEngine()
+        except ValueError:
+            pass  # expected
+        except Exception as e:
+            pytest.fail(f"Expected ValueError, got {type(e).__name__}: {e}")
