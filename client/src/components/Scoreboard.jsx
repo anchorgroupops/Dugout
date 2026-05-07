@@ -37,8 +37,11 @@ function computeZonesFromBatting(b) {
   const s = singles / total;
   const d = doubles / total;
   const hr_pct = hr / total;
-  const gb = clamp01(b.gb_pct || b.gb || 0.4);
-  const fb = clamp01(b.fb_pct || b.fb || 0.3);
+  // GC stores pcts as percentages (e.g. 45.2) or decimals (0.452) — normalize like the server does
+  const rawGb = b.gb_pct || b.gb || 0;
+  const rawFb = b.fb_pct || b.fb || 0;
+  const gb = clamp01(rawGb > 1 ? rawGb / 100 : rawGb || 0.4);
+  const fb = clamp01(rawFb > 1 ? rawFb / 100 : rawFb || 0.3);
   return {
     lf:  clamp01(0.10 + s * 0.05 + d * 0.15 + fb * 0.08),
     lc:  clamp01(0.12 + d * 0.15 + s * 0.10),
