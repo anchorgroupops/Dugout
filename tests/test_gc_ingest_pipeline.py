@@ -8,7 +8,7 @@ from unittest.mock import patch
 import pytest
 
 import tools.gc_ingest_pipeline as pipeline_mod
-from tools.gc_ingest_pipeline import _assemble_report, _auto_discover_csv
+from tools.gc_ingest_pipeline import _assemble_report, _auto_discover_csv, _team_dir
 
 
 # ---------------------------------------------------------------------------
@@ -402,3 +402,40 @@ class TestAssembleReport:
                 snapshot_id=None, scorebook_data=None,
             )
         assert len(report["lineup_snapshot"]["top_5"]) == 5
+
+
+# ---------------------------------------------------------------------------
+# _team_dir — simple path construction
+# ---------------------------------------------------------------------------
+
+class TestTeamDir:
+    def test_returns_path_under_data_dir(self, monkeypatch, tmp_path):
+        from tools.team_registry import Team
+        monkeypatch.setattr(pipeline_mod, "_ROOT_DIR", tmp_path)
+        team = Team(
+            id="a", season_slug="spring26", name="Sharks",
+            data_slug="sharks", active=True,
+        )
+        result = _team_dir(team)
+        assert result == tmp_path / "data" / "sharks"
+
+    def test_slug_in_path(self, monkeypatch, tmp_path):
+        from tools.team_registry import Team
+        monkeypatch.setattr(pipeline_mod, "_ROOT_DIR", tmp_path)
+        team = Team(
+            id="b", season_slug="spring26", name="Eagles",
+            data_slug="eagles", active=True,
+        )
+        result = _team_dir(team)
+        assert "eagles" in str(result)
+
+    def test_returns_path_object(self, monkeypatch, tmp_path):
+        from pathlib import Path as PathClass
+        from tools.team_registry import Team
+        monkeypatch.setattr(pipeline_mod, "_ROOT_DIR", tmp_path)
+        team = Team(
+            id="c", season_slug="spring26", name="Test",
+            data_slug="test_team", active=True,
+        )
+        result = _team_dir(team)
+        assert isinstance(result, PathClass)

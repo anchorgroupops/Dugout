@@ -24,7 +24,13 @@ for _modname in ("transformers", "torch", "replicate"):
 sys.path.insert(0, str(Path(__file__).parent.parent / "tools"))
 
 try:
-    from announcer_api import _make_silent_wav, VoiceDesignParams  # noqa: E402
+    from announcer_api import (  # noqa: E402
+        _make_silent_wav,
+        _pi_claim_job,
+        _pi_mark_failed,
+        _pi_upload_complete,
+        VoiceDesignParams,
+    )
 
     IMPORT_OK = True
 except Exception as _import_exc:  # pragma: no cover
@@ -213,3 +219,37 @@ class TestVoiceDesignParams:
     def test_boundary_energy_max(self):
         vd = VoiceDesignParams(energy=3.0)
         assert vd.energy == 3.0
+
+
+# ---------------------------------------------------------------------------
+# Pi integration helpers — return False when PI_API_URL is empty
+# ---------------------------------------------------------------------------
+
+@pytest.mark.skipif(not IMPORT_OK, reason="announcer_api import failed")
+class TestPiHelpers:
+    def test_claim_job_returns_false_when_no_url(self, monkeypatch):
+        import announcer_api as api
+        monkeypatch.setattr(api, "PI_API_URL", "")
+        assert _pi_claim_job("job-1") is False
+
+    def test_upload_complete_returns_false_when_no_url(self, monkeypatch):
+        import announcer_api as api
+        monkeypatch.setattr(api, "PI_API_URL", "")
+        assert _pi_upload_complete("job-1", b"flac", b"mp3") is False
+
+    def test_mark_failed_does_not_raise_when_no_url(self, monkeypatch):
+        import announcer_api as api
+        monkeypatch.setattr(api, "PI_API_URL", "")
+        _pi_mark_failed("job-1", "some error")  # must not raise
+
+    def test_claim_job_returns_bool(self, monkeypatch):
+        import announcer_api as api
+        monkeypatch.setattr(api, "PI_API_URL", "")
+        result = _pi_claim_job("job-1")
+        assert isinstance(result, bool)
+
+    def test_upload_complete_returns_bool(self, monkeypatch):
+        import announcer_api as api
+        monkeypatch.setattr(api, "PI_API_URL", "")
+        result = _pi_upload_complete("job-1", b"", b"")
+        assert isinstance(result, bool)
