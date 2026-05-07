@@ -68,6 +68,22 @@ def test_quarantine_moves_file(tmp_path, tmp_data_dir):
 # _overlap — schema drift metric
 # ---------------------------------------------------------------------------
 
+def test_rejects_utf8_decode_error(tmp_path):
+    p = tmp_path / "bad_encoding.csv"
+    p.write_bytes(b"\xff\xfe Player,AB\r\n")  # UTF-16 BOM — not valid UTF-8
+    result = cv.validate(p, known_columns=None)
+    assert result.accepted is False
+    assert "utf" in result.reason.lower() or "decode" in result.reason.lower()
+
+
+def test_rejects_empty_header_columns(tmp_path):
+    # File with a header row of only whitespace/commas — no non-empty column names
+    p = _write(tmp_path / "blank_header.csv", "  ,  ,  \nx,y,z\n")
+    result = cv.validate(p, known_columns=None)
+    assert result.accepted is False
+    assert "column" in result.reason.lower()
+
+
 class TestOverlap:
     def test_full_overlap(self):
         assert cv._overlap(["a", "b", "c"], ["a", "b", "c"]) == 1.0

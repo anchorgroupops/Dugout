@@ -186,3 +186,72 @@ def test_extract_text_returns_string():
     m = EmailMessage()
     m.set_content("test")
     assert isinstance(g._extract_text(m), str)
+
+
+def test_fetch_returns_none_when_uids_empty_after_split():
+    """SEARCH returns a whitespace-only payload: uids list is empty after split."""
+    client = MagicMock()
+    client.uid.return_value = ("OK", [b"   "])  # truthy but no real UIDs
+    code, uid = g.fetch_latest_code(client)
+    assert code is None
+    assert uid is None
+
+
+def test_fetch_min_uid_filters_all_older_messages():
+    """min_uid > 0 and all UIDs are <= min_uid — returns None, None."""
+    client = MagicMock()
+    client.uid.return_value = ("OK", [b"10 20 30"])
+    code, uid = g.fetch_latest_code(client, min_uid=100)
+    assert code is None
+    assert uid is None
+
+
+def test_fetch_min_uid_keeps_newer_messages():
+    """min_uid filters out older UIDs but newer one with code is kept."""
+    client = MagicMock()
+    client.uid.side_effect = [
+        ("OK", [b"10 20 200"]),
+        ("OK", [(b"200", _build_raw_email(
+            "Your code is 112233",
+            subject="GameChanger code 112233"))]),
+    ]
+    code, uid = g.fetch_latest_code(client, min_uid=100)
+    assert code == "112233"
+
+
+def test_fetch_continues_on_bad_fetch_result():
+    """When FETCH returns non-OK for a UID, it should continue to the next."""
+    client = MagicMock()
+    client.uid.side_effect = [
+        ("OK", [b"50 51"]),
+        ("NO", [None]),   # FETCH 51 fails
+        ("OK", [(b"50", _build_raw_email(
+            "Your code is 998877", subject="Code 998877"))]),
+    ]
+    code, uid = g.fetch_latest_code(client)
+    assert code == "998877"
+
+
+def test_fetch_noop_exception_is_ignored():
+    """If client.noop() raises, the exception is swallowed."""
+    client = MagicMock()
+    client.noop.side_effect = OSError("NOOP failed")
+    client.uid.side_effect = [
+        ("OK", [b"42"]),
+        ("OK", [(b"42", _build_raw_email("code: 654321", subject="code 654321"))]),
+    ]
+    code, uid = g.fetch_latest_code(client)
+    assert code == "654321"
+
+
+def test_fetch_all_emails_have_no_code_returns_none():
+    """All fetched emails lack a 6-digit code — returns None, None."""
+    client = MagicMock()
+    client.uid.side_effect = [
+        ("OK", [b"50"]),
+        ("OK", [(b"50", _build_raw_email(
+            "Welcome to GameChanger!", subject="Welcome!"))]),
+    ]
+    code, uid = g.fetch_latest_code(client)
+    assert code is None
+    assert uid is None
