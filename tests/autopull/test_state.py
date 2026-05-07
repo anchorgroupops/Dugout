@@ -265,3 +265,23 @@ def test_schema_overlap_empty_b(tmp_db_path):
 def test_schema_overlap_partial(tmp_db_path):
     result = StateDB.schema_overlap(["a", "b"], ["a", "b", "c"])
     assert abs(result - 2 / 3) < 1e-9
+
+
+def test_last_two_schemas_returns_none_none_when_no_rows(tmp_db_path):
+    """last_two_schemas with no rows for a team returns (None, None)."""
+    db = StateDB(tmp_db_path); db.init_schema()
+    latest, prior = db.last_two_schemas(team_id="nonexistent")
+    assert latest is None
+    assert prior is None
+
+
+def test_breaker_auto_resets_after_open_duration_passes(tmp_db_path):
+    """breaker_open returns False and resets itself once reset_at is in the past."""
+    from datetime import timedelta
+    db = StateDB(tmp_db_path); db.init_schema()
+    # Open the breaker with an already-elapsed duration (negative hours = past)
+    for _ in range(3):
+        db.breaker_record_failure("auth", open_duration_hours=-1)  # already expired
+    # breaker_open should detect reset_at is in the past, reset, and return False
+    result = db.breaker_open("auth")
+    assert result is False
