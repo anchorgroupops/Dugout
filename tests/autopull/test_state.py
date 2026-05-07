@@ -171,3 +171,97 @@ def test_record_schema_scoped_by_team(tmp_db_path):
     assert sharks_prior == ["AB", "H"]
     assert dolphins_latest == ["X", "Y"]
     assert dolphins_prior is None
+
+
+# ---------------------------------------------------------------------------
+# list_tables / _table_exists / _columns
+# ---------------------------------------------------------------------------
+
+def test_list_tables_contains_expected(tmp_db_path):
+    db = StateDB(tmp_db_path); db.init_schema()
+    tables = db.list_tables()
+    assert "runs" in tables
+    assert "strategies" in tables
+
+
+def test_list_tables_returns_list(tmp_db_path):
+    db = StateDB(tmp_db_path); db.init_schema()
+    assert isinstance(db.list_tables(), list)
+
+
+def test_table_exists_true_for_runs(tmp_db_path):
+    db = StateDB(tmp_db_path); db.init_schema()
+    with db._conn() as conn:
+        assert StateDB._table_exists(conn, "runs") is True
+
+
+def test_table_exists_false_for_nonexistent(tmp_db_path):
+    db = StateDB(tmp_db_path); db.init_schema()
+    with db._conn() as conn:
+        assert StateDB._table_exists(conn, "nonexistent_table_xyz") is False
+
+
+def test_columns_includes_known_columns(tmp_db_path):
+    db = StateDB(tmp_db_path); db.init_schema()
+    with db._conn() as conn:
+        cols = StateDB._columns(conn, "runs")
+    assert "id" in cols
+    assert "trigger" in cols
+    assert "outcome" in cols
+
+
+# ---------------------------------------------------------------------------
+# recent_runs
+# ---------------------------------------------------------------------------
+
+def test_recent_runs_returns_empty_when_no_runs(tmp_db_path):
+    db = StateDB(tmp_db_path); db.init_schema()
+    assert db.recent_runs() == []
+
+
+def test_recent_runs_includes_completed_run(tmp_db_path):
+    now = datetime.now(ET)
+    db = StateDB(tmp_db_path); db.init_schema()
+    run_id = db.start_run("cron", team_id="sharks")
+    db.complete_run(
+        run_id, outcome="success", csv_path=None, rows_ingested=10,
+        winning_strategy_id=None, duration_ms=500,
+        llm_fallback_invoked=False, session_refreshed=False,
+        completed_at=now,
+    )
+    runs = db.recent_runs()
+    assert len(runs) >= 1
+    assert runs[0].outcome == "success"
+
+
+def test_recent_runs_limit_respected(tmp_db_path):
+    now = datetime.now(ET)
+    db = StateDB(tmp_db_path); db.init_schema()
+    for _ in range(5):
+        run_id = db.start_run("cron", team_id="sharks")
+        db.complete_run(
+            run_id, outcome="success", csv_path=None, rows_ingested=1,
+            winning_strategy_id=None, duration_ms=100,
+            llm_fallback_invoked=False, session_refreshed=False,
+            completed_at=now,
+        )
+    runs = db.recent_runs(limit=3)
+    assert len(runs) <= 3
+
+
+# ---------------------------------------------------------------------------
+# schema_overlap static method
+# ---------------------------------------------------------------------------
+
+def test_schema_overlap_full(tmp_db_path):
+    assert StateDB.schema_overlap(["a", "b", "c"], ["a", "b", "c"]) == 1.0
+
+
+def test_schema_overlap_empty_b(tmp_db_path):
+    # StateDB.schema_overlap returns 0.0 when either set is empty
+    assert StateDB.schema_overlap(["a", "b"], []) == 0.0
+
+
+def test_schema_overlap_partial(tmp_db_path):
+    result = StateDB.schema_overlap(["a", "b"], ["a", "b", "c"])
+    assert abs(result - 2 / 3) < 1e-9
