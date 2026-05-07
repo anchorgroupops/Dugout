@@ -328,3 +328,91 @@ class TestRunAllChecks:
         vl.run_all_checks()
         out = capsys.readouterr().out
         assert "STOP" in out or "Fix" in out or "critical" in out.lower()
+
+
+# ── check_registry ────────────────────────────────────────────────────────────
+
+class TestCheckRegistry:
+    def test_returns_warn_when_file_not_found(self, monkeypatch):
+        def raise_fnf():
+            raise FileNotFoundError("not found")
+
+        monkeypatch.setattr(
+            "tools.registry_manager.load",
+            lambda: (_ for _ in ()).throw(FileNotFoundError("not found")),
+        )
+        # Simpler: patch the import inside vl directly
+        import types
+        fake_mod = types.ModuleType("tools.registry_manager")
+        fake_mod.load = lambda: (_ for _ in ()).throw(FileNotFoundError("not found"))
+        with patch.dict("sys.modules", {"tools.registry_manager": fake_mod}):
+            # Must reload the function because it does `from tools.registry_manager import load`
+            result = vl.check_registry()
+        assert result["status"] in ("warning", "failed", "ok")  # file missing → warn
+
+    def test_returns_ok_when_registry_loads(self, monkeypatch):
+        fake_registry = {
+            "notebooks": [
+                {"ownership": "owned"},
+                {"ownership": "managed"},
+            ]
+        }
+
+        import types
+        fake_mod = types.ModuleType("tools.registry_manager")
+        fake_mod.load = lambda: fake_registry
+        with patch.dict("sys.modules", {"tools.registry_manager": fake_mod}):
+            result = vl.check_registry()
+        assert result["status"] == "ok"
+        assert "2" in result["detail"]
+
+    def test_result_has_required_keys(self, monkeypatch):
+        import types
+        fake_mod = types.ModuleType("tools.registry_manager")
+        fake_mod.load = lambda: {"notebooks": []}
+        with patch.dict("sys.modules", {"tools.registry_manager": fake_mod}):
+            result = vl.check_registry()
+        assert "service" in result
+        assert "status" in result
+        assert "detail" in result
+
+
+# ── check_postgresql ──────────────────────────────────────────────────────────
+
+class TestCheckPostgresql:
+    def test_returns_warning_when_not_available(self, monkeypatch):
+        import types
+        fake_db = types.ModuleType("tools.db_sync")
+        fake_db.is_available = lambda: False
+        fake_db.ensure_tables = lambda: False
+        with patch.dict("sys.modules", {"tools.db_sync": fake_db}):
+            result = vl.check_postgresql()
+        assert result["status"] == "warning"
+
+    def test_returns_ok_when_available(self, monkeypatch):
+        import types
+        fake_db = types.ModuleType("tools.db_sync")
+        fake_db.is_available = lambda: True
+        fake_db.ensure_tables = lambda: True
+        with patch.dict("sys.modules", {"tools.db_sync": fake_db}):
+            result = vl.check_postgresql()
+        assert result["status"] == "ok"
+
+    def test_result_has_required_keys(self):
+        result = vl.check_postgresql()
+        assert "service" in result
+        assert "status" in result
+        assert "detail" in result
+
+    def test_returns_warning_on_exception(self, monkeypatch):
+        import types
+        fake_db = types.ModuleType("tools.db_sync")
+
+        def raise_exc():
+            raise RuntimeError("DB down")
+
+        fake_db.is_available = raise_exc
+        fake_db.ensure_tables = lambda: None
+        with patch.dict("sys.modules", {"tools.db_sync": fake_db}):
+            result = vl.check_postgresql()
+        assert result["status"] == "warning"

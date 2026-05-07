@@ -390,3 +390,105 @@ class TestPickScoreboardTarget:
         g = {"game_status": "IN_PROGRESS", "start_ts": self._ts(-0.5)}
         result = _pick([g], self._now(), self._today())
         assert result is g
+
+
+# ── _candidate_secrets_csv_paths ─────────────────────────────────────────────
+
+class TestCandidateSecretsCsvPaths:
+    def test_returns_list(self, monkeypatch):
+        monkeypatch.delenv("SECRETS_CSV", raising=False)
+        monkeypatch.delenv("APIS_CSV_PATH", raising=False)
+        result = sync_daemon._candidate_secrets_csv_paths()
+        assert isinstance(result, list)
+
+    def test_all_items_are_paths(self, monkeypatch):
+        monkeypatch.delenv("SECRETS_CSV", raising=False)
+        monkeypatch.delenv("APIS_CSV_PATH", raising=False)
+        result = sync_daemon._candidate_secrets_csv_paths()
+        assert all(isinstance(p, Path) for p in result)
+
+    def test_env_var_included_when_set(self, monkeypatch):
+        monkeypatch.setenv("SECRETS_CSV", "/tmp/my_secrets.csv")
+        result = sync_daemon._candidate_secrets_csv_paths()
+        paths = [str(p) for p in result]
+        assert "/tmp/my_secrets.csv" in paths
+
+    def test_no_duplicates(self, monkeypatch):
+        monkeypatch.delenv("SECRETS_CSV", raising=False)
+        monkeypatch.delenv("APIS_CSV_PATH", raising=False)
+        result = sync_daemon._candidate_secrets_csv_paths()
+        strs = [str(p) for p in result]
+        assert len(strs) == len(set(strs))
+
+    def test_empty_env_var_excluded(self, monkeypatch):
+        monkeypatch.setenv("SECRETS_CSV", "")
+        monkeypatch.setenv("APIS_CSV_PATH", "")
+        result = sync_daemon._candidate_secrets_csv_paths()
+        for p in result:
+            assert str(p).strip() != ""
+
+
+# ── _load_secret_cache ───────────────────────────────────────────────────────
+
+class TestLoadSecretCache:
+    def test_returns_dict(self):
+        sync_daemon._SECRET_CACHE = None  # reset
+        result = sync_daemon._load_secret_cache()
+        assert isinstance(result, dict)
+
+    def test_returns_cached_value(self):
+        sync_daemon._SECRET_CACHE = {"KEY": "cached_val"}
+        result = sync_daemon._load_secret_cache()
+        assert result["KEY"] == "cached_val"
+        sync_daemon._SECRET_CACHE = None  # cleanup
+
+
+# ── _resolve_secret ──────────────────────────────────────────────────────────
+
+class TestResolveSecret:
+    def test_returns_env_var_when_set(self, monkeypatch):
+        monkeypatch.setenv("MY_TEST_SECRET_XYZ", "env_value")
+        sync_daemon._SECRET_CACHE = None
+        result = sync_daemon._resolve_secret("MY_TEST_SECRET_XYZ", "default")
+        assert result == "env_value"
+
+    def test_returns_default_when_env_and_cache_miss(self, monkeypatch):
+        monkeypatch.delenv("NONEXISTENT_KEY_ZZZYY", raising=False)
+        sync_daemon._SECRET_CACHE = {}
+        result = sync_daemon._resolve_secret("NONEXISTENT_KEY_ZZZYY", "fallback")
+        assert result == "fallback"
+
+    def test_strips_whitespace_from_env(self, monkeypatch):
+        monkeypatch.setenv("MY_PAD_SECRET", "  padded  ")
+        sync_daemon._SECRET_CACHE = None
+        result = sync_daemon._resolve_secret("MY_PAD_SECRET", "")
+        assert result == "padded"
+
+    def test_falls_back_to_cache_when_env_empty(self, monkeypatch):
+        monkeypatch.setenv("CACHE_TEST_KEY", "")
+        sync_daemon._SECRET_CACHE = {"CACHE_TEST_KEY": "from_cache"}
+        result = sync_daemon._resolve_secret("CACHE_TEST_KEY", "default")
+        assert result == "from_cache"
+        sync_daemon._SECRET_CACHE = None
+
+
+# ── _resolve_critical_env ────────────────────────────────────────────────────
+
+class TestResolveCriticalEnv:
+    def test_returns_env_var_when_set(self, monkeypatch):
+        monkeypatch.setenv("CRITICAL_TEST_KEY", "real_value")
+        sync_daemon._SECRET_CACHE = None
+        result = sync_daemon._resolve_critical_env("CRITICAL_TEST_KEY", "fallback")
+        assert result == "real_value"
+
+    def test_returns_fallback_when_not_set(self, monkeypatch):
+        monkeypatch.delenv("CRITICAL_TEST_KEY_ZZZ", raising=False)
+        sync_daemon._SECRET_CACHE = {}
+        result = sync_daemon._resolve_critical_env("CRITICAL_TEST_KEY_ZZZ", "my_fallback")
+        assert result == "my_fallback"
+
+    def test_returns_string(self, monkeypatch):
+        monkeypatch.setenv("CRIT_STR_KEY", "hello")
+        sync_daemon._SECRET_CACHE = None
+        result = sync_daemon._resolve_critical_env("CRIT_STR_KEY", "x")
+        assert isinstance(result, str)

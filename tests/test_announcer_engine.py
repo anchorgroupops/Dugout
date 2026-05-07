@@ -1,18 +1,27 @@
 """Tests for tools/announcer_engine.py — pure logic, security helpers, MockTTS."""
 from __future__ import annotations
 
+import json
 import os
 
 import pytest
 
+import tools.announcer_engine as ae_mod
 from tools.announcer_engine import (
     MockTTS,
     _apply_phonetics,
+    _bootstrap_roster_from_team,
     _number_to_word,
     _sanitize_player_id,
     build_situational_announcement,
+    get_default_voice_profile,
+    get_player_by_id,
     get_tts_provider,
     get_quick_tts_provider,
+    load_announcer_roster,
+    load_voice_profiles,
+    save_announcer_roster,
+    update_player,
 )
 
 
@@ -354,3 +363,191 @@ class TestBuildAnnouncementText:
         ctx = {"bases": [False, False, False], "outs": 0}
         result = build_announcement_text(player, game_context=ctx)
         assert isinstance(result, str)
+
+
+# ---------------------------------------------------------------------------
+# load_voice_profiles / get_default_voice_profile
+# ---------------------------------------------------------------------------
+
+class TestLoadVoiceProfiles:
+    def test_returns_list_when_no_file(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(ae_mod, "VOICE_PROFILES_FILE", tmp_path / "vp.json")
+        result = load_voice_profiles()
+        assert isinstance(result, list)
+        assert len(result) >= 1
+
+    def test_returns_default_when_file_empty(self, tmp_path, monkeypatch):
+        vp_file = tmp_path / "vp.json"
+        vp_file.write_text("[]")
+        monkeypatch.setattr(ae_mod, "VOICE_PROFILES_FILE", vp_file)
+        result = load_voice_profiles()
+        assert isinstance(result, list)
+
+    def test_returns_profiles_from_file(self, tmp_path, monkeypatch):
+        profiles = [{"name": "Custom", "is_default": True}]
+        vp_file = tmp_path / "vp.json"
+        vp_file.write_text(json.dumps(profiles))
+        monkeypatch.setattr(ae_mod, "VOICE_PROFILES_FILE", vp_file)
+        result = load_voice_profiles()
+        assert result[0]["name"] == "Custom"
+
+
+class TestGetDefaultVoiceProfile:
+    def test_returns_dict(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(ae_mod, "VOICE_PROFILES_FILE", tmp_path / "vp.json")
+        result = get_default_voice_profile()
+        assert isinstance(result, dict)
+
+    def test_returns_profile_marked_default(self, tmp_path, monkeypatch):
+        profiles = [
+            {"name": "NonDefault", "is_default": False},
+            {"name": "TheDefault", "is_default": True},
+        ]
+        vp_file = tmp_path / "vp.json"
+        vp_file.write_text(json.dumps(profiles))
+        monkeypatch.setattr(ae_mod, "VOICE_PROFILES_FILE", vp_file)
+        result = get_default_voice_profile()
+        assert result["name"] == "TheDefault"
+
+    def test_fallback_when_no_default_marked(self, tmp_path, monkeypatch):
+        profiles = [{"name": "NoDefault", "is_default": False}]
+        vp_file = tmp_path / "vp.json"
+        vp_file.write_text(json.dumps(profiles))
+        monkeypatch.setattr(ae_mod, "VOICE_PROFILES_FILE", vp_file)
+        result = get_default_voice_profile()
+        assert isinstance(result, dict)
+
+
+# ---------------------------------------------------------------------------
+# _bootstrap_roster_from_team
+# ---------------------------------------------------------------------------
+
+class TestBootstrapRosterFromTeam:
+    def test_returns_empty_when_no_team_files(self, tmp_path, monkeypatch):
+        sharks_dir = tmp_path / "sharks"
+        sharks_dir.mkdir()
+        monkeypatch.setattr(ae_mod, "DATA_DIR", tmp_path)
+        result = _bootstrap_roster_from_team()
+        assert result == []
+
+    def test_builds_roster_from_team_json(self, tmp_path, monkeypatch):
+        sharks_dir = tmp_path / "sharks"
+        sharks_dir.mkdir()
+        team = {
+            "roster": [
+                {"first": "Jane", "last": "Doe", "number": "7"},
+                {"first": "Sara", "last": "Smith", "number": "12"},
+            ]
+        }
+        (sharks_dir / "team.json").write_text(json.dumps(team))
+        monkeypatch.setattr(ae_mod, "DATA_DIR", tmp_path)
+        result = _bootstrap_roster_from_team()
+        assert len(result) == 2
+
+    def test_each_entry_has_required_fields(self, tmp_path, monkeypatch):
+        sharks_dir = tmp_path / "sharks"
+        sharks_dir.mkdir()
+        team = {"roster": [{"first": "Jane", "last": "Doe", "number": "7"}]}
+        (sharks_dir / "team.json").write_text(json.dumps(team))
+        monkeypatch.setattr(ae_mod, "DATA_DIR", tmp_path)
+        result = _bootstrap_roster_from_team()
+        assert len(result) == 1
+        entry = result[0]
+        for key in ("id", "first", "last", "number", "status", "is_active"):
+            assert key in entry
+
+    def test_skips_player_without_first_name(self, tmp_path, monkeypatch):
+        sharks_dir = tmp_path / "sharks"
+        sharks_dir.mkdir()
+        team = {"roster": [{"last": "NoFirst", "number": "99"}]}
+        (sharks_dir / "team.json").write_text(json.dumps(team))
+        monkeypatch.setattr(ae_mod, "DATA_DIR", tmp_path)
+        result = _bootstrap_roster_from_team()
+        assert result == []
+
+
+# ---------------------------------------------------------------------------
+# load_announcer_roster / save_announcer_roster / get_player_by_id / update_player
+# ---------------------------------------------------------------------------
+
+class TestLoadSaveAnnouncerRoster:
+    def _setup(self, tmp_path, monkeypatch):
+        sharks_dir = tmp_path / "sharks"
+        announcer_dir = sharks_dir / "announcer"
+        announcer_dir.mkdir(parents=True)
+        monkeypatch.setattr(ae_mod, "DATA_DIR", tmp_path)
+        monkeypatch.setattr(ae_mod, "ANNOUNCER_DIR", announcer_dir)
+        monkeypatch.setattr(ae_mod, "ROSTER_FILE", announcer_dir / "roster.json")
+        return announcer_dir
+
+    def test_save_and_load_roundtrip(self, tmp_path, monkeypatch):
+        self._setup(tmp_path, monkeypatch)
+        roster = [{"id": "7-jane-doe", "first": "Jane", "last": "Doe", "number": "7",
+                   "status": "pending", "is_active": True}]
+        save_announcer_roster(roster)
+        loaded = load_announcer_roster()
+        assert loaded[0]["id"] == "7-jane-doe"
+
+    def test_load_returns_list(self, tmp_path, monkeypatch):
+        sharks_dir = tmp_path / "sharks"
+        announcer_dir = sharks_dir / "announcer"
+        announcer_dir.mkdir(parents=True)
+        monkeypatch.setattr(ae_mod, "DATA_DIR", tmp_path)
+        monkeypatch.setattr(ae_mod, "ANNOUNCER_DIR", announcer_dir)
+        monkeypatch.setattr(ae_mod, "ROSTER_FILE", announcer_dir / "roster.json")
+        result = load_announcer_roster()
+        assert isinstance(result, list)
+
+
+class TestGetPlayerById:
+    def _setup(self, tmp_path, monkeypatch, roster):
+        sharks_dir = tmp_path / "sharks"
+        announcer_dir = sharks_dir / "announcer"
+        announcer_dir.mkdir(parents=True)
+        (announcer_dir / "roster.json").write_text(json.dumps(roster))
+        monkeypatch.setattr(ae_mod, "DATA_DIR", tmp_path)
+        monkeypatch.setattr(ae_mod, "ANNOUNCER_DIR", announcer_dir)
+        monkeypatch.setattr(ae_mod, "ROSTER_FILE", announcer_dir / "roster.json")
+
+    def test_returns_player_when_found(self, tmp_path, monkeypatch):
+        roster = [{"id": "7-jane-doe", "first": "Jane", "last": "Doe"}]
+        self._setup(tmp_path, monkeypatch, roster)
+        result = get_player_by_id("7-jane-doe")
+        assert result is not None
+        assert result["first"] == "Jane"
+
+    def test_returns_none_when_not_found(self, tmp_path, monkeypatch):
+        roster = [{"id": "7-jane-doe", "first": "Jane", "last": "Doe"}]
+        self._setup(tmp_path, monkeypatch, roster)
+        result = get_player_by_id("99-nobody")
+        assert result is None
+
+
+class TestUpdatePlayer:
+    def _setup(self, tmp_path, monkeypatch, roster):
+        sharks_dir = tmp_path / "sharks"
+        announcer_dir = sharks_dir / "announcer"
+        announcer_dir.mkdir(parents=True)
+        (announcer_dir / "roster.json").write_text(json.dumps(roster))
+        monkeypatch.setattr(ae_mod, "DATA_DIR", tmp_path)
+        monkeypatch.setattr(ae_mod, "ANNOUNCER_DIR", announcer_dir)
+        monkeypatch.setattr(ae_mod, "ROSTER_FILE", announcer_dir / "roster.json")
+
+    def test_returns_updated_player(self, tmp_path, monkeypatch):
+        roster = [{"id": "7-jane-doe", "first": "Jane", "status": "pending"}]
+        self._setup(tmp_path, monkeypatch, roster)
+        result = update_player("7-jane-doe", {"status": "done"})
+        assert result["status"] == "done"
+
+    def test_returns_none_when_player_not_found(self, tmp_path, monkeypatch):
+        roster = [{"id": "7-jane-doe", "first": "Jane"}]
+        self._setup(tmp_path, monkeypatch, roster)
+        result = update_player("99-nobody", {"status": "done"})
+        assert result is None
+
+    def test_persists_update_to_file(self, tmp_path, monkeypatch):
+        roster = [{"id": "7-jane-doe", "first": "Jane", "status": "pending"}]
+        self._setup(tmp_path, monkeypatch, roster)
+        update_player("7-jane-doe", {"status": "done"})
+        loaded = load_announcer_roster()
+        assert loaded[0]["status"] == "done"
