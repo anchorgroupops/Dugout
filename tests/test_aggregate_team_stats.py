@@ -232,3 +232,139 @@ class TestTeamFileFromEntry:
     def test_missing_entry_returns_sharks_default(self):
         result = _team_file_from_entry({})
         assert str(result).endswith("sharks/team.json")
+
+
+# ---------------------------------------------------------------------------
+# Additional _recompute_batting edge cases
+# ---------------------------------------------------------------------------
+
+class TestRecomputeBattingExtra:
+    def test_ops_equals_obp_plus_slg(self):
+        b = {"ab": 10, "h": 4, "bb": 2, "hbp": 0, "doubles": 1, "triples": 0, "hr": 1}
+        result = _recompute_batting(b)
+        assert abs(result["ops"] - round(result["obp"] + result["slg"], 3)) < 0.001
+
+    def test_pa_inferred_from_ab_bb_hbp_when_absent(self):
+        b = {"ab": 10, "h": 3, "bb": 2, "hbp": 1}
+        result = _recompute_batting(b)
+        assert result["pa"] == 13  # 10 + 2 + 1
+
+    def test_sb_only_no_cs_gives_100_pct(self):
+        b = {"ab": 10, "h": 3, "sb": 5, "cs": 0}
+        result = _recompute_batting(b)
+        assert result["sb_pct"] == 100.0
+
+    def test_cs_only_no_sb_gives_0_pct(self):
+        b = {"ab": 10, "h": 3, "sb": 0, "cs": 3}
+        result = _recompute_batting(b)
+        assert result["sb_pct"] == 0.0
+
+    def test_singles_computed_from_hits_minus_xbh(self):
+        b = {"ab": 10, "h": 5, "doubles": 1, "triples": 1, "hr": 1, "bb": 0, "hbp": 0}
+        result = _recompute_batting(b)
+        # singles = 5 - 1 - 1 - 1 = 2; TB = 2 + 2 + 3 + 4 = 11
+        assert result["slg"] == round(11 / 10, 3)
+
+    def test_perfect_hitter_obp_is_one(self):
+        b = {"ab": 5, "h": 5, "bb": 0, "hbp": 0, "pa": 5}
+        result = _recompute_batting(b)
+        assert result["obp"] == 1.000
+
+    def test_zero_pa_gives_zero_obp(self):
+        b = {"ab": 0, "h": 0, "bb": 0, "hbp": 0, "pa": 0}
+        result = _recompute_batting(b)
+        assert result["obp"] == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Additional _recompute_pitching edge cases
+# ---------------------------------------------------------------------------
+
+class TestRecomputePitchingExtra:
+    def test_era_uses_7_inning_softball_formula(self):
+        # ERA = (ER * 7) / IP (softball uses 7, not 9)
+        p = {"er": 1, "bb": 0, "h": 0}
+        result = _recompute_pitching(p, ip_outs=21)  # 7.0 IP
+        assert result["era"] == round((1 * 7) / 7, 2)
+
+    def test_whip_per_inning(self):
+        p = {"er": 0, "bb": 3, "h": 7}
+        result = _recompute_pitching(p, ip_outs=21)  # 7.0 IP
+        assert result["whip"] == round(10 / 7, 2)
+
+    def test_ip_string_format_partial_inning(self):
+        p = {"er": 0, "bb": 0, "h": 0}
+        result = _recompute_pitching(p, ip_outs=14)  # 4.2 IP
+        assert result["ip"] == "4.2"
+
+
+# ---------------------------------------------------------------------------
+# Additional _recompute_fielding edge cases
+# ---------------------------------------------------------------------------
+
+class TestRecomputeFieldingExtra:
+    def test_perfect_fielding_is_1(self):
+        result = _recompute_fielding({"po": 8, "a": 2, "e": 0})
+        assert result["fpct"] == 1.000
+
+    def test_only_errors_no_fpct(self):
+        # po=0, a=0 means TC = e; denominator = e, numerator = 0
+        result = _recompute_fielding({"po": 0, "a": 0, "e": 3})
+        assert result["fpct"] == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Additional _merge_numeric edge cases
+# ---------------------------------------------------------------------------
+
+class TestMergeNumericExtra:
+    def test_accumulates_from_initial_value(self):
+        dst = {"ab": 10.0}
+        _merge_numeric(dst, {"ab": 5}, {"ab"})
+        assert dst["ab"] == 15.0
+
+    def test_string_numeric_parsed(self):
+        dst = {}
+        _merge_numeric(dst, {"h": "3"}, {"h"})
+        assert dst["h"] == 3.0
+
+    def test_float_value_accumulated(self):
+        dst = {}
+        _merge_numeric(dst, {"ip": 4.2}, {"ip"})
+        assert dst["ip"] == pytest.approx(4.2)
+
+
+# ---------------------------------------------------------------------------
+# Additional _merge_innings edge cases
+# ---------------------------------------------------------------------------
+
+class TestMergeInningsExtra:
+    def test_zero_outs_accumulated(self):
+        dst_outs = {"ip": 0}
+        _merge_innings(dst_outs, {"ip": "0.0"}, {"ip"})
+        assert dst_outs["ip"] == 0
+
+    def test_accumulates_over_multiple_calls(self):
+        dst_outs = {}
+        _merge_innings(dst_outs, {"ip": "3.0"}, {"ip"})  # 9 outs
+        _merge_innings(dst_outs, {"ip": "4.0"}, {"ip"})  # 12 outs
+        assert dst_outs["ip"] == 21
+
+
+# ---------------------------------------------------------------------------
+# Additional _norm_name edge cases
+# ---------------------------------------------------------------------------
+
+class TestNormNameExtra:
+    def test_numbers_stripped(self):
+        # _norm_name only keeps [a-z]; digits are stripped
+        assert _norm_name("Player123") == "player"
+
+    def test_period_stripped(self):
+        assert _norm_name("J.R. Smith") == "jrsmith"
+
+    def test_only_special_chars_returns_empty(self):
+        assert _norm_name("!!!") == ""
+
+    def test_digits_stripped(self):
+        assert _norm_name("42") == ""
