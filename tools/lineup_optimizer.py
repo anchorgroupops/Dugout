@@ -59,7 +59,7 @@ def compute_batting_score(player: dict, strategy: str = "balanced") -> float:
     singles = h - doubles - triples - hr
     total_bases = singles + (2 * doubles) + (3 * triples) + (4 * hr)
     slg = total_bases / ab if ab > 0 else 0
-    k_rate = k / pa
+    k_rate = min(1.0, k / pa)
     # GC advanced stats are on 0-100 scale — normalize to 0-1
     q_pct = min(hitting_adv.get("qab_pct", 0.0), 100.0) / 100.0
     contact_quality = min(hitting_adv.get("c_pct", 0.0), 100.0) / 100.0
