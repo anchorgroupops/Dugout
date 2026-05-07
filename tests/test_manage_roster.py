@@ -295,3 +295,58 @@ class TestTogglePlayer:
 
         mr.toggle_player(team, availability, 1)
         assert availability["Alice Smith"] is True
+
+
+# ---------------------------------------------------------------------------
+# TestMain — CLI command-line mode
+# ---------------------------------------------------------------------------
+
+class TestMain:
+    """Tests for manage_roster.main() CLI mode (non-interactive)."""
+
+    def _setup(self, tmp_files):
+        team = make_team([("Alice", "Smith", 1), ("Bob", "Jones", 2)])
+        (tmp_files / "team_merged.json").write_text(
+            __import__("json").dumps(team))
+
+    def test_list_command_runs_without_error(self, tmp_files, monkeypatch, capsys):
+        self._setup(tmp_files)
+        monkeypatch.setattr("sys.argv", ["manage_roster.py", "list"])
+        mr.main()
+        out = capsys.readouterr().out
+        assert "Alice" in out
+
+    def test_toggle_command_updates_availability(self, tmp_files, monkeypatch):
+        self._setup(tmp_files)
+        monkeypatch.setattr("sys.argv", ["manage_roster.py", "toggle", "1"])
+        mr.main()
+        import json as _json
+        data = _json.loads((tmp_files / "availability.json").read_text())
+        assert data["Alice Smith"] is False
+
+    def test_toggle_invalid_index_string_prints_message(self, tmp_files, monkeypatch, capsys):
+        self._setup(tmp_files)
+        monkeypatch.setattr("sys.argv", ["manage_roster.py", "toggle", "notanumber"])
+        mr.main()
+        out = capsys.readouterr().out
+        assert "integer" in out.lower()
+
+    def test_set_all_true_marks_all_active(self, tmp_files, monkeypatch, capsys):
+        self._setup(tmp_files)
+        monkeypatch.setattr("sys.argv", ["manage_roster.py", "set-all", "true"])
+        mr.main()
+        import json as _json
+        data = _json.loads((tmp_files / "availability.json").read_text())
+        assert all(v is True for v in data.values())
+
+    def test_set_all_false_marks_all_inactive(self, tmp_files, monkeypatch, capsys):
+        self._setup(tmp_files)
+        monkeypatch.setattr("sys.argv", ["manage_roster.py", "set-all", "false"])
+        mr.main()
+        import json as _json
+        data = _json.loads((tmp_files / "availability.json").read_text())
+        assert all(v is False for v in data.values())
+
+    def test_main_exits_early_when_team_missing(self, tmp_files, monkeypatch):
+        monkeypatch.setattr("sys.argv", ["manage_roster.py", "list"])
+        mr.main()  # should not raise even with no team file

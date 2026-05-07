@@ -229,6 +229,42 @@ class TestGenerateLineup:
         result = generate_lineup({"players": [strong_hitter]})
         assert len(result["lineup"]) == 1
 
+    def test_sentinel_avg_obp_slg_computed_from_raw_stats(self):
+        """Players with sentinel values (None, '-', '—') for avg/obp/slg get computed values."""
+        p = {
+            "number": "7", "first": "Alice", "last": "Sentinel",
+            "batting": {
+                "ab": 10, "h": 4, "bb": 2, "hbp": 0, "pa": 12,
+                "2b": 1, "3b": 0, "hr": 0, "sb": 0,
+                "avg": None, "obp": "-", "slg": "—",
+            },
+        }
+        result = generate_lineup({"roster": [p]})
+        assert len(result["lineup"]) == 1
+        entry = result["lineup"][0]
+        assert entry["avg"] == pytest.approx(0.4, abs=0.01)
+
+    def test_player_name_synthesized_when_absent(self):
+        """Players without 'name' key get first+last concatenated."""
+        p = {
+            "number": "9", "first": "Jane", "last": "Doe",
+            "batting": {"ab": 8, "h": 3, "bb": 1, "hbp": 0},
+        }
+        assert "name" not in p
+        result = generate_lineup({"roster": [p]})
+        assert len(result["lineup"]) == 1
+        # name should now be synthesized
+        assert p.get("name") == "Jane Doe"
+
+    def test_slot_players_depth_roles_filled(self):
+        """With 7+ players, depth slots (6+) are filled."""
+        players = [_mk_player(str(i), f"P{i} Player",
+                              ab=20, h=8, bb=3, hbp=0, so=2)
+                   for i in range(8)]
+        result = generate_lineup({"roster": players})
+        slots = [e["slot"] for e in result["lineup"]]
+        assert max(slots) >= 6
+
 
 # ====================================================================
 # _player_outcome_probs

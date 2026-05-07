@@ -419,3 +419,17 @@ class TestLoadManifest:
         monkeypatch.setattr(ats_mod, "MANIFEST_FILE", manifest_file)
         result = _load_manifest()
         assert len(result["extra_teams"]) == 2
+
+
+class TestMergeGenericNonParseable:
+    def test_unparseable_value_skipped(self):
+        """A non-rate key whose value fails _parse_number should be silently skipped."""
+        dst = {"ab": 3}
+        _merge_generic(dst, {"ab": 2, "position": "SS"})  # "SS" is not parseable
+        assert dst["ab"] == 5
+        assert "position" not in dst
+
+    def test_all_unparseable_leaves_dst_unchanged(self):
+        dst = {"x": 1}
+        _merge_generic(dst, {"label": "foo", "notes": "bar"})
+        assert dst == {"x": 1}

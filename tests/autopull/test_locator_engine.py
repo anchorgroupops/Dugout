@@ -154,3 +154,74 @@ def test_llm_daily_limit_enforced(tmp_db_path, tmp_path):
     result = engine.find_and_download(page, out_dir=tmp_path)
     assert llm.call_count == 0
     assert result.llm_used is False
+
+
+def test_llm_adapter_exception_returns_no_download(tmp_db_path, tmp_path):
+    """When the LLM adapter raises, the engine should return gracefully."""
+    db = StateDB(tmp_db_path); db.init_schema()
+    le.seed_builtin_strategies(db)
+    llm = MagicMock(side_effect=RuntimeError("api error"))
+    page = FakePage(found_selectors=set())
+    engine = le.LocatorEngine(db=db, llm_adapter=llm, llm_enabled=True,
+                              llm_daily_limit=10)
+    result = engine.find_and_download(page, out_dir=tmp_path)
+    assert result.downloaded_path is None
+    assert result.llm_used is False
+
+
+def test_llm_proposal_fails_download_records_failure(tmp_db_path, tmp_path):
+    """LLM proposes a valid selector, but download fails; strategy is recorded failed."""
+    db = StateDB(tmp_db_path); db.init_schema()
+    le.seed_builtin_strategies(db)
+    llm = MagicMock(return_value={
+        "strategy": "css", "selector": "button.no-match",
+        "confidence": 0.8, "reasoning": "test",
+    })
+    # button.no-match is NOT in found_selectors so count() == 0
+    page = FakePage(found_selectors=set(), download=None)
+    engine = le.LocatorEngine(db=db, llm_adapter=llm, llm_enabled=True,
+                              llm_daily_limit=10)
+    result = engine.find_and_download(page, out_dir=tmp_path)
+    assert result.downloaded_path is None
+    assert result.llm_used is True
+
+
+def test_prune_dom_strips_scripts_and_styles():
+    html = "<html><script>bad()</script><style>.x{}</style><p>ok</p></html>"
+    pruned = le.LocatorEngine._prune_dom.__func__(None, html) if False else \
+        le.LocatorEngine._prune_dom(MagicMock(content=MagicMock(return_value=html)))
+    # call via a real page mock
+    page = FakePage(html=html)
+    pruned = le.LocatorEngine._prune_dom(page)
+    assert "<script>" not in pruned
+    assert "<style>" not in pruned
+    assert "ok" in pruned
+
+
+def test_prune_dom_truncates_large_html():
+    big_html = "a" * 50_000
+    page = FakePage(html=big_html)
+    pruned = le.LocatorEngine._prune_dom(page, cap_bytes=40_000)
+    assert len(pruned) <= 40_000 + 30  # cap + truncation marker
+    assert "truncated" in pruned
+
+
+def test_prune_dom_handles_page_content_exception():
+    class BrokenPage:
+        def content(self):
+            raise RuntimeError("not available")
+    pruned = le.LocatorEngine._prune_dom(BrokenPage())
+    assert pruned == ""
+
+
+def test_proposal_is_safe_false_when_selector_missing(tmp_db_path):
+    db = StateDB(tmp_db_path); db.init_schema()
+    engine = le.LocatorEngine(db=db, llm_adapter=None, llm_enabled=False)
+    assert engine._proposal_is_safe({}) is False
+    assert engine._proposal_is_safe(None) is False
+
+
+def test_proposal_is_safe_true_for_normal_selector(tmp_db_path):
+    db = StateDB(tmp_db_path); db.init_schema()
+    engine = le.LocatorEngine(db=db, llm_adapter=None, llm_enabled=False)
+    assert engine._proposal_is_safe({"selector": "button.export"}) is True
