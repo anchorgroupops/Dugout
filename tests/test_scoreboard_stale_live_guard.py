@@ -91,3 +91,88 @@ def test_handles_unparseable_start_ts_gracefully():
     # to the original behaviour and accept it as live rather than silently drop.
     out = sync_daemon._pick_scoreboard_target([weird_live], now, today)
     assert out is weird_live
+
+
+def test_empty_games_list_returns_none():
+    now = datetime(2026, 4, 22, 12, 0, tzinfo=ET)
+    assert sync_daemon._pick_scoreboard_target([], now, now.date().isoformat()) is None
+
+
+def test_active_status_accepted_as_live():
+    now = datetime(2026, 4, 22, 18, 0, tzinfo=ET)
+    today = now.date().isoformat()
+    game = {
+        "id": "active-game",
+        "game_status": "active",
+        "start_ts": "2026-04-22T21:30:00+00:00",  # 30 min ago
+    }
+    out = sync_daemon._pick_scoreboard_target([game], now, today)
+    assert out is game
+
+
+def test_live_status_accepted_as_live():
+    now = datetime(2026, 4, 22, 18, 0, tzinfo=ET)
+    today = now.date().isoformat()
+    game = {
+        "id": "live-game",
+        "game_status": "live",
+        "start_ts": "2026-04-22T21:30:00+00:00",  # 30 min ago
+    }
+    out = sync_daemon._pick_scoreboard_target([game], now, today)
+    assert out is game
+
+
+def test_today_scheduled_game_returned_when_no_live():
+    now = datetime(2026, 4, 22, 10, 0, tzinfo=ET)
+    today = now.date().isoformat()
+    game = {
+        "id": "today-sched",
+        "game_status": "scheduled",
+        "start_ts": "2026-04-22T20:00:00+00:00",  # tonight
+    }
+    out = sync_daemon._pick_scoreboard_target([game], now, today)
+    assert out is game
+
+
+def test_live_game_preferred_over_today_scheduled():
+    now = datetime(2026, 4, 22, 18, 0, tzinfo=ET)
+    today = now.date().isoformat()
+    sched = {
+        "id": "sched",
+        "game_status": "scheduled",
+        "start_ts": "2026-04-22T23:00:00+00:00",
+    }
+    live = {
+        "id": "live",
+        "game_status": "in_progress",
+        "start_ts": "2026-04-22T21:30:00+00:00",  # 30 min ago
+    }
+    out = sync_daemon._pick_scoreboard_target([sched, live], now, today)
+    assert out is live
+
+
+def test_stale_threshold_boundary_just_inside():
+    # GAME_DURATION_HOURS = 2.5; threshold = 3.5 hours
+    # 3 hours since start → still within threshold → should be accepted
+    now = datetime(2026, 4, 22, 18, 0, tzinfo=ET)
+    today = now.date().isoformat()
+    start_utc = now.astimezone(__import__("zoneinfo").ZoneInfo("UTC")) - __import__("datetime").timedelta(hours=3)
+    game = {
+        "id": "boundary",
+        "game_status": "in_progress",
+        "start_ts": start_utc.isoformat(),
+    }
+    out = sync_daemon._pick_scoreboard_target([game], now, today)
+    assert out is game
+
+
+def test_yesterday_completed_game_ignored():
+    now = datetime(2026, 4, 22, 12, 0, tzinfo=ET)
+    today = now.date().isoformat()
+    yesterday = {
+        "id": "yesterday",
+        "game_status": "completed",
+        "start_ts": "2026-04-21T22:30:00+00:00",
+    }
+    out = sync_daemon._pick_scoreboard_target([yesterday], now, today)
+    assert out is None
