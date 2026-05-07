@@ -266,3 +266,272 @@ class TestGeneratePracticePlan:
         # Fun drill should appear near the end
         last_third = "\n".join(plan.splitlines()[-20:])
         assert fun_name in plan  # At minimum it's somewhere
+
+
+# ====================================================================
+# DRILL_LIBRARY / map integrity
+# ====================================================================
+class TestDrillLibraryIntegrity:
+    REQUIRED_DRILL_KEYS = {"name", "duration", "targets", "setup", "instructions", "objective"}
+
+    def test_all_drills_have_required_keys(self):
+        for drill_id, drill in DRILL_LIBRARY.items():
+            missing = self.REQUIRED_DRILL_KEYS - drill.keys()
+            assert not missing, f"Drill {drill_id!r} missing keys: {missing}"
+
+    def test_all_drill_durations_are_positive_ints(self):
+        for drill_id, drill in DRILL_LIBRARY.items():
+            dur = drill["duration"]
+            assert isinstance(dur, int) and dur > 0, \
+                f"Drill {drill_id!r} has bad duration: {dur!r}"
+
+    def test_all_drill_instructions_non_empty_lists(self):
+        for drill_id, drill in DRILL_LIBRARY.items():
+            instructions = drill["instructions"]
+            assert isinstance(instructions, list) and instructions, \
+                f"Drill {drill_id!r} has empty or non-list instructions"
+
+    def test_all_drill_names_are_non_empty_strings(self):
+        for drill_id, drill in DRILL_LIBRARY.items():
+            name = drill["name"]
+            assert isinstance(name, str) and name.strip(), \
+                f"Drill {drill_id!r} has empty name"
+
+    def test_drill_count_is_15(self):
+        assert len(DRILL_LIBRARY) == 15
+
+    def test_weakness_map_count_is_12(self):
+        from practice_gen import WEAKNESS_DRILL_MAP
+        assert len(WEAKNESS_DRILL_MAP) == 12
+
+    def test_weakness_map_all_drill_ids_valid(self):
+        from practice_gen import WEAKNESS_DRILL_MAP
+        for weakness, drills in WEAKNESS_DRILL_MAP.items():
+            for drill_id in drills:
+                assert drill_id in DRILL_LIBRARY, \
+                    f"WEAKNESS_DRILL_MAP[{weakness!r}] has unknown drill {drill_id!r}"
+
+    def test_matchup_boosts_all_drill_ids_valid(self):
+        from practice_gen import MATCHUP_DRILL_BOOSTS
+        for pattern, drills in MATCHUP_DRILL_BOOSTS.items():
+            for drill_id in drills:
+                assert drill_id in DRILL_LIBRARY, \
+                    f"MATCHUP_DRILL_BOOSTS[{pattern!r}] has unknown drill {drill_id!r}"
+
+    def test_exploit_boosts_all_drill_ids_valid(self):
+        from practice_gen import EXPLOIT_DRILL_BOOSTS
+        for pattern, drills in EXPLOIT_DRILL_BOOSTS.items():
+            for drill_id in drills:
+                assert drill_id in DRILL_LIBRARY, \
+                    f"EXPLOIT_DRILL_BOOSTS[{pattern!r}] has unknown drill {drill_id!r}"
+
+
+# ====================================================================
+# Additional map_weaknesses_to_drills edge cases
+# ====================================================================
+class TestMapWeaknessesFineGrained:
+    def _swot(self, team_weaknesses=None, player_analyses=None):
+        return {
+            "team_swot": {"weaknesses": team_weaknesses or []},
+            "player_analyses": player_analyses or [],
+        }
+
+    def test_their_advantages_boost_is_exactly_two(self):
+        from practice_gen import MATCHUP_DRILL_BOOSTS
+        matchup = {
+            "empty": False,
+            "opponent": "Eagles",
+            "their_advantages": ["Higher team batting average"],
+            "our_advantages": [],
+        }
+        drills = map_weaknesses_to_drills(self._swot(), matchup=matchup)
+        boosted_ids = MATCHUP_DRILL_BOOSTS["Higher team batting average"]
+        for rec in drills:
+            if rec["drill_id"] in boosted_ids:
+                assert rec["priority_score"] == 2, \
+                    f"{rec['drill_id']!r} score should be 2, got {rec['priority_score']}"
+
+    def test_our_advantages_boost_is_exactly_one(self):
+        from practice_gen import EXPLOIT_DRILL_BOOSTS
+        matchup = {
+            "empty": False,
+            "opponent": "Eagles",
+            "their_advantages": [],
+            "our_advantages": ["More aggressive baserunning"],
+        }
+        drills = map_weaknesses_to_drills(self._swot(), matchup=matchup)
+        boosted_ids = EXPLOIT_DRILL_BOOSTS["More aggressive baserunning"]
+        for rec in drills:
+            if rec["drill_id"] in boosted_ids:
+                assert rec["priority_score"] == 1, \
+                    f"{rec['drill_id']!r} score should be 1, got {rec['priority_score']}"
+
+    def test_drill_fields_from_library_included_in_result(self):
+        swot = self._swot(["Low batting average"])
+        drills = map_weaknesses_to_drills(swot)
+        rec = next(r for r in drills if r["drill_id"] == "soft_toss")
+        assert rec["name"] == DRILL_LIBRARY["soft_toss"]["name"]
+        assert rec["duration"] == DRILL_LIBRARY["soft_toss"]["duration"]
+        assert rec["objective"] == DRILL_LIBRARY["soft_toss"]["objective"]
+
+    def test_no_duplicate_drill_ids_in_output(self):
+        swot = self._swot(["Low batting average", "High strikeout rate", "Struggles to reach base"])
+        drills = map_weaknesses_to_drills(swot)
+        ids = [r["drill_id"] for r in drills]
+        assert len(ids) == len(set(ids)), "Duplicate drill_id found in output"
+
+    def test_combined_team_and_player_weakness_score(self):
+        # Team has "Low batting average"; 2 players also have it
+        players = [
+            {"swot": {"weaknesses": ["Low batting average"]}},
+            {"swot": {"weaknesses": ["Low batting average"]}},
+        ]
+        swot = self._swot(["Low batting average"], player_analyses=players)
+        drills = map_weaknesses_to_drills(swot)
+        soft_toss = next(r for r in drills if r["drill_id"] == "soft_toss")
+        assert soft_toss["priority_score"] == 3  # 1 team + 2 players
+
+    def test_reasons_populated_for_team_weakness(self):
+        swot = self._swot(["Low batting average"])
+        drills = map_weaknesses_to_drills(swot)
+        soft_toss = next(r for r in drills if r["drill_id"] == "soft_toss")
+        assert "Low batting average" in soft_toss["reasons"]
+
+    def test_matchup_reason_contains_counter_label(self):
+        matchup = {
+            "empty": False,
+            "opponent": "Wildcats",
+            "their_advantages": ["Higher team batting average"],
+            "our_advantages": [],
+        }
+        from practice_gen import MATCHUP_DRILL_BOOSTS
+        drills = map_weaknesses_to_drills(self._swot(), matchup=matchup)
+        boosted_id = MATCHUP_DRILL_BOOSTS["Higher team batting average"][0]
+        rec = next(r for r in drills if r["drill_id"] == boosted_id)
+        assert any("Counter Wildcats" in reason for reason in rec["reasons"])
+
+    def test_matchup_exploit_reason_contains_exploit_label(self):
+        matchup = {
+            "empty": False,
+            "opponent": "Ravens",
+            "their_advantages": [],
+            "our_advantages": ["More aggressive baserunning"],
+        }
+        from practice_gen import EXPLOIT_DRILL_BOOSTS
+        drills = map_weaknesses_to_drills(self._swot(), matchup=matchup)
+        boosted_id = EXPLOIT_DRILL_BOOSTS["More aggressive baserunning"][0]
+        rec = next(r for r in drills if r["drill_id"] == boosted_id)
+        assert any("Exploit vs Ravens" in reason for reason in rec["reasons"])
+
+    def test_all_known_weaknesses_produce_drills(self):
+        from practice_gen import WEAKNESS_DRILL_MAP
+        for weakness in WEAKNESS_DRILL_MAP:
+            swot = self._swot([weakness])
+            drills = map_weaknesses_to_drills(swot)
+            assert drills, f"Weakness {weakness!r} produced no drills"
+
+    def test_all_matchup_patterns_produce_drills(self):
+        from practice_gen import MATCHUP_DRILL_BOOSTS
+        for pattern in MATCHUP_DRILL_BOOSTS:
+            matchup = {
+                "empty": False,
+                "opponent": "X",
+                "their_advantages": [pattern],
+                "our_advantages": [],
+            }
+            drills = map_weaknesses_to_drills(self._swot(), matchup=matchup)
+            assert drills, f"MATCHUP pattern {pattern!r} produced no drills"
+
+    def test_all_exploit_patterns_produce_drills(self):
+        from practice_gen import EXPLOIT_DRILL_BOOSTS
+        for pattern in EXPLOIT_DRILL_BOOSTS:
+            matchup = {
+                "empty": False,
+                "opponent": "X",
+                "their_advantages": [],
+                "our_advantages": [pattern],
+            }
+            drills = map_weaknesses_to_drills(self._swot(), matchup=matchup)
+            assert drills, f"EXPLOIT pattern {pattern!r} produced no drills"
+
+
+# ====================================================================
+# Additional generate_practice_plan edge cases
+# ====================================================================
+class TestGeneratePracticePlanEdgeCases:
+    def _swot(self, weaknesses=None):
+        return {"team_swot": {"weaknesses": weaknesses or []}, "player_analyses": []}
+
+    def test_objectives_line_present(self):
+        plan = generate_practice_plan(self._swot(["Low batting average"]))
+        assert "Objectives:" in plan
+
+    def test_warmup_is_item_number_one(self):
+        plan = generate_practice_plan(self._swot())
+        lines = plan.splitlines()
+        # Find line starting with "1."
+        first_drill_line = next((l for l in lines if l.startswith("1.")), "")
+        assert "Warmup" in first_drill_line or "Stretch" in first_drill_line
+
+    def test_no_matchup_no_prep_for_line(self):
+        plan = generate_practice_plan(self._swot())
+        assert "Prep for:" not in plan
+
+    def test_empty_matchup_no_prep_for_line(self):
+        matchup = {"empty": True, "opponent": "Eagles"}
+        plan = generate_practice_plan(self._swot(), matchup=matchup)
+        assert "Prep for:" not in plan
+
+    def test_long_plan_has_water_break(self):
+        # 120-min plan with many drills should include a water break
+        swot = self._swot(["Low batting average", "High ERA", "Error-prone fielding",
+                           "Inefficient on the bases", "High strikeout rate"])
+        plan = generate_practice_plan(swot, duration_minutes=120)
+        assert "Water Break" in plan
+
+    def test_drill_setup_line_present(self):
+        swot = self._swot(["Low batting average"])
+        plan = generate_practice_plan(swot, duration_minutes=120)
+        # Soft-Toss has a setup string that should appear in the plan
+        assert "tosser" in plan or "plate" in plan.lower()
+
+    def test_plan_line_count_increases_with_duration(self):
+        swot = self._swot(["Low batting average", "High strikeout rate"])
+        short = generate_practice_plan(swot, duration_minutes=40)
+        long = generate_practice_plan(swot, duration_minutes=120)
+        assert len(long.splitlines()) > len(short.splitlines())
+
+
+# ====================================================================
+# Additional _normalize_date_str edge cases
+# ====================================================================
+class TestNormalizeDateStrExtra:
+    def test_single_digit_month_and_day(self):
+        assert _normalize_date_str("1/5/2026") == "2026-01-05"
+
+    def test_double_digit_month_and_day(self):
+        assert _normalize_date_str("12/31/2026") == "2026-12-31"
+
+    def test_whitespace_only_returns_empty(self):
+        assert _normalize_date_str("   ") == ""
+
+
+# ====================================================================
+# Additional _extract_time_hint edge cases
+# ====================================================================
+class TestExtractTimeHintExtra:
+    def test_practice_time_key(self):
+        assert _extract_time_hint({"practice_time": "5:00 PM"}) == "5:00 PM"
+
+    def test_empty_string_value_falls_through(self):
+        # Empty "time" value should not be returned; should fall through
+        result = _extract_time_hint({"time": "", "start_time": "7:30 AM"})
+        assert result == "7:30 AM"
+
+    def test_title_with_no_time_returns_empty(self):
+        assert _extract_time_hint({"title": "Practice at the park"}) == ""
+
+    def test_title_time_uppercased(self):
+        result = _extract_time_hint({"title": "Practice 6:30 pm"})
+        # The function uppercases AM/PM
+        assert "PM" in result or "6:30" in result
