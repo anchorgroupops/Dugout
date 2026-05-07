@@ -12,7 +12,17 @@ function clamp01(v) { return Math.min(1, Math.max(0, v)); }
 
 function parseRunners(runners) {
   if (!runners) return [false, false, false];
-  if (Array.isArray(runners)) return [!!runners[0], !!runners[1], !!runners[2]];
+  // Server normalizes to {first, second, third}; array form is a fallback
+  if (Array.isArray(runners)) {
+    const occupied = new Set(runners.map(r =>
+      typeof r === 'object' ? String(r?.base || r?.base_number || '') : String(r)
+    ));
+    return [
+      occupied.has('1') || occupied.has('first') || occupied.has('1b'),
+      occupied.has('2') || occupied.has('second') || occupied.has('2b'),
+      occupied.has('3') || occupied.has('third') || occupied.has('3b'),
+    ];
+  }
   return [!!runners.first, !!runners.second, !!runners.third];
 }
 
@@ -381,10 +391,10 @@ const ScoutingCard = ({ player, expanded, onToggle, compact = false }) => {
                 ))}
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '0.2rem', fontSize: '0.65rem' }}>
-                {[['AVG', player.avg], ['SLG', player.slg], ['OBP', player.obp],
-                  ['H', player.h], ['HR', player.hr], ['BB', player.bb],
-                  ['SO', player.so], ['SB', player.sb], ['PA', player.pa]].map(([k, v]) => (
-                  <span key={k} style={{ color: 'var(--text-muted)' }}>{k} <strong style={{ color: 'var(--text-main)' }}>{typeof v === 'number' && v < 2 && k !== 'PA' && k !== 'H' && k !== 'HR' && k !== 'BB' && k !== 'SO' && k !== 'SB' ? fmtStat(v) : (v ?? '—')}</strong></span>
+                {[['AVG', fmtStat(player.avg)], ['SLG', fmtStat(player.slg)], ['OBP', fmtStat(player.obp)],
+                  ['H', player.h ?? '—'], ['HR', player.hr ?? '—'], ['BB', player.bb ?? '—'],
+                  ['SO', player.so ?? '—'], ['SB', player.sb ?? '—'], ['PA', player.pa ?? '—']].map(([k, v]) => (
+                  <span key={k} style={{ color: 'var(--text-muted)' }}>{k} <strong style={{ color: 'var(--text-main)' }}>{v}</strong></span>
                 ))}
               </div>
             </div>
