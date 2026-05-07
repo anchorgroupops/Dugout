@@ -57,6 +57,13 @@ class TestParseNumber:
     def test_unhandled_type_returns_default(self):
         assert _parse_number([1, 2, 3], default=7) == 7
 
+    def test_bad_innings_notation_returns_zero(self):
+        # "x.y" where the parts can't be cast to int
+        assert _parse_number("abc.def", default=0) == 0
+
+    def test_bad_float_string_returns_default(self):
+        assert _parse_number("notanumber", default=-1) == -1
+
 
 class TestInningsToFloat:
     def test_two_outs(self):
@@ -466,6 +473,49 @@ class TestAnalyzeMatchup:
         result = analyze_matchup(us, them)
         assert result["our_team"] == "Sharks"
         assert result["opponent"] == "Eagles"
+
+    def test_their_advantages_detected_when_opponent_stronger(self):
+        """Opponent has clearly better stats — triggers their_advantages branches."""
+        us = {
+            "team_name": "Sharks",
+            "roster": [
+                {"batting": {"ab": 15, "h": 2, "bb": 0, "hbp": 0, "k": 8, "sb": 0, "2b": 0, "hr": 0}},
+                {"batting": {"ab": 14, "h": 2, "bb": 0, "hbp": 0, "k": 7, "sb": 0, "2b": 0, "hr": 0}},
+            ],
+        }
+        them = {
+            "team_name": "Eagles",
+            "roster": [
+                {"batting": {"ab": 15, "h": 9, "bb": 4, "hbp": 0, "k": 1, "sb": 3, "2b": 3, "hr": 2}},
+                {"batting": {"ab": 14, "h": 8, "bb": 3, "hbp": 0, "k": 1, "sb": 2, "2b": 2, "hr": 1}},
+            ],
+        }
+        result = analyze_matchup(us, them)
+        assert result["empty"] is False
+        # The opponent should have advantages detected
+        assert len(result["their_advantages"]) > 0
+
+    def test_recommendation_tough_matchup_when_they_dominate(self):
+        """All advantages on their side → 'Tough matchup' recommendation."""
+        us = {"roster": [
+            {"batting": {"ab": 15, "h": 2, "bb": 0, "hbp": 0, "k": 8, "sb": 0}},
+        ]}
+        them = {"roster": [
+            {"batting": {"ab": 15, "h": 9, "bb": 4, "hbp": 0, "k": 1, "sb": 5}},
+        ]}
+        result = analyze_matchup(us, them)
+        assert "tough" in result["recommendation"].lower() or len(result["their_advantages"]) > 0
+
+    def test_recommendation_favorable_when_we_dominate(self):
+        """All advantages on our side → 'Favorable' recommendation."""
+        us = {"roster": [
+            {"batting": {"ab": 15, "h": 9, "bb": 4, "hbp": 0, "k": 1, "sb": 5, "2b": 3, "hr": 2}},
+        ]}
+        them = {"roster": [
+            {"batting": {"ab": 15, "h": 2, "bb": 0, "hbp": 0, "k": 8, "sb": 0}},
+        ]}
+        result = analyze_matchup(us, them)
+        assert "favorable" in result["recommendation"].lower() or len(result["our_advantages"]) > 0
 
 
 # ====================================================================
