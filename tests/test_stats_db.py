@@ -222,3 +222,67 @@ def test_get_h2h_summary_empty_opponent(isolated_db):
     summary = stats_db.get_h2h_summary("unknown_opponent")
     assert summary["games_played"] == 0
     assert summary["wins"] == 0
+
+
+def test_get_h2h_summary_record_format(isolated_db):
+    stats_db.insert_h2h_game("g1", "tigers", "2026-01-01", 5, 2, "W")
+    stats_db.insert_h2h_game("g2", "tigers", "2026-02-01", 1, 3, "L")
+    summary = stats_db.get_h2h_summary("tigers")
+    assert summary["record"] == "1-1"
+
+
+def test_get_h2h_summary_with_ties(isolated_db):
+    stats_db.insert_h2h_game("g1", "bears", "2026-01-01", 4, 4, "T")
+    stats_db.insert_h2h_game("g2", "bears", "2026-02-01", 3, 1, "W")
+    summary = stats_db.get_h2h_summary("bears")
+    assert summary["ties"] == 1
+    assert summary["record"] == "1-0-1"
+
+
+def test_get_h2h_summary_runs_totals(isolated_db):
+    stats_db.insert_h2h_game("g1", "hawks", "2026-01-01", 5, 2, "W")
+    stats_db.insert_h2h_game("g2", "hawks", "2026-02-01", 3, 6, "L")
+    summary = stats_db.get_h2h_summary("hawks")
+    assert summary["runs_for"] == 8
+    assert summary["runs_against"] == 8
+
+
+def test_get_h2h_summary_avg_runs(isolated_db):
+    stats_db.insert_h2h_game("g1", "wolves", "2026-01-01", 6, 2, "W")
+    stats_db.insert_h2h_game("g2", "wolves", "2026-02-01", 4, 4, "T")
+    summary = stats_db.get_h2h_summary("wolves")
+    assert summary["avg_runs_for"] == 5.0
+    assert summary["avg_runs_against"] == 3.0
+
+
+def test_get_h2h_summary_games_field_included(isolated_db):
+    stats_db.insert_h2h_game("g1", "lions", "2026-01-01", 7, 3, "W")
+    summary = stats_db.get_h2h_summary("lions")
+    assert "games" in summary
+    assert len(summary["games"]) == 1
+    assert summary["games"][0]["game_id"] == "g1"
+
+
+def test_get_h2h_summary_opponent_slug_in_result(isolated_db):
+    summary = stats_db.get_h2h_summary("jaguars")
+    assert summary["opponent_slug"] == "jaguars"
+
+
+# ---------------------------------------------------------------------------
+# _now_iso helper
+# ---------------------------------------------------------------------------
+
+def test_now_iso_returns_string(isolated_db):
+    result = stats_db._now_iso()
+    assert isinstance(result, str)
+    assert "T" in result
+
+
+def test_player_key_format(isolated_db):
+    key = stats_db._player_key({"number": "42", "first": "John", "last": "Smith"})
+    assert key == "sharks:42:john_smith"
+
+
+def test_player_key_unknown_player(isolated_db):
+    key = stats_db._player_key({})
+    assert key == "sharks:nonumber:unknown"

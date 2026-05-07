@@ -3,9 +3,12 @@ from __future__ import annotations
 
 import pytest
 
+import json
+
 from tools.aggregate_team_stats import (
     _innings_to_outs,
     _is_rate_key,
+    _load_manifest,
     _merge_generic,
     _merge_innings,
     _merge_numeric,
@@ -18,6 +21,7 @@ from tools.aggregate_team_stats import (
     _recompute_pitching,
     _team_file_from_entry,
 )
+import tools.aggregate_team_stats as ats_mod
 
 
 class TestNormName:
@@ -368,3 +372,50 @@ class TestNormNameExtra:
 
     def test_digits_stripped(self):
         assert _norm_name("42") == ""
+
+
+# ---------------------------------------------------------------------------
+# _load_manifest — reads teams_manifest.json or returns default
+# ---------------------------------------------------------------------------
+
+class TestLoadManifest:
+    def test_returns_default_when_file_missing(self, tmp_path, monkeypatch):
+        # Point MANIFEST_FILE to a non-existent path
+        monkeypatch.setattr(ats_mod, "MANIFEST_FILE", tmp_path / "nonexistent.json")
+        result = _load_manifest()
+        assert "primary_team" in result
+        assert "extra_teams" in result
+        assert isinstance(result["extra_teams"], list)
+
+    def test_default_primary_team_is_sharks(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(ats_mod, "MANIFEST_FILE", tmp_path / "nonexistent.json")
+        result = _load_manifest()
+        assert result["primary_team"]["name"] == "The Sharks"
+
+    def test_default_extra_teams_is_empty(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(ats_mod, "MANIFEST_FILE", tmp_path / "nonexistent.json")
+        result = _load_manifest()
+        assert result["extra_teams"] == []
+
+    def test_reads_manifest_file_when_present(self, tmp_path, monkeypatch):
+        manifest = {
+            "primary_team": {"id": "abc", "name": "Custom Team", "data_path": "/data/team.json"},
+            "extra_teams": [{"id": "xyz", "name": "Other"}],
+        }
+        manifest_file = tmp_path / "teams_manifest.json"
+        manifest_file.write_text(json.dumps(manifest))
+        monkeypatch.setattr(ats_mod, "MANIFEST_FILE", manifest_file)
+        result = _load_manifest()
+        assert result["primary_team"]["name"] == "Custom Team"
+        assert len(result["extra_teams"]) == 1
+
+    def test_reads_extra_teams_list_from_file(self, tmp_path, monkeypatch):
+        manifest = {
+            "primary_team": {"id": "a", "name": "A"},
+            "extra_teams": [{"id": "b", "name": "B"}, {"id": "c", "name": "C"}],
+        }
+        manifest_file = tmp_path / "teams_manifest.json"
+        manifest_file.write_text(json.dumps(manifest))
+        monkeypatch.setattr(ats_mod, "MANIFEST_FILE", manifest_file)
+        result = _load_manifest()
+        assert len(result["extra_teams"]) == 2
