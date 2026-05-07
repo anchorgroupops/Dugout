@@ -232,3 +232,26 @@ teams:
 """)
     with pytest.raises(tr.RegistryError, match="non-empty"):
         tr.load(path)
+
+
+def test_missing_top_level_teams_key_raises(tmp_path):
+    """YAML file with no 'teams' key should raise RegistryError."""
+    path = _yaml(tmp_path, "other_key: value\n")
+    with pytest.raises(tr.RegistryError, match="teams"):
+        tr.load(path)
+
+
+def test_yaml_import_error_raises_registry_error(tmp_path, monkeypatch):
+    """If PyYAML is not importable, RegistryError should be raised."""
+    import builtins
+    real_import = builtins.__import__
+
+    def mock_import(name, *args, **kwargs):
+        if name == "yaml":
+            raise ImportError("no yaml")
+        return real_import(name, *args, **kwargs)
+
+    path = _yaml(tmp_path, "teams:\n  - {id: a, season_slug: s, name: A, data_slug: a, active: true}\n")
+    monkeypatch.setattr(builtins, "__import__", mock_import)
+    with pytest.raises(tr.RegistryError, match="PyYAML"):
+        tr.load(path)

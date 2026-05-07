@@ -85,6 +85,10 @@ class TestSafeInt:
     def test_negative(self):
         assert safe_int(-3.2) == -3
 
+    def test_overflow_returns_default(self):
+        # float('inf') triggers OverflowError on int(round(...))
+        assert safe_int(float("inf"), default=99) == 99
+
 
 # ====================================================================
 # safe_pct_ratio
@@ -362,6 +366,12 @@ class TestNormalizePitchingAdvancedRow:
         row = {"pitching_advanced": {"bf": 30, "so": 10}}
         assert normalize_pitching_advanced_row(row)["k_bf"] == pytest.approx(10 / 30, abs=1e-4)
 
+    def test_uses_pitching_dict_when_has_adv_keys(self):
+        """When pitching dict contains advanced keys like k_bf, use it as the source."""
+        row = {"pitching": {"bf": 20, "so": 6, "k_bf": 0.3, "bb": 2}}
+        result = normalize_pitching_advanced_row(row)
+        assert "k_bf" in result
+
 
 # ====================================================================
 # player_identity_key
@@ -510,6 +520,15 @@ class TestCountPopulatedFields:
     def test_empty_rows_empty_counts(self):
         counts = count_populated_fields([], ["ab"], normalize_batting_row)
         assert counts == {"ab": 0}
+
+    def test_non_numeric_non_sentinel_string_counted(self):
+        """A non-numeric string that's not a sentinel is counted as populated."""
+        def _identity(row):
+            return row
+
+        rows = [{"label": "active"}, {"label": None}, {"label": ""}]
+        counts = count_populated_fields(rows, ["label"], _identity)
+        assert counts["label"] == 1  # only "active" qualifies
 
 
 # ====================================================================

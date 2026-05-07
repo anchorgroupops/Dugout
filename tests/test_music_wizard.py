@@ -335,3 +335,14 @@ class TestSeedCatalog:
 
         total = conn.execute("SELECT COUNT(*) FROM walkup_catalog").fetchone()[0]
         assert total == len(WALKUP_CATALOG)
+
+    def test_exception_in_upsert_skips_entry_gracefully(self, caplog):
+        """A bad entry that triggers an SQL error should be logged and skipped."""
+        import sqlite3 as _sqlite3
+        conn = _make_conn()
+        # Deliberately break the DB by dropping the table mid-seed
+        conn.execute("DROP TABLE walkup_catalog")
+        import logging
+        with caplog.at_level(logging.WARNING, logger="tools.music_wizard"):
+            count = seed_catalog(conn)
+        assert count == 0  # no successful inserts
