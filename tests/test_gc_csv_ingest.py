@@ -7,11 +7,13 @@ from pathlib import Path
 
 import pytest
 
+import tools.gc_csv_ingest as csv_mod
 from tools.gc_csv_ingest import (
     _has_data,
     _is_core,
     _load_core_players,
     _merge_players,
+    _parse_row_section,
     _val,
     build_app_stats_json,
     build_team_json,
@@ -611,3 +613,40 @@ class TestBuildTeamJson:
         ]
         result = build_team_json(roster, Path("x.csv"), team_dir=tmp_path)
         assert "15 GP" in result["record"]
+
+
+# ---------------------------------------------------------------------------
+# _parse_row_section — column extraction via mapping
+# ---------------------------------------------------------------------------
+
+class TestParseRowSection:
+    def test_extracts_values_by_col_map(self):
+        row = ["a", "b", "c", "d", "e"]
+        col_map = {"first": 2, "last": 1}
+        result = _parse_row_section(row, col_map)
+        assert result["first"] == "c"
+        assert result["last"] == "b"
+
+    def test_empty_col_map_returns_empty_dict(self):
+        row = ["x", "y", "z"]
+        result = _parse_row_section(row, {})
+        assert result == {}
+
+    def test_out_of_bounds_index_returns_empty_string(self):
+        row = ["a", "b"]
+        col_map = {"x": 100}
+        result = _parse_row_section(row, col_map)
+        assert result["x"] == ""
+
+    def test_preserves_whitespace_raw_value(self):
+        row = ["  padded  "]
+        col_map = {"name": 0}
+        result = _parse_row_section(row, col_map)
+        # _val does .strip() so whitespace is stripped
+        assert result["name"] == "padded"
+
+    def test_all_mapped_keys_present(self):
+        row = ["1", "2", "3", "4", "5"]
+        col_map = {"a": 0, "b": 2, "c": 4}
+        result = _parse_row_section(row, col_map)
+        assert set(result.keys()) == {"a", "b", "c"}

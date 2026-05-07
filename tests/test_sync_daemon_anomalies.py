@@ -198,3 +198,25 @@ class TestCollectPipelineHealth:
         cov = result["required_field_coverage"]
         for key in ("batting", "pitching", "fielding"):
             assert key in cov
+
+
+# ─── _load_recent_metric_profiles ────────────────────────────────────────────
+
+class TestLoadRecentMetricProfiles:
+    def test_returns_empty_when_db_missing(self, tmp_path, monkeypatch):
+        import stats_db
+        monkeypatch.setattr(stats_db, "DB_PATH", tmp_path / "nonexistent.db")
+        result = sync_daemon._load_recent_metric_profiles()
+        assert result == {}
+
+    def test_returns_dict(self, tmp_path, monkeypatch):
+        import stats_db
+        monkeypatch.setattr(stats_db, "DB_PATH", tmp_path / "nonexistent.db")
+        result = sync_daemon._load_recent_metric_profiles()
+        assert isinstance(result, dict)
+
+    def test_limit_param_accepted(self, tmp_path, monkeypatch):
+        import stats_db
+        monkeypatch.setattr(stats_db, "DB_PATH", tmp_path / "nonexistent.db")
+        result = sync_daemon._load_recent_metric_profiles(limit=5)
+        assert result == {}
