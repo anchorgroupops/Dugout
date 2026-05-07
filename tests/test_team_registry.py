@@ -131,3 +131,104 @@ teams:
     teams = tr.load(path)
     assert teams[0].league == ""
     assert teams[0].is_own_team is True
+
+
+def test_empty_teams_list_raises(tmp_path):
+    path = _yaml(tmp_path, "teams: []\n")
+    with pytest.raises(tr.RegistryError, match="non-empty"):
+        tr.load(path)
+
+
+def test_missing_required_field_raises(tmp_path):
+    path = _yaml(tmp_path, """
+teams:
+  - id: a
+    season_slug: s
+    name: A
+    data_slug: a
+    # 'active' field is missing
+""")
+    with pytest.raises(tr.RegistryError, match="active"):
+        tr.load(path)
+
+
+def test_non_mapping_team_entry_raises(tmp_path):
+    path = _yaml(tmp_path, "teams:\n  - just_a_string\n")
+    with pytest.raises(tr.RegistryError):
+        tr.load(path)
+
+
+def test_env_fallback_raises_when_no_vars(tmp_path, monkeypatch):
+    monkeypatch.delenv("GC_TEAM_ID", raising=False)
+    monkeypatch.delenv("GC_SEASON_SLUG", raising=False)
+    with pytest.raises(tr.RegistryError):
+        tr.load(tmp_path / "nope.yaml")
+
+
+def test_env_fallback_raises_when_only_team_id_set(tmp_path, monkeypatch):
+    monkeypatch.setenv("GC_TEAM_ID", "some_id")
+    monkeypatch.delenv("GC_SEASON_SLUG", raising=False)
+    with pytest.raises(tr.RegistryError):
+        tr.load(tmp_path / "nope.yaml")
+
+
+def test_is_own_team_defaults_true(tmp_path):
+    path = _yaml(tmp_path, """
+teams:
+  - id: x
+    season_slug: s
+    name: X
+    data_slug: x
+    active: true
+""")
+    assert tr.load(path)[0].is_own_team is True
+
+
+def test_multiple_teams_loaded(tmp_path):
+    path = _yaml(tmp_path, """
+teams:
+  - id: a
+    season_slug: s1
+    name: A
+    data_slug: a
+    active: true
+  - id: b
+    season_slug: s2
+    name: B
+    data_slug: b
+    active: true
+""")
+    teams = tr.load(path)
+    assert len(teams) == 2
+    assert {t.data_slug for t in teams} == {"a", "b"}
+
+
+def test_require_by_slug_raises_for_unknown(tmp_path):
+    path = _yaml(tmp_path, """
+teams:
+  - id: a
+    season_slug: s
+    name: A
+    data_slug: a
+    active: true
+""")
+    with pytest.raises(tr.RegistryError, match="unknown team"):
+        tr.require_by_slug("z", path)
+
+
+def test_team_stats_url_format():
+    team = tr.Team(id="abc", season_slug="2026-spring", name="X", data_slug="x")
+    assert team.stats_url == "https://web.gc.com/teams/abc/2026-spring/season-stats"
+
+
+def test_empty_id_raises(tmp_path):
+    path = _yaml(tmp_path, """
+teams:
+  - id: ""
+    season_slug: s
+    name: A
+    data_slug: a
+    active: true
+""")
+    with pytest.raises(tr.RegistryError, match="non-empty"):
+        tr.load(path)
