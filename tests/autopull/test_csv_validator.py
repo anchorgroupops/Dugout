@@ -62,3 +62,35 @@ def test_quarantine_moves_file(tmp_path, tmp_data_dir):
     assert moved.exists()
     assert not p.exists()
     assert "bad.csv" in moved.name
+
+
+# ---------------------------------------------------------------------------
+# _overlap — schema drift metric
+# ---------------------------------------------------------------------------
+
+class TestOverlap:
+    def test_full_overlap(self):
+        assert cv._overlap(["a", "b", "c"], ["a", "b", "c"]) == 1.0
+
+    def test_empty_known_cols_returns_one(self):
+        assert cv._overlap(["a", "b"], []) == 1.0
+
+    def test_zero_overlap(self):
+        assert cv._overlap(["x", "y"], ["a", "b"]) == 0.0
+
+    def test_partial_overlap(self):
+        result = cv._overlap(["a", "b", "x", "y"], ["a", "b", "c", "d"])
+        assert abs(result - 0.5) < 1e-9
+
+    def test_extra_csv_cols_dont_reduce_overlap(self):
+        # CSV has extra col "extra" not in known; known cols fully covered
+        result = cv._overlap(["a", "b", "extra"], ["a", "b"])
+        assert result == 1.0
+
+    def test_returns_float(self):
+        result = cv._overlap(["a"], ["a"])
+        assert isinstance(result, float)
+
+    def test_single_missing_known_col(self):
+        result = cv._overlap(["a", "b"], ["a", "b", "c"])
+        assert abs(result - 2 / 3) < 1e-9

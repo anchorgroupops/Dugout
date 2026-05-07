@@ -61,3 +61,25 @@ def test_rejects_missing_required_keys():
     adapter = la.ClaudeLocatorAdapter(client=client, model="claude-sonnet-4-6")
     with pytest.raises(la.LLMAdapterError):
         adapter("<html>...</html>")
+
+
+# ---------------------------------------------------------------------------
+# build_default_adapter
+# ---------------------------------------------------------------------------
+
+def test_build_default_adapter_returns_adapter():
+    from unittest.mock import patch, MagicMock
+    fake_client = MagicMock()
+    with patch("tools.autopull.llm_adapter.Anthropic", return_value=fake_client) if False else __import__("contextlib").nullcontext():
+        # Patch at the module level where it's imported inside the function
+        with patch("anthropic.Anthropic", return_value=fake_client):
+            adapter = la.build_default_adapter(api_key="fake-key", model="test-model")
+    assert isinstance(adapter, la.ClaudeLocatorAdapter)
+
+
+def test_build_default_adapter_passes_model():
+    from unittest.mock import patch, MagicMock
+    fake_client = MagicMock()
+    with patch("anthropic.Anthropic", return_value=fake_client):
+        adapter = la.build_default_adapter(api_key="fake-key", model="claude-sonnet-4-6")
+    assert adapter.model == "claude-sonnet-4-6"
