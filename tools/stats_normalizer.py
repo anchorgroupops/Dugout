@@ -66,7 +66,7 @@ def safe_float(val: Any, default: float = 0.0) -> float:
 def safe_int(val: Any, default: int = 0) -> int:
     try:
         return int(round(safe_float(val, float(default))))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return default
 
 
