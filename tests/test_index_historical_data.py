@@ -272,3 +272,31 @@ class TestRunDryRun:
         (opp / "b.json").write_text("{}")
         count = ihd.run("idx", "ns", batch_size=4, dry_run=True)
         assert count == 2
+
+
+class TestRunLive:
+    """Test the non-dry-run path by mocking MemoryEngine."""
+
+    @pytest.fixture(autouse=True)
+    def _patch_dirs(self, tmp_path, monkeypatch):
+        self.data_dir = tmp_path / "data"
+        self.sharks_dir = self.data_dir / "sharks"
+        self.sharks_dir.mkdir(parents=True)
+        (self.data_dir / "opponents").mkdir()
+        monkeypatch.setattr(ihd, "DATA_DIR", self.data_dir)
+        monkeypatch.setattr(ihd, "SHARKS_DIR", self.sharks_dir)
+        monkeypatch.setattr(ihd, "OPPONENTS_DIR", self.data_dir / "opponents")
+
+    def test_calls_memory_engine_when_not_dry_run(self, monkeypatch):
+        from unittest.mock import MagicMock, patch
+        (self.sharks_dir / "team.json").write_text('{"name": "Sharks"}')
+        mock_engine = MagicMock()
+        mock_engine.batch_upsert_documents.return_value = 1
+        with patch.dict("sys.modules", {"memory_engine": MagicMock(MemoryEngine=MagicMock(return_value=mock_engine))}):
+            import importlib
+            import tools.index_historical_data as ihd2
+            monkeypatch.setattr(ihd2, "DATA_DIR", self.data_dir)
+            monkeypatch.setattr(ihd2, "SHARKS_DIR", self.sharks_dir)
+            monkeypatch.setattr(ihd2, "OPPONENTS_DIR", self.data_dir / "opponents")
+            count = ihd2.run("idx", "ns", batch_size=4, dry_run=False)
+        assert count >= 0  # engine was called

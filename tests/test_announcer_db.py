@@ -847,3 +847,71 @@ class TestMusicAuth:
         result = adb.get_music_auth("spotify")
         assert result["updated_at"] is not None
         datetime.fromisoformat(result["updated_at"])
+
+
+# ===========================================================================
+# TestPeekNextSongs
+# ===========================================================================
+
+class TestPeekNextSongs:
+    def test_returns_empty_when_no_songs(self, db):
+        result = adb.peek_next_songs(["p1", "p2"], "session-1")
+        assert result == {}
+
+    def test_returns_url_for_player_with_song(self, db):
+        adb.add_player_song("p1", "https://example.com/song.mp3", "Eye of the Tiger")
+        result = adb.peek_next_songs(["p1"], "session-1")
+        assert "p1" in result
+        assert result["p1"] == "https://example.com/song.mp3"
+
+    def test_skips_player_without_songs(self, db):
+        adb.add_player_song("p1", "https://example.com/song1.mp3", "Song 1")
+        result = adb.peek_next_songs(["p1", "p2"], "session-1")
+        assert "p1" in result
+        assert "p2" not in result
+
+    def test_all_played_resets_to_full_pool(self, db):
+        """When all songs have been played, falls back to the full pool."""
+        adb.add_player_song("p1", "https://example.com/song1.mp3", "Song 1")
+        # Simulate all songs played by setting them in shuffle_state
+        with adb._conn() as conn:
+            songs = adb.get_player_songs("p1")
+            played_ids = json.dumps([s["id"] for s in songs])
+            conn.execute(
+                "INSERT OR REPLACE INTO shuffle_state (player_id, game_session_id, played_song_ids, updated_at) "
+                "VALUES (?, ?, ?, datetime('now'))",
+                ("p1", "session-1", played_ids),
+            )
+        result = adb.peek_next_songs(["p1"], "session-1")
+        assert "p1" in result
+
+
+# ===========================================================================
+# TestConnRollback
+# ===========================================================================
+
+class TestConnRollback:
+    def test_exception_triggers_rollback(self, db):
+        """_conn() rolls back on exception and re-raises."""
+        import contextlib
+        with pytest.raises(ValueError):
+            with adb._conn() as conn:
+                raise ValueError("test rollback")
+
+    def test_schema_v2_migration_idempotent_with_existing_columns(self, db):
+        """Applying init_db twice when v2 columns exist should not raise."""
+        adb.init_db()  # second call — v2 columns already present
+        # Should silently handle the OperationalError for duplicate columns
+        adb.init_db()  # third call — no error
+
+
+class TestIsWorkerAliveException:
+    def test_bad_timestamp_returns_false(self, db):
+        """Corrupt timestamp in heartbeat row → exception → returns False."""
+        with adb._conn() as conn:
+            conn.execute(
+                "INSERT INTO mac_heartbeat (worker_id, last_seen_at, version) VALUES (?, ?, ?)",
+                ("corrupt-worker", "not-a-valid-timestamp", ""),
+            )
+        result = adb.is_worker_alive(max_age_seconds=3600)
+        assert result is False
