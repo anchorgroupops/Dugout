@@ -225,3 +225,132 @@ class TestGetTtsProvider:
         monkeypatch.delenv("ANNOUNCER_VOICE_REF_URL", raising=False)
         provider = get_quick_tts_provider()
         assert isinstance(provider, MockTTS)
+
+
+# ---------------------------------------------------------------------------
+# _apply_phonetics — name substitution map
+# ---------------------------------------------------------------------------
+
+class TestApplyPhonetics:
+    def test_empty_map_returns_text_unchanged(self, monkeypatch):
+        import tools.announcer_engine as ae
+        monkeypatch.setattr(ae, "_PHONETIC_MAP", {})
+        assert ae._apply_phonetics("Hello Sofia") == "Hello Sofia"
+
+    def test_known_word_replaced(self, monkeypatch):
+        import tools.announcer_engine as ae
+        monkeypatch.setattr(ae, "_PHONETIC_MAP", {"Sofia": "SOH-fee-ah"})
+        result = ae._apply_phonetics("Now batting: Sofia")
+        assert "SOH-fee-ah" in result
+
+    def test_replacement_case_insensitive(self, monkeypatch):
+        import tools.announcer_engine as ae
+        monkeypatch.setattr(ae, "_PHONETIC_MAP", {"sofia": "SOH-fee-ah"})
+        result = ae._apply_phonetics("SOFIA is up next")
+        assert "SOH-fee-ah" in result
+
+    def test_multiple_replacements(self, monkeypatch):
+        import tools.announcer_engine as ae
+        monkeypatch.setattr(ae, "_PHONETIC_MAP", {"Jane": "JAYN", "Doe": "DOH"})
+        result = ae._apply_phonetics("Jane Doe")
+        assert "JAYN" in result
+        assert "DOH" in result
+
+    def test_non_matching_word_untouched(self, monkeypatch):
+        import tools.announcer_engine as ae
+        monkeypatch.setattr(ae, "_PHONETIC_MAP", {"Alice": "AL-iss"})
+        result = ae._apply_phonetics("Now batting: Bob")
+        assert "Bob" in result
+        assert "AL-iss" not in result
+
+    def test_returns_string(self, monkeypatch):
+        import tools.announcer_engine as ae
+        monkeypatch.setattr(ae, "_PHONETIC_MAP", {})
+        assert isinstance(ae._apply_phonetics("test"), str)
+
+
+# ---------------------------------------------------------------------------
+# _atomic_write_json — file creation and atomicity
+# ---------------------------------------------------------------------------
+
+class TestAtomicWriteJson:
+    def test_creates_file_with_correct_content(self, tmp_path):
+        from tools.announcer_engine import _atomic_write_json
+        target = tmp_path / "test.json"
+        data = {"key": "value", "num": 42}
+        _atomic_write_json(target, data)
+        import json
+        assert json.loads(target.read_text()) == data
+
+    def test_creates_parent_dirs_automatically(self, tmp_path):
+        from tools.announcer_engine import _atomic_write_json
+        target = tmp_path / "sub" / "deep" / "file.json"
+        _atomic_write_json(target, {"x": 1})
+        assert target.exists()
+
+    def test_overwrites_existing_file(self, tmp_path):
+        from tools.announcer_engine import _atomic_write_json
+        import json
+        target = tmp_path / "data.json"
+        _atomic_write_json(target, {"v": 1})
+        _atomic_write_json(target, {"v": 2})
+        assert json.loads(target.read_text()) == {"v": 2}
+
+    def test_writes_list(self, tmp_path):
+        from tools.announcer_engine import _atomic_write_json
+        import json
+        target = tmp_path / "list.json"
+        _atomic_write_json(target, [1, 2, 3])
+        assert json.loads(target.read_text()) == [1, 2, 3]
+
+
+# ---------------------------------------------------------------------------
+# _read_json — filesystem JSON reader
+# ---------------------------------------------------------------------------
+
+class TestReadJson:
+    def test_missing_file_returns_default(self, tmp_path):
+        from tools.announcer_engine import _read_json
+        result = _read_json(tmp_path / "absent.json", default={"fallback": True})
+        assert result == {"fallback": True}
+
+    def test_valid_json_parsed(self, tmp_path):
+        from tools.announcer_engine import _read_json
+        import json
+        p = tmp_path / "data.json"
+        p.write_text(json.dumps({"ok": True}))
+        assert _read_json(p) == {"ok": True}
+
+    def test_malformed_json_returns_default(self, tmp_path):
+        from tools.announcer_engine import _read_json
+        p = tmp_path / "bad.json"
+        p.write_text("{INVALID")
+        result = _read_json(p, default=None)
+        assert result is None
+
+    def test_none_default(self, tmp_path):
+        from tools.announcer_engine import _read_json
+        result = _read_json(tmp_path / "absent.json")
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# build_announcement_text — thin delegate
+# ---------------------------------------------------------------------------
+
+class TestBuildAnnouncementText:
+    def test_delegates_to_situational(self):
+        from tools.announcer_engine import build_announcement_text
+        player = {"number": "7", "first": "Jane", "last": "Doe",
+                  "phonetic_hint": "", "tts_instruction": ""}
+        result = build_announcement_text(player)
+        assert isinstance(result, str)
+        assert "batting" in result.lower() or "Jane" in result
+
+    def test_with_game_context(self):
+        from tools.announcer_engine import build_announcement_text
+        player = {"number": "7", "first": "Jane", "last": "Doe",
+                  "phonetic_hint": "", "tts_instruction": ""}
+        ctx = {"bases": [False, False, False], "outs": 0}
+        result = build_announcement_text(player, game_context=ctx)
+        assert isinstance(result, str)
