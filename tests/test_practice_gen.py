@@ -1,15 +1,24 @@
 """Tests for tools/practice_gen.py — weakness → drill mapping + plan generation."""
 from __future__ import annotations
 
+import json
 from datetime import datetime
 
 import pytest
 
+import tools.practice_gen as pg_mod
 from tools.practice_gen import (
     _clean_opponent_name,
     _extract_time_hint,
     _iso,
     _load_json,
+    _load_practice_events,
+    _load_game_events,
+    _compute_windows,
+    _snapshot_source_files,
+    _load_plan_meta,
+    _save_plan_meta,
+    _resolve_opponent_slug,
     _normalize_date_str,
     _parse_event_datetime,
     ET_TZ,
@@ -535,3 +544,284 @@ class TestExtractTimeHintExtra:
         result = _extract_time_hint({"title": "Practice 6:30 pm"})
         # The function uppercases AM/PM
         assert "PM" in result or "6:30" in result
+
+
+# ====================================================================
+# TestLoadPracticeEvents
+# ====================================================================
+
+_NOW = datetime(2026, 5, 10, 12, 0, tzinfo=ET_TZ)
+
+
+class TestLoadPracticeEvents:
+    def test_returns_empty_when_no_file(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(pg_mod, "SHARKS_DIR", tmp_path)
+        assert _load_practice_events(_NOW) == []
+
+    def test_loads_next_event(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(pg_mod, "SHARKS_DIR", tmp_path)
+        rsvp = {"next": {"date": "2026-05-15", "title": "Practice"}}
+        (tmp_path / "practice_rsvp.json").write_text(json.dumps(rsvp))
+        events = _load_practice_events(_NOW)
+        assert len(events) == 1
+        assert events[0]["kind"] == "practice"
+
+    def test_loads_multiple_from_practices_list(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(pg_mod, "SHARKS_DIR", tmp_path)
+        rsvp = {
+            "practices": [
+                {"date": "2026-05-15", "title": "A"},
+                {"date": "2026-05-22", "title": "B"},
+            ]
+        }
+        (tmp_path / "practice_rsvp.json").write_text(json.dumps(rsvp))
+        events = _load_practice_events(_NOW)
+        assert len(events) == 2
+
+    def test_deduplicates_same_event(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(pg_mod, "SHARKS_DIR", tmp_path)
+        rsvp = {
+            "next": {"date": "2026-05-15", "title": "Practice"},
+            "practices": [{"date": "2026-05-15", "title": "Practice"}],
+        }
+        (tmp_path / "practice_rsvp.json").write_text(json.dumps(rsvp))
+        events = _load_practice_events(_NOW)
+        assert len(events) == 1
+
+    def test_skips_entry_without_date(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(pg_mod, "SHARKS_DIR", tmp_path)
+        rsvp = {"practices": [{"title": "No Date Here"}]}
+        (tmp_path / "practice_rsvp.json").write_text(json.dumps(rsvp))
+        assert _load_practice_events(_NOW) == []
+
+    def test_event_has_is_future_field(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(pg_mod, "SHARKS_DIR", tmp_path)
+        rsvp = {"next": {"date": "2026-05-15", "title": "Future"}}
+        (tmp_path / "practice_rsvp.json").write_text(json.dumps(rsvp))
+        events = _load_practice_events(_NOW)
+        assert "is_future" in events[0]
+        assert events[0]["is_future"] is True
+
+    def test_past_event_is_not_future(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(pg_mod, "SHARKS_DIR", tmp_path)
+        rsvp = {"next": {"date": "2026-05-01", "title": "Past"}}
+        (tmp_path / "practice_rsvp.json").write_text(json.dumps(rsvp))
+        events = _load_practice_events(_NOW)
+        assert events[0]["is_future"] is False
+
+    def test_returns_empty_when_non_dict_data(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(pg_mod, "SHARKS_DIR", tmp_path)
+        (tmp_path / "practice_rsvp.json").write_text("[]")
+        assert _load_practice_events(_NOW) == []
+
+
+# ====================================================================
+# TestLoadGameEvents
+# ====================================================================
+
+class TestLoadGameEvents:
+    def test_returns_empty_when_no_file(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(pg_mod, "SHARKS_DIR", tmp_path)
+        assert _load_game_events(_NOW) == []
+
+    def test_loads_past_game(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(pg_mod, "SHARKS_DIR", tmp_path)
+        schedule = {"past": [{"date": "2026-04-20", "opponent": "Eagles", "is_game": True}]}
+        (tmp_path / "schedule_manual.json").write_text(json.dumps(schedule))
+        events = _load_game_events(_NOW)
+        assert len(events) == 1
+        assert events[0]["kind"] == "game"
+
+    def test_loads_upcoming_game(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(pg_mod, "SHARKS_DIR", tmp_path)
+        schedule = {"upcoming": [{"date": "2026-05-20", "opponent": "Hawks"}]}
+        (tmp_path / "schedule_manual.json").write_text(json.dumps(schedule))
+        events = _load_game_events(_NOW)
+        assert len(events) == 1
+
+    def test_skips_non_game_entries(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(pg_mod, "SHARKS_DIR", tmp_path)
+        schedule = {"upcoming": [{"date": "2026-05-20", "is_game": False}]}
+        (tmp_path / "schedule_manual.json").write_text(json.dumps(schedule))
+        assert _load_game_events(_NOW) == []
+
+    def test_skips_entries_without_date(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(pg_mod, "SHARKS_DIR", tmp_path)
+        schedule = {"upcoming": [{"opponent": "No Date"}]}
+        (tmp_path / "schedule_manual.json").write_text(json.dumps(schedule))
+        assert _load_game_events(_NOW) == []
+
+    def test_cleans_opponent_name(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(pg_mod, "SHARKS_DIR", tmp_path)
+        schedule = {"upcoming": [{"date": "2026-05-20", "opponent": "vs. Ravens"}]}
+        (tmp_path / "schedule_manual.json").write_text(json.dumps(schedule))
+        events = _load_game_events(_NOW)
+        assert events[0]["title"] == "Ravens"
+
+    def test_is_future_for_upcoming(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(pg_mod, "SHARKS_DIR", tmp_path)
+        schedule = {"upcoming": [{"date": "2026-05-20", "opponent": "Bears"}]}
+        (tmp_path / "schedule_manual.json").write_text(json.dumps(schedule))
+        events = _load_game_events(_NOW)
+        assert events[0]["is_future"] is True
+
+    def test_returns_empty_when_non_dict(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(pg_mod, "SHARKS_DIR", tmp_path)
+        (tmp_path / "schedule_manual.json").write_text("[]")
+        assert _load_game_events(_NOW) == []
+
+
+# ====================================================================
+# TestComputeWindows
+# ====================================================================
+
+class TestComputeWindows:
+    def test_returns_dict_with_required_keys(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(pg_mod, "SHARKS_DIR", tmp_path)
+        windows = _compute_windows(_NOW)
+        for key in ("latest_completed_event", "latest_completed_end",
+                    "planning_allowed_after", "next_practice", "next_practice_start",
+                    "refresh_window_start"):
+            assert key in windows
+
+    def test_no_events_next_practice_is_none(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(pg_mod, "SHARKS_DIR", tmp_path)
+        windows = _compute_windows(_NOW)
+        assert windows["next_practice"] is None
+        assert windows["next_practice_start"] is None
+
+    def test_no_events_planning_allowed_after_is_now(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(pg_mod, "SHARKS_DIR", tmp_path)
+        windows = _compute_windows(_NOW)
+        assert windows["planning_allowed_after"] == _NOW
+
+    def test_future_practice_appears_as_next_practice(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(pg_mod, "SHARKS_DIR", tmp_path)
+        rsvp = {"next": {"date": "2026-05-15", "title": "Future Practice"}}
+        (tmp_path / "practice_rsvp.json").write_text(json.dumps(rsvp))
+        windows = _compute_windows(_NOW)
+        assert windows["next_practice"] is not None
+
+
+# ====================================================================
+# TestSnapshotSourceFiles
+# ====================================================================
+
+class TestSnapshotSourceFiles:
+    def test_returns_dict(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(pg_mod, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(pg_mod, "DATA_DIR", tmp_path.parent)
+        result = _snapshot_source_files()
+        assert isinstance(result, dict)
+
+    def test_missing_file_has_exists_false(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(pg_mod, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(pg_mod, "DATA_DIR", tmp_path.parent)
+        result = _snapshot_source_files()
+        for val in result.values():
+            assert "exists" in val
+
+    def test_existing_file_has_sha1(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(pg_mod, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(pg_mod, "DATA_DIR", tmp_path.parent)
+        (tmp_path / "swot_analysis.json").write_text('{"ok": true}')
+        result = _snapshot_source_files()
+        entry = next((v for v in result.values() if v.get("exists")), None)
+        assert entry is not None
+        assert "sha1" in entry
+        assert len(entry["sha1"]) == 40
+
+
+# ====================================================================
+# TestLoadAndSavePlanMeta
+# ====================================================================
+
+class TestLoadPlanMeta:
+    def test_returns_empty_dict_when_no_file(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(pg_mod, "PLAN_META_FILE", tmp_path / "meta.json")
+        result = _load_plan_meta()
+        assert result == {}
+
+    def test_returns_dict_from_file(self, tmp_path, monkeypatch):
+        meta_file = tmp_path / "meta.json"
+        meta_file.write_text('{"generated_at": "2026-05-01T10:00:00"}')
+        monkeypatch.setattr(pg_mod, "PLAN_META_FILE", meta_file)
+        result = _load_plan_meta()
+        assert result["generated_at"] == "2026-05-01T10:00:00"
+
+    def test_returns_empty_on_non_dict_content(self, tmp_path, monkeypatch):
+        meta_file = tmp_path / "meta.json"
+        meta_file.write_text("[]")
+        monkeypatch.setattr(pg_mod, "PLAN_META_FILE", meta_file)
+        result = _load_plan_meta()
+        assert result == {}
+
+
+class TestSavePlanMeta:
+    def test_writes_json_file(self, tmp_path, monkeypatch):
+        meta_file = tmp_path / "meta.json"
+        monkeypatch.setattr(pg_mod, "PLAN_META_FILE", meta_file)
+        monkeypatch.setattr(pg_mod, "SHARKS_DIR", tmp_path)
+        _save_plan_meta({"key": "value"})
+        assert meta_file.exists()
+        assert json.loads(meta_file.read_text())["key"] == "value"
+
+    def test_creates_parent_dir(self, tmp_path, monkeypatch):
+        sub = tmp_path / "subdir"
+        meta_file = sub / "meta.json"
+        monkeypatch.setattr(pg_mod, "PLAN_META_FILE", meta_file)
+        monkeypatch.setattr(pg_mod, "SHARKS_DIR", sub)
+        _save_plan_meta({"x": 1})
+        assert meta_file.exists()
+
+    def test_overwrites_existing(self, tmp_path, monkeypatch):
+        meta_file = tmp_path / "meta.json"
+        meta_file.write_text('{"old": true}')
+        monkeypatch.setattr(pg_mod, "PLAN_META_FILE", meta_file)
+        monkeypatch.setattr(pg_mod, "SHARKS_DIR", tmp_path)
+        _save_plan_meta({"new": True})
+        content = json.loads(meta_file.read_text())
+        assert "new" in content
+        assert "old" not in content
+
+
+# ====================================================================
+# TestResolveOpponentSlug
+# ====================================================================
+
+class TestResolveOpponentSlug:
+    def test_returns_none_when_no_discovery_file(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(pg_mod, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(pg_mod, "DATA_DIR", tmp_path)
+        result = _resolve_opponent_slug("Eagles")
+        assert result is None
+
+    def test_matches_from_discovery_json(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(pg_mod, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(pg_mod, "DATA_DIR", tmp_path)
+        discovery = {"teams": [{"team_name": "Eagles", "slug": "eagles"}]}
+        (tmp_path / "opponent_discovery.json").write_text(json.dumps(discovery))
+        result = _resolve_opponent_slug("Eagles")
+        assert result == "eagles"
+
+    def test_partial_name_match(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(pg_mod, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(pg_mod, "DATA_DIR", tmp_path)
+        discovery = {"teams": [{"team_name": "Blue Eagles", "slug": "blue_eagles"}]}
+        (tmp_path / "opponent_discovery.json").write_text(json.dumps(discovery))
+        result = _resolve_opponent_slug("Eagles")
+        assert result == "blue_eagles"
+
+    def test_fallback_to_opponents_dir(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(pg_mod, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(pg_mod, "DATA_DIR", tmp_path)
+        opp_dir = tmp_path / "opponents" / "hawks"
+        opp_dir.mkdir(parents=True)
+        result = _resolve_opponent_slug("Hawks")
+        assert result == "hawks"
+
+    def test_returns_none_when_no_match(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(pg_mod, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(pg_mod, "DATA_DIR", tmp_path)
+        result = _resolve_opponent_slug("Totally Unknown Team")
+        assert result is None

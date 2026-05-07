@@ -5,6 +5,7 @@ import json
 
 import pytest
 
+import tools.swot_analyzer as swot_mod
 from tools.swot_analyzer import (
     _generate_basic_matchups,
     _innings_to_float,
@@ -22,6 +23,8 @@ from tools.swot_analyzer import (
     classify_pitching,
     compute_derived_stats,
     load_team,
+    run_sharks_analysis,
+    run_opponent_analysis,
 )
 
 
@@ -507,3 +510,116 @@ class TestLoadTeam:
     def test_prefer_merged_falls_back(self, tmp_path):
         (tmp_path / "team.json").write_text(json.dumps({"team_name": "Plain"}))
         assert load_team(tmp_path, prefer_merged=True)["team_name"] == "Plain"
+
+
+# ===========================================================================
+# TestRunSharksAnalysis
+# ===========================================================================
+
+_MINIMAL_PLAYER = {
+    "number": "1", "first": "Jane", "last": "Doe",
+    "batting": {"pa": 10, "ab": 8, "h": 3, "bb": 1, "so": 2, "hr": 0,
+                "doubles": 0, "triples": 0, "sb": 0, "r": 2, "rbi": 1},
+    "pitching": None,
+    "fielding": {"po": 5, "a": 2, "e": 0},
+}
+
+
+class TestRunSharksAnalysis:
+    def test_returns_none_when_no_team_data(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(swot_mod, "SHARKS_DIR", tmp_path)
+        assert run_sharks_analysis() is None
+
+    def test_returns_dict_with_team_data(self, tmp_path, monkeypatch):
+        team = {"team_name": "The Sharks", "roster": [_MINIMAL_PLAYER]}
+        (tmp_path / "team.json").write_text(json.dumps(team))
+        monkeypatch.setattr(swot_mod, "SHARKS_DIR", tmp_path)
+        result = run_sharks_analysis()
+        assert isinstance(result, dict)
+
+    def test_writes_swot_analysis_json(self, tmp_path, monkeypatch):
+        team = {"team_name": "The Sharks", "roster": [_MINIMAL_PLAYER]}
+        (tmp_path / "team.json").write_text(json.dumps(team))
+        monkeypatch.setattr(swot_mod, "SHARKS_DIR", tmp_path)
+        run_sharks_analysis()
+        assert (tmp_path / "swot_analysis.json").exists()
+
+    def test_swot_analysis_json_is_valid_json(self, tmp_path, monkeypatch):
+        team = {"team_name": "The Sharks", "roster": [_MINIMAL_PLAYER]}
+        (tmp_path / "team.json").write_text(json.dumps(team))
+        monkeypatch.setattr(swot_mod, "SHARKS_DIR", tmp_path)
+        run_sharks_analysis()
+        content = json.loads((tmp_path / "swot_analysis.json").read_text())
+        assert isinstance(content, dict)
+
+    def test_result_has_team_swot_key(self, tmp_path, monkeypatch):
+        team = {"team_name": "The Sharks", "roster": [_MINIMAL_PLAYER]}
+        (tmp_path / "team.json").write_text(json.dumps(team))
+        monkeypatch.setattr(swot_mod, "SHARKS_DIR", tmp_path)
+        result = run_sharks_analysis()
+        assert "team_swot" in result
+
+    def test_prefers_merged_over_plain(self, tmp_path, monkeypatch):
+        plain = {"team_name": "Plain Sharks", "roster": [_MINIMAL_PLAYER]}
+        merged = {"team_name": "Merged Sharks", "roster": [_MINIMAL_PLAYER]}
+        (tmp_path / "team.json").write_text(json.dumps(plain))
+        (tmp_path / "team_merged.json").write_text(json.dumps(merged))
+        monkeypatch.setattr(swot_mod, "SHARKS_DIR", tmp_path)
+        result = run_sharks_analysis()
+        assert result["team_name"] == "Merged Sharks"
+
+
+# ===========================================================================
+# TestRunOpponentAnalysis
+# ===========================================================================
+
+class TestRunOpponentAnalysis:
+    def _opp_dir(self, tmp_path, slug):
+        d = tmp_path / slug
+        d.mkdir()
+        return d
+
+    def test_returns_none_when_opponent_not_found(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(swot_mod, "OPPONENTS_DIR", tmp_path)
+        assert run_opponent_analysis("unknown_team") is None
+
+    def test_returns_dict_with_team_data(self, tmp_path, monkeypatch):
+        d = self._opp_dir(tmp_path, "wildcats")
+        team = {"team_name": "Wildcats", "roster": [_MINIMAL_PLAYER]}
+        (d / "team.json").write_text(json.dumps(team))
+        monkeypatch.setattr(swot_mod, "OPPONENTS_DIR", tmp_path)
+        result = run_opponent_analysis("wildcats")
+        assert isinstance(result, dict)
+
+    def test_writes_swot_analysis_json_to_opp_dir(self, tmp_path, monkeypatch):
+        d = self._opp_dir(tmp_path, "wildcats")
+        team = {"team_name": "Wildcats", "roster": [_MINIMAL_PLAYER]}
+        (d / "team.json").write_text(json.dumps(team))
+        monkeypatch.setattr(swot_mod, "OPPONENTS_DIR", tmp_path)
+        run_opponent_analysis("wildcats")
+        assert (d / "swot_analysis.json").exists()
+
+    def test_slug_lowercased_and_space_replaced(self, tmp_path, monkeypatch):
+        d = self._opp_dir(tmp_path, "blue_jays")
+        team = {"team_name": "Blue Jays", "roster": [_MINIMAL_PLAYER]}
+        (d / "team.json").write_text(json.dumps(team))
+        monkeypatch.setattr(swot_mod, "OPPONENTS_DIR", tmp_path)
+        result = run_opponent_analysis("Blue Jays")
+        assert isinstance(result, dict)
+
+    def test_result_has_team_swot_key(self, tmp_path, monkeypatch):
+        d = self._opp_dir(tmp_path, "hawks")
+        team = {"team_name": "Hawks", "roster": [_MINIMAL_PLAYER]}
+        (d / "team.json").write_text(json.dumps(team))
+        monkeypatch.setattr(swot_mod, "OPPONENTS_DIR", tmp_path)
+        result = run_opponent_analysis("hawks")
+        assert "team_swot" in result
+
+    def test_swot_analysis_content_is_valid(self, tmp_path, monkeypatch):
+        d = self._opp_dir(tmp_path, "ravens")
+        team = {"team_name": "Ravens", "roster": [_MINIMAL_PLAYER]}
+        (d / "team.json").write_text(json.dumps(team))
+        monkeypatch.setattr(swot_mod, "OPPONENTS_DIR", tmp_path)
+        run_opponent_analysis("ravens")
+        content = json.loads((d / "swot_analysis.json").read_text())
+        assert "team_swot" in content

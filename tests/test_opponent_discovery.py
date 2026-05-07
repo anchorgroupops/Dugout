@@ -9,11 +9,16 @@ from pathlib import Path
 
 import pytest
 
+import json
+
 sys.path.insert(0, str(Path(__file__).parent.parent / "tools"))
 from opponent_discovery import (
     _clean_name,
     _extract_line_score_side,
+    _load_schedule_opponents,
+    _parse_org_ids,
     _record_to_string,
+    _safe_get_json,
     _safe_int,
     _slug,
 )
@@ -323,3 +328,143 @@ class TestExtractLineScoreSide:
         assert runs == 0
         assert hits == 0
         assert errors == 0
+
+
+# ====================================================================
+# _parse_org_ids
+# ====================================================================
+
+class TestParseOrgIds:
+    def test_returns_list(self, monkeypatch):
+        monkeypatch.delenv("GC_ORG_IDS", raising=False)
+        result = _parse_org_ids()
+        assert isinstance(result, list)
+        assert len(result) > 0
+
+    def test_uses_env_var(self, monkeypatch):
+        monkeypatch.setenv("GC_ORG_IDS", "org1,org2,org3")
+        result = _parse_org_ids()
+        assert result == ["org1", "org2", "org3"]
+
+    def test_strips_whitespace(self, monkeypatch):
+        monkeypatch.setenv("GC_ORG_IDS", " org1 , org2 ")
+        result = _parse_org_ids()
+        assert result == ["org1", "org2"]
+
+    def test_filters_empty_segments(self, monkeypatch):
+        monkeypatch.setenv("GC_ORG_IDS", "org1,,org2")
+        result = _parse_org_ids()
+        assert "" not in result
+        assert "org1" in result
+
+    def test_defaults_when_env_empty(self, monkeypatch):
+        monkeypatch.setenv("GC_ORG_IDS", "")
+        result = _parse_org_ids()
+        assert len(result) > 0  # falls back to DEFAULT_ORG_IDS
+
+
+# ====================================================================
+# _safe_get_json
+# ====================================================================
+
+class TestSafeGetJson:
+    def test_returns_none_on_network_error(self, monkeypatch):
+        import requests
+
+        def bad_get(*args, **kwargs):
+            raise requests.exceptions.ConnectionError("no network")
+
+        import opponent_discovery
+        monkeypatch.setattr(opponent_discovery.requests, "get", bad_get)
+        result = _safe_get_json("http://localhost:1/nonexistent")
+        assert result is None
+
+    def test_returns_none_on_non_200_status(self, monkeypatch):
+        class FakeResp:
+            status_code = 404
+
+        import opponent_discovery
+        monkeypatch.setattr(opponent_discovery.requests, "get", lambda *a, **kw: FakeResp())
+        result = _safe_get_json("http://example.com/api")
+        assert result is None
+
+    def test_returns_parsed_json_on_success(self, monkeypatch):
+        class FakeResp:
+            status_code = 200
+
+            def json(self):
+                return {"teams": []}
+
+        import opponent_discovery
+        monkeypatch.setattr(opponent_discovery.requests, "get", lambda *a, **kw: FakeResp())
+        result = _safe_get_json("http://example.com/api")
+        assert result == {"teams": []}
+
+
+# ====================================================================
+# _load_schedule_opponents
+# ====================================================================
+
+class TestLoadScheduleOpponents:
+    def test_returns_empty_when_no_file(self, tmp_path):
+        result = _load_schedule_opponents(tmp_path)
+        assert result == []
+
+    def test_returns_opponents_from_upcoming(self, tmp_path):
+        sharks = tmp_path / "sharks"
+        sharks.mkdir()
+        schedule = {
+            "upcoming": [
+                {"opponent": "Eagles", "is_game": True},
+                {"opponent": "Hawks", "is_game": True},
+            ]
+        }
+        (sharks / "schedule_manual.json").write_text(json.dumps(schedule))
+        result = _load_schedule_opponents(tmp_path)
+        assert "Eagles" in result
+        assert "Hawks" in result
+
+    def test_returns_opponents_from_past(self, tmp_path):
+        sharks = tmp_path / "sharks"
+        sharks.mkdir()
+        schedule = {"past": [{"opponent": "Ravens", "is_game": True}]}
+        (sharks / "schedule_manual.json").write_text(json.dumps(schedule))
+        result = _load_schedule_opponents(tmp_path)
+        assert "Ravens" in result
+
+    def test_skips_non_game_entries(self, tmp_path):
+        sharks = tmp_path / "sharks"
+        sharks.mkdir()
+        schedule = {
+            "upcoming": [
+                {"opponent": "Eagles", "is_game": True},
+                {"opponent": "ShouldSkip", "is_game": False},
+            ]
+        }
+        (sharks / "schedule_manual.json").write_text(json.dumps(schedule))
+        result = _load_schedule_opponents(tmp_path)
+        assert "ShouldSkip" not in result
+
+    def test_skips_empty_opponent_names(self, tmp_path):
+        sharks = tmp_path / "sharks"
+        sharks.mkdir()
+        schedule = {"upcoming": [{"opponent": "", "is_game": True}]}
+        (sharks / "schedule_manual.json").write_text(json.dumps(schedule))
+        result = _load_schedule_opponents(tmp_path)
+        assert result == []
+
+    def test_returns_empty_on_invalid_json(self, tmp_path):
+        sharks = tmp_path / "sharks"
+        sharks.mkdir()
+        (sharks / "schedule_manual.json").write_text("not valid json")
+        result = _load_schedule_opponents(tmp_path)
+        assert result == []
+
+    def test_cleans_opponent_prefixes(self, tmp_path):
+        sharks = tmp_path / "sharks"
+        sharks.mkdir()
+        schedule = {"upcoming": [{"opponent": "@ Wildcats", "is_game": True}]}
+        (sharks / "schedule_manual.json").write_text(json.dumps(schedule))
+        result = _load_schedule_opponents(tmp_path)
+        assert "Wildcats" in result
+        assert "@ Wildcats" not in result
