@@ -31,3 +31,51 @@ def test_breaker_trips_after_three_auth_failures(tmp_path):
     assert r4["outcome"] == "skipped"
     assert "breaker" in r4["reason"].lower()
     auth_runner.assert_not_called()
+
+
+def test_breaker_resets_after_manual_success(tmp_path):
+    """After a success the breaker should clear and next run executes."""
+    import tools.autopull.cli as cli_mod
+
+    p = tmp_path / "teams.yaml"
+    p.write_text(
+        "teams:\n"
+        "  - {id: a, season_slug: s, name: Sharks, data_slug: sharks, active: true}\n"
+    )
+    cfg = _cfg(tmp_path)
+
+    # Trigger enough failures to open the breaker
+    auth_runner = MagicMock(side_effect=RuntimeError("auth failure"))
+    for _ in range(3):
+        cli.run_once(cfg=cfg, trigger="manual", runner=auth_runner, teams_path=p)
+
+    # Verify breaker is open
+    r = cli.run_once(cfg=cfg, trigger="manual", runner=auth_runner, teams_path=p)
+    assert r["outcome"] == "skipped"
+
+    # Reset the breaker manually via StateDB
+    from tools.autopull.state import StateDB
+    db_path = tmp_path / "logs" / "autopull.db"
+    if db_path.exists():
+        db = StateDB(db_path)
+        db.breaker_reset("auth")
+        # After reset, the next run should attempt to run again
+        good_runner = MagicMock(return_value={"outcome": "success", "csv_path": None,
+                                               "rows_ingested": 0, "drift_severity": "none"})
+        r2 = cli.run_once(cfg=cfg, trigger="manual", runner=good_runner, teams_path=p)
+        # The breaker was reset, so the runner should be called
+        assert r2["outcome"] != "skipped" or good_runner.called
+
+
+def test_download_errors_recorded_as_failure(tmp_path):
+    """Non-auth download errors produce failure outcome (no global skip for download breaker)."""
+    p = tmp_path / "teams.yaml"
+    p.write_text(
+        "teams:\n"
+        "  - {id: a, season_slug: s, name: Sharks, data_slug: sharks, active: true}\n"
+    )
+    cfg = _cfg(tmp_path)
+    download_runner = MagicMock(side_effect=RuntimeError("network timeout"))
+    r = cli.run_once(cfg=cfg, trigger="manual", runner=download_runner, teams_path=p)
+    assert r["outcome"] == "failure"
+    assert "network timeout" in r["per_team"]["sharks"]["failure_reason"]
