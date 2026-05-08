@@ -26,6 +26,7 @@ from memory_engine import (  # noqa: E402  (import after sys.modules patch)
     _content_hash,
     _flatten_metadata,
     _safe_id,
+    DEFAULT_NAMESPACE,
     MemoryEngine,
 )
 
@@ -343,3 +344,243 @@ class TestMemoryEngineInit:
             pass  # expected
         except Exception as e:
             pytest.fail(f"Expected ValueError, got {type(e).__name__}: {e}")
+
+
+# ===========================================================================
+# MemoryEngine — method tests with fully mocked external APIs
+# ===========================================================================
+
+def _make_engine(monkeypatch) -> "MemoryEngine":
+    """Create a MemoryEngine with mocked external APIs."""
+    monkeypatch.setenv("PINECONE_API_KEY", "fake-pc-key")
+    monkeypatch.setenv("GEMINI_API_KEY", "fake-gemini-key")
+    fake_vector = [0.1] * 768
+
+    # Patch genai.embed_content to return the expected structure
+    genai_mock = sys.modules["google.generativeai"]
+    genai_mock.embed_content = mock.MagicMock(return_value={"embedding": fake_vector})
+    genai_mock.configure = mock.MagicMock()
+
+    # Patch Pinecone and its Index
+    pc_instance = mock.MagicMock()
+    index_instance = mock.MagicMock()
+    pc_instance.Index.return_value = index_instance
+    sys.modules["pinecone"].Pinecone.return_value = pc_instance
+
+    engine = MemoryEngine()
+    engine._fake_vector = fake_vector
+    engine._index_mock = index_instance
+    return engine
+
+
+class TestMemoryEngineInitSuccess:
+    def test_successful_init_configures_genai(self, monkeypatch):
+        """Lines 60-64: successful __init__ calls genai.configure and Pinecone."""
+        engine = _make_engine(monkeypatch)
+        genai_mock = sys.modules["google.generativeai"]
+        genai_mock.configure.assert_called_once()
+        assert engine.namespace == DEFAULT_NAMESPACE
+
+    def test_successful_init_uses_custom_index(self, monkeypatch):
+        monkeypatch.setenv("PINECONE_API_KEY", "pk")
+        monkeypatch.setenv("GEMINI_API_KEY", "gk")
+        sys.modules["google.generativeai"].configure = mock.MagicMock()
+        sys.modules["google.generativeai"].embed_content = mock.MagicMock(
+            return_value={"embedding": [0.0] * 768})
+        pc_instance = mock.MagicMock()
+        pc_instance.Index.return_value = mock.MagicMock()
+        sys.modules["pinecone"].Pinecone.return_value = pc_instance
+        engine = MemoryEngine(index_name="my-index", namespace="my-ns")
+        assert engine.namespace == "my-ns"
+        pc_instance.Index.assert_called_once_with("my-index")
+
+
+class TestEmbed:
+    def test_embed_returns_vector(self, monkeypatch):
+        """Lines 67-75: _embed returns a list of floats from genai response."""
+        engine = _make_engine(monkeypatch)
+        result = engine._embed("some text", task_type="retrieval_document")
+        assert result == engine._fake_vector
+
+    def test_embed_truncates_text(self, monkeypatch):
+        engine = _make_engine(monkeypatch)
+        long_text = "x" * 20000
+        engine._embed(long_text, task_type="retrieval_document")
+        genai_mock = sys.modules["google.generativeai"]
+        call_args = genai_mock.embed_content.call_args
+        content_arg = call_args[1].get("content") or call_args[0][1]
+        assert len(content_arg) <= 12000
+
+    def test_embed_empty_string_uses_placeholder(self, monkeypatch):
+        engine = _make_engine(monkeypatch)
+        engine._embed("", task_type="retrieval_document")
+        genai_mock = sys.modules["google.generativeai"]
+        call_args = genai_mock.embed_content.call_args
+        content_arg = call_args[1].get("content") or call_args[0][1]
+        assert content_arg == "empty"
+
+    def test_embed_raises_when_no_embedding_key(self, monkeypatch):
+        engine = _make_engine(monkeypatch)
+        sys.modules["google.generativeai"].embed_content = mock.MagicMock(
+            return_value={"no_embedding_here": []})
+        with pytest.raises(RuntimeError, match="embedding"):
+            engine._embed("text", task_type="retrieval_document")
+
+
+class TestDocText:
+    def test_doc_text_returns_canonical_json(self, monkeypatch):
+        """Line 78: _doc_text wraps _canonical_json."""
+        from memory_engine import _canonical_json
+        engine = _make_engine(monkeypatch)
+        data = {"z": 1, "a": 2}
+        result = engine._doc_text(data)
+        assert result == _canonical_json(data)
+
+
+class TestUpsertGameData:
+    def test_upsert_game_data_calls_index_upsert(self, monkeypatch):
+        """Lines 82-95: upsert_game_data calls index.upsert."""
+        engine = _make_engine(monkeypatch)
+        doc_id = engine.upsert_game_data("game-001", {"innings": 7})
+        assert doc_id == "game::game-001"
+        engine._index_mock.upsert.assert_called_once()
+
+    def test_upsert_game_data_includes_entity_type(self, monkeypatch):
+        engine = _make_engine(monkeypatch)
+        engine.upsert_game_data("g1", {"score": 5})
+        call_kwargs = engine._index_mock.upsert.call_args[1]
+        vectors = call_kwargs["vectors"]
+        assert vectors[0]["metadata"]["entity_type"] == "game"
+
+
+class TestUpsertDocument:
+    def test_upsert_document_returns_safe_id(self, monkeypatch):
+        """Lines 99-112: upsert_document returns safe doc_id."""
+        engine = _make_engine(monkeypatch)
+        result = engine.upsert_document("sharks/team.json", {"data": "val"})
+        assert result == "sharks/team.json"
+        engine._index_mock.upsert.assert_called_once()
+
+    def test_upsert_document_merges_metadata(self, monkeypatch):
+        engine = _make_engine(monkeypatch)
+        engine.upsert_document("doc1", {"x": 1},
+                               metadata={"scope": "sharks"})
+        call_kwargs = engine._index_mock.upsert.call_args[1]
+        vectors = call_kwargs["vectors"]
+        assert "scope" in vectors[0]["metadata"]
+
+
+class TestBatchUpsertDocuments:
+    def test_returns_count_of_upserted_docs(self, monkeypatch):
+        """Lines 119-147: batch_upsert_documents returns total count."""
+        engine = _make_engine(monkeypatch)
+        engine._index_mock.upsert.return_value = None
+        docs = [
+            {"id": "doc1", "data": {"val": 1}},
+            {"id": "doc2", "data": {"val": 2}},
+        ]
+        count = engine.batch_upsert_documents(docs, batch_size=10)
+        assert count == 2
+
+    def test_skips_non_dict_items(self, monkeypatch):
+        engine = _make_engine(monkeypatch)
+        docs = ["not a dict", None, {"id": "d1", "data": {"x": 1}}]
+        count = engine.batch_upsert_documents(docs)
+        assert count == 1
+
+    def test_skips_items_missing_id_or_data(self, monkeypatch):
+        engine = _make_engine(monkeypatch)
+        docs = [
+            {"data": {"x": 1}},  # missing id
+            {"id": "d1"},         # missing data
+            {"id": "d2", "data": {"y": 2}},
+        ]
+        count = engine.batch_upsert_documents(docs)
+        assert count == 1
+
+    def test_batching_flushes_at_batch_size(self, monkeypatch):
+        engine = _make_engine(monkeypatch)
+        docs = [{"id": f"d{i}", "data": {"i": i}} for i in range(5)]
+        engine.batch_upsert_documents(docs, batch_size=2)
+        # 5 docs, batch_size=2 → 2 upserts of 2, 1 upsert of 1 = 3 calls
+        assert engine._index_mock.upsert.call_count == 3
+
+    def test_empty_input_returns_zero(self, monkeypatch):
+        engine = _make_engine(monkeypatch)
+        count = engine.batch_upsert_documents([])
+        assert count == 0
+
+    def test_optional_metadata_merged(self, monkeypatch):
+        engine = _make_engine(monkeypatch)
+        docs = [{"id": "d1", "data": {"x": 1},
+                 "metadata": {"scope": "sharks"}}]
+        engine.batch_upsert_documents(docs)
+        call_kwargs = engine._index_mock.upsert.call_args[1]
+        assert "scope" in call_kwargs["vectors"][0]["metadata"]
+
+
+class TestSearchHistory:
+    def test_returns_list_of_matches(self, monkeypatch):
+        """Lines 151-168: search_history returns match dicts."""
+        engine = _make_engine(monkeypatch)
+        fake_match = mock.MagicMock()
+        fake_match.id = "doc1"
+        fake_match.score = 0.95
+        fake_match.metadata = {"entity_type": "game"}
+        engine._index_mock.query.return_value = mock.MagicMock(
+            matches=[fake_match])
+        results = engine.search_history("how did we do last week?")
+        assert len(results) == 1
+        assert results[0]["id"] == "doc1"
+        assert results[0]["score"] == pytest.approx(0.95)
+
+    def test_returns_empty_list_when_no_matches(self, monkeypatch):
+        engine = _make_engine(monkeypatch)
+        engine._index_mock.query.return_value = mock.MagicMock(matches=[])
+        results = engine.search_history("no match query")
+        assert results == []
+
+    def test_uses_top_k_parameter(self, monkeypatch):
+        engine = _make_engine(monkeypatch)
+        engine._index_mock.query.return_value = mock.MagicMock(matches=[])
+        engine.search_history("query", top_k=3)
+        call_kwargs = engine._index_mock.query.call_args[1]
+        assert call_kwargs["top_k"] == 3
+
+
+class TestSyncLocalFiles:
+    def test_returns_zero_when_no_files_exist(self, tmp_path, monkeypatch):
+        """Lines 175-214: sync_local_files returns 0 when files missing."""
+        engine = _make_engine(monkeypatch)
+        count = engine.sync_local_files(str(tmp_path))
+        assert count == 0
+
+    def test_indexes_json_files(self, tmp_path, monkeypatch):
+        engine = _make_engine(monkeypatch)
+        engine._index_mock.upsert.return_value = None
+        (tmp_path / "team.json").write_text('{"team": "sharks"}')
+        count = engine.sync_local_files(str(tmp_path))
+        assert count == 1
+
+    def test_indexes_txt_files(self, tmp_path, monkeypatch):
+        engine = _make_engine(monkeypatch)
+        engine._index_mock.upsert.return_value = None
+        (tmp_path / "next_practice.txt").write_text("Warmup: stretch 10min")
+        count = engine.sync_local_files(str(tmp_path))
+        assert count == 1
+
+    def test_skips_invalid_json_file(self, tmp_path, monkeypatch, capsys):
+        engine = _make_engine(monkeypatch)
+        (tmp_path / "team.json").write_text("{bad json}")
+        count = engine.sync_local_files(str(tmp_path))
+        assert count == 0
+        out = capsys.readouterr().out
+        assert "Error" in out
+
+    def test_multiple_files_all_indexed(self, tmp_path, monkeypatch):
+        engine = _make_engine(monkeypatch)
+        engine._index_mock.upsert.return_value = None
+        (tmp_path / "team.json").write_text('{"x": 1}')
+        (tmp_path / "lineups.json").write_text('{"y": 2}')
+        count = engine.sync_local_files(str(tmp_path))
+        assert count == 2
