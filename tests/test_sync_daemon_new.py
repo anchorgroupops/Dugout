@@ -2830,3 +2830,744 @@ class TestBuildVoiceOverviewTextExtended:
         }
         text = sd._build_voice_overview_text(ctx)
         assert isinstance(text, str)  # must not crash
+
+
+# ---------------------------------------------------------------------------
+# Additional handle_scoreboard branches
+# ---------------------------------------------------------------------------
+
+class TestHandleScoreboardExtended:
+    def _mock_gc(self, games_list):
+        mock_resp = MagicMock()
+        mock_resp.ok = True
+        mock_resp.json = MagicMock(return_value=games_list)
+        return mock_resp
+
+    def test_scheduled_status_returns_pregame(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        today = datetime.now(ET).strftime("%Y-%m-%d")
+        game = {
+            "id": "gc_sched",
+            "game_status": "scheduled",
+            "start_ts": f"{today}T18:00:00-04:00",
+            "score": {"team": 0, "opponent_team": 0},
+            "opponent_team": {"name": "Lions"},
+        }
+        with patch("sync_daemon.requests.get", return_value=self._mock_gc([game])):
+            with flask_app.test_client() as client:
+                resp = client.get("/api/scoreboard")
+        data = resp.get_json()
+        assert data["status"] == "pregame"
+
+    def test_unknown_status_returns_pregame(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        today = datetime.now(ET).strftime("%Y-%m-%d")
+        game = {
+            "id": "gc_unk",
+            "game_status": "something_unknown",
+            "start_ts": f"{today}T18:00:00-04:00",
+            "score": {"team": 0, "opponent_team": 0},
+            "opponent_team": {"name": "Bears"},
+        }
+        with patch("sync_daemon.requests.get", return_value=self._mock_gc([game])):
+            with flask_app.test_client() as client:
+                resp = client.get("/api/scoreboard")
+        data = resp.get_json()
+        assert data["status"] == "pregame"
+
+    def test_local_game_file_enriches_scoreboard(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        today = datetime.now(ET).strftime("%Y-%m-%d")
+        games_dir = tmp_path / "games"
+        games_dir.mkdir()
+        local_game = {
+            "date": today,
+            "sharks_batting": [{"name": "Jane", "h": 2}],
+            "opponent_batting": [],
+            "score": {"sharks": 6, "opponent": 4},
+        }
+        (games_dir / "game_today.json").write_text(json.dumps(local_game))
+        game = {
+            "id": "gc_today",
+            "game_status": "completed",
+            "start_ts": f"{today}T12:00:00-04:00",
+            "score": {"team": 5, "opponent_team": 3},
+            "opponent_team": {"name": "Tigers"},
+        }
+        with patch("sync_daemon.requests.get", return_value=self._mock_gc([game])):
+            with flask_app.test_client() as client:
+                resp = client.get("/api/scoreboard")
+        data = resp.get_json()
+        # Local file should override score
+        assert data["sharks_score"] == 6
+
+    def test_schedule_context_adds_time(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        today = datetime.now(ET).strftime("%Y-%m-%d")
+        sched = {"upcoming": [{"date": today, "opponent": "Wolves", "time": "7:00 PM",
+                                "home_away": "away", "is_game": True}]}
+        (tmp_path / "schedule_manual.json").write_text(json.dumps(sched))
+        game = {
+            "id": "gc_sched_ctx",
+            "game_status": "scheduled",
+            "start_ts": f"{today}T18:00:00-04:00",
+            "score": {"team": 0, "opponent_team": 0},
+            "opponent_team": {"name": "Wolves"},
+        }
+        with patch("sync_daemon.requests.get", return_value=self._mock_gc([game])):
+            with flask_app.test_client() as client:
+                resp = client.get("/api/scoreboard")
+        data = resp.get_json()
+        assert data.get("time") == "7:00 PM"
+
+    def test_live_game_fetches_live_events(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        now = datetime.now(ET)
+        game = {
+            "id": "gc_live_evt",
+            "game_status": "in_progress",
+            "start_ts": now.isoformat(),
+            "score": {"team": 3, "opponent_team": 2},
+            "opponent_team": {"name": "Tigers"},
+        }
+        fake_events = {"batter": "Jane", "runners": []}
+        with patch("sync_daemon.requests.get", return_value=self._mock_gc([game])), \
+             patch("sync_daemon._cached_live_events", return_value=fake_events):
+            with flask_app.test_client() as client:
+                resp = client.get("/api/scoreboard")
+        data = resp.get_json()
+        assert data.get("live_play") == fake_events
+
+
+# ---------------------------------------------------------------------------
+# handle_game_detail — self-heal, strip_totals normal path, advanced keys
+# ---------------------------------------------------------------------------
+
+class TestHandleGameDetailSelfHeal:
+    def test_self_heal_supplements_sharks_data_from_gc_file(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        games_dir = tmp_path / "games"
+        games_dir.mkdir()
+        # Primary game file lacks sharks block
+        primary = {"game_id": "game_no_sharks", "date": "2024-04-15", "opponent": "Tigers"}
+        (games_dir / "game_no_sharks.json").write_text(json.dumps(primary))
+        # GC game file with same date has sharks block
+        gc_game = {
+            "date": "2024-04-15",
+            "result": "W",
+            "sharks": {"batting": [{"name": "Jane", "pa": 4}], "pitching": []},
+        }
+        (games_dir / "game_gc_20240415.json").write_text(json.dumps(gc_game))
+        with flask_app.test_client() as client:
+            resp = client.get("/api/games/game_no_sharks")
+        data = resp.get_json()
+        assert "sharks_batting" in data
+        assert data["sharks_batting"][0]["name"] == "Jane"
+
+    def test_strip_totals_row_no_strip_when_not_totals(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        games_dir = tmp_path / "games"
+        games_dir.mkdir()
+        # Two rows where first row PA does NOT equal sum of rest
+        game = {
+            "game_id": "game_notot",
+            "date": "2024-04-20",
+            "sharks": {
+                "batting": [
+                    {"name": "Jane", "pa": 3},
+                    {"name": "Bob", "pa": 5},
+                ],
+                "pitching": [],
+            },
+        }
+        (games_dir / "game_notot.json").write_text(json.dumps(game))
+        with flask_app.test_client() as client:
+            resp = client.get("/api/games/game_notot")
+        data = resp.get_json()
+        names = [r["name"] for r in data.get("sharks_batting", [])]
+        assert "Jane" in names  # first row NOT stripped
+
+    def test_batting_advanced_key_exposed(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        games_dir = tmp_path / "games"
+        games_dir.mkdir()
+        game = {
+            "game_id": "game_badvanced",
+            "date": "2024-04-21",
+            "sharks": {
+                "batting": [{"name": "Jane", "pa": 4}],
+                "pitching": [],
+                "pitching_advanced": [{"era": 1.5}],
+            },
+        }
+        (games_dir / "game_badvanced.json").write_text(json.dumps(game))
+        with flask_app.test_client() as client:
+            resp = client.get("/api/games/game_badvanced")
+        data = resp.get_json()
+        assert "sharks_pitching_advanced" in data
+
+
+# ---------------------------------------------------------------------------
+# auto_deactivate_subs — no-date branch (line 1516)
+# ---------------------------------------------------------------------------
+
+class TestAutoDeactivateSubsNoBranch:
+    def test_no_op_when_last_game_has_no_date(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        sd._ROSTER_MANIFEST_CACHE = None
+        sched = {"past": [{"opponent": "Unknown", "date": ""}], "upcoming": []}
+        avail = {"Sub Player": True}
+        manifest = {"core_players": ["Jane Core"]}
+        (tmp_path / "schedule_manual.json").write_text(json.dumps(sched))
+        (tmp_path / "availability.json").write_text(json.dumps(avail))
+        (tmp_path / "roster_manifest.json").write_text(json.dumps(manifest))
+        sd.auto_deactivate_subs()
+        # No date → should return early without deactivating
+        saved = json.loads((tmp_path / "availability.json").read_text())
+        assert saved["Sub Player"] is True
+        sd._ROSTER_MANIFEST_CACHE = None
+
+
+# ---------------------------------------------------------------------------
+# _build_games_feed — known results & GC self-heal branches
+# ---------------------------------------------------------------------------
+
+class TestBuildGamesFeedBranches:
+    def test_known_result_applied_to_pdf_game(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(sd, "CONFIG_DIR", tmp_path)
+        games_dir = tmp_path / "games"
+        games_dir.mkdir()
+        # PDF game (from index.json) with no result
+        index = [{"game_id": "pdf_001", "date": "2024-03-10", "opponent": "Tigers"}]
+        (games_dir / "index.json").write_text(json.dumps(index))
+        # Known results file
+        known = {"results": [{"date": "2024-03-10", "result": "W", "score": "8-3"}]}
+        (tmp_path / "known_game_results.json").write_text(json.dumps(known))
+        result = sd._build_games_feed()
+        game = next((g for g in result if g["game_id"] == "pdf_001"), None)
+        assert game is not None
+        assert game.get("result") == "W"
+
+    def test_known_result_kr_no_date_skipped(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(sd, "CONFIG_DIR", tmp_path)
+        games_dir = tmp_path / "games"
+        games_dir.mkdir()
+        index = [{"game_id": "pdf_002", "date": "2024-03-11", "opponent": "Lions"}]
+        (games_dir / "index.json").write_text(json.dumps(index))
+        # Known result with no date — should be skipped
+        known = {"results": [{"date": "", "result": "W", "score": "5-2"}]}
+        (tmp_path / "known_game_results.json").write_text(json.dumps(known))
+        result = sd._build_games_feed()
+        game = next((g for g in result if g["game_id"] == "pdf_002"), None)
+        assert game is not None
+        assert not game.get("result")  # not applied
+
+    def test_gc_game_self_heal_fills_result_for_pdf_game(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(sd, "CONFIG_DIR", tmp_path)
+        games_dir = tmp_path / "games"
+        games_dir.mkdir()
+        # PDF game with no result and no score
+        index = [{"game_id": "pdf_003", "date": "2024-03-12", "opponent": "Bears"}]
+        (games_dir / "index.json").write_text(json.dumps(index))
+        # GC game file with same date and score
+        gc_game = {
+            "date": "2024-03-12",
+            "score": {"sharks": 5, "opponent": 2},
+        }
+        (games_dir / "game_gc_20240312.json").write_text(json.dumps(gc_game))
+        result = sd._build_games_feed()
+        game = next((g for g in result if g["game_id"] == "pdf_003"), None)
+        assert game is not None
+        assert game.get("result") == "W"
+
+    def test_pdf_game_without_date_not_self_healed(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(sd, "CONFIG_DIR", tmp_path)
+        games_dir = tmp_path / "games"
+        games_dir.mkdir()
+        # PDF game with no date
+        index = [{"game_id": "pdf_nodate", "date": "", "opponent": "Tigers"}]
+        (games_dir / "index.json").write_text(json.dumps(index))
+        result = sd._build_games_feed()
+        game = next((g for g in result if g["game_id"] == "pdf_nodate"), None)
+        assert game is not None
+        assert not game.get("result")  # no date → no self-heal
+
+    def test_known_results_bad_json_does_not_crash(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(sd, "CONFIG_DIR", tmp_path)
+        games_dir = tmp_path / "games"
+        games_dir.mkdir()
+        index = [{"game_id": "pdf_x", "date": "2024-05-01", "opponent": "Tigers"}]
+        (games_dir / "index.json").write_text(json.dumps(index))
+        (tmp_path / "known_game_results.json").write_text("{{bad json")
+        result = sd._build_games_feed()
+        assert isinstance(result, list)
+
+    def test_gc_game_with_duplicate_id_not_added_twice(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(sd, "CONFIG_DIR", tmp_path)
+        games_dir = tmp_path / "games"
+        games_dir.mkdir()
+        # Two GC-format files with the same game_id
+        gc_game = {
+            "game_id": "dup_gc",
+            "source": "gc_full_scraper_v2",
+            "date": "2024-05-05",
+            "opponent": "Tigers",
+            "sharks": {"batting": [{"name": "Jane", "pa": 4}], "pitching": []},
+        }
+        (games_dir / "game_gc_dup_a.json").write_text(json.dumps(gc_game))
+        (games_dir / "game_gc_dup_b.json").write_text(json.dumps(gc_game))
+        result = sd._build_games_feed()
+        matching = [g for g in result if g.get("game_id") == "dup_gc"]
+        assert len(matching) == 1  # second duplicate skipped (line 1770)
+
+    def test_gc_game_totals_with_invalid_pa_type(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(sd, "CONFIG_DIR", tmp_path)
+        games_dir = tmp_path / "games"
+        games_dir.mkdir()
+        gc_game = {
+            "game_id": "game_bad_pa",
+            "source": "gc_full_scraper_v2",
+            "date": "2024-05-06",
+            "opponent": "Bears",
+            "sharks": {
+                "batting": [{"name": "Jane", "pa": "not-a-number"}],
+                "pitching": [],
+            },
+        }
+        (games_dir / "game_bad_pa.json").write_text(json.dumps(gc_game))
+        result = sd._build_games_feed()
+        game = next((g for g in result if g.get("game_id") == "game_bad_pa"), None)
+        assert game is not None
+        # pa totals should fall back to 0 when non-numeric
+
+
+# ---------------------------------------------------------------------------
+# handle_availability POST — additional edge cases
+# ---------------------------------------------------------------------------
+
+class TestHandleAvailabilityPostEdgeCases:
+    def test_rejects_non_dict_json_body(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(sd, "WRITE_ORIGINS", ["https://test.example.com"])
+        with flask_app.test_client() as client:
+            resp = client.post(
+                "/api/availability",
+                data='["not", "a", "dict"]',
+                content_type="application/json",
+                headers={"Origin": "https://test.example.com"},
+            )
+        assert resp.status_code == 400
+        assert "invalid_json_object" in resp.get_json().get("error", "")
+
+    def test_rejects_key_longer_than_80_chars(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(sd, "WRITE_ORIGINS", ["https://test.example.com"])
+        long_key = "A" * 81
+        with flask_app.test_client() as client:
+            resp = client.post(
+                "/api/availability",
+                json={long_key: True},
+                content_type="application/json",
+                headers={"Origin": "https://test.example.com"},
+            )
+        assert resp.status_code == 400
+        assert "invalid_player_name" in resp.get_json().get("error", "")
+
+
+# ---------------------------------------------------------------------------
+# Additional handle_scoreboard exception branches
+# ---------------------------------------------------------------------------
+
+class TestHandleScoreboardExceptionBranches:
+    def _mock_gc(self, games_list):
+        mock_resp = MagicMock()
+        mock_resp.ok = True
+        mock_resp.json = MagicMock(return_value=games_list)
+        return mock_resp
+
+    def test_schedule_file_bad_json_does_not_crash(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        # Bad schedule file — exception caught and returns no_game
+        (tmp_path / "schedule_manual.json").write_text("{{bad json")
+        with patch("sync_daemon.requests.get", return_value=self._mock_gc([])):
+            with flask_app.test_client() as client:
+                resp = client.get("/api/scoreboard")
+        assert resp.status_code == 200
+        assert resp.get_json()["status"] == "no_game"
+
+    def test_game_with_bad_start_ts_does_not_crash(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        today = datetime.now(ET).strftime("%Y-%m-%d")
+        game = {
+            "id": "gc_bad_ts",
+            "game_status": "completed",
+            "start_ts": "not-a-timestamp",
+            "score": {"team": 3, "opponent_team": 2},
+            "opponent_team": {"name": "Tigers"},
+        }
+        with patch("sync_daemon.requests.get", return_value=self._mock_gc([game])):
+            with flask_app.test_client() as client:
+                resp = client.get("/api/scoreboard")
+        assert resp.status_code == 200
+
+    def test_local_game_index_json_skipped(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        today = datetime.now(ET).strftime("%Y-%m-%d")
+        games_dir = tmp_path / "games"
+        games_dir.mkdir()
+        # index.json should be skipped in scoreboard local enrichment
+        (games_dir / "index.json").write_text('[{"date": "' + today + '"}]')
+        game = {
+            "id": "gc_idx_skip",
+            "game_status": "completed",
+            "start_ts": f"{today}T12:00:00-04:00",
+            "score": {"team": 4, "opponent_team": 1},
+            "opponent_team": {"name": "Bears"},
+        }
+        with patch("sync_daemon.requests.get", return_value=self._mock_gc([game])):
+            with flask_app.test_client() as client:
+                resp = client.get("/api/scoreboard")
+        assert resp.status_code == 200
+
+    def test_live_events_exception_does_not_crash(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        now = datetime.now(ET)
+        game = {
+            "id": "gc_evt_err",
+            "game_status": "in_progress",
+            "start_ts": now.isoformat(),
+            "score": {"team": 2, "opponent_team": 1},
+            "opponent_team": {"name": "Wolves"},
+        }
+        with patch("sync_daemon.requests.get", return_value=self._mock_gc([game])), \
+             patch("sync_daemon._cached_live_events", side_effect=RuntimeError("cache fail")):
+            with flask_app.test_client() as client:
+                resp = client.get("/api/scoreboard")
+        assert resp.status_code == 200
+
+    def test_scouting_exception_does_not_crash(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        today = datetime.now(ET).strftime("%Y-%m-%d")
+        game = {
+            "id": "gc_scout_err",
+            "game_status": "completed",
+            "start_ts": f"{today}T12:00:00-04:00",
+            "score": {"team": 5, "opponent_team": 3},
+            "opponent_team": {"name": "Tigers"},
+        }
+        with patch("sync_daemon.requests.get", return_value=self._mock_gc([game])), \
+             patch("sync_daemon._cached_opponent_scouting", side_effect=RuntimeError("scout fail")):
+            with flask_app.test_client() as client:
+                resp = client.get("/api/scoreboard")
+        assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# _cached_live_events  (cache hit branch)
+# ---------------------------------------------------------------------------
+
+class TestCachedLiveEvents:
+    def test_returns_cached_result(self, monkeypatch):
+        import time as _t
+        game_id = "test_game_cache"
+        fake_data = {"batter": "Jane"}
+        # Inject a fresh cache entry
+        sd._LIVE_EVENTS_CACHE[game_id] = (_t.time() + 60, fake_data)
+        result = sd._cached_live_events(game_id)
+        assert result == fake_data
+        del sd._LIVE_EVENTS_CACHE[game_id]
+
+    def test_expired_cache_re_fetches(self, monkeypatch):
+        import time as _t
+        game_id = "test_game_exp"
+        # Inject an expired cache entry
+        sd._LIVE_EVENTS_CACHE[game_id] = (_t.time() - 10, {"old": "data"})
+        fresh_data = {"new": "events"}
+        with patch("sync_daemon._fetch_gc_live_events", return_value=fresh_data):
+            result = sd._cached_live_events(game_id)
+        assert result == fresh_data
+        del sd._LIVE_EVENTS_CACHE[game_id]
+
+
+# ---------------------------------------------------------------------------
+# handle_game_detail — self-heal copies result/score_str
+# ---------------------------------------------------------------------------
+
+class TestHandleGameDetailSelfHealCopy:
+    def test_result_copied_from_gc_file(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        games_dir = tmp_path / "games"
+        games_dir.mkdir()
+        primary = {"game_id": "game_noresult", "date": "2024-05-10", "opponent": "Tigers"}
+        (games_dir / "game_noresult.json").write_text(json.dumps(primary))
+        gc_game = {
+            "date": "2024-05-10",
+            "result": "W",
+            "score_str": "7-3",
+            "sharks": {"batting": [{"name": "Jane"}], "pitching": []},
+        }
+        (games_dir / "game_gc_2024.json").write_text(json.dumps(gc_game))
+        with flask_app.test_client() as client:
+            resp = client.get("/api/games/game_noresult")
+        data = resp.get_json()
+        assert data.get("result") == "W"
+        assert data.get("score_str") == "7-3"
+
+    def test_strip_totals_exception_returns_all_rows(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        games_dir = tmp_path / "games"
+        games_dir.mkdir()
+        # Rows where PA field is non-numeric (exception in _strip_team_totals_row)
+        game = {
+            "game_id": "game_paerr",
+            "date": "2024-05-11",
+            "sharks": {
+                "batting": [
+                    {"name": "Row1", "pa": "N/A"},
+                    {"name": "Row2", "pa": "N/A"},
+                ],
+                "pitching": [],
+            },
+        }
+        (games_dir / "game_paerr.json").write_text(json.dumps(game))
+        with flask_app.test_client() as client:
+            resp = client.get("/api/games/game_paerr")
+        data = resp.get_json()
+        # Exception caught — returns original rows unchanged
+        assert len(data.get("sharks_batting", [])) == 2
+
+
+# ---------------------------------------------------------------------------
+# _build_games_feed — additional exception and edge-case branches
+# ---------------------------------------------------------------------------
+
+class TestBuildGamesFeedEdgeCases:
+    def test_known_results_with_non_dict_item_does_not_crash(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(sd, "CONFIG_DIR", tmp_path)
+        games_dir = tmp_path / "games"
+        games_dir.mkdir()
+        index = [{"game_id": "pdf_edge", "date": "2024-06-01", "opponent": "Tigers"}]
+        (games_dir / "index.json").write_text(json.dumps(index))
+        # Non-dict items in results list → causes AttributeError → exception caught at 1702
+        known = {"results": ["not a dict", 42]}
+        (tmp_path / "known_game_results.json").write_text(json.dumps(known))
+        result = sd._build_games_feed()
+        assert isinstance(result, list)
+
+    def test_gc_self_heal_skips_file_with_different_date(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(sd, "CONFIG_DIR", tmp_path)
+        games_dir = tmp_path / "games"
+        games_dir.mkdir()
+        index = [{"game_id": "pdf_misdate", "date": "2024-06-01", "opponent": "Bears"}]
+        (games_dir / "index.json").write_text(json.dumps(index))
+        # GC game file with a DIFFERENT date — should be skipped (line 1717)
+        gc_game = {
+            "date": "2024-07-01",  # different date
+            "score": {"sharks": 5, "opponent": 3},
+        }
+        (games_dir / "game_gc_diff_date.json").write_text(json.dumps(gc_game))
+        result = sd._build_games_feed()
+        game = next((g for g in result if g["game_id"] == "pdf_misdate"), None)
+        assert game is not None
+        assert not game.get("result")  # not self-healed
+
+    def test_gc_self_heal_skips_file_with_no_valid_score(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(sd, "CONFIG_DIR", tmp_path)
+        games_dir = tmp_path / "games"
+        games_dir.mkdir()
+        index = [{"game_id": "pdf_noscore", "date": "2024-06-02", "opponent": "Cats"}]
+        (games_dir / "index.json").write_text(json.dumps(index))
+        # GC game file with same date but score missing sharks/opponent keys (line 1723)
+        gc_game = {
+            "date": "2024-06-02",
+            "score": {"team": 5, "other_team": 3},  # no sharks/opponent keys
+        }
+        (games_dir / "game_gc_noscore.json").write_text(json.dumps(gc_game))
+        result = sd._build_games_feed()
+        game = next((g for g in result if g["game_id"] == "pdf_noscore"), None)
+        assert game is not None
+        assert not game.get("result")  # score check failed
+
+    def test_gc_format_game_bad_batting_row_exception_caught(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(sd, "CONFIG_DIR", tmp_path)
+        games_dir = tmp_path / "games"
+        games_dir.mkdir()
+        # A GC v2 game file where batting contains non-dict items → totals _s() call raises
+        gc_game = {
+            "game_id": "game_gc_badrow",
+            "source": "gc_full_scraper_v2",
+            "date": "2024-06-10",
+            "opponent": "Tigers",
+            "sharks": {
+                "batting": "not a list",  # invalid batting → exception in has_any_stats
+                "pitching": [],
+            },
+        }
+        (games_dir / "game_gc_badrow.json").write_text(json.dumps(gc_game))
+        result = sd._build_games_feed()
+        # The game should be excluded (exception handler at 1821-1822 fired or has_any_stats=False)
+        assert isinstance(result, list)
+
+    def test_gc_self_heal_non_numeric_score_exception_caught(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(sd, "CONFIG_DIR", tmp_path)
+        games_dir = tmp_path / "games"
+        games_dir.mkdir()
+        index = [{"game_id": "pdf_numex", "date": "2024-07-01", "opponent": "Sharks"}]
+        (games_dir / "index.json").write_text(json.dumps(index))
+        # GC file with non-numeric score that causes TypeError in sh > op comparison
+        gc_game = {"date": "2024-07-01", "score": {"sharks": "five", "opponent": 3}}
+        (games_dir / "game_gc_numex.json").write_text(json.dumps(gc_game))
+        result = sd._build_games_feed()
+        assert isinstance(result, list)  # exception caught at lines 1731-1732
+
+    def test_gc_v2_non_numeric_score_exception_caught(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(sd, "CONFIG_DIR", tmp_path)
+        games_dir = tmp_path / "games"
+        games_dir.mkdir()
+        # GC v2 game with non-numeric score — triggers exception at 1821-1822
+        gc_game = {
+            "game_id": "game_gc_ex",
+            "source": "gc_full_scraper_v2",
+            "date": "2024-07-02",
+            "opponent": "Tigers",
+            "score": {"sharks": "five", "opponent": 3},  # non-numeric
+            "sharks": {"batting": [{"name": "Jane", "pa": 4}], "pitching": []},
+        }
+        (games_dir / "game_gc_ex.json").write_text(json.dumps(gc_game))
+        result = sd._build_games_feed()
+        assert isinstance(result, list)
+
+
+# ---------------------------------------------------------------------------
+# handle_game_detail — invalid slug returns 400
+# ---------------------------------------------------------------------------
+
+class TestHandleGameDetailInvalidSlug:
+    def test_invalid_slug_with_dot_returns_400(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        (tmp_path / "games").mkdir()
+        with flask_app.test_client() as client:
+            resp = client.get("/api/games/game.with.dots")
+        assert resp.status_code == 400
+        assert "invalid_parameter" in resp.get_json().get("error", "")
+
+    def test_slug_with_spaces_url_encoded(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        (tmp_path / "games").mkdir()
+        with flask_app.test_client() as client:
+            resp = client.get("/api/games/game%20with%20spaces")
+        assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# Additional exception branches in handle_scoreboard
+# ---------------------------------------------------------------------------
+
+class TestHandleScoreboardMoreBranches:
+    def _mock_gc(self, games_list):
+        mock_resp = MagicMock()
+        mock_resp.ok = True
+        mock_resp.json = MagicMock(return_value=games_list)
+        return mock_resp
+
+    def test_schedule_fallback_exception_returns_no_game(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        # Create a bad schedule file in a dir that will be monkeypatched
+        (tmp_path / "schedule_manual.json").write_text("{{bad")
+        with patch("sync_daemon.requests.get", return_value=self._mock_gc([])):
+            with flask_app.test_client() as client:
+                resp = client.get("/api/scoreboard")
+        # Bad schedule file caught → returns no_game
+        assert resp.get_json()["status"] == "no_game"
+
+    def test_live_game_with_bad_start_ts_parses_gracefully(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        game = {
+            "id": "gc_bad_start",
+            "game_status": "in_progress",  # live game — picked even with bad start_ts
+            "start_ts": "not-a-date",  # bad start_ts
+            "score": {"team": 4, "opponent_team": 2},
+            "opponent_team": {"name": "Lions"},
+        }
+        with patch("sync_daemon.requests.get", return_value=self._mock_gc([game])):
+            with flask_app.test_client() as client:
+                resp = client.get("/api/scoreboard")
+        data = resp.get_json()
+        # Should not crash; covers lines 2105-2106 (start_ts parse exception)
+        assert data["status"] == "live"
+
+    def test_local_enrichment_bad_game_file_skipped(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        today = datetime.now(ET).strftime("%Y-%m-%d")
+        games_dir = tmp_path / "games"
+        games_dir.mkdir()
+        # A corrupt game file in games_dir
+        (games_dir / "game_corrupt.json").write_text("{{bad json")
+        game = {
+            "id": "gc_corrupt_test",
+            "game_status": "completed",
+            "start_ts": f"{today}T12:00:00-04:00",
+            "score": {"team": 5, "opponent_team": 2},
+            "opponent_team": {"name": "Tigers"},
+        }
+        with patch("sync_daemon.requests.get", return_value=self._mock_gc([game])):
+            with flask_app.test_client() as client:
+                resp = client.get("/api/scoreboard")
+        assert resp.status_code == 200
+
+    def test_schedule_context_exception_does_not_crash(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        today = datetime.now(ET).strftime("%Y-%m-%d")
+        # Bad schedule file
+        (tmp_path / "schedule_manual.json").write_text("{{bad json")
+        game = {
+            "id": "gc_sched_ex",
+            "game_status": "completed",
+            "start_ts": f"{today}T12:00:00-04:00",
+            "score": {"team": 5, "opponent_team": 3},
+            "opponent_team": {"name": "Tigers"},
+        }
+        with patch("sync_daemon.requests.get", return_value=self._mock_gc([game])):
+            with flask_app.test_client() as client:
+                resp = client.get("/api/scoreboard")
+        assert resp.status_code == 200
+
+    def test_local_enrichment_bad_start_ts_falls_back_to_today(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        today = datetime.now(ET).strftime("%Y-%m-%d")
+        games_dir = tmp_path / "games"
+        games_dir.mkdir()
+        local_game = {
+            "date": today,
+            "sharks_batting": [{"name": "Jane", "h": 1}],
+            "score": {"sharks": 4, "opponent": 2},
+        }
+        (games_dir / "game_local.json").write_text(json.dumps(local_game))
+        # in_progress game so it gets picked even with bad start_ts
+        game = {
+            "id": "gc_bad_start_local",
+            "game_status": "in_progress",
+            "start_ts": "not-a-date",  # bad start_ts → fallback to today_str (lines 2131-2132)
+            "score": {"team": 3, "opponent_team": 1},
+            "opponent_team": {"name": "Tigers"},
+        }
+        with patch("sync_daemon.requests.get", return_value=self._mock_gc([game])):
+            with flask_app.test_client() as client:
+                resp = client.get("/api/scoreboard")
+        data = resp.get_json()
+        # Local enrichment finds today's game by date fallback → overrides score
+        assert data["status"] == "live"
+        assert data["sharks_score"] == 4  # from local file
