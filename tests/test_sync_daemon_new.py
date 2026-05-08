@@ -1029,3 +1029,1804 @@ class TestRosterManifestHelpers:
         sd._save_sub_tracker({"Sub": {"last_active": "2026-05-01"}})
         data = json.loads((tmp_path / "sub_tracker.json").read_text())
         assert "Sub" in data
+
+
+# ---------------------------------------------------------------------------
+# /api/schedule
+# ---------------------------------------------------------------------------
+
+class TestHandleSchedule:
+    def test_no_file_returns_empty_lists(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(sd, "CONFIG_DIR", tmp_path)
+        with flask_app.test_client() as client:
+            resp = client.get("/api/schedule")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data == {"upcoming": [], "past": []}
+
+    def test_returns_upcoming_and_past(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(sd, "CONFIG_DIR", tmp_path)
+        sched = {
+            "upcoming": [{"opponent": "Tigers", "date": "2099-06-01"}],
+            "past": [{"opponent": "Bears", "date": "2024-01-01"}],
+        }
+        (tmp_path / "schedule_manual.json").write_text(json.dumps(sched))
+        with flask_app.test_client() as client:
+            resp = client.get("/api/schedule")
+        data = resp.get_json()
+        assert len(data["upcoming"]) == 1
+        assert len(data["past"]) == 1
+
+    def test_promotes_stale_upcoming_to_past(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(sd, "CONFIG_DIR", tmp_path)
+        sched = {
+            "upcoming": [{"opponent": "Old Foes", "date": "2020-01-01"}],
+            "past": [],
+        }
+        (tmp_path / "schedule_manual.json").write_text(json.dumps(sched))
+        with flask_app.test_client() as client:
+            resp = client.get("/api/schedule")
+        data = resp.get_json()
+        assert len(data["upcoming"]) == 0
+        assert len(data["past"]) == 1
+        assert data["past"][0]["opponent_raw"] == "Old Foes"
+
+    def test_applies_known_result_to_promoted_game(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(sd, "CONFIG_DIR", tmp_path)
+        sched = {
+            "upcoming": [{"opponent": "Rivals", "date": "2020-03-15"}],
+            "past": [],
+        }
+        known = {"results": [{"date": "2020-03-15", "result": "W", "score": "11-5"}]}
+        (tmp_path / "schedule_manual.json").write_text(json.dumps(sched))
+        (tmp_path / "known_game_results.json").write_text(json.dumps(known))
+        with flask_app.test_client() as client:
+            resp = client.get("/api/schedule")
+        data = resp.get_json()
+        assert data["past"][0]["result"] == "W"
+        assert data["past"][0]["score"] == "11-5"
+
+    def test_applies_known_result_to_existing_past_game(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(sd, "CONFIG_DIR", tmp_path)
+        sched = {
+            "upcoming": [],
+            "past": [{"opponent": "Old Team", "date": "2020-01-05", "result": "", "score": ""}],
+        }
+        known = {"results": [{"date": "2020-01-05", "result": "L", "score": "3-7"}]}
+        (tmp_path / "schedule_manual.json").write_text(json.dumps(sched))
+        (tmp_path / "known_game_results.json").write_text(json.dumps(known))
+        with flask_app.test_client() as client:
+            resp = client.get("/api/schedule")
+        data = resp.get_json()
+        assert data["past"][0]["result"] == "L"
+
+    def test_opponent_raw_preserved(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(sd, "CONFIG_DIR", tmp_path)
+        sched = {
+            "upcoming": [{"opponent": "Team ABC (1234)", "date": "2099-06-01"}],
+            "past": [],
+        }
+        (tmp_path / "schedule_manual.json").write_text(json.dumps(sched))
+        with flask_app.test_client() as client:
+            resp = client.get("/api/schedule")
+        data = resp.get_json()
+        assert data["upcoming"][0]["opponent_raw"] == "Team ABC (1234)"
+
+    def test_bad_known_results_file_does_not_crash(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(sd, "CONFIG_DIR", tmp_path)
+        sched = {"upcoming": [], "past": []}
+        (tmp_path / "schedule_manual.json").write_text(json.dumps(sched))
+        (tmp_path / "known_game_results.json").write_text("{{bad json")
+        with flask_app.test_client() as client:
+            resp = client.get("/api/schedule")
+        assert resp.status_code == 200
+
+    def test_does_not_overwrite_existing_result(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(sd, "CONFIG_DIR", tmp_path)
+        sched = {
+            "upcoming": [],
+            "past": [{"opponent": "Known", "date": "2020-06-01", "result": "W", "score": "5-3"}],
+        }
+        known = {"results": [{"date": "2020-06-01", "result": "L", "score": "1-9"}]}
+        (tmp_path / "schedule_manual.json").write_text(json.dumps(sched))
+        (tmp_path / "known_game_results.json").write_text(json.dumps(known))
+        with flask_app.test_client() as client:
+            resp = client.get("/api/schedule")
+        data = resp.get_json()
+        # Existing "W" should not be overwritten with "L"
+        assert data["past"][0]["result"] == "W"
+
+
+# ---------------------------------------------------------------------------
+# /api/stats-db/status
+# ---------------------------------------------------------------------------
+
+class TestHandleStatsDbStatus:
+    def test_returns_200_with_mock(self, flask_app, monkeypatch):
+        import types
+        fake_stats = types.ModuleType("stats_db")
+        fake_stats.get_db_status = lambda: {"rows": 42, "tables": 5}
+        monkeypatch.setitem(sys.modules, "stats_db", fake_stats)
+        with flask_app.test_client() as client:
+            resp = client.get("/api/stats-db/status")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["rows"] == 42
+
+    def test_returns_503_on_exception(self, flask_app, monkeypatch):
+        import types
+        fake_stats = types.ModuleType("stats_db")
+        fake_stats.get_db_status = MagicMock(side_effect=RuntimeError("db gone"))
+        monkeypatch.setitem(sys.modules, "stats_db", fake_stats)
+        with flask_app.test_client() as client:
+            resp = client.get("/api/stats-db/status")
+        assert resp.status_code == 503
+        assert "stats_db_unavailable" in resp.get_json().get("error", "")
+
+
+# ---------------------------------------------------------------------------
+# /api/opponent-discovery
+# ---------------------------------------------------------------------------
+
+class TestHandleOpponentDiscovery:
+    def test_returns_defaults_when_no_file(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        with flask_app.test_client() as client:
+            resp = client.get("/api/opponent-discovery")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["generated_at"] is None
+        assert data["teams"] == []
+        assert data["missing_schedule_opponents"] == []
+
+    def test_returns_file_content(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        artifact = {"generated_at": "2026-05-01", "teams": [{"id": "abc"}], "missing_schedule_opponents": []}
+        (tmp_path / "opponent_discovery.json").write_text(json.dumps(artifact))
+        with flask_app.test_client() as client:
+            resp = client.get("/api/opponent-discovery")
+        data = resp.get_json()
+        assert data["generated_at"] == "2026-05-01"
+        assert len(data["teams"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# /api/availability  GET + POST
+# ---------------------------------------------------------------------------
+
+class TestHandleAvailabilityGet:
+    def test_returns_200(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        with flask_app.test_client() as client:
+            resp = client.get("/api/availability")
+        assert resp.status_code == 200
+
+    def test_returns_saved_when_no_team_file(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        avail = {"Jane Doe": True, "Bob Smith": False}
+        (tmp_path / "availability.json").write_text(json.dumps(avail))
+        with flask_app.test_client() as client:
+            resp = client.get("/api/availability")
+        data = resp.get_json()
+        assert data["Jane Doe"] is True
+        assert data["Bob Smith"] is False
+
+    def test_backfills_core_players_as_true(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        sd._ROSTER_MANIFEST_CACHE = None
+        team = {"roster": [{"first": "Jane", "last": "Doe"}, {"first": "Sam", "last": "Smith"}]}
+        manifest = {"core_players": ["Jane Doe"]}
+        (tmp_path / "team_enriched.json").write_text(json.dumps(team))
+        (tmp_path / "roster_manifest.json").write_text(json.dumps(manifest))
+        with flask_app.test_client() as client:
+            resp = client.get("/api/availability")
+        data = resp.get_json()
+        assert data["Jane Doe"] is True   # core player default
+        assert data["Sam Smith"] is False  # non-core default
+        sd._ROSTER_MANIFEST_CACHE = None
+
+    def test_saved_value_overrides_default(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        sd._ROSTER_MANIFEST_CACHE = None
+        team = {"roster": [{"first": "Jane", "last": "Doe"}]}
+        manifest = {"core_players": ["Jane Doe"]}
+        avail = {"Jane Doe": False}  # manually set to unavailable
+        (tmp_path / "team_enriched.json").write_text(json.dumps(team))
+        (tmp_path / "roster_manifest.json").write_text(json.dumps(manifest))
+        (tmp_path / "availability.json").write_text(json.dumps(avail))
+        with flask_app.test_client() as client:
+            resp = client.get("/api/availability")
+        data = resp.get_json()
+        assert data["Jane Doe"] is False
+        sd._ROSTER_MANIFEST_CACHE = None
+
+    def test_preserves_extra_subs_in_saved(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        team = {"roster": [{"first": "Jane", "last": "Doe"}]}
+        avail = {"Jane Doe": True, "Extra Sub": True}
+        (tmp_path / "team_enriched.json").write_text(json.dumps(team))
+        (tmp_path / "availability.json").write_text(json.dumps(avail))
+        with flask_app.test_client() as client:
+            resp = client.get("/api/availability")
+        data = resp.get_json()
+        assert "Extra Sub" in data
+
+
+class TestHandleAvailabilityPost:
+    def test_post_requires_origin(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(sd, "WRITE_ORIGINS", ["https://test.example.com"])
+        with flask_app.test_client() as client:
+            resp = client.post(
+                "/api/availability",
+                json={"Jane Doe": True},
+                content_type="application/json",
+            )
+        assert resp.status_code == 403
+
+    def test_post_rejects_non_json(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(sd, "WRITE_ORIGINS", ["https://test.example.com"])
+        with flask_app.test_client() as client:
+            resp = client.post(
+                "/api/availability",
+                data="not json",
+                content_type="text/plain",
+                headers={"Origin": "https://test.example.com"},
+            )
+        assert resp.status_code == 415
+
+    def test_post_rejects_too_large(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(sd, "WRITE_ORIGINS", ["https://test.example.com"])
+        big_payload = {f"Player {i}": True for i in range(61)}
+        with flask_app.test_client() as client:
+            resp = client.post(
+                "/api/availability",
+                json=big_payload,
+                content_type="application/json",
+                headers={"Origin": "https://test.example.com"},
+            )
+        assert resp.status_code == 400
+        assert "payload_too_large" in resp.get_json().get("error", "")
+
+    def test_post_rejects_non_bool_values(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(sd, "WRITE_ORIGINS", ["https://test.example.com"])
+        with flask_app.test_client() as client:
+            resp = client.post(
+                "/api/availability",
+                json={"Jane Doe": "yes"},
+                content_type="application/json",
+                headers={"Origin": "https://test.example.com"},
+            )
+        assert resp.status_code == 400
+        assert "values_must_be_boolean" in resp.get_json().get("error", "")
+
+    def test_post_saves_availability(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(sd, "WRITE_ORIGINS", ["https://test.example.com"])
+        sd._ROSTER_MANIFEST_CACHE = None
+        (tmp_path / "roster_manifest.json").write_text(json.dumps({"core_players": ["Jane Doe"]}))
+        # Mock out the optimizer/SWOT imports so they don't fail
+        with patch("sync_daemon.lineup_optimizer", create=True), \
+             patch("sync_daemon.swot_analyzer", create=True):
+            with flask_app.test_client() as client:
+                resp = client.post(
+                    "/api/availability",
+                    json={"Jane Doe": True},
+                    content_type="application/json",
+                    headers={"Origin": "https://test.example.com"},
+                )
+        assert resp.status_code == 200
+        assert resp.get_json()["status"] == "success"
+        saved = json.loads((tmp_path / "availability.json").read_text())
+        assert saved["Jane Doe"] is True
+        sd._ROSTER_MANIFEST_CACHE = None
+
+
+# ---------------------------------------------------------------------------
+# /api/league-players
+# ---------------------------------------------------------------------------
+
+class TestHandleLeaguePlayers:
+    def test_returns_empty_list_no_opponents_dir(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "DATA_DIR", tmp_path)
+        with flask_app.test_client() as client:
+            resp = client.get("/api/league-players")
+        assert resp.status_code == 200
+        assert resp.get_json() == []
+
+    def test_returns_players_from_team_file(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "DATA_DIR", tmp_path)
+        opp_dir = tmp_path / "opponents" / "team_alpha"
+        opp_dir.mkdir(parents=True)
+        team_data = {
+            "team_name": "Alpha",
+            "gc_team_id": "tid1",
+            "roster": [{"first": "Alice", "last": "Wonder", "number": "7"}],
+        }
+        (opp_dir / "team.json").write_text(json.dumps(team_data))
+        with flask_app.test_client() as client:
+            resp = client.get("/api/league-players")
+        data = resp.get_json()
+        assert len(data) == 1
+        assert data[0]["first"] == "Alice"
+        assert data[0]["team_name"] == "Alpha"
+
+    def test_sorted_alphabetically(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "DATA_DIR", tmp_path)
+        opp_dir = tmp_path / "opponents" / "team_z"
+        opp_dir.mkdir(parents=True)
+        roster = [
+            {"first": "Zara", "last": "A", "number": "1"},
+            {"first": "Anna", "last": "B", "number": "2"},
+        ]
+        (opp_dir / "team.json").write_text(json.dumps({"team_name": "Z", "roster": roster}))
+        with flask_app.test_client() as client:
+            resp = client.get("/api/league-players")
+        data = resp.get_json()
+        assert data[0]["first"] == "Anna"
+        assert data[1]["first"] == "Zara"
+
+    def test_bad_team_file_skipped(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "DATA_DIR", tmp_path)
+        opp_dir = tmp_path / "opponents" / "bad_team"
+        opp_dir.mkdir(parents=True)
+        (opp_dir / "team.json").write_text("{{bad json")
+        with flask_app.test_client() as client:
+            resp = client.get("/api/league-players")
+        assert resp.status_code == 200
+        assert resp.get_json() == []
+
+
+# ---------------------------------------------------------------------------
+# /api/games/<game_id>
+# ---------------------------------------------------------------------------
+
+class TestHandleGameDetail:
+    def test_returns_404_when_not_found(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        (tmp_path / "games").mkdir()
+        with flask_app.test_client() as client:
+            resp = client.get("/api/games/game_20240101")
+        assert resp.status_code == 404
+
+    def test_returns_400_for_invalid_slug(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        (tmp_path / "games").mkdir()
+        with flask_app.test_client() as client:
+            resp = client.get("/api/games/../../etc/passwd")
+        assert resp.status_code in (400, 404)
+
+    def test_returns_game_data(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        games_dir = tmp_path / "games"
+        games_dir.mkdir()
+        game = {"game_id": "game_20240101", "date": "2024-01-01", "opponent": "Tigers"}
+        (games_dir / "game_20240101.json").write_text(json.dumps(game))
+        with flask_app.test_client() as client:
+            resp = client.get("/api/games/game_20240101")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["game_id"] == "game_20240101"
+
+    def test_legacy_to_new_format_bridge(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        games_dir = tmp_path / "games"
+        games_dir.mkdir()
+        game = {
+            "game_id": "game_20240102",
+            "date": "2024-01-02",
+            "sharks": {"batting": [{"name": "Jane", "pa": 3}], "pitching": []},
+        }
+        (games_dir / "game_20240102.json").write_text(json.dumps(game))
+        with flask_app.test_client() as client:
+            resp = client.get("/api/games/game_20240102")
+        data = resp.get_json()
+        assert "sharks_batting" in data
+        assert data["sharks_batting"][0]["name"] == "Jane"
+
+    def test_opponent_stats_bridge(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        games_dir = tmp_path / "games"
+        games_dir.mkdir()
+        game = {
+            "game_id": "game_20240103",
+            "date": "2024-01-03",
+            "opponent_stats": {"batting": [{"name": "Opp1", "pa": 2}], "pitching": []},
+        }
+        (games_dir / "game_20240103.json").write_text(json.dumps(game))
+        with flask_app.test_client() as client:
+            resp = client.get("/api/games/game_20240103")
+        data = resp.get_json()
+        assert "opponent_batting" in data
+        assert data["opponent_batting"][0]["name"] == "Opp1"
+
+    def test_score_dict_converted_to_string(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        games_dir = tmp_path / "games"
+        games_dir.mkdir()
+        game = {
+            "game_id": "game_20240104",
+            "date": "2024-01-04",
+            "score": {"sharks": 11, "opponent": 5},
+        }
+        (games_dir / "game_20240104.json").write_text(json.dumps(game))
+        with flask_app.test_client() as client:
+            resp = client.get("/api/games/game_20240104")
+        data = resp.get_json()
+        assert data.get("score_str") == "11-5"
+
+    def test_503_on_corrupt_json(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        games_dir = tmp_path / "games"
+        games_dir.mkdir()
+        (games_dir / "game_bad.json").write_text("{{not valid")
+        with flask_app.test_client() as client:
+            resp = client.get("/api/games/game_bad")
+        assert resp.status_code == 503
+
+
+# ---------------------------------------------------------------------------
+# /api/games  (list)
+# ---------------------------------------------------------------------------
+
+class TestHandleGamesList:
+    def test_returns_empty_list_no_games(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        (tmp_path / "games").mkdir()
+        with flask_app.test_client() as client:
+            resp = client.get("/api/games")
+        assert resp.status_code == 200
+        assert resp.get_json() == []
+
+
+# ---------------------------------------------------------------------------
+# /api/announcer/heartbeat  (POST)
+# ---------------------------------------------------------------------------
+
+class TestAnnouncerHeartbeat:
+    def _make_adb(self):
+        adb = MagicMock()
+        adb.update_heartbeat = MagicMock()
+        return adb
+
+    def test_heartbeat_rejected_without_origin(self, flask_app, monkeypatch):
+        monkeypatch.setattr(sd, "WRITE_ORIGINS", ["https://test.example.com"])
+        with flask_app.test_client() as client:
+            resp = client.post(
+                "/api/announcer/heartbeat",
+                json={"worker_id": "mac"},
+                content_type="application/json",
+            )
+        assert resp.status_code == 403
+
+    def test_heartbeat_accepted_with_origin(self, flask_app, monkeypatch):
+        monkeypatch.setattr(sd, "WRITE_ORIGINS", ["https://test.example.com"])
+        mock_adb = self._make_adb()
+        monkeypatch.setattr(sd, "_announcer_db", lambda: mock_adb)
+        with flask_app.test_client() as client:
+            resp = client.post(
+                "/api/announcer/heartbeat",
+                json={"worker_id": "mac", "version": "1.0"},
+                content_type="application/json",
+                headers={"Origin": "https://test.example.com"},
+            )
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["status"] == "ok"
+        assert data["worker_id"] == "mac"
+
+    def test_heartbeat_calls_update_heartbeat(self, flask_app, monkeypatch):
+        monkeypatch.setattr(sd, "WRITE_ORIGINS", ["https://test.example.com"])
+        mock_adb = self._make_adb()
+        monkeypatch.setattr(sd, "_announcer_db", lambda: mock_adb)
+        with flask_app.test_client() as client:
+            client.post(
+                "/api/announcer/heartbeat",
+                json={"worker_id": "mac", "version": "2.0"},
+                content_type="application/json",
+                headers={"Origin": "https://test.example.com"},
+            )
+        mock_adb.update_heartbeat.assert_called_once_with("mac", "2.0")
+
+    def test_heartbeat_default_worker_id(self, flask_app, monkeypatch):
+        monkeypatch.setattr(sd, "WRITE_ORIGINS", ["https://test.example.com"])
+        mock_adb = self._make_adb()
+        monkeypatch.setattr(sd, "_announcer_db", lambda: mock_adb)
+        with flask_app.test_client() as client:
+            resp = client.post(
+                "/api/announcer/heartbeat",
+                json={},
+                content_type="application/json",
+                headers={"Origin": "https://test.example.com"},
+            )
+        data = resp.get_json()
+        assert data["worker_id"] == "mac"
+
+
+# ---------------------------------------------------------------------------
+# /api/announcer/worker-status  (GET)
+# ---------------------------------------------------------------------------
+
+class TestAnnouncerWorkerStatus:
+    def _make_adb(self, hb=None, pending=0, alive=False):
+        adb = MagicMock()
+        adb.get_heartbeat_info = MagicMock(return_value=hb)
+        adb.get_pending_jobs = MagicMock(return_value=list(range(pending)))
+        adb.is_worker_alive = MagicMock(return_value=alive)
+        return adb
+
+    def test_returns_200(self, flask_app, monkeypatch):
+        adb = self._make_adb()
+        monkeypatch.setattr(sd, "_announcer_db", lambda: adb)
+        with flask_app.test_client() as client:
+            resp = client.get("/api/announcer/worker-status")
+        assert resp.status_code == 200
+
+    def test_hub_status_always_online(self, flask_app, monkeypatch):
+        adb = self._make_adb()
+        monkeypatch.setattr(sd, "_announcer_db", lambda: adb)
+        with flask_app.test_client() as client:
+            resp = client.get("/api/announcer/worker-status")
+        assert resp.get_json()["hub_status"] == "ONLINE"
+
+    def test_offline_when_no_heartbeat(self, flask_app, monkeypatch):
+        adb = self._make_adb(hb=None, alive=False)
+        monkeypatch.setattr(sd, "_announcer_db", lambda: adb)
+        with flask_app.test_client() as client:
+            resp = client.get("/api/announcer/worker-status")
+        data = resp.get_json()
+        assert data["primary_worker"]["status"] == "OFFLINE"
+        assert data["current_mode"] == "RAPID"
+
+    def test_active_when_alive_with_pending_jobs(self, flask_app, monkeypatch):
+        hb = {"worker_id": "mac-pro", "last_seen_at": "2026-05-08T12:00:00"}
+        adb = self._make_adb(hb=hb, pending=3, alive=True)
+        monkeypatch.setattr(sd, "_announcer_db", lambda: adb)
+        with flask_app.test_client() as client:
+            resp = client.get("/api/announcer/worker-status")
+        data = resp.get_json()
+        assert data["primary_worker"]["status"] == "ACTIVE"
+        assert data["current_mode"] == "ELITE"
+        assert data["primary_worker"]["queue_depth"] == 3
+
+    def test_standby_when_alive_no_pending_jobs(self, flask_app, monkeypatch):
+        hb = {"worker_id": "mac-pro", "last_seen_at": "2026-05-08T12:00:00"}
+        adb = self._make_adb(hb=hb, pending=0, alive=True)
+        monkeypatch.setattr(sd, "_announcer_db", lambda: adb)
+        with flask_app.test_client() as client:
+            resp = client.get("/api/announcer/worker-status")
+        data = resp.get_json()
+        assert data["primary_worker"]["status"] == "STANDBY"
+
+    def test_offline_when_heartbeat_exists_but_not_alive(self, flask_app, monkeypatch):
+        hb = {"worker_id": "mac-pro", "last_seen_at": "2026-05-01T12:00:00"}
+        adb = self._make_adb(hb=hb, pending=0, alive=False)
+        monkeypatch.setattr(sd, "_announcer_db", lambda: adb)
+        with flask_app.test_client() as client:
+            resp = client.get("/api/announcer/worker-status")
+        data = resp.get_json()
+        assert data["primary_worker"]["status"] == "OFFLINE"
+
+    def test_failover_worker_always_ready(self, flask_app, monkeypatch):
+        adb = self._make_adb()
+        monkeypatch.setattr(sd, "_announcer_db", lambda: adb)
+        with flask_app.test_client() as client:
+            resp = client.get("/api/announcer/worker-status")
+        data = resp.get_json()
+        assert data["failover_worker"]["status"] == "READY"
+
+
+# ---------------------------------------------------------------------------
+# /api/announcer/render-queue  (GET)
+# ---------------------------------------------------------------------------
+
+class TestAnnouncerRenderQueueGet:
+    def test_returns_200_with_empty_jobs(self, flask_app, monkeypatch):
+        adb = MagicMock()
+        adb.get_pending_jobs = MagicMock(return_value=[])
+        monkeypatch.setattr(sd, "_announcer_db", lambda: adb)
+        with flask_app.test_client() as client:
+            resp = client.get("/api/announcer/render-queue")
+        assert resp.status_code == 200
+        assert resp.get_json()["jobs"] == []
+
+    def test_returns_jobs_list(self, flask_app, monkeypatch):
+        adb = MagicMock()
+        adb.get_pending_jobs = MagicMock(return_value=[{"id": "j1"}, {"id": "j2"}])
+        monkeypatch.setattr(sd, "_announcer_db", lambda: adb)
+        with flask_app.test_client() as client:
+            resp = client.get("/api/announcer/render-queue")
+        data = resp.get_json()
+        assert len(data["jobs"]) == 2
+
+
+# ---------------------------------------------------------------------------
+# auto_deactivate_subs()
+# ---------------------------------------------------------------------------
+
+class TestAutoDeactivateSubs:
+    def _setup_files(self, tmp_path, past_date="2020-01-01", roster=None):
+        """Write minimal schedule + availability + roster_manifest to tmp_path.
+
+        roster_manifest must be non-empty or auto_deactivate_subs() exits early
+        (can't distinguish subs from starters without a core player list).
+        """
+        sd._ROSTER_MANIFEST_CACHE = None
+        sched = {
+            "past": [{"opponent": "Old Team", "date": past_date}],
+            "upcoming": [],
+        }
+        avail = {"Sub Player": True}
+        # Include at least one core player so the manifest is truthy
+        manifest = {"core_players": roster or ["Jane Core"]}
+        (tmp_path / "schedule_manual.json").write_text(json.dumps(sched))
+        (tmp_path / "availability.json").write_text(json.dumps(avail))
+        (tmp_path / "roster_manifest.json").write_text(json.dumps(manifest))
+
+    def test_no_op_when_no_schedule_file(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        sd._ROSTER_MANIFEST_CACHE = None
+        (tmp_path / "availability.json").write_text('{}')
+        # No schedule_manual.json — should return without modifying
+        sd.auto_deactivate_subs()
+
+    def test_no_op_when_no_availability_file(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        sd._ROSTER_MANIFEST_CACHE = None
+        sched = {"past": [{"date": "2020-01-01"}], "upcoming": []}
+        (tmp_path / "schedule_manual.json").write_text(json.dumps(sched))
+        sd.auto_deactivate_subs()
+
+    def test_no_op_when_no_manifest(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        sd._ROSTER_MANIFEST_CACHE = None
+        sched = {"past": [{"date": "2020-01-01"}], "upcoming": []}
+        (tmp_path / "schedule_manual.json").write_text(json.dumps(sched))
+        (tmp_path / "availability.json").write_text('{"Sub Player": true}')
+        # No roster_manifest.json — _load_roster_manifest returns [] → skip
+        sd.auto_deactivate_subs()
+        saved = json.loads((tmp_path / "availability.json").read_text())
+        assert saved["Sub Player"] is True
+        sd._ROSTER_MANIFEST_CACHE = None
+
+    def test_no_op_when_no_past_games(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        sd._ROSTER_MANIFEST_CACHE = None
+        sched = {"past": [], "upcoming": []}
+        (tmp_path / "schedule_manual.json").write_text(json.dumps(sched))
+        (tmp_path / "availability.json").write_text('{"Sub Player": true}')
+        (tmp_path / "roster_manifest.json").write_text('{"core_players": []}')
+        sd.auto_deactivate_subs()
+        sd._ROSTER_MANIFEST_CACHE = None
+
+    def test_deactivates_sub_after_game_day(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        self._setup_files(tmp_path, past_date="2020-01-01")
+        sd.auto_deactivate_subs()
+        saved = json.loads((tmp_path / "availability.json").read_text())
+        assert saved["Sub Player"] is False
+        sd._ROSTER_MANIFEST_CACHE = None
+
+    def test_does_not_deactivate_core_player(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        sd._ROSTER_MANIFEST_CACHE = None
+        sched = {"past": [{"date": "2020-01-01"}], "upcoming": []}
+        avail = {"Jane Doe": True}
+        manifest = {"core_players": ["Jane Doe"]}
+        (tmp_path / "schedule_manual.json").write_text(json.dumps(sched))
+        (tmp_path / "availability.json").write_text(json.dumps(avail))
+        (tmp_path / "roster_manifest.json").write_text(json.dumps(manifest))
+        sd.auto_deactivate_subs()
+        saved = json.loads((tmp_path / "availability.json").read_text())
+        assert saved["Jane Doe"] is True
+        sd._ROSTER_MANIFEST_CACHE = None
+
+    def test_does_not_deactivate_twice(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        sd._ROSTER_MANIFEST_CACHE = None
+        sched = {"past": [{"date": "2020-01-01"}], "upcoming": []}
+        avail = {"Sub Player": True}  # still active — but tracker says already done
+        manifest = {"core_players": ["Jane Core"]}  # non-empty so function doesn't exit early
+        tracker = {"Sub Player": {"deactivated_after_game": "2020-01-01", "auto_deactivated": True}}
+        (tmp_path / "schedule_manual.json").write_text(json.dumps(sched))
+        (tmp_path / "availability.json").write_text(json.dumps(avail))
+        (tmp_path / "roster_manifest.json").write_text(json.dumps(manifest))
+        (tmp_path / "sub_tracker.json").write_text(json.dumps(tracker))
+        sd.auto_deactivate_subs()
+        # availability should not be changed since already_deactivated is True
+        saved = json.loads((tmp_path / "availability.json").read_text())
+        assert saved["Sub Player"] is True
+        sd._ROSTER_MANIFEST_CACHE = None
+
+    def test_no_deactivation_if_game_day_is_today(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        sd._ROSTER_MANIFEST_CACHE = None
+        today = datetime.now(ET).strftime("%Y-%m-%d")
+        sched = {"past": [{"date": today}], "upcoming": []}
+        avail = {"Sub Player": True}
+        manifest = {"core_players": ["Jane Core"]}  # non-empty so function doesn't exit early
+        (tmp_path / "schedule_manual.json").write_text(json.dumps(sched))
+        (tmp_path / "availability.json").write_text(json.dumps(avail))
+        (tmp_path / "roster_manifest.json").write_text(json.dumps(manifest))
+        sd.auto_deactivate_subs()
+        saved = json.loads((tmp_path / "availability.json").read_text())
+        assert saved["Sub Player"] is True  # not deactivated — game is today
+        sd._ROSTER_MANIFEST_CACHE = None
+
+
+# ---------------------------------------------------------------------------
+# Pure helper functions
+# ---------------------------------------------------------------------------
+
+class TestTtsStat:
+    def test_decimal_stat_spoken_form(self):
+        result = sd._tts_stat(0.778)
+        assert "seven" in result.lower()
+
+    def test_zero_returns_zero(self):
+        result = sd._tts_stat(0.0)
+        assert result == "zero"
+
+    def test_integer_like_stat(self):
+        result = sd._tts_stat(1.234)
+        assert result  # any non-empty string
+
+    def test_non_numeric_passthrough(self):
+        result = sd._tts_stat("N/A")
+        assert result == "N/A"
+
+    def test_negative_decimal(self):
+        result = sd._tts_stat(-0.123)
+        assert result  # just must not crash
+
+    def test_large_value_non_decimal(self):
+        result = sd._tts_stat(42)
+        assert "42" in result
+
+    def test_three_digit_after_decimal(self):
+        result = sd._tts_stat(0.500)
+        assert "five" in result.lower() or "00" in result or "0" in result
+
+
+class TestApplyPhonetics:
+    def test_known_word_replaced(self):
+        result = sd._apply_phonetics("The Sharks face PCLL tonight")
+        assert "Palm Coast Little League" in result
+
+    def test_case_insensitive(self):
+        result = sd._apply_phonetics("pcll standings")
+        assert "Palm Coast Little League" in result
+
+    def test_unknown_word_unchanged(self):
+        result = sd._apply_phonetics("Hello world")
+        assert result == "Hello world"
+
+    def test_empty_string(self):
+        assert sd._apply_phonetics("") == ""
+
+
+class TestCleanOpponentName:
+    def test_strips_at_prefix(self):
+        assert sd._clean_opponent_name("@ Tigers") == "Tigers"
+
+    def test_strips_vs_dot_prefix(self):
+        assert sd._clean_opponent_name("vs. Lions") == "Lions"
+
+    def test_strips_vs_space_prefix(self):
+        assert sd._clean_opponent_name("vs Bears") == "Bears"
+
+    def test_no_prefix_unchanged(self):
+        assert sd._clean_opponent_name("Panthers") == "Panthers"
+
+    def test_strips_whitespace(self):
+        assert sd._clean_opponent_name("  @ Wolves  ") == "Wolves"
+
+
+class TestAllRosterNames:
+    def test_returns_full_roster_names(self):
+        team = {"roster": [
+            {"first": "Jane", "last": "Doe"},
+            {"first": "Bob", "last": "Smith"},
+        ]}
+        names = sd._all_roster_names(team)
+        assert "Jane Doe" in names
+        assert "Bob Smith" in names
+
+    def test_empty_roster(self):
+        assert sd._all_roster_names({"roster": []}) == []
+
+    def test_uses_name_field_if_present(self):
+        team = {"roster": [{"name": "Full Name"}]}
+        assert "Full Name" in sd._all_roster_names(team)
+
+
+class TestCoreRosterNames:
+    def test_includes_default_players(self):
+        team = {"roster": [
+            {"first": "Jane", "last": "Doe"},
+            {"first": "Bob", "last": "Smith"},
+        ]}
+        names = sd._core_roster_names(team)
+        assert "Jane Doe" in names
+        assert "Bob Smith" in names
+
+    def test_excludes_core_false_players(self):
+        team = {"roster": [
+            {"first": "Jane", "last": "Doe"},
+            {"first": "Sub", "last": "Player", "core": False},
+        ]}
+        names = sd._core_roster_names(team)
+        assert "Sub Player" not in names
+
+    def test_sorted_alphabetically(self):
+        team = {"roster": [
+            {"first": "Zara", "last": "Z"},
+            {"first": "Alice", "last": "A"},
+        ]}
+        names = sd._core_roster_names(team)
+        assert names[0] == "Alice A"
+        assert names[1] == "Zara Z"
+
+
+class TestCalcPlayerPracticeProfile:
+    def test_returns_expected_keys(self):
+        player = {}
+        prof = sd._calc_player_practice_profile(player)
+        for key in ("pa", "ab", "h", "obp", "slg", "k_rate", "bb_rate", "ip", "errors", "fpct"):
+            assert key in prof
+
+    def test_k_rate_calculated(self):
+        player = {"pa": 10, "so": 4}
+        prof = sd._calc_player_practice_profile(player)
+        assert abs(prof["k_rate"] - 0.4) < 0.01
+
+    def test_zero_division_safe(self):
+        player = {"pa": 0, "ab": 0, "so": 0}
+        prof = sd._calc_player_practice_profile(player)
+        assert prof["k_rate"] == 0.0
+        assert prof["bb_rate"] == 0.0
+
+
+class TestBuildPracticeNeeds:
+    def test_empty_team_returns_empty_list(self):
+        needs = sd._build_practice_needs({"roster": []}, [])
+        assert needs == []
+
+    def test_returns_list(self):
+        team = {"roster": [{"first": "Jane", "last": "Doe", "pa": 10, "so": 5}]}
+        needs = sd._build_practice_needs(team, ["Jane Doe"])
+        assert isinstance(needs, list)
+
+    def test_priority_assigned(self):
+        team = {"roster": [
+            {"first": "Jane", "last": "Doe", "pa": 8, "so": 4, "obp": 0.20, "slg": 0.20},
+        ]}
+        needs = sd._build_practice_needs(team, ["Jane Doe"])
+        if needs:
+            assert needs[0]["priority"] == 1
+
+    def test_player_not_in_selected_excluded(self):
+        team = {"roster": [
+            {"first": "Jane", "last": "Doe", "pa": 10, "so": 5},
+            {"first": "Bob", "last": "Smith", "pa": 10, "so": 5},
+        ]}
+        needs = sd._build_practice_needs(team, ["Jane Doe"])
+        # Bob not in selected — shouldn't appear in focus_players
+        all_focus = [p for n in needs for p in n.get("focus_players", [])]
+        assert all("Bob" not in fp for fp in all_focus)
+
+
+class TestBuildVoiceOverviewText:
+    def _make_ctx(self):
+        return {
+            "team": {
+                "team_name": "The Sharks",
+                "roster": [
+                    {"first": "Jane", "last": "Doe", "obp": 0.500, "ops": 1.0, "number": "7"},
+                ],
+            },
+            "swot": {"team_swot": {"strengths": ["Great pitching"], "weaknesses": ["Low OBP"]}},
+            "lineups": {"balanced": {"lineup": [{"first": "Jane", "last": "Doe", "number": "7"}]}},
+            "schedule": {"upcoming": [{"opponent": "Tigers", "date": "2099-06-01", "home_away": "home"}]},
+            "games": [{"date": "2024-01-01", "result": "W"}, {"date": "2024-01-02", "result": "L"}],
+        }
+
+    def test_returns_string(self):
+        text = sd._build_voice_overview_text(self._make_ctx())
+        assert isinstance(text, str)
+        assert len(text) > 50
+
+    def test_contains_team_name(self):
+        text = sd._build_voice_overview_text(self._make_ctx())
+        assert "Sharks" in text
+
+    def test_includes_win_loss_record(self):
+        text = sd._build_voice_overview_text(self._make_ctx())
+        assert "1 and 1" in text
+
+    def test_empty_ctx_does_not_crash(self):
+        text = sd._build_voice_overview_text({})
+        assert isinstance(text, str)
+
+    def test_no_games_shows_zero_record(self):
+        ctx = self._make_ctx()
+        ctx["games"] = []
+        text = sd._build_voice_overview_text(ctx)
+        assert "oh and oh" in text
+
+    def test_applies_pcll_phonetics(self):
+        ctx = self._make_ctx()
+        ctx["schedule"]["upcoming"][0]["opponent"] = "PCLL All-Stars"
+        text = sd._build_voice_overview_text(ctx)
+        assert "Palm Coast Little League" in text or "PCLL" not in text
+
+
+# ---------------------------------------------------------------------------
+# /api/practice-insights  GET
+# ---------------------------------------------------------------------------
+
+class TestHandlePracticeInsights:
+    def test_returns_200_with_no_team_file(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(sd, "CONFIG_DIR", tmp_path)
+        with flask_app.test_client() as client:
+            resp = client.get("/api/practice-insights")
+        assert resp.status_code == 200
+
+    def test_returns_needs_key(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(sd, "CONFIG_DIR", tmp_path)
+        with flask_app.test_client() as client:
+            resp = client.get("/api/practice-insights")
+        data = resp.get_json()
+        assert "needs" in data
+
+    def test_returns_recommended_plan_key(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(sd, "CONFIG_DIR", tmp_path)
+        with flask_app.test_client() as client:
+            resp = client.get("/api/practice-insights")
+        data = resp.get_json()
+        assert "recommended_plan" in data
+
+    def test_with_team_file_returns_team_name(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(sd, "CONFIG_DIR", tmp_path)
+        team = {"team_name": "The Sharks", "roster": [
+            {"first": "Jane", "last": "Doe"},
+        ]}
+        (tmp_path / "team_enriched.json").write_text(json.dumps(team))
+        with flask_app.test_client() as client:
+            resp = client.get("/api/practice-insights")
+        data = resp.get_json()
+        assert "Sharks" in data.get("team_name", "")
+
+    def test_player_filter_via_query_string(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(sd, "CONFIG_DIR", tmp_path)
+        team = {"team_name": "The Sharks", "roster": [
+            {"first": "Jane", "last": "Doe"},
+            {"first": "Bob", "last": "Smith"},
+        ]}
+        (tmp_path / "team_enriched.json").write_text(json.dumps(team))
+        with flask_app.test_client() as client:
+            resp = client.get("/api/practice-insights?players=Jane+Doe")
+        assert resp.status_code == 200
+
+    def test_fallback_general_fundamentals_when_no_stat_data(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(sd, "CONFIG_DIR", tmp_path)
+        with flask_app.test_client() as client:
+            resp = client.get("/api/practice-insights")
+        data = resp.get_json()
+        need_keys = [n["key"] for n in data.get("needs", [])]
+        assert "general_fundamentals" in need_keys
+
+
+# ---------------------------------------------------------------------------
+# _load_practice_rsvp_defaults
+# ---------------------------------------------------------------------------
+
+class TestLoadPracticeRsvpDefaults:
+    def _make_team(self):
+        return {"roster": [
+            {"first": "Jane", "last": "Doe"},
+            {"first": "Sam", "last": "Smith"},
+        ]}
+
+    def test_fallback_to_full_roster_when_no_rsvp_no_avail(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        team = self._make_team()
+        names, source, _ = sd._load_practice_rsvp_defaults(team)
+        assert source == "roster_default"
+        assert "Jane Doe" in names
+
+    def test_uses_availability_when_no_rsvp(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        team = self._make_team()
+        avail = {"Jane Doe": True, "Sam Smith": False}
+        (tmp_path / "availability.json").write_text(json.dumps(avail))
+        names, source, _ = sd._load_practice_rsvp_defaults(team)
+        assert source == "availability"
+        assert "Jane Doe" in names
+        assert "Sam Smith" not in names
+
+    def test_uses_rsvp_next_attending(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        team = self._make_team()
+        rsvp = {"next": {"date": "2026-06-01", "title": "Practice", "attending": ["Jane Doe"]}}
+        (tmp_path / "practice_rsvp.json").write_text(json.dumps(rsvp))
+        names, source, meta = sd._load_practice_rsvp_defaults(team)
+        assert source == "practice_rsvp"
+        assert "Jane Doe" in names
+
+    def test_rsvp_meta_date_returned(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        team = self._make_team()
+        rsvp = {"next": {"date": "2026-06-15", "title": "Big Practice", "attending": ["Jane Doe"]}}
+        (tmp_path / "practice_rsvp.json").write_text(json.dumps(rsvp))
+        _, _, meta = sd._load_practice_rsvp_defaults(team)
+        assert meta["date"] == "2026-06-15"
+        assert meta["title"] == "Big Practice"
+
+    def test_uses_rsvp_practices_list(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        team = self._make_team()
+        rsvp = {
+            "practices": [
+                {"date": "2099-06-01", "title": "Future Practice", "attending": ["Jane Doe"]},
+            ]
+        }
+        (tmp_path / "practice_rsvp.json").write_text(json.dumps(rsvp))
+        names, source, _ = sd._load_practice_rsvp_defaults(team)
+        assert source == "practice_rsvp"
+        assert "Jane Doe" in names
+
+
+# ---------------------------------------------------------------------------
+# /api/voice-update  GET
+# ---------------------------------------------------------------------------
+
+class TestHandleVoiceUpdate:
+    def test_returns_404_when_no_file_no_api_key(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        # No voice file, no ElevenLabs key — should return 404 error JSON
+        with flask_app.test_client() as client:
+            resp = client.get("/api/voice-update")
+        assert resp.status_code == 404
+        data = resp.get_json()
+        assert "no_voice_available" in data.get("error", "")
+
+    def test_returns_mp3_when_file_exists(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        mp3_file = tmp_path / "voice_update.mp3"
+        mp3_file.write_bytes(b"\xff\xfbFakeMP3Data")  # minimal fake MP3
+        with flask_app.test_client() as client:
+            resp = client.get("/api/voice-update")
+        assert resp.status_code == 200
+        assert resp.content_type == "audio/mpeg"
+
+    def test_returns_fresh_voice_without_stale_header(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        mp3_file = tmp_path / "voice_update.mp3"
+        mp3_file.write_bytes(b"\xff\xfbFakeMP3Data")
+        with flask_app.test_client() as client:
+            resp = client.get("/api/voice-update")
+        assert resp.headers.get("X-Voice-Stale") is None
+
+    def test_stale_header_when_file_older_than_24h(self, flask_app, monkeypatch, tmp_path):
+        import time as _t
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        mp3_file = tmp_path / "voice_update.mp3"
+        mp3_file.write_bytes(b"\xff\xfbFakeMP3Data")
+        # Set modification time to 25 hours ago
+        old_mtime = _t.time() - (25 * 3600)
+        import os
+        os.utime(mp3_file, (old_mtime, old_mtime))
+        with flask_app.test_client() as client:
+            resp = client.get("/api/voice-update")
+        assert resp.headers.get("X-Voice-Stale") == "true"
+
+    def test_includes_generated_at_header_from_meta(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        mp3_file = tmp_path / "voice_update.mp3"
+        mp3_file.write_bytes(b"\xff\xfbFakeMP3Data")
+        meta = {"generated_at": "2026-05-08T10:00:00"}
+        (tmp_path / "voice_overview_latest.json").write_text(json.dumps(meta))
+        with flask_app.test_client() as client:
+            resp = client.get("/api/voice-update")
+        assert "2026-05-08" in resp.headers.get("X-Voice-Generated-At", "")
+
+
+# ---------------------------------------------------------------------------
+# /api/regenerate-lineups  POST
+# ---------------------------------------------------------------------------
+
+class TestHandleRegenerateLineups:
+    def test_returns_403_without_origin(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(sd, "WRITE_ORIGINS", ["https://test.example.com"])
+        with flask_app.test_client() as client:
+            resp = client.post(
+                "/api/regenerate-lineups",
+                json={},
+                content_type="application/json",
+            )
+        assert resp.status_code == 403
+
+    def test_returns_415_for_non_json(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(sd, "WRITE_ORIGINS", ["https://test.example.com"])
+        with flask_app.test_client() as client:
+            resp = client.post(
+                "/api/regenerate-lineups",
+                data="plain text",
+                content_type="text/plain",
+                headers={"Origin": "https://test.example.com"},
+            )
+        assert resp.status_code == 415
+
+    def test_success_with_mocked_optimizer(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(sd, "WRITE_ORIGINS", ["https://test.example.com"])
+        import types
+        fake_lo = types.ModuleType("lineup_optimizer")
+        fake_lo.run = MagicMock()
+        monkeypatch.setitem(sys.modules, "lineup_optimizer", fake_lo)
+        with flask_app.test_client() as client:
+            resp = client.post(
+                "/api/regenerate-lineups",
+                json={},
+                content_type="application/json",
+                headers={"Origin": "https://test.example.com"},
+            )
+        assert resp.status_code == 200
+        assert resp.get_json()["status"] == "ok"
+
+    def test_returns_lineups_from_file(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(sd, "WRITE_ORIGINS", ["https://test.example.com"])
+        import types
+        fake_lo = types.ModuleType("lineup_optimizer")
+        fake_lo.run = MagicMock()
+        monkeypatch.setitem(sys.modules, "lineup_optimizer", fake_lo)
+        lineups = {"balanced": {"lineup": []}, "aggressive": {"lineup": []}}
+        (tmp_path / "lineups.json").write_text(json.dumps(lineups))
+        with flask_app.test_client() as client:
+            resp = client.post(
+                "/api/regenerate-lineups",
+                json={},
+                content_type="application/json",
+                headers={"Origin": "https://test.example.com"},
+            )
+        data = resp.get_json()
+        assert "balanced" in data["lineups"]
+
+    def test_500_on_optimizer_error(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(sd, "WRITE_ORIGINS", ["https://test.example.com"])
+        import types
+        fake_lo = types.ModuleType("lineup_optimizer")
+        fake_lo.run = MagicMock(side_effect=RuntimeError("lineup broke"))
+        monkeypatch.setitem(sys.modules, "lineup_optimizer", fake_lo)
+        with flask_app.test_client() as client:
+            resp = client.post(
+                "/api/regenerate-lineups",
+                json={},
+                content_type="application/json",
+                headers={"Origin": "https://test.example.com"},
+            )
+        assert resp.status_code == 500
+        assert "regenerate_failed" in resp.get_json().get("error", "")
+
+
+# ---------------------------------------------------------------------------
+# /api/announcer/roster  GET
+# ---------------------------------------------------------------------------
+
+class TestHandleAnnouncerRoster:
+    def test_returns_500_when_announcer_engine_raises(self, flask_app, monkeypatch):
+        import types
+        fake_ae = types.ModuleType("announcer_engine")
+        fake_ae.load_announcer_roster = MagicMock(side_effect=RuntimeError("engine broke"))
+        fake_ae.get_roster_stats = MagicMock(return_value={})
+        monkeypatch.setitem(sys.modules, "announcer_engine", fake_ae)
+        with flask_app.test_client() as client:
+            resp = client.get("/api/announcer/roster")
+        assert resp.status_code == 500
+        assert "announcer_roster_failed" in resp.get_json().get("error", "")
+
+    def test_returns_roster_and_stats(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        import types
+        fake_ae = types.ModuleType("announcer_engine")
+        fake_ae.load_announcer_roster = MagicMock(return_value=[{"id": "p1", "first": "Jane", "last": "Doe"}])
+        fake_ae.get_roster_stats = MagicMock(return_value={"total": 1})
+        monkeypatch.setitem(sys.modules, "announcer_engine", fake_ae)
+        with flask_app.test_client() as client:
+            resp = client.get("/api/announcer/roster")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert "roster" in data
+        assert data["stats"]["total"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Availability POST — sub tracker activation branch
+# ---------------------------------------------------------------------------
+
+class TestHandleAvailabilityPostSubTracker:
+    def test_activating_non_core_sub_updates_tracker(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(sd, "WRITE_ORIGINS", ["https://test.example.com"])
+        sd._ROSTER_MANIFEST_CACHE = None
+        # No core players — so any player is a sub
+        (tmp_path / "roster_manifest.json").write_text('{"core_players": []}')
+        # Old availability: Sub is False
+        (tmp_path / "availability.json").write_text('{"Sub Player": false}')
+        import types
+        fake_lo = types.ModuleType("lineup_optimizer")
+        fake_lo.run = MagicMock()
+        fake_sa = types.ModuleType("swot_analyzer")
+        fake_sa.run_sharks_analysis = MagicMock()
+        monkeypatch.setitem(sys.modules, "lineup_optimizer", fake_lo)
+        monkeypatch.setitem(sys.modules, "swot_analyzer", fake_sa)
+        with flask_app.test_client() as client:
+            resp = client.post(
+                "/api/availability",
+                json={"Sub Player": True},
+                content_type="application/json",
+                headers={"Origin": "https://test.example.com"},
+            )
+        assert resp.status_code == 200
+        # sub_tracker should now have "Sub Player"
+        tracker = json.loads((tmp_path / "sub_tracker.json").read_text())
+        assert "Sub Player" in tracker
+        assert tracker["Sub Player"]["auto_deactivated"] is False
+        sd._ROSTER_MANIFEST_CACHE = None
+
+    def test_optimizer_exception_does_not_break_response(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(sd, "WRITE_ORIGINS", ["https://test.example.com"])
+        sd._ROSTER_MANIFEST_CACHE = None
+        (tmp_path / "roster_manifest.json").write_text('{"core_players": ["Jane Doe"]}')
+        import types
+        fake_lo = types.ModuleType("lineup_optimizer")
+        fake_lo.run = MagicMock(side_effect=RuntimeError("optimizer broke"))
+        monkeypatch.setitem(sys.modules, "lineup_optimizer", fake_lo)
+        with flask_app.test_client() as client:
+            resp = client.post(
+                "/api/availability",
+                json={"Jane Doe": True},
+                content_type="application/json",
+                headers={"Origin": "https://test.example.com"},
+            )
+        assert resp.status_code == 200
+        sd._ROSTER_MANIFEST_CACHE = None
+
+
+# ---------------------------------------------------------------------------
+# _pick_scoreboard_target  (pure function)
+# ---------------------------------------------------------------------------
+
+class TestPickScoreboardTarget:
+    def test_returns_none_for_empty_games(self):
+        now = datetime.now(ET)
+        today_str = now.strftime("%Y-%m-%d")
+        result = sd._pick_scoreboard_target([], now, today_str)
+        assert result is None
+
+    def test_picks_in_progress_game(self):
+        now = datetime.now(ET)
+        today_str = now.strftime("%Y-%m-%d")
+        game = {"game_id": "live1", "game_status": "in_progress", "start_ts": now.isoformat()}
+        result = sd._pick_scoreboard_target([game], now, today_str)
+        assert result is game
+
+    def test_picks_todays_game(self):
+        now = datetime.now(ET)
+        today_str = now.strftime("%Y-%m-%d")
+        game = {"game_id": "today1", "game_status": "scheduled",
+                "start_ts": f"{today_str}T12:00:00-04:00"}
+        result = sd._pick_scoreboard_target([game], now, today_str)
+        assert result is game
+
+    def test_prefers_live_over_today(self):
+        now = datetime.now(ET)
+        today_str = now.strftime("%Y-%m-%d")
+        today_game = {"game_id": "today", "game_status": "scheduled",
+                      "start_ts": f"{today_str}T12:00:00-04:00"}
+        live_game = {"game_id": "live", "game_status": "active",
+                     "start_ts": now.isoformat()}
+        result = sd._pick_scoreboard_target([today_game, live_game], now, today_str)
+        assert result["game_id"] == "live"
+
+    def test_rejects_stale_live_game(self):
+        now = datetime.now(ET)
+        today_str = now.strftime("%Y-%m-%d")
+        # Game started 10 hours ago with in_progress status (stale GC bug)
+        stale_ts = (now.replace(tzinfo=None) - timedelta(hours=10))
+        stale_iso = stale_ts.isoformat() + "-04:00"
+        stale_game = {"game_id": "stale", "game_status": "in_progress", "start_ts": stale_iso}
+        result = sd._pick_scoreboard_target([stale_game], now, today_str)
+        assert result is None
+
+    def test_returns_none_for_past_game(self):
+        now = datetime.now(ET)
+        today_str = now.strftime("%Y-%m-%d")
+        game = {"game_id": "old", "game_status": "completed",
+                "start_ts": "2020-01-01T12:00:00-04:00"}
+        result = sd._pick_scoreboard_target([game], now, today_str)
+        assert result is None
+
+    def test_game_with_invalid_timestamp(self):
+        now = datetime.now(ET)
+        today_str = now.strftime("%Y-%m-%d")
+        game = {"game_id": "bad_ts", "game_status": "active", "start_ts": "not-a-date"}
+        result = sd._pick_scoreboard_target([game], now, today_str)
+        # active status without valid ts — live_game should still be set
+        assert result is game
+
+
+# ---------------------------------------------------------------------------
+# _augment_sharks_batting  (pure function with file I/O)
+# ---------------------------------------------------------------------------
+
+class TestAugmentSharksBatting:
+    def test_empty_list_passthrough(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        result = sd._augment_sharks_batting([])
+        assert result == []
+
+    def test_no_team_merged_passthrough(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        rows = [{"name": "Jane", "h": 2, "ab": 4}]
+        result = sd._augment_sharks_batting(rows)
+        assert result == rows
+
+    def test_augments_with_season_stats(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        roster_data = {
+            "roster": [{"name": "Jane Doe", "number": "7",
+                        "batting": {"avg": 0.400, "slg": 0.700, "obp": 0.500, "ops": 1.200}}]
+        }
+        (tmp_path / "team_merged.json").write_text(json.dumps(roster_data))
+        rows = [{"name": "Jane Doe", "number": "7", "h": 2, "ab": 4}]
+        result = sd._augment_sharks_batting(rows)
+        assert result[0].get("avg") == 0.400
+
+    def test_matches_by_number(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        roster_data = {
+            "roster": [{"name": "Jane Doe", "number": "7",
+                        "batting": {"avg": 0.400, "slg": 0.700, "obp": 0.500, "ops": 1.200}}]
+        }
+        (tmp_path / "team_merged.json").write_text(json.dumps(roster_data))
+        rows = [{"player": "Who", "number": "7", "h": 1, "ab": 3}]
+        result = sd._augment_sharks_batting(rows)
+        assert result[0].get("avg") == 0.400
+
+    def test_unknown_player_not_augmented(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        roster_data = {"roster": [{"name": "Jane Doe", "number": "7", "batting": {"avg": 0.400}}]}
+        (tmp_path / "team_merged.json").write_text(json.dumps(roster_data))
+        rows = [{"name": "Mystery Player", "number": "99", "h": 1}]
+        result = sd._augment_sharks_batting(rows)
+        assert result[0].get("avg") is None
+
+    def test_exception_returns_original_rows(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        (tmp_path / "team_merged.json").write_text("{{bad json")
+        rows = [{"name": "Jane", "h": 1}]
+        result = sd._augment_sharks_batting(rows)
+        assert result == rows
+
+
+# ---------------------------------------------------------------------------
+# _slugify_opponent  (pure function)
+# ---------------------------------------------------------------------------
+
+class TestSlugifyOpponent:
+    def test_basic_slug(self):
+        assert sd._slugify_opponent("The Tigers") == "the_tigers"
+
+    def test_empty_returns_empty(self):
+        assert sd._slugify_opponent("") == ""
+
+    def test_special_chars_removed(self):
+        slug = sd._slugify_opponent("Sharks & Dolphins!")
+        assert "&" not in slug
+        assert "!" not in slug
+
+    def test_lowercase(self):
+        assert sd._slugify_opponent("TIGERS") == "tigers"
+
+
+# ---------------------------------------------------------------------------
+# _build_practice_needs — coverage for defense, pitching, baserunning branches
+# ---------------------------------------------------------------------------
+
+class TestBuildPracticeNeedsExtended:
+    def _player(self, name, **kwargs):
+        parts = name.split()
+        p = {"first": parts[0], "last": parts[-1] if len(parts) > 1 else ""}
+        p.update(kwargs)
+        return p
+
+    def test_defense_need_with_errors(self):
+        team = {"roster": [self._player("Jane Doe", pa=8, ab=6, h=2, so=1, e=3, fpct=0.85)]}
+        needs = sd._build_practice_needs(team, ["Jane Doe"])
+        keys = [n["key"] for n in needs]
+        assert "defense_reliability" in keys
+
+    def test_pitch_command_need(self):
+        team = {"roster": [self._player("Jane Doe", pa=6, ab=5, h=2, so=1, ip=3.0, bb=5)]}
+        needs = sd._build_practice_needs(team, ["Jane Doe"])
+        keys = [n["key"] for n in needs]
+        assert "pitch_command" in keys
+
+    def test_baserunning_need(self):
+        # Player with good OBP but 0 steals and >= 4 PA
+        team = {"roster": [self._player("Jane Doe", pa=8, ab=6, h=3, bb=2, obp=0.45, sb=0)]}
+        needs = sd._build_practice_needs(team, ["Jane Doe"])
+        keys = [n["key"] for n in needs]
+        assert "baserunning_iq" in keys
+
+    def test_player_with_no_name_skipped(self):
+        team = {"roster": [{"first": "", "last": "", "pa": 10, "so": 5}]}
+        needs = sd._build_practice_needs(team, [])
+        assert needs == []
+
+
+# ---------------------------------------------------------------------------
+# _load_practice_rsvp_defaults — rsvps dict branch
+# ---------------------------------------------------------------------------
+
+class TestLoadPracticeRsvpDefaultsRsvpsDict:
+    def _make_team(self):
+        return {"roster": [
+            {"first": "Jane", "last": "Doe"},
+            {"first": "Sam", "last": "Smith"},
+        ]}
+
+    def test_uses_rsvps_dict_when_attending_empty(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        team = self._make_team()
+        rsvp = {"next": {"date": "2026-06-01", "attending": [],
+                         "rsvps": {"Jane Doe": True, "Sam Smith": False}}}
+        (tmp_path / "practice_rsvp.json").write_text(json.dumps(rsvp))
+        names, source, _ = sd._load_practice_rsvp_defaults(team)
+        assert source == "practice_rsvp"
+        assert "Jane Doe" in names
+        assert "Sam Smith" not in names
+
+    def test_practices_list_uses_rsvps_fallback(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        team = self._make_team()
+        rsvp = {
+            "practices": [
+                {"date": "2099-06-01", "attending": [],
+                 "rsvps": {"Jane Doe": True, "Sam Smith": False}},
+            ]
+        }
+        (tmp_path / "practice_rsvp.json").write_text(json.dumps(rsvp))
+        names, source, _ = sd._load_practice_rsvp_defaults(team)
+        assert source == "practice_rsvp"
+        assert "Jane Doe" in names
+
+
+# ---------------------------------------------------------------------------
+# handle_game_detail — advanced stat keys + strip_totals
+# ---------------------------------------------------------------------------
+
+class TestHandleGameDetailExtended:
+    def test_advanced_keys_copied_from_sharks_block(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        games_dir = tmp_path / "games"
+        games_dir.mkdir()
+        game = {
+            "game_id": "game_adv",
+            "date": "2024-03-01",
+            "sharks": {
+                "batting": [{"name": "Jane", "pa": 3}],
+                "pitching": [],
+                "batting_advanced": [{"name": "Jane", "k_rate": 0.33}],
+            },
+        }
+        (games_dir / "game_adv.json").write_text(json.dumps(game))
+        with flask_app.test_client() as client:
+            resp = client.get("/api/games/game_adv")
+        data = resp.get_json()
+        assert "sharks_batting_advanced" in data
+
+    def test_strip_totals_row_removes_first_row(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        games_dir = tmp_path / "games"
+        games_dir.mkdir()
+        # First row PA = sum of rest (totals row pattern)
+        game = {
+            "game_id": "game_totals",
+            "date": "2024-03-02",
+            "sharks": {
+                "batting": [
+                    {"name": "TOTALS", "pa": 10},  # PA == sum of rest
+                    {"name": "Jane", "pa": 5},
+                    {"name": "Bob", "pa": 5},
+                ],
+                "pitching": [],
+            },
+        }
+        (games_dir / "game_totals.json").write_text(json.dumps(game))
+        with flask_app.test_client() as client:
+            resp = client.get("/api/games/game_totals")
+        data = resp.get_json()
+        names = [r["name"] for r in data.get("sharks_batting", [])]
+        assert "TOTALS" not in names
+
+    def test_score_dict_bridge_with_equal_score(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        games_dir = tmp_path / "games"
+        games_dir.mkdir()
+        game = {
+            "game_id": "game_tie",
+            "date": "2024-03-03",
+            "score": {"sharks": 5, "opponent": 5},
+        }
+        (games_dir / "game_tie.json").write_text(json.dumps(game))
+        with flask_app.test_client() as client:
+            resp = client.get("/api/games/game_tie")
+        data = resp.get_json()
+        assert data.get("score_str") == "5-5"
+
+
+# ---------------------------------------------------------------------------
+# handle_availability GET — empty-name player branch
+# ---------------------------------------------------------------------------
+
+class TestHandleAvailabilityGetEmptyName:
+    def test_player_with_empty_name_skipped(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        # Roster with one real player and one with empty first/last
+        team = {"roster": [
+            {"first": "Jane", "last": "Doe"},
+            {"first": "", "last": ""},  # empty name — should be skipped (line 1624-1625)
+        ]}
+        (tmp_path / "team_enriched.json").write_text(json.dumps(team))
+        with flask_app.test_client() as client:
+            resp = client.get("/api/availability")
+        data = resp.get_json()
+        assert "" not in data
+        assert " " not in data  # also no whitespace-only key
+
+
+# ---------------------------------------------------------------------------
+# /api/scoreboard  GET
+# ---------------------------------------------------------------------------
+
+class TestHandleScoreboard:
+    def _mock_gc_response(self, games_list):
+        mock_resp = MagicMock()
+        mock_resp.ok = True
+        mock_resp.json = MagicMock(return_value=games_list)
+        return mock_resp
+
+    def test_no_game_returns_no_game_status(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        with patch("sync_daemon.requests.get", return_value=self._mock_gc_response([])):
+            with flask_app.test_client() as client:
+                resp = client.get("/api/scoreboard")
+        assert resp.status_code == 200
+        assert resp.get_json()["status"] == "no_game"
+
+    def test_gc_api_error_falls_back_gracefully(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        with patch("sync_daemon.requests.get", side_effect=ConnectionError("timeout")):
+            with flask_app.test_client() as client:
+                resp = client.get("/api/scoreboard")
+        assert resp.status_code == 200
+
+    def test_upcoming_game_returned_when_no_active_game(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        today = datetime.now(ET).strftime("%Y-%m-%d")
+        sched = {"upcoming": [{"date": today, "opponent": "Tigers", "time": "6:00 PM",
+                                "is_game": True, "home_away": "home"}]}
+        (tmp_path / "schedule_manual.json").write_text(json.dumps(sched))
+        with patch("sync_daemon.requests.get", return_value=self._mock_gc_response([])):
+            with flask_app.test_client() as client:
+                resp = client.get("/api/scoreboard")
+        data = resp.get_json()
+        assert data["status"] == "upcoming"
+        assert "Tigers" in data["opponent"]
+
+    def test_live_game_returns_live_status(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        now = datetime.now(ET)
+        game = {
+            "id": "gc123",
+            "game_status": "in_progress",
+            "start_ts": now.isoformat(),
+            "score": {"team": 5, "opponent_team": 3},
+            "opponent_team": {"name": "Tigers"},
+            "home_away": "home",
+        }
+        with patch("sync_daemon.requests.get", return_value=self._mock_gc_response([game])):
+            with flask_app.test_client() as client:
+                resp = client.get("/api/scoreboard")
+        data = resp.get_json()
+        assert data["status"] == "live"
+        assert data["sharks_score"] == 5
+        assert data["opponent_score"] == 3
+
+    def test_completed_game_returns_final_status(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        today = datetime.now(ET).strftime("%Y-%m-%d")
+        game = {
+            "id": "gc456",
+            "game_status": "completed",
+            "start_ts": f"{today}T12:00:00-04:00",
+            "score": {"team": 7, "opponent_team": 2},
+            "opponent_team": {"name": "Bears"},
+        }
+        with patch("sync_daemon.requests.get", return_value=self._mock_gc_response([game])):
+            with flask_app.test_client() as client:
+                resp = client.get("/api/scoreboard")
+        data = resp.get_json()
+        assert data["status"] == "final"
+
+    def test_gc_api_returns_non_list_falls_back(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        mock_resp = MagicMock()
+        mock_resp.ok = True
+        mock_resp.json = MagicMock(return_value={"not": "a list"})
+        with patch("sync_daemon.requests.get", return_value=mock_resp):
+            with flask_app.test_client() as client:
+                resp = client.get("/api/scoreboard")
+        assert resp.status_code == 200
+        assert resp.get_json()["status"] == "no_game"
+
+    def test_includes_scouting_key_for_named_opponent(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        today = datetime.now(ET).strftime("%Y-%m-%d")
+        game = {
+            "id": "gc789",
+            "game_status": "completed",
+            "start_ts": f"{today}T12:00:00-04:00",
+            "score": {"team": 5, "opponent_team": 3},
+            "opponent_team": {"name": "Tigers"},
+        }
+        with patch("sync_daemon.requests.get", return_value=self._mock_gc_response([game])):
+            with flask_app.test_client() as client:
+                resp = client.get("/api/scoreboard")
+        data = resp.get_json()
+        assert "opponent_scouting" in data
+
+
+# ---------------------------------------------------------------------------
+# _build_games_feed (via /api/games with GC-format game files)
+# ---------------------------------------------------------------------------
+
+class TestBuildGamesFeedGcFormat:
+    def test_gc_format_game_included(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(sd, "CONFIG_DIR", tmp_path)
+        games_dir = tmp_path / "games"
+        games_dir.mkdir()
+        gc_game = {
+            "game_id": "game_gc_001",
+            "source": "gc_full_scraper_v2",
+            "date": "2024-05-01",
+            "opponent": "Tigers",
+            "score": {"sharks": 8, "opponent": 3},
+            "score_str": "8-3",
+            "sharks": {"batting": [{"name": "Jane", "pa": 4, "h": 2}], "pitching": []},
+        }
+        (games_dir / "game_gc_001.json").write_text(json.dumps(gc_game))
+        with flask_app.test_client() as client:
+            resp = client.get("/api/games")
+        data = resp.get_json()
+        ids = [g["game_id"] for g in data]
+        assert "game_gc_001" in ids
+
+    def test_gc_game_without_stats_excluded(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(sd, "CONFIG_DIR", tmp_path)
+        games_dir = tmp_path / "games"
+        games_dir.mkdir()
+        gc_game = {
+            "game_id": "game_gc_future",
+            "source": "gc_full_scraper_v2",
+            "date": "2099-06-01",
+            "opponent": "Future Team",
+            "sharks": {"batting": [], "pitching": []},  # no stats
+        }
+        (games_dir / "game_gc_future.json").write_text(json.dumps(gc_game))
+        with flask_app.test_client() as client:
+            resp = client.get("/api/games")
+        data = resp.get_json()
+        ids = [g["game_id"] for g in data]
+        assert "game_gc_future" not in ids
+
+    def test_gc_game_deduplicates_by_date(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(sd, "CONFIG_DIR", tmp_path)
+        games_dir = tmp_path / "games"
+        games_dir.mkdir()
+        gc_game = {
+            "game_id": "game_gc_dup",
+            "source": "gc_full_scraper_v2",
+            "date": "2024-05-01",
+            "opponent": "Tigers",
+            "sharks": {"batting": [{"name": "Jane", "pa": 4}], "pitching": []},
+        }
+        (games_dir / "game_gc_dup.json").write_text(json.dumps(gc_game))
+        # games are de-duped by date — GC format preferred over PDF
+        data = sd._build_games_feed()
+        assert any(g["game_id"] == "game_gc_dup" for g in data)
+
+    def test_index_json_read_as_pdf_games(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(sd, "CONFIG_DIR", tmp_path)
+        games_dir = tmp_path / "games"
+        games_dir.mkdir()
+        # index.json holds the list of PDF-scraped games (should be a list, not a dict)
+        index_data = [{"game_id": "pdf_001", "date": "2024-01-01", "opponent": "Lions"}]
+        (games_dir / "index.json").write_text(json.dumps(index_data))
+        with flask_app.test_client() as client:
+            resp = client.get("/api/games")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert any(g["game_id"] == "pdf_001" for g in data)
+
+
+# ---------------------------------------------------------------------------
+# _build_voice_overview_text — duplicate date and non-list branches
+# ---------------------------------------------------------------------------
+
+class TestBuildVoiceOverviewTextExtended:
+    def test_deduplicates_games_by_date(self):
+        ctx = {
+            "team": {"team_name": "The Sharks", "roster": []},
+            "swot": {},
+            "lineups": {},
+            "schedule": {"upcoming": []},
+            "games": [
+                {"date": "2024-01-01", "result": "W"},
+                {"date": "2024-01-01", "result": "W"},  # duplicate date — should count only once
+            ],
+        }
+        text = sd._build_voice_overview_text(ctx)
+        assert "1 and 0" in text  # deduplicated: 1 win, 0 losses
+
+    def test_games_not_list_shows_zero_record(self):
+        ctx = {
+            "team": {"roster": []},
+            "swot": {},
+            "lineups": {},
+            "schedule": {"upcoming": []},
+            "games": "not a list",
+        }
+        text = sd._build_voice_overview_text(ctx)
+        assert "oh and oh" in text
+
+    def test_next_game_bad_date_format_fallback(self):
+        ctx = {
+            "team": {"roster": []},
+            "swot": {},
+            "lineups": {},
+            "schedule": {"upcoming": [{"opponent": "Tigers", "date": "bad-date",
+                                       "home_away": "home"}]},
+            "games": [],
+        }
+        text = sd._build_voice_overview_text(ctx)
+        assert isinstance(text, str)  # must not crash
