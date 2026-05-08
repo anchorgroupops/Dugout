@@ -187,3 +187,160 @@ class TestSummariesFromResult:
         }
         summaries = cli._summaries_from_result(result, trigger="cron")
         assert summaries[0].outcome == "success"
+
+
+# ---------------------------------------------------------------------------
+# _build_notifier
+# ---------------------------------------------------------------------------
+
+class TestBuildNotifier:
+    def test_returns_notifier_instance(self, tmp_path, monkeypatch):
+        """_build_notifier returns a Notifier without making network calls."""
+        from tools.autopull.notifier import Notifier
+        import types
+        fake_requests = types.ModuleType("requests")
+        fake_requests.post = MagicMock()
+        monkeypatch.setitem(__import__("sys").modules, "requests", fake_requests)
+        cfg = _fake_cfg(tmp_path)
+        notifier = cli._build_notifier(cfg)
+        assert isinstance(notifier, Notifier)
+
+    def test_gmail_sender_skips_when_not_configured(self, tmp_path, monkeypatch, capsys):
+        """_GmailSender.send() is a no-op when gmail creds are empty."""
+        import types
+        fake_requests = types.ModuleType("requests")
+        fake_requests.post = MagicMock()
+        monkeypatch.setitem(__import__("sys").modules, "requests", fake_requests)
+        cfg = _fake_cfg(tmp_path, gmail_username="", gmail_app_password="")
+        notifier = cli._build_notifier(cfg)
+        # Access the internal _GmailSender and call send — should not raise
+        notifier._gmail.send(to="x@y.z", subject="test", body="hi")
+
+    def test_webhook_pusher_skips_when_no_url(self, tmp_path, monkeypatch):
+        """_WebhookPusher.notify() is a no-op when push URL is empty."""
+        import types
+        fake_requests = types.ModuleType("requests")
+        fake_requests.post = MagicMock()
+        monkeypatch.setitem(__import__("sys").modules, "requests", fake_requests)
+        monkeypatch.setenv("PUSH_WEBHOOK_URL", "")
+        cfg = _fake_cfg(tmp_path)
+        notifier = cli._build_notifier(cfg)
+        notifier._push.notify("hello")
+        fake_requests.post.assert_not_called()
+
+    def test_n8n_poster_calls_requests_post(self, tmp_path, monkeypatch):
+        """_N8nPoster.post() calls requests.post."""
+        import types
+        fake_requests = types.ModuleType("requests")
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        fake_requests.post = MagicMock(return_value=mock_resp)
+        monkeypatch.setitem(__import__("sys").modules, "requests", fake_requests)
+        cfg = _fake_cfg(tmp_path)
+        notifier = cli._build_notifier(cfg)
+        notifier._n8n.post("https://x/y", {"k": "v"})
+        fake_requests.post.assert_called_once()
+
+    def test_gmail_sender_calls_send_email_when_configured(self, tmp_path, monkeypatch):
+        """Line 266: _GmailSender.send() calls g2fa.send_email when creds set."""
+        import types
+        fake_requests = types.ModuleType("requests")
+        fake_requests.post = MagicMock()
+        monkeypatch.setitem(__import__("sys").modules, "requests", fake_requests)
+        # Mock g2fa.send_email inside the cli module
+        mock_send_email = MagicMock()
+        monkeypatch.setattr("tools.autopull.gmail_2fa_fetcher.send_email", mock_send_email)
+        cfg = _fake_cfg(tmp_path, gmail_username="u@g.com", gmail_app_password="pw12345678")
+        notifier = cli._build_notifier(cfg)
+        notifier._gmail.send(to="r@x.com", subject="Test", body="Hello")
+        mock_send_email.assert_called_once()
+
+    def test_webhook_pusher_posts_when_url_set(self, tmp_path, monkeypatch):
+        """Line 283: _WebhookPusher.notify() calls requests.post when URL non-empty."""
+        import types
+        fake_requests = types.ModuleType("requests")
+        fake_requests.post = MagicMock()
+        monkeypatch.setitem(__import__("sys").modules, "requests", fake_requests)
+        monkeypatch.setenv("PUSH_WEBHOOK_URL", "https://push.example.com/hook")
+        cfg = _fake_cfg(tmp_path)
+        notifier = cli._build_notifier(cfg)
+        notifier._push.notify("test message")
+        fake_requests.post.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# main()
+# ---------------------------------------------------------------------------
+
+class TestMain:
+    def _mock_cfg(self, tmp_path):
+        return _fake_cfg(tmp_path)
+
+    def test_main_returns_0_on_skipped(self, tmp_path, monkeypatch):
+        """main() returns 0 when outcome is 'skipped'."""
+        cfg = _fake_cfg(tmp_path)
+        monkeypatch.setattr("tools.autopull.cli.config_mod.load", lambda **kw: cfg)
+        monkeypatch.setattr("tools.autopull.cli.run_once",
+                            lambda **kw: {"outcome": "skipped", "reason": "disabled"})
+        monkeypatch.setattr("dotenv.load_dotenv", lambda *a, **kw: None)
+        result = cli.main(argv=["--trigger", "manual"])
+        assert result == 0
+
+    def test_main_returns_0_on_all_success(self, tmp_path, monkeypatch):
+        """main() returns 0 when outcome is 'all_success'."""
+        cfg = _fake_cfg(tmp_path)
+        monkeypatch.setattr("tools.autopull.cli.config_mod.load", lambda **kw: cfg)
+        monkeypatch.setattr("tools.autopull.cli.run_once",
+                            lambda **kw: {"outcome": "all_success",
+                                         "per_team": {"sharks": {"outcome": "success",
+                                                                  "run_id": 1,
+                                                                  "drift_severity": "none"}}})
+        monkeypatch.setattr("dotenv.load_dotenv", lambda *a, **kw: None)
+        monkeypatch.setattr("tools.autopull.cli._build_notifier",
+                            lambda cfg: MagicMock())
+        result = cli.main(argv=["--trigger", "cron"])
+        assert result == 0
+
+    def test_main_returns_1_on_failure(self, tmp_path, monkeypatch):
+        """main() returns 1 when outcome is 'failure'."""
+        cfg = _fake_cfg(tmp_path)
+        monkeypatch.setattr("tools.autopull.cli.config_mod.load", lambda **kw: cfg)
+        monkeypatch.setattr("tools.autopull.cli.run_once",
+                            lambda **kw: {"outcome": "failure",
+                                         "per_team": {"sharks": {"outcome": "failure",
+                                                                  "run_id": 1,
+                                                                  "failure_reason": "err",
+                                                                  "drift_severity": "none"}}})
+        monkeypatch.setattr("dotenv.load_dotenv", lambda *a, **kw: None)
+        monkeypatch.setattr("tools.autopull.cli._build_notifier",
+                            lambda cfg: MagicMock())
+        result = cli.main(argv=["--trigger", "cron"])
+        assert result == 1
+
+    def test_main_notifier_exception_logged_not_raised(self, tmp_path, monkeypatch, capsys):
+        """Notifier wiring failure is logged, main() still returns normally."""
+        cfg = _fake_cfg(tmp_path)
+        monkeypatch.setattr("tools.autopull.cli.config_mod.load", lambda **kw: cfg)
+        monkeypatch.setattr("tools.autopull.cli.run_once",
+                            lambda **kw: {"outcome": "all_success",
+                                         "per_team": {"sharks": {"outcome": "success",
+                                                                  "run_id": 1,
+                                                                  "drift_severity": "none"}}})
+        monkeypatch.setattr("dotenv.load_dotenv", lambda *a, **kw: None)
+        monkeypatch.setattr("tools.autopull.cli._build_notifier",
+                            lambda cfg: (_ for _ in ()).throw(RuntimeError("notifier broke")))
+        result = cli.main(argv=["--trigger", "cron"])
+        assert result == 0  # doesn't crash
+
+    def test_main_prints_json_result(self, tmp_path, monkeypatch, capsys):
+        """main() prints JSON result to stdout."""
+        import json as _json
+        cfg = _fake_cfg(tmp_path)
+        monkeypatch.setattr("tools.autopull.cli.config_mod.load", lambda **kw: cfg)
+        monkeypatch.setattr("tools.autopull.cli.run_once",
+                            lambda **kw: {"outcome": "skipped", "reason": "disabled"})
+        monkeypatch.setattr("dotenv.load_dotenv", lambda *a, **kw: None)
+        cli.main(argv=["--trigger", "manual"])
+        out = capsys.readouterr().out
+        parsed = _json.loads(out)
+        assert parsed["outcome"] == "skipped"
