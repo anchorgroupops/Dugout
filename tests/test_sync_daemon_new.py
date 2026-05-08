@@ -7917,3 +7917,353 @@ class TestBuildOpponentScouting:
         (opp_dir / "team.json").write_text(json.dumps(opp_team))
         result = sd._build_opponent_scouting("bears", [])
         assert "players" in result
+
+
+# ===========================================================================
+# _build_opponent_scouting remaining branches (2332, 2401, 2403)
+# ===========================================================================
+
+class TestBuildOpponentScoutingMoreBranches:
+    """Lines 2332, 2401, 2403: duplicate key skip, Grounder/Flyball tags."""
+
+    def test_duplicate_batter_skipped(self, tmp_path, monkeypatch):
+        """Line 2332: if same key appears in both live_batting and batting_stats."""
+        monkeypatch.setattr(sd, "DATA_DIR", tmp_path)
+        opp_dir = tmp_path / "opponents" / "foxes"
+        opp_dir.mkdir(parents=True)
+        # batting_stats has player "5"
+        opp_team = {
+            "roster": [],
+            "batting_stats": [
+                {"number": "5", "name": "Eagle", "ab": "8", "h": "3", "pa": "10",
+                 "1b": "3", "2b": "0", "3b": "0", "hr": "0", "bb": "2",
+                 "hbp": "0", "so": "2", "rbi": "2", "sb": "0", "r": "2", "sac": "0"}
+            ]
+        }
+        (opp_dir / "team.json").write_text(json.dumps(opp_team))
+        # live_batting also has player "5" → duplicate
+        live_batting = [
+            {"number": "5", "name": "Eagle", "ab": "4", "h": "2", "pa": "5",
+             "1b": "2", "2b": "0", "3b": "0", "hr": "0", "bb": "1",
+             "hbp": "0", "so": "1", "rbi": "1", "sb": "0", "r": "1", "sac": "0"}
+        ]
+        result = sd._build_opponent_scouting("foxes", live_batting)
+        # Only one player should appear (duplicate skipped)
+        player_nums = [p.get("number") for p in result["players"]]
+        assert player_nums.count("5") == 1
+
+    def test_grounder_tag_for_high_gb_pct(self, tmp_path, monkeypatch):
+        """Line 2401: player with gb_pct > 50 gets 'Grounder' tag."""
+        monkeypatch.setattr(sd, "DATA_DIR", tmp_path)
+        opp_dir = tmp_path / "opponents" / "wolves"
+        opp_dir.mkdir(parents=True)
+        # Roster player with high gb_pct in batting_advanced
+        opp_team = {
+            "roster": [
+                {"number": "7", "name": "Grounder Guy",
+                 "batting": {"pa": 15, "ab": 12, "h": 4, "1b": 4, "2b": 0, "3b": 0,
+                             "hr": 0, "bb": 3, "hbp": 0, "so": 2, "rbi": 2, "sb": 0,
+                             "r": 2, "sac": 0},
+                 "batting_advanced": {"gb_pct": 65.0, "fb_pct": 15.0}  # 65% GB
+                }
+            ],
+            "batting_stats": [
+                {"number": "7", "name": "Grounder Guy", "ab": "12", "h": "4", "pa": "15",
+                 "1b": "4", "2b": "0", "3b": "0", "hr": "0", "bb": "3",
+                 "hbp": "0", "so": "2", "rbi": "2", "sb": "0", "r": "2", "sac": "0"}
+            ]
+        }
+        (opp_dir / "team.json").write_text(json.dumps(opp_team))
+        result = sd._build_opponent_scouting("wolves", [])
+        players = result["players"]
+        assert len(players) == 1
+        assert "Grounder" in players[0].get("tags", [])
+
+    def test_flyball_tag_for_high_fb_pct(self, tmp_path, monkeypatch):
+        """Line 2403: player with fb_pct > 40 gets 'Flyball' tag."""
+        monkeypatch.setattr(sd, "DATA_DIR", tmp_path)
+        opp_dir = tmp_path / "opponents" / "hawks"
+        opp_dir.mkdir(parents=True)
+        opp_team = {
+            "roster": [
+                {"number": "3", "name": "Flyball Guy",
+                 "batting": {"pa": 15, "ab": 12, "h": 5, "1b": 5, "2b": 0, "3b": 0,
+                             "hr": 0, "bb": 3, "hbp": 0, "so": 2, "rbi": 2, "sb": 0,
+                             "r": 2, "sac": 0},
+                 "batting_advanced": {"gb_pct": 20.0, "fb_pct": 55.0}  # 55% FB
+                }
+            ],
+            "batting_stats": [
+                {"number": "3", "name": "Flyball Guy", "ab": "12", "h": "5", "pa": "15",
+                 "1b": "5", "2b": "0", "3b": "0", "hr": "0", "bb": "3",
+                 "hbp": "0", "so": "2", "rbi": "2", "sb": "0", "r": "2", "sac": "0"}
+            ]
+        }
+        (opp_dir / "team.json").write_text(json.dumps(opp_team))
+        result = sd._build_opponent_scouting("hawks", [])
+        players = result["players"]
+        assert len(players) == 1
+        assert "Flyball" in players[0].get("tags", [])
+
+
+# ===========================================================================
+# handle_team serves even when optional fields are missing
+# ===========================================================================
+
+class TestHandleTeamOptionalFields:
+    """Ensure handle_team handles roster data with various optional fields."""
+
+    def test_team_with_gc_team_id_present(self, flask_app, monkeypatch, tmp_path):
+        """Test when gc_team_id is already set in team data."""
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        team_data = {"roster": [], "team_name": "The Sharks",
+                     "gc_team_id": "abc123", "gc_season_slug": "2026-spring"}
+        (tmp_path / "team_enriched.json").write_text(json.dumps(team_data))
+        with flask_app.test_client() as client:
+            resp = client.get("/api/team")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data.get("gc_team_id") == "abc123"
+
+
+# ===========================================================================
+# _synthesize_voice_update (lines 3651-3674)
+# ===========================================================================
+
+class TestSynthesizeVoiceUpdate:
+    """Lines 3651-3674: _synthesize_voice_update makes ElevenLabs request."""
+
+    def test_no_api_key_raises(self, monkeypatch):
+        """Line 3650: missing api_key raises RuntimeError."""
+        monkeypatch.setattr(sd, "_resolve_secret", lambda name, default="": "")
+        with pytest.raises(RuntimeError, match="ElevenLabs API key"):
+            sd._synthesize_voice_update("Hello world")
+
+    def test_elevenlabs_error_raises(self, monkeypatch):
+        """Line 3673: non-200 response raises RuntimeError."""
+        monkeypatch.setenv("ELEVENLABS_API_KEY", "fake_key")
+        monkeypatch.setenv("ELEVENLABS_VOICE_ID", "voice_abc")
+        fake_resp = MagicMock()
+        fake_resp.status_code = 500
+        fake_resp.text = "Internal Error"
+        monkeypatch.setattr(sd.requests, "post", MagicMock(return_value=fake_resp))
+        with pytest.raises(RuntimeError, match="ElevenLabs returned 500"):
+            sd._synthesize_voice_update("Hello world")
+
+    def test_success_returns_bytes(self, monkeypatch):
+        """Line 3674: successful response returns content."""
+        monkeypatch.setenv("ELEVENLABS_API_KEY", "fake_key")
+        monkeypatch.setenv("ELEVENLABS_VOICE_ID", "voice_abc")
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.content = b"audio_data"
+        monkeypatch.setattr(sd.requests, "post", MagicMock(return_value=fake_resp))
+        result = sd._synthesize_voice_update("Hello world")
+        assert result == b"audio_data"
+
+
+# ===========================================================================
+# Additional threat tags (lines 2401, 2403 via live batting)
+# ===========================================================================
+
+class TestOpponentScoutingThreatTags:
+    """Lines 2401, 2403: threat tags via live batting with advanced stats."""
+
+    def test_contact_tag_for_high_avg(self, tmp_path, monkeypatch):
+        """avg >= 0.350 → Contact tag."""
+        monkeypatch.setattr(sd, "DATA_DIR", tmp_path)
+        live_batting = [
+            {"number": "5", "name": "Star", "ab": "10", "h": "4",
+             "pa": "10", "1b": "4", "2b": "0", "3b": "0", "hr": "0",
+             "bb": "0", "hbp": "0", "so": "1", "rbi": "2", "sb": "0", "r": "2", "sac": "0"}
+        ]
+        result = sd._build_opponent_scouting("stars", live_batting)
+        players = result["players"]
+        assert len(players) == 1
+        assert "Contact" in players[0].get("tags", [])
+
+    def test_power_tag_for_high_slg(self, tmp_path, monkeypatch):
+        """slg >= 0.500 → Power tag."""
+        monkeypatch.setattr(sd, "DATA_DIR", tmp_path)
+        live_batting = [
+            {"number": "5", "name": "Slugger", "ab": "10", "h": "4",
+             "pa": "10", "1b": "0", "2b": "0", "3b": "0", "hr": "4",  # 4 HR = slg 1.600
+             "bb": "0", "hbp": "0", "so": "2", "rbi": "8", "sb": "0", "r": "4", "sac": "0"}
+        ]
+        result = sd._build_opponent_scouting("sluggers", live_batting)
+        players = result["players"]
+        assert "Power" in players[0].get("tags", [])
+
+    def test_speed_tag_for_high_sb(self, tmp_path, monkeypatch):
+        """sb >= 2 → Speed tag."""
+        monkeypatch.setattr(sd, "DATA_DIR", tmp_path)
+        live_batting = [
+            {"number": "7", "name": "Speedster", "ab": "10", "h": "3",
+             "pa": "11", "1b": "3", "2b": "0", "3b": "0", "hr": "0",
+             "bb": "1", "hbp": "0", "so": "1", "rbi": "1", "sb": "3", "r": "3", "sac": "0"}
+        ]
+        result = sd._build_opponent_scouting("sprinters", live_batting)
+        players = result["players"]
+        assert "Speed" in players[0].get("tags", [])
+
+    def test_patient_tag_for_bb_gt_so(self, tmp_path, monkeypatch):
+        """bb > so and pa >= 5 → Patient tag."""
+        monkeypatch.setattr(sd, "DATA_DIR", tmp_path)
+        live_batting = [
+            {"number": "2", "name": "Walker", "ab": "8", "h": "3",
+             "pa": "12", "1b": "3", "2b": "0", "3b": "0", "hr": "0",
+             "bb": "4", "hbp": "0", "so": "1", "rbi": "1", "sb": "0", "r": "2", "sac": "0"}
+        ]
+        result = sd._build_opponent_scouting("walkers", live_batting)
+        players = result["players"]
+        assert "Patient" in players[0].get("tags", [])
+
+
+# ===========================================================================
+# handle_music_wizard (lines 4749-4761)
+# ===========================================================================
+
+class TestHandleMusicWizard:
+    """Lines 4749-4761: music wizard endpoint."""
+
+    def _setup_modules(self, monkeypatch, tmp_path):
+        import types, sys
+        # Fake announcer_db
+        fake_adb = types.ModuleType("announcer_db")
+        fake_adb.get_catalog_count = MagicMock(return_value=5)
+        fake_adb.search_catalog = MagicMock(return_value=[{"id": "song1", "title": "Eye of Tiger"}])
+        fake_adb._conn = MagicMock()
+        fake_adb.init_db = MagicMock()
+        # Fake music_wizard
+        fake_mw = types.ModuleType("music_wizard")
+        fake_mw.auto_match_roster = MagicMock(return_value=[{"player_id": "07-jane", "suggestions": []}])
+        fake_mw.WALKUP_CATALOG = [{"id": "song2", "title": "Welcome to the Jungle"}]
+        fake_mw.seed_catalog = MagicMock()
+        monkeypatch.setitem(sys.modules, "announcer_db", fake_adb)
+        monkeypatch.setitem(sys.modules, "music_wizard", fake_mw)
+        return fake_adb, fake_mw
+
+    def test_returns_suggestions(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        fake_adb, fake_mw = self._setup_modules(monkeypatch, tmp_path)
+        monkeypatch.setattr(sd, "_announcer_db", lambda: MagicMock())
+        monkeypatch.setattr(sd, "_load_roster_players", lambda: [{"id": "07-jane", "first": "Jane"}])
+        with flask_app.test_client() as client:
+            resp = client.get("/api/announcer/music-wizard")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert "suggestions" in data
+
+    def test_seeds_catalog_when_empty(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        fake_adb, fake_mw = self._setup_modules(monkeypatch, tmp_path)
+        # catalog_count = 0 → should call seed_catalog
+        fake_adb.get_catalog_count = MagicMock(return_value=0)
+        fake_conn_ctx = MagicMock()
+        fake_conn_ctx.__enter__ = MagicMock(return_value=fake_conn_ctx)
+        fake_conn_ctx.__exit__ = MagicMock(return_value=False)
+        fake_adb._conn = MagicMock(return_value=fake_conn_ctx)
+        monkeypatch.setattr(sd, "_announcer_db", lambda: MagicMock())
+        monkeypatch.setattr(sd, "_load_roster_players", lambda: [])
+        with flask_app.test_client() as client:
+            resp = client.get("/api/announcer/music-wizard")
+        assert resp.status_code == 200
+        fake_mw.seed_catalog.assert_called_once()
+
+    def test_falls_back_to_walkup_catalog_when_search_empty(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        fake_adb, fake_mw = self._setup_modules(monkeypatch, tmp_path)
+        # search_catalog returns empty list → use WALKUP_CATALOG
+        fake_adb.search_catalog = MagicMock(return_value=[])
+        monkeypatch.setattr(sd, "_announcer_db", lambda: MagicMock())
+        monkeypatch.setattr(sd, "_load_roster_players", lambda: [])
+        with flask_app.test_client() as client:
+            resp = client.get("/api/announcer/music-wizard")
+        assert resp.status_code == 200
+
+
+# ===========================================================================
+# _trigger_post_game_analysis (lines 5039-5074)
+# ===========================================================================
+
+class TestTriggerPostGameAnalysis:
+    """Lines 5039-5074: post-game analysis pipeline."""
+
+    def test_dispatches_subprocess_and_syncs(self, monkeypatch):
+        import subprocess, types, sys
+        monkeypatch.setattr(subprocess, "Popen", MagicMock())
+        # Mock parse_scorebook_pdf
+        fake_pdf = types.ModuleType("parse_scorebook_pdf")
+        fake_pdf.run = MagicMock()
+        monkeypatch.setitem(sys.modules, "parse_scorebook_pdf", fake_pdf)
+        monkeypatch.setattr(sd, "run_sync_cycle", lambda: True)
+        monkeypatch.setattr(sd, "_record_h2h_from_games", MagicMock())
+        monkeypatch.setattr(sd, "send_alert", MagicMock())
+        sd._trigger_post_game_analysis()
+        subprocess.Popen.assert_called_once()
+
+    def test_handles_subprocess_exception(self, monkeypatch):
+        import subprocess
+        monkeypatch.setattr(subprocess, "Popen", MagicMock(side_effect=OSError("no subprocess")))
+        # Mock other dependencies
+        import types, sys
+        fake_pdf = types.ModuleType("parse_scorebook_pdf")
+        fake_pdf.run = MagicMock()
+        monkeypatch.setitem(sys.modules, "parse_scorebook_pdf", fake_pdf)
+        monkeypatch.setattr(sd, "run_sync_cycle", lambda: True)
+        monkeypatch.setattr(sd, "_record_h2h_from_games", MagicMock())
+        monkeypatch.setattr(sd, "send_alert", MagicMock())
+        # Should not raise
+        sd._trigger_post_game_analysis()
+
+    def test_sends_error_alert_when_sync_fails(self, monkeypatch):
+        import subprocess, types, sys
+        monkeypatch.setattr(subprocess, "Popen", MagicMock())
+        fake_pdf = types.ModuleType("parse_scorebook_pdf")
+        fake_pdf.run = MagicMock()
+        monkeypatch.setitem(sys.modules, "parse_scorebook_pdf", fake_pdf)
+        monkeypatch.setattr(sd, "run_sync_cycle", lambda: False)
+        monkeypatch.setattr(sd, "_record_h2h_from_games", MagicMock())
+        mock_alert = MagicMock()
+        monkeypatch.setattr(sd, "send_alert", mock_alert)
+        sd._trigger_post_game_analysis()
+        # Error alert should be sent
+        assert mock_alert.call_count >= 1
+        # Check the error alert was sent
+        calls_str = str(mock_alert.call_args_list)
+        assert "ERROR" in calls_str or "error" in calls_str.lower()
+
+
+# ===========================================================================
+# handle_voice_update: meta_file exception and live synthesis paths
+# ===========================================================================
+
+class TestHandleVoiceUpdatePaths:
+    """Lines 3702-3703, 3717-3726: voice_update exception/synthesis paths."""
+
+    def test_corrupt_meta_file_handled(self, flask_app, monkeypatch, tmp_path):
+        """Lines 3702-3703: corrupt meta JSON → except Exception: pass."""
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        # Create a valid voice file
+        voice_file = tmp_path / "voice_update.mp3"
+        voice_file.write_bytes(b"FAKE_MP3_AUDIO")
+        # Create a corrupt meta file
+        meta_file = tmp_path / "voice_overview_latest.json"
+        meta_file.write_text("{broken json")
+        with flask_app.test_client() as client:
+            resp = client.get("/api/voice-update")
+        assert resp.status_code == 200
+        assert resp.content_type == "audio/mpeg"
+
+    def test_live_synthesis_success(self, flask_app, monkeypatch, tmp_path):
+        """Lines 3717-3726: no cached voice file → synthesize live."""
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        # No cached voice file
+        monkeypatch.setattr(sd, "_load_voice_context", lambda: {})
+        monkeypatch.setattr(sd, "_build_voice_overview_text", lambda ctx: "Today's game preview.")
+        monkeypatch.setattr(sd, "_synthesize_voice_update", lambda text: b"SYNTHESIZED_AUDIO")
+        with flask_app.test_client() as client:
+            resp = client.get("/api/voice-update")
+        assert resp.status_code == 200
+        assert resp.content_type == "audio/mpeg"
+        assert resp.data == b"SYNTHESIZED_AUDIO"
