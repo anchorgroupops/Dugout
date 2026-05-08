@@ -155,3 +155,28 @@ class TestStubImage:
         result = _stub_image(tmp_path / "img.png")
         assert isinstance(result["reason"], str)
         assert len(result["reason"]) > 0
+
+
+# ─── sys.path.insert branch (line 27) ───────────────────────────────────────
+
+class TestSysPathInsert:
+    def test_sys_path_insert_branch_covered(self):
+        """Line 27: when _TOOLS_DIR is absent from sys.path, it gets inserted."""
+        import importlib
+        import tools.scorebook_ocr as soc_tools
+
+        tools_dir = str(soc_tools._TOOLS_DIR)
+
+        # Save original sys.path and sys.modules entries
+        original_path = sys.path[:]
+        keys_to_remove = [k for k in sys.modules if k in ("tools.scorebook_ocr", "scorebook_ocr")]
+        saved_modules = {k: sys.modules.pop(k) for k in keys_to_remove}
+
+        # Remove tools_dir so the insert branch fires
+        sys.path[:] = [p for p in sys.path if p != tools_dir]
+        try:
+            import tools.scorebook_ocr  # noqa: F401 — triggers line 27
+            assert tools_dir in sys.path
+        finally:
+            sys.path[:] = original_path
+            sys.modules.update(saved_modules)
