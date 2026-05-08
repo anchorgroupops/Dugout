@@ -825,3 +825,426 @@ class TestResolveOpponentSlug:
         monkeypatch.setattr(pg_mod, "DATA_DIR", tmp_path)
         result = _resolve_opponent_slug("Totally Unknown Team")
         assert result is None
+
+
+# ====================================================================
+# _parse_event_datetime — line 479 (all formats fail)
+# ====================================================================
+
+class TestParseEventDatetimeReturnNone:
+    def test_non_iso_non_slash_date_returns_none(self):
+        """date_str normalizes to non-empty non-ISO string → all strptime fail → None."""
+        result = _parse_event_datetime("April 22, 2026")
+        assert result is None
+
+
+# ====================================================================
+# _load_practice_events — line 516 (unparseable date → skip)
+# ====================================================================
+
+class TestLoadPracticeEventsUnparseableDate:
+    def test_unparseable_date_skips_event(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(pg_mod, "SHARKS_DIR", tmp_path)
+        rsvp = {"practices": [{"date": "April 22, 2026", "title": "Practice"}]}
+        (tmp_path / "practice_rsvp.json").write_text(json.dumps(rsvp))
+        events = _load_practice_events(_NOW)
+        assert events == []
+
+
+# ====================================================================
+# _load_game_events — line 562 (unparseable date → skip)
+# ====================================================================
+
+class TestLoadGameEventsUnparseableDate:
+    def test_unparseable_date_skips_game(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(pg_mod, "SHARKS_DIR", tmp_path)
+        schedule = {"upcoming": [{"date": "April 22, 2026", "opponent": "Eagles"}]}
+        (tmp_path / "schedule_manual.json").write_text(json.dumps(schedule))
+        events = _load_game_events(_NOW)
+        assert events == []
+
+
+# ====================================================================
+# _resolve_opponent_slug — line 701 (non-dict team entry skipped)
+# ====================================================================
+
+class TestResolveOpponentSlugNonDictTeam:
+    def test_non_dict_entry_in_teams_list_skipped(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(pg_mod, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(pg_mod, "DATA_DIR", tmp_path)
+        discovery = {"teams": ["not-a-dict", {"team_name": "Eagles", "slug": "eagles"}]}
+        (tmp_path / "opponent_discovery.json").write_text(json.dumps(discovery))
+        result = _resolve_opponent_slug("Eagles")
+        assert result == "eagles"
+
+
+# ====================================================================
+# _write_plan — lines 651-656
+# ====================================================================
+
+class TestWritePlan:
+    def test_writes_plan_file(self, tmp_path, monkeypatch):
+        from tools.practice_gen import _write_plan, PLAN_FILE
+        plan_file = tmp_path / "next_practice.txt"
+        monkeypatch.setattr(pg_mod, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(pg_mod, "PLAN_FILE", plan_file)
+        swot = {"team_swot": {"weaknesses": []}, "player_analyses": []}
+        windows = {"next_practice_start": None}
+        plan = _write_plan(swot, windows)
+        assert plan_file.exists()
+        assert isinstance(plan, str)
+        assert len(plan) > 0
+
+    def test_uses_next_practice_start_for_date(self, tmp_path, monkeypatch):
+        from tools.practice_gen import _write_plan
+        plan_file = tmp_path / "next_practice.txt"
+        monkeypatch.setattr(pg_mod, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(pg_mod, "PLAN_FILE", plan_file)
+        swot = {"team_swot": {"weaknesses": []}, "player_analyses": []}
+        target = datetime(2026, 7, 4, 18, 0, tzinfo=ET_TZ)
+        windows = {"next_practice_start": target}
+        plan = _write_plan(swot, windows)
+        assert "7/4/2026" in plan
+
+
+# ====================================================================
+# _resolve_next_opponent_matchup — lines 661-692
+# ====================================================================
+
+class TestResolveNextOpponentMatchup:
+    from tools.practice_gen import _resolve_next_opponent_matchup
+
+    def test_returns_none_when_no_schedule_file(self, tmp_path, monkeypatch):
+        from tools.practice_gen import _resolve_next_opponent_matchup
+        monkeypatch.setattr(pg_mod, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(pg_mod, "DATA_DIR", tmp_path)
+        assert _resolve_next_opponent_matchup() is None
+
+    def test_returns_none_when_schedule_not_dict(self, tmp_path, monkeypatch):
+        from tools.practice_gen import _resolve_next_opponent_matchup
+        monkeypatch.setattr(pg_mod, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(pg_mod, "DATA_DIR", tmp_path)
+        (tmp_path / "schedule_manual.json").write_text("[]")
+        assert _resolve_next_opponent_matchup() is None
+
+    def test_returns_none_when_no_future_games(self, tmp_path, monkeypatch):
+        from tools.practice_gen import _resolve_next_opponent_matchup
+        monkeypatch.setattr(pg_mod, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(pg_mod, "DATA_DIR", tmp_path)
+        schedule = {"upcoming": [{"date": "2020-01-01", "opponent": "Eagles"}]}
+        (tmp_path / "schedule_manual.json").write_text(json.dumps(schedule))
+        assert _resolve_next_opponent_matchup() is None
+
+    def test_returns_none_when_no_slug_resolved(self, tmp_path, monkeypatch):
+        from tools.practice_gen import _resolve_next_opponent_matchup
+        monkeypatch.setattr(pg_mod, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(pg_mod, "DATA_DIR", tmp_path)
+        schedule = {"upcoming": [{"date": "2099-06-01", "opponent": "UnknownTeam"}]}
+        (tmp_path / "schedule_manual.json").write_text(json.dumps(schedule))
+        result = _resolve_next_opponent_matchup()
+        assert result is None
+
+    def test_returns_none_when_matchup_file_missing(self, tmp_path, monkeypatch):
+        from tools.practice_gen import _resolve_next_opponent_matchup
+        monkeypatch.setattr(pg_mod, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(pg_mod, "DATA_DIR", tmp_path)
+        # Create slug match via opponents dir
+        (tmp_path / "opponents" / "eagles").mkdir(parents=True)
+        discovery = {"teams": [{"team_name": "Eagles", "slug": "eagles"}]}
+        (tmp_path / "opponent_discovery.json").write_text(json.dumps(discovery))
+        schedule = {"upcoming": [{"date": "2099-06-01", "opponent": "Eagles"}]}
+        (tmp_path / "schedule_manual.json").write_text(json.dumps(schedule))
+        # No matchup file at opponents/eagles/team.json → returns None
+        result = _resolve_next_opponent_matchup()
+        assert result is None
+
+    def test_skips_is_game_false_entries(self, tmp_path, monkeypatch):
+        from tools.practice_gen import _resolve_next_opponent_matchup
+        monkeypatch.setattr(pg_mod, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(pg_mod, "DATA_DIR", tmp_path)
+        schedule = {"upcoming": [{"date": "2099-06-01", "opponent": "Eagles", "is_game": False}]}
+        (tmp_path / "schedule_manual.json").write_text(json.dumps(schedule))
+        assert _resolve_next_opponent_matchup() is None
+
+    def test_returns_matchup_when_file_exists_and_our_team_loaded(self, tmp_path, monkeypatch):
+        """Lines 679-688: matchup file exists, analyze_matchup called, returns dict."""
+        import sys, types
+        from tools.practice_gen import _resolve_next_opponent_matchup
+        monkeypatch.setattr(pg_mod, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(pg_mod, "DATA_DIR", tmp_path)
+        # Set up opponent dir and matchup file
+        opp_dir = tmp_path / "opponents" / "eagles"
+        opp_dir.mkdir(parents=True)
+        opp_team = {"roster": []}
+        (opp_dir / "team.json").write_text(json.dumps(opp_team))
+        # Discovery so slug resolves
+        discovery = {"teams": [{"team_name": "Eagles", "slug": "eagles"}]}
+        (tmp_path / "opponent_discovery.json").write_text(json.dumps(discovery))
+        schedule = {"upcoming": [{"date": "2099-06-01", "opponent": "Eagles"}]}
+        (tmp_path / "schedule_manual.json").write_text(json.dumps(schedule))
+        # Mock swot_analyzer module
+        fake_swot = types.ModuleType("swot_analyzer")
+        our_team_mock = {"roster": [{"first": "Alice", "last": "Smith"}]}
+        fake_swot.load_team = lambda path, prefer_merged=False: our_team_mock
+        fake_swot.analyze_matchup = lambda our, opp: {
+            "their_advantages": [], "our_advantages": [], "key_matchup": ""}
+        saved = sys.modules.get("swot_analyzer")
+        sys.modules["swot_analyzer"] = fake_swot
+        try:
+            result = _resolve_next_opponent_matchup()
+        finally:
+            if saved is None:
+                sys.modules.pop("swot_analyzer", None)
+            else:
+                sys.modules["swot_analyzer"] = saved
+        assert result is not None
+        assert result["opponent"] == "Eagles"
+        assert result["opponent_slug"] == "eagles"
+
+    def test_exception_in_analyze_matchup_swallowed(self, tmp_path, monkeypatch):
+        """Line 689-690: exception inside try block is caught, returns None."""
+        import sys, types
+        from tools.practice_gen import _resolve_next_opponent_matchup
+        monkeypatch.setattr(pg_mod, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(pg_mod, "DATA_DIR", tmp_path)
+        opp_dir = tmp_path / "opponents" / "eagles"
+        opp_dir.mkdir(parents=True)
+        (opp_dir / "team.json").write_text("{}")
+        discovery = {"teams": [{"team_name": "Eagles", "slug": "eagles"}]}
+        (tmp_path / "opponent_discovery.json").write_text(json.dumps(discovery))
+        schedule = {"upcoming": [{"date": "2099-06-01", "opponent": "Eagles"}]}
+        (tmp_path / "schedule_manual.json").write_text(json.dumps(schedule))
+        fake_swot = types.ModuleType("swot_analyzer")
+        fake_swot.load_team = lambda path, prefer_merged=False: {"roster": []}
+        fake_swot.analyze_matchup = lambda our, opp: (_ for _ in ()).throw(RuntimeError("boom"))
+        saved = sys.modules.get("swot_analyzer")
+        sys.modules["swot_analyzer"] = fake_swot
+        try:
+            result = _resolve_next_opponent_matchup()
+        finally:
+            if saved is None:
+                sys.modules.pop("swot_analyzer", None)
+            else:
+                sys.modules["swot_analyzer"] = saved
+        assert result is None
+
+
+# ====================================================================
+# run_scheduled — lines 721-802
+# ====================================================================
+
+_SWOT = {"team_swot": {"weaknesses": []}, "player_analyses": []}
+
+
+class TestRunScheduled:
+    from tools.practice_gen import run_scheduled
+
+    @pytest.fixture(autouse=True)
+    def _dirs(self, tmp_path, monkeypatch):
+        self.sharks = tmp_path / "sharks"
+        self.sharks.mkdir()
+        monkeypatch.setattr(pg_mod, "SHARKS_DIR", self.sharks)
+        monkeypatch.setattr(pg_mod, "DATA_DIR", tmp_path)
+        monkeypatch.setattr(pg_mod, "PLAN_FILE", self.sharks / "next_practice.txt")
+        monkeypatch.setattr(pg_mod, "PLAN_META_FILE", self.sharks / "next_practice_meta.json")
+
+    def _write_swot(self):
+        (self.sharks / "swot_analysis.json").write_text(json.dumps(_SWOT))
+
+    def test_skipped_when_no_swot(self):
+        from tools.practice_gen import run_scheduled
+        result = run_scheduled()
+        assert result["status"] == "skipped"
+        assert result["reason"] == "missing_swot"
+
+    def test_force_generates_plan(self):
+        from tools.practice_gen import run_scheduled
+        self._write_swot()
+        result = run_scheduled(force=True)
+        assert result["status"] == "generated"
+        assert result["mode"] == "scheduled_force"
+
+    def test_initial_after_cooldown_generates_plan(self):
+        from tools.practice_gen import run_scheduled
+        self._write_swot()
+        # No meta → new cycle → initial
+        result = run_scheduled(force=False)
+        assert result["status"] == "generated"
+        assert result["mode"] == "scheduled_initial"
+
+    def test_skipped_during_cooldown(self, monkeypatch):
+        from tools.practice_gen import run_scheduled
+        from datetime import datetime, timedelta
+        self._write_swot()
+        # Simulate a just-completed event: set planning_allowed_after to far future
+        future = datetime(2099, 1, 1, tzinfo=ET_TZ)
+        monkeypatch.setattr(pg_mod, "_compute_windows", lambda now: {
+            "latest_completed_event": {"title": "Game"},
+            "latest_completed_end": future - timedelta(hours=0.5),
+            "planning_allowed_after": future,
+            "next_practice": None,
+            "next_practice_start": None,
+            "refresh_window_start": None,
+        })
+        result = run_scheduled(force=False)
+        assert result["status"] == "skipped"
+        assert result["reason"] == "cooldown_after_event"
+
+    def test_skipped_outside_refresh_window(self, monkeypatch):
+        from tools.practice_gen import run_scheduled
+        from datetime import datetime, timedelta
+        self._write_swot()
+        now = datetime.now(ET_TZ)
+        past = now - timedelta(hours=10)
+        # cycle_anchor_end=None means _iso(None)=None → (None or "")="" → prev must also be ""
+        meta = {"cycle_anchor_end": None, "source_snapshot": {}}
+        monkeypatch.setattr(pg_mod, "_compute_windows", lambda n: {
+            "latest_completed_event": None,
+            "latest_completed_end": None,
+            "planning_allowed_after": past,
+            "next_practice": None,
+            "next_practice_start": None,
+            "refresh_window_start": None,
+        })
+        monkeypatch.setattr(pg_mod, "_load_plan_meta", lambda: meta)
+        result = run_scheduled(force=False)
+        assert result["status"] == "skipped"
+        assert result["reason"] == "outside_refresh_window"
+
+    def test_refresh_skipped_when_already_done(self, monkeypatch):
+        from tools.practice_gen import run_scheduled
+        from datetime import datetime, timedelta
+        self._write_swot()
+        now = datetime.now(ET_TZ)
+        past = now - timedelta(hours=10)
+        next_practice = now + timedelta(hours=0.5)
+        refresh_start = now - timedelta(hours=0.5)
+        refresh_iso = next_practice.isoformat()
+        # cycle_anchor_end=None → _iso(None)=None → (None or "")="" matches str(None or "")=""
+        meta = {
+            "cycle_anchor_end": None,
+            "last_refresh_for_practice": refresh_iso,
+            "source_snapshot": {},
+        }
+        monkeypatch.setattr(pg_mod, "_compute_windows", lambda n: {
+            "latest_completed_event": None,
+            "latest_completed_end": None,
+            "planning_allowed_after": past,
+            "next_practice": {"title": "P"},
+            "next_practice_start": next_practice,
+            "refresh_window_start": refresh_start,
+        })
+        monkeypatch.setattr(pg_mod, "_load_plan_meta", lambda: meta)
+        monkeypatch.setattr(pg_mod, "_snapshot_source_files", lambda: {})
+        monkeypatch.setattr(pg_mod, "_iso", lambda dt: dt.isoformat() if dt else None)
+        result = run_scheduled(force=False)
+        assert result["status"] == "skipped"
+        assert result["reason"] == "refresh_already_done"
+
+    def test_refresh_skipped_when_no_new_info(self, monkeypatch):
+        from tools.practice_gen import run_scheduled
+        from datetime import datetime, timedelta
+        self._write_swot()
+        now = datetime.now(ET_TZ)
+        past = now - timedelta(hours=10)
+        next_practice = now + timedelta(hours=0.5)
+        refresh_start = now - timedelta(hours=0.5)
+        snapshot = {"file": {"exists": False}}
+        meta = {
+            "cycle_anchor_end": None,
+            "last_refresh_for_practice": "other_val",
+            "source_snapshot": snapshot,
+        }
+        monkeypatch.setattr(pg_mod, "_compute_windows", lambda n: {
+            "latest_completed_event": None,
+            "latest_completed_end": None,
+            "planning_allowed_after": past,
+            "next_practice": {"title": "P"},
+            "next_practice_start": next_practice,
+            "refresh_window_start": refresh_start,
+        })
+        monkeypatch.setattr(pg_mod, "_load_plan_meta", lambda: meta)
+        monkeypatch.setattr(pg_mod, "_snapshot_source_files", lambda: snapshot)
+        monkeypatch.setattr(pg_mod, "_iso", lambda dt: dt.isoformat() if dt else None)
+        result = run_scheduled(force=False)
+        assert result["status"] == "skipped"
+        assert result["reason"] == "no_new_info"
+
+    def test_refresh_generates_when_new_info(self, monkeypatch):
+        from tools.practice_gen import run_scheduled
+        from datetime import datetime, timedelta
+        self._write_swot()
+        now = datetime.now(ET_TZ)
+        past = now - timedelta(hours=10)
+        next_practice = now + timedelta(hours=0.5)
+        refresh_start = now - timedelta(hours=0.5)
+        old_snapshot = {"file": {"exists": False}}
+        new_snapshot = {"file": {"exists": True, "sha1": "abc"}}
+        meta = {
+            "cycle_anchor_end": None,
+            "last_refresh_for_practice": "other_val",
+            "source_snapshot": old_snapshot,
+        }
+        monkeypatch.setattr(pg_mod, "_compute_windows", lambda n: {
+            "latest_completed_event": None,
+            "latest_completed_end": None,
+            "planning_allowed_after": past,
+            "next_practice": {"title": "P"},
+            "next_practice_start": next_practice,
+            "refresh_window_start": refresh_start,
+        })
+        monkeypatch.setattr(pg_mod, "_load_plan_meta", lambda: meta)
+        monkeypatch.setattr(pg_mod, "_snapshot_source_files", lambda: new_snapshot)
+        monkeypatch.setattr(pg_mod, "_iso", lambda dt: dt.isoformat() if dt else None)
+        monkeypatch.setattr(pg_mod, "_save_plan_meta", lambda m: None)
+        monkeypatch.setattr(pg_mod, "_resolve_next_opponent_matchup", lambda: None)
+        result = run_scheduled(force=False)
+        assert result["status"] == "generated"
+        assert result["mode"] == "scheduled_refresh"
+
+
+# ====================================================================
+# run() — lines 812-829
+# ====================================================================
+
+class TestRun:
+    @pytest.fixture(autouse=True)
+    def _dirs(self, tmp_path, monkeypatch):
+        self.sharks = tmp_path / "sharks"
+        self.sharks.mkdir()
+        monkeypatch.setattr(pg_mod, "SHARKS_DIR", self.sharks)
+        monkeypatch.setattr(pg_mod, "DATA_DIR", tmp_path)
+        monkeypatch.setattr(pg_mod, "PLAN_FILE", self.sharks / "next_practice.txt")
+        monkeypatch.setattr(pg_mod, "PLAN_META_FILE", self.sharks / "meta.json")
+
+    def test_returns_none_when_no_swot(self, capsys):
+        from tools.practice_gen import run
+        result = run()
+        assert result is None
+        assert "SWOT" in capsys.readouterr().out
+
+    def test_generates_plan_when_swot_exists(self):
+        from tools.practice_gen import run
+        (self.sharks / "swot_analysis.json").write_text(json.dumps(_SWOT))
+        plan_file = self.sharks / "next_practice.txt"
+        result = run()
+        assert result is not None
+        assert plan_file.exists()
+        assert "Stretch" in result or "Warmup" in result
+
+    def test_prints_plan_to_stdout(self, capsys):
+        from tools.practice_gen import run
+        (self.sharks / "swot_analysis.json").write_text(json.dumps(_SWOT))
+        run()
+        out = capsys.readouterr().out
+        assert "Plan saved" in out or "PRACTICE" in out
+
+    def test_matchup_printed_when_available(self, monkeypatch, capsys):
+        from tools.practice_gen import run
+        (self.sharks / "swot_analysis.json").write_text(json.dumps(_SWOT))
+        monkeypatch.setattr(pg_mod, "_resolve_next_opponent_matchup",
+                            lambda: {"opponent": "Eagles", "their_advantages": [],
+                                     "our_advantages": []})
+        run()
+        out = capsys.readouterr().out
+        assert "Eagles" in out
