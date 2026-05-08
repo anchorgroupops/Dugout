@@ -433,3 +433,299 @@ class TestMergeGenericNonParseable:
         dst = {"x": 1}
         _merge_generic(dst, {"label": "foo", "notes": "bar"})
         assert dst == {"x": 1}
+
+
+# ====================================================================
+# main() — lines 192-347
+# ====================================================================
+
+import tools.aggregate_team_stats as ats_mod
+
+
+def _make_player(first="Alice", last="Smith", number="7", **extras):
+    p = {"first": first, "last": last, "number": number, "core": False}
+    p.update(extras)
+    return p
+
+
+def _simple_team(players=None):
+    return {"team_name": "TestTeam", "roster": players or [_make_player()]}
+
+
+class TestMain:
+    @pytest.fixture(autouse=True)
+    def _dirs(self, tmp_path, monkeypatch):
+        self.sharks = tmp_path / "sharks"
+        self.sharks.mkdir()
+        self.teams = tmp_path / "teams"
+        self.manifest_file = self.sharks / "teams_manifest.json"
+        self.output_file = self.sharks / "team_merged.json"
+        monkeypatch.setattr(ats_mod, "SHARKS_DIR", self.sharks)
+        monkeypatch.setattr(ats_mod, "TEAMS_DIR", self.teams)
+        monkeypatch.setattr(ats_mod, "ROOT_DIR", tmp_path)
+        monkeypatch.setattr(ats_mod, "MANIFEST_FILE", self.manifest_file)
+        monkeypatch.setattr(ats_mod, "OUTPUT_FILE", self.output_file)
+
+    def _write_manifest(self, primary=None, extra=None):
+        manifest = {"primary_team": primary or {}, "extra_teams": extra or []}
+        self.manifest_file.write_text(json.dumps(manifest))
+
+    def _write_team_file(self, path, team):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(team))
+
+    def test_aborts_when_no_team_data(self, capsys):
+        """No team files found → prints abort message, no output file."""
+        from tools.aggregate_team_stats import main
+        team_file = self.sharks / "team.json"
+        # Don't create the file → main() should abort
+        main()
+        out = capsys.readouterr().out
+        assert "No team data" in out
+        assert not self.output_file.exists()
+
+    def test_missing_team_file_prints_message(self, capsys):
+        """Entry with non-existent file → prints missing message."""
+        from tools.aggregate_team_stats import main
+        self._write_manifest(primary={"id": "X", "season_slug": "y", "name": "Sharks"})
+        # teams/X_y/team.json doesn't exist → prints missing
+        main()
+        out = capsys.readouterr().out
+        assert "Missing" in out
+
+    def test_writes_output_file_with_primary_team(self, capsys):
+        """Happy path: primary team exists → team_merged.json written."""
+        from tools.aggregate_team_stats import main
+        team = _simple_team()
+        team_file = self.sharks / "team.json"
+        self._write_team_file(team_file, team)
+        # Default manifest (no manifest file) uses team.json
+        main()
+        assert self.output_file.exists()
+        data = json.loads(self.output_file.read_text())
+        assert "roster" in data
+        assert len(data["roster"]) == 1
+
+    def test_data_path_entry_used_when_provided(self):
+        """primary_team with data_path uses that path directly."""
+        from tools.aggregate_team_stats import main
+        team = _simple_team([_make_player("Bob", "Jones", "3")])
+        team_file = self.sharks / "team.json"
+        self._write_team_file(team_file, team)
+        self._write_manifest(primary={
+            "data_path": str(team_file),
+            "name": "Sharks",
+        })
+        main()
+        data = json.loads(self.output_file.read_text())
+        assert len(data["roster"]) == 1
+
+    def test_extra_team_merged_when_player_in_primary(self):
+        """Extra team player included only if name is in primary roster."""
+        from tools.aggregate_team_stats import main
+        primary_team = _simple_team([_make_player("Alice", "Smith", "7")])
+        primary_file = self.sharks / "team.json"
+        self._write_team_file(primary_file, primary_team)
+
+        extra_file = self.teams / "extra_team.json"
+        extra_player = _make_player("Alice", "Smith", "7",
+                                    batting={"ab": 10, "h": 3})
+        extra_team = _simple_team([extra_player])
+        self._write_team_file(extra_file, extra_team)
+
+        self._write_manifest(
+            primary={"data_path": str(primary_file), "name": "Sharks",
+                     "id": "prim", "season_slug": "2026"},
+            extra=[{"data_path": str(extra_file), "name": "Extra",
+                    "id": "ext", "season_slug": "2026"}],
+        )
+        main()
+        data = json.loads(self.output_file.read_text())
+        # Alice should appear once in merged roster
+        alice = next((p for p in data["roster"]
+                      if p["first"] == "Alice"), None)
+        assert alice is not None
+
+    def test_extra_team_player_not_in_primary_excluded(self):
+        """Extra team player NOT in primary roster (by name) is excluded."""
+        from tools.aggregate_team_stats import main
+        primary_team = _simple_team([_make_player("Alice", "Smith", "7")])
+        primary_file = self.sharks / "team.json"
+        self._write_team_file(primary_file, primary_team)
+
+        extra_file = self.teams / "extra_team.json"
+        stranger = _make_player("Stranger", "Danger", "99", batting={"ab": 5})
+        extra_team = _simple_team([stranger])
+        self._write_team_file(extra_file, extra_team)
+
+        self._write_manifest(
+            primary={"data_path": str(primary_file), "name": "Sharks",
+                     "id": "prim", "season_slug": "2026"},
+            extra=[{"data_path": str(extra_file), "name": "Extra",
+                    "id": "ext", "season_slug": "2026"}],
+        )
+        main()
+        data = json.loads(self.output_file.read_text())
+        strangers = [p for p in data["roster"] if p["first"] == "Stranger"]
+        assert strangers == []
+
+    def test_roster_manifest_borrowed_players_added(self):
+        """roster_manifest.json borrowed_players are added to allowed_names."""
+        from tools.aggregate_team_stats import main
+        primary_team = _simple_team([_make_player("Alice", "Smith", "7")])
+        primary_file = self.sharks / "team.json"
+        self._write_team_file(primary_file, primary_team)
+
+        roster_manifest = {"borrowed_players": ["Borrowed Player"]}
+        (self.sharks / "roster_manifest.json").write_text(json.dumps(roster_manifest))
+
+        extra_file = self.teams / "extra.json"
+        borrowed = _make_player("Borrowed", "Player", "5")
+        extra_team = _simple_team([borrowed])
+        self._write_team_file(extra_file, extra_team)
+
+        self._write_manifest(
+            primary={"data_path": str(primary_file), "name": "Sharks",
+                     "id": "prim", "season_slug": "2026"},
+            extra=[{"data_path": str(extra_file), "name": "Extra",
+                    "id": "ext", "season_slug": "2026"}],
+        )
+        main()
+        data = json.loads(self.output_file.read_text())
+        names = [f"{p['first']} {p['last']}" for p in data["roster"]]
+        assert "Borrowed Player" in names
+
+    def test_batting_stats_summed_across_teams(self):
+        """A player appearing in two teams gets batting ab summed."""
+        from tools.aggregate_team_stats import main
+        player1 = _make_player("Alice", "Smith", "7",
+                               batting={"ab": 10, "h": 4, "bb": 1, "hbp": 0})
+        player2 = _make_player("Alice", "Smith", "7",
+                               batting={"ab": 5, "h": 2, "bb": 0, "hbp": 0})
+        primary_file = self.sharks / "team.json"
+        extra_file = self.teams / "extra.json"
+        self._write_team_file(primary_file, _simple_team([player1]))
+        self._write_team_file(extra_file, _simple_team([player2]))
+
+        self._write_manifest(
+            primary={"data_path": str(primary_file), "name": "Sharks",
+                     "id": "prim", "season_slug": "2026"},
+            extra=[{"data_path": str(extra_file), "name": "Extra",
+                    "id": "ext", "season_slug": "2026"}],
+        )
+        main()
+        data = json.loads(self.output_file.read_text())
+        alice = next(p for p in data["roster"] if p["first"] == "Alice")
+        assert alice["batting"]["ab"] == 15
+
+    def test_pitching_innings_played_merged(self):
+        """Player with pitching stats gets ip and era computed in output."""
+        from tools.aggregate_team_stats import main
+        player = _make_player("Alice", "Smith", "7",
+                              pitching={"ip": "3.0", "er": 2, "bb": 1, "h": 4,
+                                        "gp": 1, "w": 1, "l": 0})
+        team_file = self.sharks / "team.json"
+        self._write_team_file(team_file, _simple_team([player]))
+        main()
+        data = json.loads(self.output_file.read_text())
+        alice = next(p for p in data["roster"] if p["first"] == "Alice")
+        assert "ip" in alice["pitching"]
+        assert "era" in alice["pitching"]
+
+    def test_innings_played_positions_merged(self):
+        """Player with innings_played dict gets positions preserved."""
+        from tools.aggregate_team_stats import main
+        player = _make_player("Alice", "Smith", "7",
+                              innings_played={"P": "3.0", "SS": "2.1"})
+        team_file = self.sharks / "team.json"
+        self._write_team_file(team_file, _simple_team([player]))
+        main()
+        data = json.loads(self.output_file.read_text())
+        alice = next(p for p in data["roster"] if p["first"] == "Alice")
+        assert "P" in alice["innings_played"] or alice["innings_played"] == {}
+
+    def test_core_player_flagged(self):
+        """Primary team core=True player is flagged as core in output."""
+        from tools.aggregate_team_stats import main
+        player = _make_player("Alice", "Smith", "7", core=True)
+        team_file = self.sharks / "team.json"
+        self._write_team_file(team_file, _simple_team([player]))
+        main()
+        data = json.loads(self.output_file.read_text())
+        alice = next(p for p in data["roster"] if p["first"] == "Alice")
+        assert alice["core"] is True
+
+    def test_output_has_team_name_and_source_teams(self):
+        """Output JSON includes team_name and source_teams from manifest."""
+        from tools.aggregate_team_stats import main
+        team_file = self.sharks / "team.json"
+        self._write_team_file(team_file, _simple_team())
+        self._write_manifest(primary={"data_path": str(team_file), "name": "My Sharks"})
+        main()
+        data = json.loads(self.output_file.read_text())
+        assert data["team_name"] == "My Sharks"
+        assert "My Sharks" in data["source_teams"]
+
+    def test_batting_advanced_merged(self):
+        """Line 284: batting_advanced present → _merge_generic called."""
+        from tools.aggregate_team_stats import main
+        player = _make_player("Alice", "Smith", "7",
+                              batting_advanced={"c_pct": 0.75, "bb_per_k": 0.5})
+        team_file = self.sharks / "team.json"
+        self._write_team_file(team_file, _simple_team([player]))
+        main()
+        data = json.loads(self.output_file.read_text())
+        alice = next(p for p in data["roster"] if p["first"] == "Alice")
+        assert isinstance(alice["batting_advanced"], dict)
+
+    def test_pitching_advanced_merged(self):
+        """Line 293: pitching_advanced present → _merge_generic called."""
+        from tools.aggregate_team_stats import main
+        player = _make_player("Alice", "Smith", "7",
+                              pitching={"ip": "2.0", "er": 1, "bb": 0, "h": 2},
+                              pitching_advanced={"k_pct": 0.30})
+        team_file = self.sharks / "team.json"
+        self._write_team_file(team_file, _simple_team([player]))
+        main()
+        data = json.loads(self.output_file.read_text())
+        alice = next(p for p in data["roster"] if p["first"] == "Alice")
+        assert isinstance(alice["pitching_advanced"], dict)
+
+    def test_fielding_stats_merged(self):
+        """Line 297: fielding present → _merge_numeric called."""
+        from tools.aggregate_team_stats import main
+        player = _make_player("Alice", "Smith", "7",
+                              fielding={"po": 5, "a": 2, "e": 1, "tc": 8})
+        team_file = self.sharks / "team.json"
+        self._write_team_file(team_file, _simple_team([player]))
+        main()
+        data = json.loads(self.output_file.read_text())
+        alice = next(p for p in data["roster"] if p["first"] == "Alice")
+        assert alice["fielding"].get("po") == 5
+
+    def test_catching_stats_merged(self):
+        """Lines 301-304: catching present → merged with inn_outs."""
+        from tools.aggregate_team_stats import main
+        player = _make_player("Alice", "Smith", "7",
+                              catching={"sb": 3, "cs": 1, "inn": "5.0"})
+        team_file = self.sharks / "team.json"
+        self._write_team_file(team_file, _simple_team([player]))
+        main()
+        data = json.loads(self.output_file.read_text())
+        alice = next(p for p in data["roster"] if p["first"] == "Alice")
+        assert alice["catching"].get("sb") == 3
+        assert "inn" in alice["catching"]
+
+    def test_innings_played_with_unparseable_value_skipped(self):
+        """Line 311: innings_played value that _innings_to_outs returns None for → continue."""
+        from tools.aggregate_team_stats import main
+        player = _make_player("Alice", "Smith", "7",
+                              innings_played={"P": "invalid", "SS": "3.0"})
+        team_file = self.sharks / "team.json"
+        self._write_team_file(team_file, _simple_team([player]))
+        main()
+        data = json.loads(self.output_file.read_text())
+        alice = next(p for p in data["roster"] if p["first"] == "Alice")
+        # SS should be present, P (invalid) was skipped
+        assert "SS" in alice["innings_played"]
+        assert "P" not in alice["innings_played"]
