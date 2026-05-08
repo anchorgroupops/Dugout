@@ -572,3 +572,320 @@ class TestMetadataFromFilename:
     def test_two_digit_day_not_double_padded(self):
         meta = _metadata_from_filename(self._path("Jun_25_2025"))
         assert meta["date"] == "2025-06-25"
+
+    def test_iso_fallback_6digit_sequence(self):
+        """Lines 203-204: fallback parses MMDDYY as 6-digit run."""
+        meta = _metadata_from_filename(self._path("game_021926_final"))
+        assert meta["date"] == "2026-02-19"
+
+
+# ---------------------------------------------------------------------------
+# _parse_players_from_page (lines 120-159) with fake PDF page
+# ---------------------------------------------------------------------------
+
+import parse_scorebook_pdf as psb
+
+
+class FakePage:
+    def __init__(self, tables=None, text=""):
+        self._tables = tables or []
+        self._text = text or ""
+
+    def extract_tables(self):
+        return self._tables
+
+    def extract_text(self):
+        return self._text
+
+
+class TestParsePlayersFromPage:
+    def test_no_tables_returns_empty(self):
+        page = FakePage(tables=[])
+        assert psb._parse_players_from_page(page) == []
+
+    def test_valid_player_row_extracted(self):
+        table = [["7", "Alice Smith", "SS", None, None, "1B", "K", "G"]]
+        page = FakePage(tables=[table])
+        players = psb._parse_players_from_page(page)
+        assert len(players) == 1
+        assert players[0]["number"] == "7"
+        assert players[0]["name"] == "Alice Smith"
+
+    def test_header_row_skipped(self):
+        table = [["#", "Name", "Pos", None, None]]
+        page = FakePage(tables=[table])
+        assert psb._parse_players_from_page(page) == []
+
+    def test_non_numeric_jersey_skipped(self):
+        table = [["X7", "Alice Smith", "SS", None, None, "1B"]]
+        page = FakePage(tables=[table])
+        assert psb._parse_players_from_page(page) == []
+
+    def test_empty_name_skipped(self):
+        table = [["7", "", "SS", None, None, "1B"]]
+        page = FakePage(tables=[table])
+        assert psb._parse_players_from_page(page) == []
+
+    def test_duplicate_jersey_skipped(self):
+        table = [
+            ["7", "Alice Smith", "SS", None, None, "1B"],
+            ["7", "Alice Clone", "3B", None, None, "K"],
+        ]
+        page = FakePage(tables=[table])
+        players = psb._parse_players_from_page(page)
+        assert len(players) == 1
+
+    def test_none_cells_skipped(self):
+        table = [[None, None, None, None, None]]
+        page = FakePage(tables=[table])
+        assert psb._parse_players_from_page(page) == []
+
+    def test_empty_row_skipped(self):
+        table = [[]]
+        page = FakePage(tables=[table])
+        assert psb._parse_players_from_page(page) == []
+
+    def test_at_bat_cells_extracted(self):
+        table = [["7", "Alice Smith", "SS", None, None, "1B", "K", None, "HR"]]
+        page = FakePage(tables=[table])
+        players = psb._parse_players_from_page(page)
+        assert "1B" in players[0]["at_bats_raw"]
+        assert "K" in players[0]["at_bats_raw"]
+        assert "HR" in players[0]["at_bats_raw"]
+
+    def test_digit_only_cells_skipped_in_abs(self):
+        table = [["7", "Alice Smith", "SS", None, None, "1B", "5", "#12"]]
+        page = FakePage(tables=[table])
+        players = psb._parse_players_from_page(page)
+        assert "5" not in players[0]["at_bats_raw"]
+        assert "#12" not in players[0]["at_bats_raw"]
+        assert "1B" in players[0]["at_bats_raw"]
+
+
+class TestPageTeamAndSide:
+    def test_first_line_is_team_name(self):
+        page = FakePage(text="Eagles\nAway Team")
+        team, side, date_str = psb._page_team_and_side(page)
+        assert team == "Eagles"
+
+    def test_away_detected(self):
+        page = FakePage(text="Eagles\nAway Team")
+        _, side, _ = psb._page_team_and_side(page)
+        assert side == "away"
+
+    def test_home_detected(self):
+        page = FakePage(text="Sharks\nHome Team 2026/04/15")
+        _, side, _ = psb._page_team_and_side(page)
+        assert side == "home"
+
+    def test_date_extracted_from_side_line(self):
+        page = FakePage(text="Sharks\nHome Team 2026/04/15")
+        _, _, date_str = psb._page_team_and_side(page)
+        assert date_str == "2026-04-15"
+
+    def test_no_date_returns_none(self):
+        page = FakePage(text="Eagles\nAway Team")
+        _, _, date_str = psb._page_team_and_side(page)
+        assert date_str is None
+
+    def test_empty_text_returns_unknown(self):
+        page = FakePage(text="")
+        team, side, date_str = psb._page_team_and_side(page)
+        assert team == "Unknown"
+        assert side == "home"
+
+
+# ---------------------------------------------------------------------------
+# parse_pdf (lines 213-258) with mocked pdfplumber
+# ---------------------------------------------------------------------------
+
+
+class TestParsePdf:
+    def test_returns_none_when_no_sharks_page(self, tmp_path):
+        pdf_path = tmp_path / "May_15_2026.pdf"
+        pdf_path.touch()
+        eagles_page = FakePage(text="Eagles\nAway Team 2026/05/15", tables=[])
+        ravens_page = FakePage(text="Ravens\nHome Team 2026/05/15", tables=[])
+        mock_pdf = mock.MagicMock()
+        mock_pdf.pages = [eagles_page, ravens_page]
+        mock_pdf.__enter__ = lambda s: mock_pdf
+        mock_pdf.__exit__ = mock.MagicMock(return_value=False)
+        sys.modules["pdfplumber"].open.return_value = mock_pdf
+        result = psb.parse_pdf(pdf_path)
+        assert result is None
+
+    def test_returns_game_dict_with_sharks_page(self, tmp_path):
+        pdf_path = tmp_path / "May_15_2026.pdf"
+        pdf_path.touch()
+        sharks_table = [["7", "Alice Smith", "SS", None, None, "1B", "K"]]
+        sharks_page = FakePage(text="Sharks\nHome Team 2026/05/15",
+                               tables=[sharks_table])
+        opp_page = FakePage(text="Eagles\nAway Team 2026/05/15", tables=[])
+        mock_pdf = mock.MagicMock()
+        mock_pdf.pages = [sharks_page, opp_page]
+        mock_pdf.__enter__ = lambda s: mock_pdf
+        mock_pdf.__exit__ = mock.MagicMock(return_value=False)
+        sys.modules["pdfplumber"].open.return_value = mock_pdf
+        result = psb.parse_pdf(pdf_path)
+        assert result is not None
+        assert result["sharks_side"] == "home"
+        assert result["opponent"] == "Eagles"
+        assert len(result["sharks_batting"]) == 1
+
+    def test_date_from_pdf_used_when_filename_has_no_date(self, tmp_path):
+        pdf_path = tmp_path / "no_date_game.pdf"
+        pdf_path.touch()
+        sharks_page = FakePage(text="Sharks\nHome Team 2026/05/20", tables=[])
+        opp_page = FakePage(text="Eagles\nAway Team 2026/05/20", tables=[])
+        mock_pdf = mock.MagicMock()
+        mock_pdf.pages = [sharks_page, opp_page]
+        mock_pdf.__enter__ = lambda s: mock_pdf
+        mock_pdf.__exit__ = mock.MagicMock(return_value=False)
+        sys.modules["pdfplumber"].open.return_value = mock_pdf
+        result = psb.parse_pdf(pdf_path)
+        assert result is not None
+        assert result["date"] == "2026-05-20"
+
+    def test_no_opponent_page_opponent_is_unknown(self, tmp_path):
+        pdf_path = tmp_path / "May_15_2026.pdf"
+        pdf_path.touch()
+        sharks_page = FakePage(text="Sharks\nHome Team 2026/05/15", tables=[])
+        mock_pdf = mock.MagicMock()
+        mock_pdf.pages = [sharks_page]
+        mock_pdf.__enter__ = lambda s: mock_pdf
+        mock_pdf.__exit__ = mock.MagicMock(return_value=False)
+        sys.modules["pdfplumber"].open.return_value = mock_pdf
+        result = psb.parse_pdf(pdf_path)
+        assert result is not None
+        assert result["opponent"] == "Unknown"
+
+
+# ---------------------------------------------------------------------------
+# run() (lines 276-347)
+# ---------------------------------------------------------------------------
+
+import json as _json
+
+
+class TestRun:
+    def test_returns_empty_when_no_pdfs(self, tmp_path):
+        scorebooks = tmp_path / "Scorebooks"
+        scorebooks.mkdir()
+        result = psb.run(scorebooks_dir=scorebooks, games_dir=tmp_path / "games")
+        assert result == []
+
+    def test_returns_results_and_writes_json(self, tmp_path, monkeypatch):
+        scorebooks = tmp_path / "Scorebooks"
+        scorebooks.mkdir()
+        games = tmp_path / "games"
+        (scorebooks / "May_15_2026.pdf").touch()
+
+        fake_game = {
+            "game_id": "2026-05-15_eagles",
+            "date": "2026-05-15",
+            "opponent": "Eagles",
+            "sharks_side": "home",
+            "source": "scorebook_pdf",
+            "pdf_file": "May_15_2026.pdf",
+            "sharks_batting": [{"number": "7", "name": "Alice",
+                                "batting": {"h": 1, "ab": 3, "pa": 3,
+                                            "singles": 1, "doubles": 0,
+                                            "triples": 0, "hr": 0, "bb": 0,
+                                            "hbp": 0, "so": 1, "sac": 0}}],
+            "opponent_batting": [],
+        }
+        monkeypatch.setattr(psb, "parse_pdf", lambda p: fake_game)
+        results = psb.run(scorebooks_dir=scorebooks, games_dir=games)
+        assert len(results) == 1
+        assert (games / "2026-05-15_eagles.json").exists()
+        assert (games / "index.json").exists()
+
+    def test_skips_pdf_that_returns_none(self, tmp_path, monkeypatch):
+        scorebooks = tmp_path / "Scorebooks"
+        scorebooks.mkdir()
+        (scorebooks / "bad.pdf").touch()
+        monkeypatch.setattr(psb, "parse_pdf", lambda p: None)
+        result = psb.run(scorebooks_dir=scorebooks, games_dir=tmp_path / "games")
+        assert result == []
+
+    def test_run_enriches_with_known_results(self, tmp_path, monkeypatch):
+        """Lines 317-322: game date matches known result → enriched with W/L and score."""
+        scorebooks = tmp_path / "Scorebooks"
+        scorebooks.mkdir()
+        games = tmp_path / "games"
+        (scorebooks / "Feb_19_2026.pdf").touch()
+
+        fake_game = {
+            "game_id": "2026-02-19_tbd",
+            "date": "2026-02-19",
+            "opponent": "TBD",
+            "sharks_side": "away",
+            "source": "scorebook_pdf",
+            "pdf_file": "Feb_19_2026.pdf",
+            "sharks_batting": [],
+            "opponent_batting": [],
+        }
+        monkeypatch.setattr(psb, "parse_pdf", lambda p: fake_game)
+        # Use the real known_game_results.json which has "2026-02-19" with score "13-20"
+        results = psb.run(scorebooks_dir=scorebooks, games_dir=games)
+        assert len(results) == 1
+        # Result from real file: "L" with score "13-20"
+        assert results[0].get("result") == "L"
+        assert results[0].get("score") is not None
+
+    def test_score_raw_used_when_non_numeric(self, tmp_path, monkeypatch):
+        """Lines 323-324: score that can't be split as ints → score_raw."""
+        scorebooks = tmp_path / "Scorebooks"
+        scorebooks.mkdir()
+        games = tmp_path / "games"
+        (scorebooks / "Feb_19_2026.pdf").touch()
+
+        fake_game = {
+            "game_id": "2026-02-19_tbd",
+            "date": "2026-02-19",
+            "opponent": "TBD",
+            "sharks_side": "away",
+            "source": "scorebook_pdf",
+            "pdf_file": "Feb_19_2026.pdf",
+            "sharks_batting": [],
+            "opponent_batting": [],
+        }
+        monkeypatch.setattr(psb, "parse_pdf", lambda p: fake_game)
+        # Patch json.load to return a known result with non-numeric score
+        known_data = {"results": [{"date": "2026-02-19", "result": "W", "score": "X-Y"}]}
+        orig_json_load = _json.load
+        call_count = [0]
+        def fake_json_load(f):
+            call_count[0] += 1
+            if call_count[0] == 1:  # first call is for known_game_results.json
+                return known_data
+            return orig_json_load(f)
+        monkeypatch.setattr(psb.json, "load", fake_json_load)
+        results = psb.run(scorebooks_dir=scorebooks, games_dir=games)
+        assert len(results) == 1
+        assert results[0].get("score_raw") == "X-Y"
+
+    def test_known_results_exception_swallowed(self, tmp_path, monkeypatch):
+        """Lines 311-312: exception during known_results loading is swallowed."""
+        scorebooks = tmp_path / "Scorebooks"
+        scorebooks.mkdir()
+        games = tmp_path / "games"
+        (scorebooks / "May_15_2026.pdf").touch()
+
+        fake_game = {
+            "game_id": "2026-05-15_eagles",
+            "date": "2026-05-15",
+            "opponent": "Eagles",
+            "sharks_side": "home",
+            "source": "scorebook_pdf",
+            "pdf_file": "May_15_2026.pdf",
+            "sharks_batting": [],
+            "opponent_batting": [],
+        }
+        monkeypatch.setattr(psb, "parse_pdf", lambda p: fake_game)
+        # Make json.load raise to trigger the except block
+        monkeypatch.setattr(psb.json, "load", lambda f: (_ for _ in ()).throw(
+            RuntimeError("bad JSON")))
+        # Should not raise despite the error
+        results = psb.run(scorebooks_dir=scorebooks, games_dir=games)
+        assert len(results) == 1
