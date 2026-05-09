@@ -10,7 +10,7 @@ import requests
 
 try:
     from playwright.sync_api import sync_playwright
-except ImportError:
+except ImportError:  # pragma: no cover
     sync_playwright = None
 
 

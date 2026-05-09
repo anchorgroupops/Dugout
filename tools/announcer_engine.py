@@ -129,7 +129,7 @@ class TTSProvider(ABC):
 
     @property
     @abstractmethod
-    def name(self) -> str:
+    def name(self) -> str:  # pragma: no cover
         pass
 
 

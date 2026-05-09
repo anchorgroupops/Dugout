@@ -6,6 +6,7 @@ import math
 import pytest
 
 from tools.stats_normalizer import (
+    _pick,
     build_player_metric_profile,
     count_populated_fields,
     detect_player_outlier_stats,
@@ -85,9 +86,10 @@ class TestSafeInt:
     def test_negative(self):
         assert safe_int(-3.2) == -3
 
-    def test_overflow_returns_default(self):
-        # float('inf') triggers OverflowError on int(round(...))
+    def test_infinity_returns_default(self):
+        # safe_float filters infinity to the default, so safe_int returns it too
         assert safe_int(float("inf"), default=99) == 99
+        assert safe_int(float("-inf"), default=7) == 7
 
 
 # ====================================================================
@@ -114,6 +116,26 @@ class TestSafePctRatio:
 
     def test_default_for_none(self):
         assert safe_pct_ratio(None, default=0.25) == 0.25
+
+
+# ====================================================================
+# _pick
+# ====================================================================
+class TestPick:
+    def test_non_dict_returns_none(self):
+        assert _pick(None, "ab") is None
+        assert _pick("not-a-dict", "ab") is None
+        assert _pick(42, "ab") is None
+
+    def test_returns_first_matching_key(self):
+        assert _pick({"ab": 5}, "ab") == 5
+
+    def test_skips_sentinel_values(self):
+        assert _pick({"ab": "-"}, "ab", "fallback") is None
+        assert _pick({"ab": None, "fallback": 3}, "ab", "fallback") == 3
+
+    def test_returns_none_when_no_keys_match(self):
+        assert _pick({"x": 1}, "ab") is None
 
 
 # ====================================================================

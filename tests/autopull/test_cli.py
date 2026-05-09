@@ -344,3 +344,177 @@ class TestMain:
         out = capsys.readouterr().out
         parsed = _json.loads(out)
         assert parsed["outcome"] == "skipped"
+
+
+# ---------------------------------------------------------------------------
+# default_runner — full Playwright+ingest flow (lines 141-251)
+# ---------------------------------------------------------------------------
+
+class TestDefaultRunner:
+    """Cover default_runner by patching module attributes directly."""
+
+    def _inject_mocks(self, monkeypatch, tmp_path, *,
+                      downloaded_path=None,
+                      val_accepted=True,
+                      pipeline_rc=0,
+                      fallback_rc=0):
+        """Patch all external module attributes used by default_runner.
+
+        Uses monkeypatch.setattr on the already-imported module objects so that
+        `from tools.autopull import X` inside default_runner receives the fake,
+        regardless of Python's package-attribute caching.
+        """
+        # ── playwright ──
+        import playwright.sync_api as _pw_sync
+        fake_page = MagicMock()
+        fake_page.goto = MagicMock()
+        fake_pw_ctx = MagicMock()
+        fake_pw_ctx.__enter__ = MagicMock(return_value=MagicMock())
+        fake_pw_ctx.__exit__ = MagicMock(return_value=False)
+        monkeypatch.setattr(_pw_sync, "sync_playwright",
+                            MagicMock(return_value=fake_pw_ctx))
+
+        # ── session_manager ──
+        from tools.autopull import session_manager as _sm_mod
+        fake_session = MagicMock()
+        fake_session.new_logged_in_page = MagicMock(return_value=(fake_page, True))
+        monkeypatch.setattr(_sm_mod, "SessionManager",
+                            MagicMock(return_value=fake_session))
+
+        # ── locator_engine ──
+        from tools.autopull import locator_engine as _le_mod
+        fake_result = MagicMock()
+        fake_result.downloaded_path = downloaded_path
+        fake_result.llm_used = False
+        fake_result.winning_strategy_id = "strat-1"
+        fake_engine = MagicMock()
+        fake_engine.find_and_download = MagicMock(return_value=fake_result)
+        monkeypatch.setattr(_le_mod, "seed_builtin_strategies", MagicMock())
+        monkeypatch.setattr(_le_mod, "LocatorEngine",
+                            MagicMock(return_value=fake_engine))
+
+        # ── csv_validator ──
+        from tools.autopull import csv_validator as _cv_mod
+        fake_val = MagicMock()
+        fake_val.accepted = val_accepted
+        fake_val.reason = "drift"
+        fake_val.drift_severity = "low"
+        fake_val.columns = ["a", "b"]
+        fake_val.row_count = 10
+        monkeypatch.setattr(_cv_mod, "validate", MagicMock(return_value=fake_val))
+        monkeypatch.setattr(_cv_mod, "quarantine", MagicMock())
+
+        # ── gmail_2fa_fetcher ──
+        from tools.autopull import gmail_2fa_fetcher as _g2fa_mod
+        monkeypatch.setattr(_g2fa_mod, "build_client",
+                            MagicMock(return_value=MagicMock()))
+        monkeypatch.setattr(_g2fa_mod, "fetch_latest_code",
+                            MagicMock(return_value=(None, None)))
+
+        # ── llm_adapter ──
+        from tools.autopull import llm_adapter as _lla_mod
+        monkeypatch.setattr(_lla_mod, "build_default_adapter",
+                            MagicMock(return_value=None))
+
+        # ── subprocess — locally imported inside default_runner ──
+        import subprocess as _real_subprocess
+        rc_sequence = iter([pipeline_rc, fallback_rc])
+        def fake_run(*args, **kwargs):
+            m = MagicMock()
+            m.returncode = next(rc_sequence, 0)
+            return m
+        monkeypatch.setattr(_real_subprocess, "run", fake_run)
+
+        return fake_result, fake_val, _lla_mod
+
+    def _fake_team(self):
+        team = MagicMock()
+        team.data_slug = "sharks"
+        team.stats_url = "https://web.gc.com/teams/sharks/stats"
+        return team
+
+    def _fake_db(self):
+        db = MagicMock()
+        db.last_two_schemas = MagicMock(return_value=(None, None))
+        db.record_schema = MagicMock()
+        return db
+
+    def test_default_runner_no_download_returns_failure(self, tmp_path, monkeypatch):
+        """Lines 189-195: downloaded_path=None → failure outcome."""
+        self._inject_mocks(monkeypatch, tmp_path, downloaded_path=None)
+        cfg = _fake_cfg(tmp_path)
+        result = cli.default_runner(
+            cfg=cfg, db=self._fake_db(), run_id=1, team=self._fake_team()
+        )
+        assert result["outcome"] == "failure"
+        assert "No strategy" in result["failure_reason"]
+
+    def test_default_runner_quarantined(self, tmp_path, monkeypatch):
+        """Lines 199-206: val.accepted=False → quarantined outcome."""
+        dl_path = tmp_path / "sharks_export.csv"
+        dl_path.write_text("name,ab\n")
+        self._inject_mocks(monkeypatch, tmp_path,
+                           downloaded_path=dl_path, val_accepted=False)
+        cfg = _fake_cfg(tmp_path)
+        result = cli.default_runner(
+            cfg=cfg, db=self._fake_db(), run_id=1, team=self._fake_team()
+        )
+        assert result["outcome"] == "quarantined"
+
+    def test_default_runner_success(self, tmp_path, monkeypatch):
+        """Lines 208-251: happy path → success outcome."""
+        dl_path = tmp_path / "sharks_export.csv"
+        dl_path.write_text("name,ab\n")
+        # Make Path.replace a no-op so the file isn't actually moved
+        monkeypatch.setattr(Path, "replace", MagicMock())
+        self._inject_mocks(monkeypatch, tmp_path,
+                           downloaded_path=dl_path, val_accepted=True, pipeline_rc=0)
+        cfg = _fake_cfg(tmp_path)
+        result = cli.default_runner(
+            cfg=cfg, db=self._fake_db(), run_id=1, team=self._fake_team()
+        )
+        assert result["outcome"] == "success"
+
+    def test_default_runner_pipeline_fail_fallback_success(self, tmp_path, monkeypatch):
+        """Lines 223-241: pipeline rc!=0, fallback rc=0 → success."""
+        dl_path = tmp_path / "sharks_export.csv"
+        dl_path.write_text("name,ab\n")
+        monkeypatch.setattr(Path, "replace", MagicMock())
+        self._inject_mocks(monkeypatch, tmp_path,
+                           downloaded_path=dl_path, val_accepted=True,
+                           pipeline_rc=1, fallback_rc=0)
+        cfg = _fake_cfg(tmp_path)
+        result = cli.default_runner(
+            cfg=cfg, db=self._fake_db(), run_id=1, team=self._fake_team()
+        )
+        assert result["outcome"] == "success"
+
+    def test_default_runner_both_pipelines_fail(self, tmp_path, monkeypatch):
+        """Lines 233-241: pipeline fails AND fallback fails → failure."""
+        dl_path = tmp_path / "sharks_export.csv"
+        dl_path.write_text("name,ab\n")
+        monkeypatch.setattr(Path, "replace", MagicMock())
+        self._inject_mocks(monkeypatch, tmp_path,
+                           downloaded_path=dl_path, val_accepted=True,
+                           pipeline_rc=1, fallback_rc=1)
+        cfg = _fake_cfg(tmp_path)
+        result = cli.default_runner(
+            cfg=cfg, db=self._fake_db(), run_id=1, team=self._fake_team()
+        )
+        assert result["outcome"] == "failure"
+        assert "ingest failed" in result["failure_reason"]
+
+    def test_default_runner_llm_enabled(self, tmp_path, monkeypatch):
+        """Line 176-179: llm_adapt_enabled=True, anthropic_api_key set → adapter built."""
+        dl_path = tmp_path / "sharks_export.csv"
+        dl_path.write_text("name,ab\n")
+        monkeypatch.setattr(Path, "replace", MagicMock())
+        _, _, lla_mod = self._inject_mocks(monkeypatch, tmp_path,
+                                           downloaded_path=dl_path, val_accepted=True)
+
+        cfg = _fake_cfg(tmp_path, llm_adapt_enabled=True, anthropic_api_key="key-123")
+        result = cli.default_runner(
+            cfg=cfg, db=self._fake_db(), run_id=1, team=self._fake_team()
+        )
+        lla_mod.build_default_adapter.assert_called_once()
+        assert result["outcome"] == "success"

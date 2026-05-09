@@ -13,7 +13,7 @@ from pathlib import Path
 
 try:
     import pdfplumber
-except ImportError:
+except ImportError:  # pragma: no cover
     print("ERROR: pdfplumber not installed. Run: pip install pdfplumber")
     sys.exit(1)
 
