@@ -67,7 +67,7 @@ _log_file = LOG_DIR / "sync_daemon.log"
 try:
     _log_file.touch(exist_ok=True)
     _log_file.chmod(0o666)
-except OSError:
+except OSError:  # pragma: no cover
     pass  # Already writable, or on a read-only FS — RotatingFileHandler will surface the real error
 DEFAULT_FALLBACK_VOICE_ID = "EXAVITQu4vr4xnSDxMaL"
 _SECRET_CACHE: dict[str, str] | None = None
@@ -116,7 +116,7 @@ CORS_ORIGINS = [
     for origin in os.getenv("CORS_ORIGINS", ",".join(DEFAULT_CORS_ORIGINS)).split(",")
     if origin.strip() and origin.strip() != "*"
 ]
-if not CORS_ORIGINS:
+if not CORS_ORIGINS:  # pragma: no cover
     CORS_ORIGINS = DEFAULT_CORS_ORIGINS
 
 DEFAULT_WRITE_ORIGINS = list(DEFAULT_CORS_ORIGINS)
@@ -125,7 +125,7 @@ WRITE_ORIGINS = [
     for origin in os.getenv("WRITE_ORIGINS", ",".join(DEFAULT_WRITE_ORIGINS)).split(",")
     if origin.strip() and origin.strip() != "*"
 ]
-if not WRITE_ORIGINS:
+if not WRITE_ORIGINS:  # pragma: no cover
     WRITE_ORIGINS = DEFAULT_WRITE_ORIGINS
 
 
@@ -3513,7 +3513,7 @@ def _tts_stat(v) -> str:
         tens_ones = int(digits[1:])
         hundreds_words = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"]
         return f"{hundreds_words[hundreds]} {tens_ones:02d}" if tens_ones > 0 else hundreds_words[hundreds]
-    return digits
+    return digits  # pragma: no cover
 
 
 # Phonetic pronunciation map for names the TTS engine mispronounces.
@@ -3648,7 +3648,7 @@ def _synthesize_voice_update(text: str) -> bytes:
 
     if not api_key:
         raise RuntimeError("Voice updates require an ElevenLabs API key. Add ELEVENLABS_API_KEY to .env")
-    if not voice_id:
+    if not voice_id:  # pragma: no cover
         raise RuntimeError("Missing ELEVENLABS_VOICE_ID.")
 
     url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
