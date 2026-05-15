@@ -4,6 +4,9 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    groups:
+      gh-actions-minor-patch:
+        update-types: ["minor", "patch"]
     commit-message:
       prefix: "ci"
 
@@ -11,6 +14,9 @@ updates:
     directory: "/client"
     schedule:
       interval: "weekly"
+    groups:
+      npm-minor-patch:
+        update-types: ["minor", "patch"]
     commit-message:
       prefix: "deps"
     open-pull-requests-limit: 5
@@ -19,6 +25,9 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    groups:
+      pip-minor-patch:
+        update-types: ["minor", "patch"]
     commit-message:
       prefix: "deps"
     open-pull-requests-limit: 5
@@ -27,6 +36,9 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    groups:
+      docker-minor-patch:
+        update-types: ["minor", "patch"]
     commit-message:
       prefix: "deps"
 
@@ -34,5 +46,8 @@ updates:
     directory: "/client"
     schedule:
       interval: "weekly"
+    groups:
+      docker-client-minor-patch:
+        update-types: ["minor", "patch"]
     commit-message:
       prefix: "deps"
