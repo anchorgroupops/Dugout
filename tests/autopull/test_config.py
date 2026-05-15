@@ -60,3 +60,74 @@ def test_bool_parsing(monkeypatch):
     for falsy in ("false", "FALSE", "0", "no", "off", ""):
         monkeypatch.setenv("GC_AUTOPULL_ENABLED", falsy)
         assert config.load().enabled is False
+
+
+# ---------------------------------------------------------------------------
+# _bool, _int, _float — low-level env parsers
+# ---------------------------------------------------------------------------
+
+class TestBool:
+    def test_returns_default_when_not_set(self, monkeypatch):
+        monkeypatch.delenv("TEST_BOOL_XYZ", raising=False)
+        assert config._bool("TEST_BOOL_XYZ", default=False) is False
+        assert config._bool("TEST_BOOL_XYZ", default=True) is True
+
+    def test_true_string_values(self, monkeypatch):
+        for val in ("true", "TRUE", "1", "yes", "on"):
+            monkeypatch.setenv("TEST_BOOL_XYZ", val)
+            assert config._bool("TEST_BOOL_XYZ") is True
+
+    def test_false_string_values(self, monkeypatch):
+        for val in ("false", "FALSE", "0", "no", "off"):
+            monkeypatch.setenv("TEST_BOOL_XYZ", val)
+            assert config._bool("TEST_BOOL_XYZ") is False
+
+    def test_empty_string_is_falsy(self, monkeypatch):
+        monkeypatch.setenv("TEST_BOOL_XYZ", "")
+        assert config._bool("TEST_BOOL_XYZ") is False
+
+
+class TestInt:
+    def test_returns_default_when_not_set(self, monkeypatch):
+        monkeypatch.delenv("TEST_INT_XYZ", raising=False)
+        assert config._int("TEST_INT_XYZ", default=42) == 42
+
+    def test_parses_integer_string(self, monkeypatch):
+        monkeypatch.setenv("TEST_INT_XYZ", "7")
+        assert config._int("TEST_INT_XYZ", default=0) == 7
+
+    def test_parses_negative_integer(self, monkeypatch):
+        monkeypatch.setenv("TEST_INT_XYZ", "-3")
+        assert config._int("TEST_INT_XYZ", default=0) == -3
+
+    def test_raises_on_non_integer(self, monkeypatch):
+        monkeypatch.setenv("TEST_INT_XYZ", "abc")
+        with pytest.raises(config.ConfigError):
+            config._int("TEST_INT_XYZ", default=0)
+
+    def test_empty_string_returns_default(self, monkeypatch):
+        monkeypatch.setenv("TEST_INT_XYZ", "")
+        assert config._int("TEST_INT_XYZ", default=99) == 99
+
+
+class TestFloat:
+    def test_returns_default_when_not_set(self, monkeypatch):
+        monkeypatch.delenv("TEST_FLOAT_XYZ", raising=False)
+        assert config._float("TEST_FLOAT_XYZ", default=1.5) == 1.5
+
+    def test_parses_float_string(self, monkeypatch):
+        monkeypatch.setenv("TEST_FLOAT_XYZ", "3.14")
+        assert abs(config._float("TEST_FLOAT_XYZ", default=0.0) - 3.14) < 1e-9
+
+    def test_parses_integer_as_float(self, monkeypatch):
+        monkeypatch.setenv("TEST_FLOAT_XYZ", "5")
+        assert config._float("TEST_FLOAT_XYZ", default=0.0) == 5.0
+
+    def test_raises_on_non_float(self, monkeypatch):
+        monkeypatch.setenv("TEST_FLOAT_XYZ", "xyz")
+        with pytest.raises(config.ConfigError):
+            config._float("TEST_FLOAT_XYZ", default=0.0)
+
+    def test_empty_string_returns_default(self, monkeypatch):
+        monkeypatch.setenv("TEST_FLOAT_XYZ", "")
+        assert config._float("TEST_FLOAT_XYZ", default=2.5) == 2.5

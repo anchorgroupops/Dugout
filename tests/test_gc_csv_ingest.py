@@ -7,9 +7,13 @@ from pathlib import Path
 
 import pytest
 
+import tools.gc_csv_ingest as csv_mod
 from tools.gc_csv_ingest import (
     _has_data,
+    _is_core,
+    _load_core_players,
     _merge_players,
+    _parse_row_section,
     _val,
     build_app_stats_json,
     build_team_json,
@@ -108,6 +112,67 @@ def _catcher_row(extra: dict | None = None) -> list[str]:
     """Row with catching stats populated."""
     positions = {**_BATTER_DEFAULTS, **_CATCH_EXTRA, **(extra or {})}
     return _make_row(positions)
+
+
+# ---------------------------------------------------------------------------
+# _load_core_players / _is_core — core player detection
+# ---------------------------------------------------------------------------
+
+class TestLoadCorePlayers:
+    def test_returns_empty_set_when_no_manifest(self, tmp_path):
+        result = _load_core_players(tmp_path)
+        assert result == set()
+
+    def test_returns_empty_set_when_manifest_has_empty_list(self, tmp_path):
+        manifest = {"core_players": []}
+        (tmp_path / "roster_manifest.json").write_text(json.dumps(manifest))
+        result = _load_core_players(tmp_path)
+        assert result == set()
+
+    def test_returns_lowercased_names(self, tmp_path):
+        manifest = {"core_players": ["Jane Doe", "Sofia Smith"]}
+        (tmp_path / "roster_manifest.json").write_text(json.dumps(manifest))
+        result = _load_core_players(tmp_path)
+        assert "jane doe" in result
+        assert "sofia smith" in result
+
+    def test_strips_whitespace_from_names(self, tmp_path):
+        manifest = {"core_players": ["  Jane Doe  "]}
+        (tmp_path / "roster_manifest.json").write_text(json.dumps(manifest))
+        result = _load_core_players(tmp_path)
+        assert "jane doe" in result
+
+    def test_multiple_core_players(self, tmp_path):
+        manifest = {"core_players": ["Alice", "Bob", "Carol"]}
+        (tmp_path / "roster_manifest.json").write_text(json.dumps(manifest))
+        result = _load_core_players(tmp_path)
+        assert len(result) == 3
+
+
+class TestIsCore:
+    def test_player_in_core_set_returns_true(self):
+        core = {"jane doe"}
+        assert _is_core("Jane", "Doe", core) is True
+
+    def test_player_not_in_core_set_returns_false(self):
+        core = {"jane doe"}
+        assert _is_core("John", "Smith", core) is False
+
+    def test_case_insensitive_match(self):
+        core = {"sofia smith"}
+        assert _is_core("SOFIA", "SMITH", core) is True
+
+    def test_empty_core_set_returns_false(self):
+        assert _is_core("Jane", "Doe", set()) is False
+
+    def test_first_name_only_player(self):
+        core = {"zoe"}
+        assert _is_core("Zoe", "", core) is True
+
+    def test_extra_spaces_in_name_do_not_match(self):
+        core = {"jane doe"}
+        # "Jane  Doe" (double space) lowercased = "jane  doe" — won't match "jane doe"
+        assert _is_core("Jane ", "Doe", core) is False
 
 
 # ---------------------------------------------------------------------------
@@ -477,3 +542,111 @@ class TestParseGcCsv:
         csv_path = self._write_csv(tmp_path, [_batter_row(), no_num])
         roster = parse_gc_csv(csv_path, team_dir=tmp_path)
         assert len(roster) == 2
+
+
+# ---------------------------------------------------------------------------
+# build_team_json — structure and metadata
+# ---------------------------------------------------------------------------
+
+class TestBuildTeamJson:
+    def _roster(self, gp=5):
+        return [{
+            "first": "Jane", "last": "Doe", "number": "7",
+            "games_played": gp,
+            "batting": {"pa": 15, "ab": 12, "h": 4},
+            "pitching": None,
+            "fielding": None,
+        }]
+
+    def test_has_required_top_level_keys(self, tmp_path):
+        result = build_team_json(self._roster(), Path("export.csv"), team_dir=tmp_path)
+        assert "team_name" in result
+        assert "roster" in result
+        assert "last_updated" in result
+        assert "source" in result
+        assert "record" in result
+
+    def test_roster_passed_through(self, tmp_path):
+        roster = self._roster()
+        result = build_team_json(roster, Path("export.csv"), team_dir=tmp_path)
+        assert result["roster"] is roster
+
+    def test_source_contains_csv_name(self, tmp_path):
+        result = build_team_json(self._roster(), Path("my_export.csv"), team_dir=tmp_path)
+        assert "my_export.csv" in result["source"]
+
+    def test_default_team_name_sharks(self, tmp_path):
+        result = build_team_json(self._roster(), Path("x.csv"), team_dir=tmp_path)
+        assert result["team_name"] == "The Sharks"
+
+    def test_record_contains_gp_count(self, tmp_path):
+        result = build_team_json(self._roster(gp=7), Path("x.csv"), team_dir=tmp_path)
+        assert "7 GP" in result["record"]
+
+    def test_last_updated_is_iso_string(self, tmp_path):
+        result = build_team_json(self._roster(), Path("x.csv"), team_dir=tmp_path)
+        assert "T" in result["last_updated"]
+
+    def test_preserves_existing_team_name_from_file(self, tmp_path):
+        existing = {
+            "team_name": "Custom Name",
+            "league": "PCLL",
+            "season": "2026-spring",
+            "gc_team_id": "abc123",
+        }
+        (tmp_path / "team.json").write_text(json.dumps(existing))
+        result = build_team_json(self._roster(), Path("x.csv"), team_dir=tmp_path)
+        assert result["team_name"] == "Custom Name"
+
+    def test_preserves_existing_league_from_file(self, tmp_path):
+        existing = {"team_name": "Sharks", "league": "My League", "season": "s", "gc_team_id": ""}
+        (tmp_path / "team.json").write_text(json.dumps(existing))
+        result = build_team_json(self._roster(), Path("x.csv"), team_dir=tmp_path)
+        assert result["league"] == "My League"
+
+    def test_max_gp_in_record_from_roster(self, tmp_path):
+        roster = [
+            {"first": "A", "last": "B", "number": "1", "games_played": 10,
+             "batting": {"pa": 30, "ab": 25, "h": 8}, "pitching": None, "fielding": None},
+            {"first": "C", "last": "D", "number": "2", "games_played": 15,
+             "batting": {"pa": 40, "ab": 35, "h": 12}, "pitching": None, "fielding": None},
+        ]
+        result = build_team_json(roster, Path("x.csv"), team_dir=tmp_path)
+        assert "15 GP" in result["record"]
+
+
+# ---------------------------------------------------------------------------
+# _parse_row_section — column extraction via mapping
+# ---------------------------------------------------------------------------
+
+class TestParseRowSection:
+    def test_extracts_values_by_col_map(self):
+        row = ["a", "b", "c", "d", "e"]
+        col_map = {"first": 2, "last": 1}
+        result = _parse_row_section(row, col_map)
+        assert result["first"] == "c"
+        assert result["last"] == "b"
+
+    def test_empty_col_map_returns_empty_dict(self):
+        row = ["x", "y", "z"]
+        result = _parse_row_section(row, {})
+        assert result == {}
+
+    def test_out_of_bounds_index_returns_empty_string(self):
+        row = ["a", "b"]
+        col_map = {"x": 100}
+        result = _parse_row_section(row, col_map)
+        assert result["x"] == ""
+
+    def test_preserves_whitespace_raw_value(self):
+        row = ["  padded  "]
+        col_map = {"name": 0}
+        result = _parse_row_section(row, col_map)
+        # _val does .strip() so whitespace is stripped
+        assert result["name"] == "padded"
+
+    def test_all_mapped_keys_present(self):
+        row = ["1", "2", "3", "4", "5"]
+        col_map = {"a": 0, "b": 2, "c": 4}
+        result = _parse_row_section(row, col_map)
+        assert set(result.keys()) == {"a", "b", "c"}

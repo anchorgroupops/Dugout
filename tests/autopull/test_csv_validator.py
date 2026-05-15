@@ -62,3 +62,79 @@ def test_quarantine_moves_file(tmp_path, tmp_data_dir):
     assert moved.exists()
     assert not p.exists()
     assert "bad.csv" in moved.name
+
+
+# ---------------------------------------------------------------------------
+# _overlap — schema drift metric
+# ---------------------------------------------------------------------------
+
+def test_rejects_utf8_decode_error(tmp_path):
+    p = tmp_path / "bad_encoding.csv"
+    p.write_bytes(b"\xff\xfe Player,AB\r\n")  # UTF-16 BOM — not valid UTF-8
+    result = cv.validate(p, known_columns=None)
+    assert result.accepted is False
+    assert "utf" in result.reason.lower() or "decode" in result.reason.lower()
+
+
+def test_rejects_empty_header_columns(tmp_path):
+    # File with a header row of only whitespace/commas — no non-empty column names
+    p = _write(tmp_path / "blank_header.csv", "  ,  ,  \nx,y,z\n")
+    result = cv.validate(p, known_columns=None)
+    assert result.accepted is False
+    assert "column" in result.reason.lower()
+
+
+def test_stop_iteration_on_empty_csv_reader(tmp_path, monkeypatch):
+    """csv.reader yields nothing (StopIteration) for a non-empty file — line 45."""
+    p = tmp_path / "nonempty.csv"
+    p.write_text("x", encoding="utf-8")  # size > 0 bypasses early-exit
+    monkeypatch.setattr(cv.csv, "reader", lambda *a, **kw: iter([]))
+    result = cv.validate(p, known_columns=None)
+    assert result.accepted is False
+    assert "empty" in result.reason.lower()
+
+
+def test_csv_error_during_parse(tmp_path, monkeypatch):
+    """csv.reader raises csv.Error — lines 49-50."""
+    import csv as _csv
+    p = tmp_path / "bad.csv"
+    p.write_text("some,content\n", encoding="utf-8")
+
+    def _error_reader(*a, **kw):
+        def _gen():
+            raise _csv.Error("bad line format")
+            yield  # noqa: unreachable — makes it a generator
+        return _gen()
+
+    monkeypatch.setattr(cv.csv, "reader", _error_reader)
+    result = cv.validate(p, known_columns=None)
+    assert result.accepted is False
+    assert "csv" in result.reason.lower() or "parse" in result.reason.lower()
+
+
+class TestOverlap:
+    def test_full_overlap(self):
+        assert cv._overlap(["a", "b", "c"], ["a", "b", "c"]) == 1.0
+
+    def test_empty_known_cols_returns_one(self):
+        assert cv._overlap(["a", "b"], []) == 1.0
+
+    def test_zero_overlap(self):
+        assert cv._overlap(["x", "y"], ["a", "b"]) == 0.0
+
+    def test_partial_overlap(self):
+        result = cv._overlap(["a", "b", "x", "y"], ["a", "b", "c", "d"])
+        assert abs(result - 0.5) < 1e-9
+
+    def test_extra_csv_cols_dont_reduce_overlap(self):
+        # CSV has extra col "extra" not in known; known cols fully covered
+        result = cv._overlap(["a", "b", "extra"], ["a", "b"])
+        assert result == 1.0
+
+    def test_returns_float(self):
+        result = cv._overlap(["a"], ["a"])
+        assert isinstance(result, float)
+
+    def test_single_missing_known_col(self):
+        result = cv._overlap(["a", "b"], ["a", "b", "c"])
+        assert abs(result - 2 / 3) < 1e-9

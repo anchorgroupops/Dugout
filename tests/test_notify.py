@@ -124,3 +124,45 @@ class TestNotifyCircuitOpen:
         assert "My Notebook" in msg
         assert "7" in msg
         assert "Circuit Breaker" in msg
+
+    def test_returns_send_telegram_result(self, clean_telegram_env):
+        with patch.object(notify, "send_telegram", return_value=False):
+            result = notify.notify_circuit_open("NB", 1)
+        assert result is False
+
+    def test_returns_true_on_success(self, clean_telegram_env):
+        with patch.object(notify, "send_telegram", return_value=True):
+            result = notify.notify_circuit_open("NB", 3)
+        assert result is True
+
+
+class TestNotifyErrorReturnValue:
+    def test_returns_send_telegram_result_true(self, clean_telegram_env):
+        with patch.object(notify, "send_telegram", return_value=True):
+            result = notify.notify_error("ctx", "err")
+        assert result is True
+
+    def test_returns_send_telegram_result_false(self, clean_telegram_env):
+        with patch.object(notify, "send_telegram", return_value=False):
+            result = notify.notify_error("ctx", "err")
+        assert result is False
+
+
+class TestNotifySyncCompleteReturnValue:
+    def test_returns_send_telegram_result(self, clean_telegram_env):
+        with patch.object(notify, "send_telegram", return_value=False):
+            result = notify.notify_sync_complete(0, 0, 0, 1)
+        assert result is False
+
+    def test_all_failed_shows_partial(self, clean_telegram_env):
+        with patch.object(notify, "send_telegram", return_value=True) as st:
+            notify.notify_sync_complete(total_added=0, total_failed=5, notebooks_synced=2, duration_secs=10)
+        msg = st.call_args.args[0]
+        assert "PARTIAL" in msg
+        assert "5 failed" in msg
+
+    def test_duration_in_message(self, clean_telegram_env):
+        with patch.object(notify, "send_telegram", return_value=True) as st:
+            notify.notify_sync_complete(total_added=3, total_failed=0, notebooks_synced=2, duration_secs=42)
+        msg = st.call_args.args[0]
+        assert "42" in msg

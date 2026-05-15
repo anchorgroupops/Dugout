@@ -229,6 +229,42 @@ class TestGenerateLineup:
         result = generate_lineup({"players": [strong_hitter]})
         assert len(result["lineup"]) == 1
 
+    def test_sentinel_avg_obp_slg_computed_from_raw_stats(self):
+        """Players with sentinel values (None, '-', '—') for avg/obp/slg get computed values."""
+        p = {
+            "number": "7", "first": "Alice", "last": "Sentinel",
+            "batting": {
+                "ab": 10, "h": 4, "bb": 2, "hbp": 0, "pa": 12,
+                "2b": 1, "3b": 0, "hr": 0, "sb": 0,
+                "avg": None, "obp": "-", "slg": "—",
+            },
+        }
+        result = generate_lineup({"roster": [p]})
+        assert len(result["lineup"]) == 1
+        entry = result["lineup"][0]
+        assert entry["avg"] == pytest.approx(0.4, abs=0.01)
+
+    def test_player_name_synthesized_when_absent(self):
+        """Players without 'name' key get first+last concatenated."""
+        p = {
+            "number": "9", "first": "Jane", "last": "Doe",
+            "batting": {"ab": 8, "h": 3, "bb": 1, "hbp": 0},
+        }
+        assert "name" not in p
+        result = generate_lineup({"roster": [p]})
+        assert len(result["lineup"]) == 1
+        # name should now be synthesized
+        assert p.get("name") == "Jane Doe"
+
+    def test_slot_players_depth_roles_filled(self):
+        """With 7+ players, depth slots (6+) are filled."""
+        players = [_mk_player(str(i), f"P{i} Player",
+                              ab=20, h=8, bb=3, hbp=0, so=2)
+                   for i in range(8)]
+        result = generate_lineup({"roster": players})
+        slots = [e["slot"] for e in result["lineup"]]
+        assert max(slots) >= 6
+
 
 # ====================================================================
 # _player_outcome_probs
@@ -406,3 +442,169 @@ class TestComputeBattingScoreProperty:
         result = compute_batting_score(player, strategy)
         assert isinstance(result, float)
         assert result >= 0.0
+
+
+# ====================================================================
+# run() — lines 497-596
+# ====================================================================
+
+import tools.lineup_optimizer as _lo_mod
+
+
+def _make_team_json(players=None):
+    if players is None:
+        players = [
+            {"first": "Alice", "last": "Smith", "number": "1",
+             "batting": {"ab": 20, "h": 8, "bb": 3, "hbp": 0, "so": 2,
+                         "2b": 2, "3b": 0, "hr": 1, "sb": 1, "rbi": 5}},
+            {"first": "Bob", "last": "Jones", "number": "2",
+             "batting": {"ab": 15, "h": 5, "bb": 2, "hbp": 0, "so": 3,
+                         "2b": 1, "3b": 0, "hr": 0, "sb": 0, "rbi": 2}},
+        ]
+    return {"roster": players}
+
+
+class TestRun:
+    @pytest.fixture(autouse=True)
+    def _patch_sharks_dir(self, tmp_path, monkeypatch):
+        self.sharks_dir = tmp_path / "sharks"
+        self.sharks_dir.mkdir()
+        monkeypatch.setattr(_lo_mod, "SHARKS_DIR", self.sharks_dir)
+
+    def _write_team(self, data=None):
+        path = self.sharks_dir / "team.json"
+        path.write_text(json.dumps(data or _make_team_json()))
+        return path
+
+    def test_no_team_file_returns_none(self, capsys):
+        result = _lo_mod.run()
+        assert result is None
+        out = capsys.readouterr().out
+        assert "No team data found" in out or "LINEUP" in out
+
+    def test_with_team_file_writes_lineups_json(self):
+        self._write_team()
+        result = _lo_mod.run()
+        assert result is not None
+        lineups_file = self.sharks_dir / "lineups.json"
+        assert lineups_file.exists()
+        data = json.loads(lineups_file.read_text())
+        assert "balanced" in data
+
+    def test_team_enriched_preferred_over_merged(self):
+        enriched = self.sharks_dir / "team_enriched.json"
+        enriched.write_text(json.dumps(_make_team_json()))
+        (self.sharks_dir / "team.json").write_text(json.dumps({"roster": []}))
+        result = _lo_mod.run()
+        assert result is not None
+
+    def test_team_merged_used_when_enriched_missing(self):
+        (self.sharks_dir / "team_merged.json").write_text(
+            json.dumps(_make_team_json()))
+        result = _lo_mod.run()
+        assert result is not None
+        assert (self.sharks_dir / "lineups.json").exists()
+
+    def test_availability_file_filters_roster(self, capsys):
+        self._write_team()
+        availability = {"Alice Smith": False, "Bob Jones": True}
+        (self.sharks_dir / "availability.json").write_text(json.dumps(availability))
+        result = _lo_mod.run()
+        assert result is not None
+        out = capsys.readouterr().out
+        assert "Filtered roster" in out
+        assert "1/2" in out
+
+    def test_availability_file_missing_uses_full_roster(self, capsys):
+        self._write_team()
+        result = _lo_mod.run()
+        assert result is not None
+        out = capsys.readouterr().out
+        assert "Filtered roster" not in out
+
+    def test_audit_log_exception_swallowed(self, monkeypatch, capsys):
+        self._write_team()
+        from unittest.mock import MagicMock
+        monkeypatch.setattr(_lo_mod, "log_decision",
+                            MagicMock(side_effect=RuntimeError("db down")))
+        result = _lo_mod.run()
+        assert result is not None
+        out = capsys.readouterr().out
+        assert "Audit log skipped" in out
+
+    def test_practice_gen_import_exception_swallowed(self, monkeypatch, capsys):
+        self._write_team()
+        import sys
+        # Remove practice_gen from sys.modules so the import inside run() fails
+        saved = sys.modules.pop("practice_gen", None)
+        # Inject a broken module that raises on import
+        import types
+        broken = types.ModuleType("practice_gen")
+        def _bad_resolve():
+            raise RuntimeError("practice_gen not available")
+        broken._resolve_next_opponent_matchup = _bad_resolve
+        sys.modules["practice_gen"] = broken
+        try:
+            result = _lo_mod.run()
+        finally:
+            if saved is None:
+                sys.modules.pop("practice_gen", None)
+            else:
+                sys.modules["practice_gen"] = saved
+        assert result is not None
+
+    def test_run_prints_strategy_and_lineup(self, capsys):
+        self._write_team()
+        _lo_mod.run()
+        out = capsys.readouterr().out
+        assert "STRATEGY" in out
+
+    def test_run_returns_dict_with_all_strategies(self):
+        self._write_team()
+        result = _lo_mod.run()
+        for strategy in ("balanced", "aggressive", "development"):
+            assert strategy in result
+
+    def test_matchup_prints_next_opponent(self, monkeypatch, capsys):
+        """Line 535: matchup printed when practice_gen returns non-empty matchup."""
+        import sys, types
+        self._write_team()
+        pg = types.ModuleType("practice_gen")
+        pg._resolve_next_opponent_matchup = lambda: {
+            "opponent": "Eagles", "their_advantages": [], "our_advantages": [],
+        }
+        saved = sys.modules.get("practice_gen")
+        sys.modules["practice_gen"] = pg
+        try:
+            _lo_mod.run()
+        finally:
+            if saved is None:
+                sys.modules.pop("practice_gen", None)
+            else:
+                sys.modules["practice_gen"] = saved
+        out = capsys.readouterr().out
+        assert "Eagles" in out
+
+    def test_strategy_error_dict_prints_error(self, monkeypatch, capsys):
+        """Lines 583-584: strategy entry without 'compliant' prints ERROR line."""
+        self._write_team()
+        original_gal = _lo_mod.generate_all_lineups
+
+        def fake_gal(team_data, matchup=None):
+            res = original_gal(team_data, matchup=matchup)
+            # Replace one strategy with an error dict missing 'compliant'
+            res["balanced"] = {"error": "something broke"}
+            return res
+
+        monkeypatch.setattr(_lo_mod, "generate_all_lineups", fake_gal)
+        _lo_mod.run()
+        out = capsys.readouterr().out
+        assert "ERROR" in out
+        assert "something broke" in out
+
+    def test_violations_printed_when_empty_roster(self, capsys):
+        """Lines 592-594: violations block printed when roster is empty."""
+        (self.sharks_dir / "team.json").write_text(json.dumps({"roster": []}))
+        _lo_mod.run()
+        out = capsys.readouterr().out
+        assert "VIOLATIONS" in out or "No roster" in out

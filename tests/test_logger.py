@@ -61,3 +61,30 @@ class TestLogDecision:
         logger.log_decision("x", {}, {}, "rat")
         output = capsys.readouterr().out
         assert "Failed to log decision" in output
+
+    def test_audit_entry_has_correct_category(self, isolated_logger):
+        logger, tmp = isolated_logger
+        logger.log_decision("lineup_optimization", {}, {}, "rationale")
+        history = json.loads((tmp / "logs" / "audit_trail.json").read_text())
+        assert history[0]["category"] == "lineup_optimization"
+
+    def test_audit_entry_input_and_output_stored(self, isolated_logger):
+        logger, tmp = isolated_logger
+        logger.log_decision("x", {"key": "value"}, {"result": 42}, "r")
+        history = json.loads((tmp / "logs" / "audit_trail.json").read_text())
+        assert history[0]["input"] == {"key": "value"}
+        assert history[0]["output"] == {"result": 42}
+
+    def test_prints_logged_message(self, isolated_logger, capsys):
+        logger, tmp = isolated_logger
+        logger.log_decision("test", {}, {}, "reason")
+        output = capsys.readouterr().out
+        assert "AUDIT" in output
+
+    def test_three_sequential_entries(self, isolated_logger):
+        logger, tmp = isolated_logger
+        for i in range(3):
+            logger.log_decision(f"cat{i}", {}, {}, f"reason{i}")
+        history = json.loads((tmp / "logs" / "audit_trail.json").read_text())
+        assert len(history) == 3
+        assert history[2]["category"] == "cat2"

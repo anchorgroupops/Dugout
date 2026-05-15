@@ -117,3 +117,203 @@ def test_send_email_uses_smtp_with_app_password():
     mock_smtp.assert_called_once_with(g.SMTP_HOST, g.SMTP_PORT)
     smtp_inst.login.assert_called_once_with("fly386@gmail.com", "abcdefghijklmnop")
     smtp_inst.send_message.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# current_max_uid
+# ---------------------------------------------------------------------------
+
+def test_current_max_uid_returns_max():
+    client = MagicMock()
+    client.uid.return_value = ("OK", [b"101 205 150"])
+    result = g.current_max_uid(client)
+    assert result == 205
+
+
+def test_current_max_uid_returns_zero_when_no_messages():
+    client = MagicMock()
+    client.uid.return_value = ("OK", [b""])
+    result = g.current_max_uid(client)
+    assert result == 0
+
+
+def test_current_max_uid_returns_zero_on_non_ok():
+    client = MagicMock()
+    client.uid.return_value = ("NO", [b""])
+    result = g.current_max_uid(client)
+    assert result == 0
+
+
+def test_current_max_uid_single_uid():
+    client = MagicMock()
+    client.uid.return_value = ("OK", [b"42"])
+    result = g.current_max_uid(client)
+    assert result == 42
+
+
+# ---------------------------------------------------------------------------
+# _extract_text
+# ---------------------------------------------------------------------------
+
+def test_extract_text_from_simple_plain_message():
+    from email.message import EmailMessage
+    m = EmailMessage()
+    m.set_content("Hello from GC!")
+    result = g._extract_text(m)
+    assert "Hello from GC!" in result
+
+
+def test_extract_text_from_multipart_message():
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+    msg = MIMEMultipart("alternative")
+    msg.attach(MIMEText("Plain text content", "plain"))
+    msg.attach(MIMEText("<b>HTML content</b>", "html"))
+    result = g._extract_text(msg)
+    assert "Plain text content" in result
+    assert "<b>" not in result  # HTML part skipped
+
+
+def test_extract_text_returns_empty_for_html_only():
+    from email.mime.text import MIMEText
+    msg = MIMEText("<h1>Only HTML</h1>", "html")
+    result = g._extract_text(msg)
+    assert result == ""
+
+
+def test_extract_text_returns_string():
+    from email.message import EmailMessage
+    m = EmailMessage()
+    m.set_content("test")
+    assert isinstance(g._extract_text(m), str)
+
+
+def test_fetch_returns_none_when_uids_empty_after_split():
+    """SEARCH returns a whitespace-only payload: uids list is empty after split."""
+    client = MagicMock()
+    client.uid.return_value = ("OK", [b"   "])  # truthy but no real UIDs
+    code, uid = g.fetch_latest_code(client)
+    assert code is None
+    assert uid is None
+
+
+def test_fetch_min_uid_filters_all_older_messages():
+    """min_uid > 0 and all UIDs are <= min_uid — returns None, None."""
+    client = MagicMock()
+    client.uid.return_value = ("OK", [b"10 20 30"])
+    code, uid = g.fetch_latest_code(client, min_uid=100)
+    assert code is None
+    assert uid is None
+
+
+def test_fetch_min_uid_keeps_newer_messages():
+    """min_uid filters out older UIDs but newer one with code is kept."""
+    client = MagicMock()
+    client.uid.side_effect = [
+        ("OK", [b"10 20 200"]),
+        ("OK", [(b"200", _build_raw_email(
+            "Your code is 112233",
+            subject="GameChanger code 112233"))]),
+    ]
+    code, uid = g.fetch_latest_code(client, min_uid=100)
+    assert code == "112233"
+
+
+def test_fetch_continues_on_bad_fetch_result():
+    """When FETCH returns non-OK for a UID, it should continue to the next."""
+    client = MagicMock()
+    client.uid.side_effect = [
+        ("OK", [b"50 51"]),
+        ("NO", [None]),   # FETCH 51 fails
+        ("OK", [(b"50", _build_raw_email(
+            "Your code is 998877", subject="Code 998877"))]),
+    ]
+    code, uid = g.fetch_latest_code(client)
+    assert code == "998877"
+
+
+def test_fetch_noop_exception_is_ignored():
+    """If client.noop() raises, the exception is swallowed."""
+    client = MagicMock()
+    client.noop.side_effect = OSError("NOOP failed")
+    client.uid.side_effect = [
+        ("OK", [b"42"]),
+        ("OK", [(b"42", _build_raw_email("code: 654321", subject="code 654321"))]),
+    ]
+    code, uid = g.fetch_latest_code(client)
+    assert code == "654321"
+
+
+def test_fetch_second_noop_raises_still_returns_none():
+    """First SEARCH fails, second noop() raises (lines 82-83), second SEARCH also fails."""
+    client = MagicMock()
+    # First SEARCH fails (triggers the retry block), noop raises, second SEARCH also fails
+    client.uid.side_effect = [
+        ("NO", [b""]),   # first SEARCH fails → enter retry block
+        ("NO", [b""]),   # second SEARCH also fails → return None, None
+    ]
+    client.noop.side_effect = OSError("noop error")  # covers lines 82-83
+    code, uid = g.fetch_latest_code(client)
+    assert code is None
+    assert uid is None
+
+
+def test_fetch_header_decode_exception_falls_back_to_raw_subject():
+    """make_header raises during subject decode → falls back to raw subject (lines 110-111)."""
+    from unittest.mock import patch
+    client = MagicMock()
+    raw = _build_raw_email("body with code 123456", subject="code 123456")
+    client.uid.side_effect = [
+        ("OK", [b"77"]),
+        ("OK", [(b"77", raw)]),
+    ]
+    with patch("tools.autopull.gmail_2fa_fetcher.email.header.make_header",
+               side_effect=Exception("decode failed")):
+        code, uid = g.fetch_latest_code(client)
+    assert code == "123456"
+
+
+def test_extract_text_multipart_part_decode_exception():
+    """Part get_payload() raises — exception is caught and part is skipped (lines 154-155)."""
+    from unittest.mock import MagicMock
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+
+    msg = MIMEMultipart("alternative")
+    good_part = MIMEText("good text 999888", "plain")
+    msg.attach(good_part)
+
+    # Replace the good part's get_payload to raise on the first plain part
+    parts_list = list(msg.walk())
+    plain_parts = [p for p in parts_list if p.get_content_type() == "text/plain"]
+    if plain_parts:
+        plain_parts[0].get_payload = MagicMock(side_effect=RuntimeError("decode fail"))
+
+    result = g._extract_text(msg)
+    # exception is swallowed; result may be empty
+    assert isinstance(result, str)
+
+
+def test_extract_text_non_multipart_decode_exception():
+    """Non-multipart get_payload() raises — exception is caught (lines 162-163)."""
+    from unittest.mock import MagicMock
+    from email.mime.text import MIMEText
+
+    msg = MIMEText("hello world", "plain")
+    msg.get_payload = MagicMock(side_effect=RuntimeError("payload error"))
+
+    result = g._extract_text(msg)
+    assert result == ""
+
+
+def test_fetch_all_emails_have_no_code_returns_none():
+    """All fetched emails lack a 6-digit code — returns None, None."""
+    client = MagicMock()
+    client.uid.side_effect = [
+        ("OK", [b"50"]),
+        ("OK", [(b"50", _build_raw_email(
+            "Welcome to GameChanger!", subject="Welcome!"))]),
+    ]
+    code, uid = g.fetch_latest_code(client)
+    assert code is None
+    assert uid is None

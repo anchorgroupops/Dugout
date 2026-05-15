@@ -51,3 +51,108 @@ def test_summary_groups_by_team(tmp_db_path):
     assert "by_team" in summary
     assert summary["by_team"]["sharks"]["success"] == 2
     assert summary["by_team"]["dolphins"]["failure"] == 1
+
+
+def test_summary_empty_db_returns_zero_totals(tmp_db_path):
+    db = StateDB(tmp_db_path); db.init_schema()
+    summary = wr.build_summary(db, days=7)
+    assert summary["total_runs"] == 0
+    assert summary["llm_fallback_invocations"] == 0
+    assert summary["session_refreshes"] == 0
+    assert summary["recent_failures"] == []
+
+
+def test_summary_session_refreshes_counted(tmp_db_path):
+    db = StateDB(tmp_db_path); db.init_schema()
+    now = datetime.now(ET)
+    rid = db.start_run(trigger="cron", started_at=now)
+    db.complete_run(rid, outcome="success", csv_path=None, rows_ingested=5,
+                    winning_strategy_id=None, duration_ms=100,
+                    llm_fallback_invoked=False, session_refreshed=True,
+                    completed_at=now)
+    summary = wr.build_summary(db, days=7)
+    assert summary["session_refreshes"] == 1
+
+
+def test_summary_winning_strategy_counted(tmp_db_path):
+    db = StateDB(tmp_db_path); db.init_schema()
+    now = datetime.now(ET)
+    sid = db.upsert_strategy(kind="css", selector="button.x",
+                             description="x", source="builtin")
+    rid = db.start_run(trigger="cron", started_at=now)
+    db.complete_run(rid, outcome="success", csv_path=None, rows_ingested=5,
+                    winning_strategy_id=sid, duration_ms=100,
+                    llm_fallback_invoked=False, session_refreshed=False,
+                    completed_at=now)
+    summary = wr.build_summary(db, days=7)
+    assert len(summary["top_winning_strategies"]) >= 1
+    assert summary["top_winning_strategies"][0][0] == sid
+
+
+def test_summary_recent_failures_collected(tmp_db_path):
+    db = StateDB(tmp_db_path); db.init_schema()
+    now = datetime.now(ET)
+    rid = db.start_run(trigger="cron", started_at=now)
+    db.complete_run(rid, outcome="failure", csv_path=None, rows_ingested=None,
+                    winning_strategy_id=None, duration_ms=100,
+                    llm_fallback_invoked=False, session_refreshed=False,
+                    completed_at=now, failure_reason="auth expired")
+    summary = wr.build_summary(db, days=7)
+    assert "auth expired" in summary["recent_failures"]
+
+
+def test_main_function_calls_requests_post_when_webhook_set(tmp_db_path, monkeypatch, capsys):
+    """main() calls requests.post when webhook URL is non-empty — covers line 79."""
+    from unittest.mock import MagicMock, patch
+
+    fake_cfg = MagicMock()
+    fake_cfg.data_root = tmp_db_path.parent
+    fake_cfg.n8n_weekly_webhook = "https://n8n.local/webhook/test"
+    monkeypatch.setattr("tools.autopull.weekly_report.config_mod.load", lambda: fake_cfg)
+    monkeypatch.setattr(
+        "tools.autopull.weekly_report.StateDB",
+        lambda path: StateDB(tmp_db_path),
+    )
+
+    mock_response = MagicMock()
+    mock_response.raise_for_status = MagicMock()
+    mock_requests = MagicMock()
+    mock_requests.post.return_value = mock_response
+
+    with patch.dict("sys.modules", {"requests": mock_requests}):
+        result = wr.main(argv=["--days", "3"])
+
+    assert result == 0
+    mock_requests.post.assert_called_once()
+
+
+def test_main_function_prints_summary(tmp_db_path, monkeypatch, capsys):
+    """weekly_report.main() initializes DB, builds summary, prints JSON — lines 70-83."""
+    import json as _json
+    from unittest.mock import MagicMock
+
+    # Patch config to point at the tmp DB
+    fake_cfg = MagicMock()
+    fake_cfg.data_root = tmp_db_path.parent
+    fake_cfg.n8n_weekly_webhook = ""  # no webhook → no POST
+    monkeypatch.setattr("tools.autopull.weekly_report.config_mod.load", lambda: fake_cfg)
+
+    # Patch StateDB to use our tmp DB
+    monkeypatch.setattr(
+        "tools.autopull.weekly_report.StateDB",
+        lambda path: StateDB(tmp_db_path),
+    )
+
+    result = wr.main(argv=["--days", "7"])
+    assert result == 0
+    captured = capsys.readouterr().out
+    parsed = _json.loads(captured)
+    assert "total_runs" in parsed
+
+
+def test_post_weekly_skips_post_when_no_webhook(tmp_db_path):
+    db = StateDB(tmp_db_path); db.init_schema()
+    poster = MagicMock()
+    summary = wr.post_weekly(db, poster=poster, webhook_url="", days=7)
+    poster.assert_not_called()
+    assert "total_runs" in summary

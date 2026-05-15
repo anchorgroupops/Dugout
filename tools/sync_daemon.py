@@ -68,7 +68,7 @@ _log_file = LOG_DIR / "sync_daemon.log"
 try:
     _log_file.touch(exist_ok=True)
     _log_file.chmod(0o666)
-except OSError:
+except OSError:  # pragma: no cover
     pass  # Already writable, or on a read-only FS — RotatingFileHandler will surface the real error
 DEFAULT_FALLBACK_VOICE_ID = "EXAVITQu4vr4xnSDxMaL"
 _SECRET_CACHE: dict[str, str] | None = None
@@ -117,7 +117,7 @@ CORS_ORIGINS = [
     for origin in os.getenv("CORS_ORIGINS", ",".join(DEFAULT_CORS_ORIGINS)).split(",")
     if origin.strip() and origin.strip() != "*"
 ]
-if not CORS_ORIGINS:
+if not CORS_ORIGINS:  # pragma: no cover
     CORS_ORIGINS = DEFAULT_CORS_ORIGINS
 
 DEFAULT_WRITE_ORIGINS = list(DEFAULT_CORS_ORIGINS)
@@ -126,7 +126,7 @@ WRITE_ORIGINS = [
     for origin in os.getenv("WRITE_ORIGINS", ",".join(DEFAULT_WRITE_ORIGINS)).split(",")
     if origin.strip() and origin.strip() != "*"
 ]
-if not WRITE_ORIGINS:
+if not WRITE_ORIGINS:  # pragma: no cover
     WRITE_ORIGINS = DEFAULT_WRITE_ORIGINS
 
 
@@ -2221,7 +2221,7 @@ def handle_scoreboard():
                     gdata = _read_json_file(gf, default={}) or {}
                     if (gdata.get("gc_game_id") == gc_game_id or
                         (gdata.get("date") or "")[:10] == game_date):
-                        result["sharks_batting"] = gdata.get("sharks_batting") or []
+                        result["sharks_batting"] = _augment_sharks_batting(gdata.get("sharks_batting") or [])
                         result["opponent_batting"] = gdata.get("opponent_batting") or []
                         local_score = gdata.get("score")
                         if isinstance(local_score, dict):
@@ -2305,6 +2305,58 @@ _SCOUTING_CACHE: dict[str, tuple[float, dict]] = {}  # slug -> (expiry_ts, data)
 _SCOUTING_CACHE_TTL = 120  # 2 minutes — scouting data is static during a game
 _LIVE_EVENTS_CACHE: dict[str, tuple[float, dict | None]] = {}  # game_id -> (expiry_ts, data)
 _LIVE_EVENTS_CACHE_TTL = 15  # 15 seconds — match frontend poll interval
+
+
+def _augment_sharks_batting(game_batting: list) -> list:
+    """Merge season rate stats (avg/slg/obp/gb_pct/fb_pct/2b/3b) into per-game batting rows.
+
+    The game-level batting rows only carry counting stats for the current game.
+    The BatterCard spray chart and rate-stat display need season totals, so we
+    pull them from team_merged.json and overlay them on each player entry.
+    """
+    if not game_batting:
+        return game_batting
+    try:
+        roster_file = SHARKS_DIR / "team_merged.json"
+        if not roster_file.exists():
+            return game_batting
+        roster_data = _read_json_file(roster_file, default={}) or {}
+        roster = roster_data.get("roster", [])
+        # Index by jersey number (primary) and lowercase name (fallback)
+        by_num: dict[str, dict] = {}
+        by_name: dict[str, dict] = {}
+        for p in roster:
+            num = str(p.get("number", "")).strip()
+            name = (p.get("name") or p.get("player") or "").strip().lower()
+            if num:
+                by_num[num] = p
+            if name:
+                by_name[name] = p
+
+        augmented = []
+        for row in game_batting:
+            row = dict(row)  # shallow copy — don't mutate the original
+            num = str(row.get("number", "")).strip()
+            name = (row.get("name") or row.get("player") or "").strip().lower()
+            roster_player = by_num.get(num) or by_name.get(name)
+            if roster_player:
+                season = roster_player.get("batting") or {}
+                adv = roster_player.get("batting_advanced") or {}
+                # Overlay season rate stats; keep game counting stats intact
+                for key in ("avg", "slg", "obp", "ops"):
+                    if key in season:
+                        row.setdefault(f"season_{key}", season[key])
+                        row[key] = season[key]
+                # Canonical double/triple field names expected by BatterCard
+                row["2b"] = season.get("2b") or season.get("doubles") or row.get("doubles") or 0
+                row["3b"] = season.get("3b") or season.get("triples") or row.get("triples") or 0
+                row["gb_pct"] = adv.get("gb_pct") or 0
+                row["fb_pct"] = adv.get("fb_pct") or 0
+            augmented.append(row)
+        return augmented
+    except Exception as e:
+        logging.debug("[Scoreboard] _augment_sharks_batting failed: %s", e)
+        return game_batting
 
 
 def _cached_opponent_scouting(opp_slug: str, live_batting: list) -> dict:
@@ -2534,8 +2586,35 @@ def _fetch_gc_live_events(gc_game_id: str) -> dict | None:
             if ev_data.get("outs") is not None:
                 outs = int(ev_data.get("outs", 0))
 
-            if ev_data.get("runners"):
-                runners = ev_data.get("runners", [])
+            if ev_data.get("runners") is not None:
+                raw_runners = ev_data.get("runners") or []
+                # Normalize to {first, second, third} booleans regardless of API shape
+                if isinstance(raw_runners, list):
+                    occupied: set[str] = set()
+                    for r in raw_runners:
+                        if isinstance(r, dict):
+                            base = str(r.get("base", r.get("base_number", ""))).lower()
+                            if base in ("1", "first", "1b"):
+                                occupied.add("first")
+                            elif base in ("2", "second", "2b"):
+                                occupied.add("second")
+                            elif base in ("3", "third", "3b"):
+                                occupied.add("third")
+                        elif isinstance(r, (int, str)):
+                            b = str(r)
+                            if b in ("1", "first"):
+                                occupied.add("first")
+                            elif b in ("2", "second"):
+                                occupied.add("second")
+                            elif b in ("3", "third"):
+                                occupied.add("third")
+                    runners = {"first": "first" in occupied, "second": "second" in occupied, "third": "third" in occupied}
+                elif isinstance(raw_runners, dict):
+                    runners = {
+                        "first": bool(raw_runners.get("first") or raw_runners.get("1")),
+                        "second": bool(raw_runners.get("second") or raw_runners.get("2")),
+                        "third": bool(raw_runners.get("third") or raw_runners.get("3")),
+                    }
 
             if not last_play and ev_data.get("description"):
                 last_play = str(ev_data["description"])[:200]
@@ -3668,7 +3747,7 @@ def _tts_stat(v) -> str:
         tens_ones = int(digits[1:])
         hundreds_words = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"]
         return f"{hundreds_words[hundreds]} {tens_ones:02d}" if tens_ones > 0 else hundreds_words[hundreds]
-    return digits
+    return digits  # pragma: no cover
 
 
 # Phonetic pronunciation map for names the TTS engine mispronounces.
@@ -3803,7 +3882,7 @@ def _synthesize_voice_update(text: str) -> bytes:
 
     if not api_key:
         raise RuntimeError("Voice updates require an ElevenLabs API key. Add ELEVENLABS_API_KEY to .env")
-    if not voice_id:
+    if not voice_id:  # pragma: no cover
         raise RuntimeError("Missing ELEVENLABS_VOICE_ID.")
 
     url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"

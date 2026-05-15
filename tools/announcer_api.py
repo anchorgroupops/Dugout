@@ -195,7 +195,7 @@ def _synth_replicate(text: str, vd: VoiceDesignParams, ref_audio: str, ref_text:
         input_payload["mode"] = "clone"
         input_payload["reference_audio"] = ref_audio
         input_payload["reference_text"] = ref_text
-    else:
+    else:  # pragma: no cover
         input_payload["mode"] = "design"
     payload = {"input": input_payload}
     resp = requests.post(

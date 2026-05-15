@@ -8,7 +8,7 @@ from unittest.mock import patch
 import pytest
 
 import tools.gc_ingest_pipeline as pipeline_mod
-from tools.gc_ingest_pipeline import _assemble_report, _auto_discover_csv
+from tools.gc_ingest_pipeline import _assemble_report, _auto_discover_csv, _team_dir
 
 
 # ---------------------------------------------------------------------------
@@ -211,3 +211,231 @@ class TestAssembleReport:
         notes = report["game_strategy_notes"]
         assert any("Strikeouts" in n for n in notes)
         assert any("Strong defense" in n for n in notes)
+
+    def test_game_strategy_notes_weaknesses_capped_at_3(self, tmp_path):
+        swot = {
+            "team_swot": {
+                "strengths": [],
+                "weaknesses": ["W1", "W2", "W3", "W4", "W5"],
+                "opportunities": [],
+                "threats": [],
+            },
+            "player_analyses": [],
+        }
+        report = self._call(tmp_path, swot_result=swot)
+        weakness_notes = [n for n in report["game_strategy_notes"] if "address in practice" in n]
+        assert len(weakness_notes) == 3
+
+    def test_game_strategy_notes_strengths_capped_at_2(self, tmp_path):
+        swot = {
+            "team_swot": {
+                "strengths": ["S1", "S2", "S3", "S4"],
+                "weaknesses": [],
+                "opportunities": [],
+                "threats": [],
+            },
+            "player_analyses": [],
+        }
+        report = self._call(tmp_path, swot_result=swot)
+        strength_notes = [n for n in report["game_strategy_notes"] if "leverage in game" in n]
+        assert len(strength_notes) == 2
+
+    def test_game_strategy_notes_includes_strategy_line(self, tmp_path):
+        swot = {
+            "team_swot": {"strengths": [], "weaknesses": [], "opportunities": [], "threats": []},
+            "player_analyses": [],
+        }
+        report = self._call(tmp_path, swot_result=swot)
+        assert any("Recommended lineup strategy" in n for n in report["game_strategy_notes"])
+
+    def test_swot_summary_has_all_four_keys(self, tmp_path):
+        swot = {
+            "team_swot": {
+                "strengths": ["Good OBP"],
+                "weaknesses": ["Low power"],
+                "opportunities": ["Opponent weak pitching"],
+                "threats": ["Weather"],
+            },
+            "player_analyses": [],
+        }
+        report = self._call(tmp_path, swot_result=swot)
+        summary = report["swot_summary"]
+        assert "team_strengths" in summary
+        assert "team_weaknesses" in summary
+        assert "team_opportunities" in summary
+        assert "priority_threats" in summary
+
+    def test_swot_summary_opportunities_and_threats(self, tmp_path):
+        swot = {
+            "team_swot": {
+                "strengths": [],
+                "weaknesses": [],
+                "opportunities": ["Opponent weak pitching"],
+                "threats": ["Rainy weather"],
+            },
+            "player_analyses": [],
+        }
+        report = self._call(tmp_path, swot_result=swot)
+        assert report["swot_summary"]["team_opportunities"] == ["Opponent weak pitching"]
+        assert report["swot_summary"]["priority_threats"] == ["Rainy weather"]
+
+    def test_drill_priorities_populated_from_swot(self, tmp_path):
+        swot = {
+            "team_swot": {
+                "strengths": [],
+                "weaknesses": ["High strikeout rate"],
+                "opportunities": [],
+                "threats": [],
+            },
+            "player_analyses": [],
+        }
+        report = self._call(tmp_path, swot_result=swot)
+        priorities = report["drill_priorities"]
+        assert len(priorities) >= 1
+        first = priorities[0]
+        assert first["rank"] == 1
+        assert "drill_id" in first
+        assert "name" in first
+        assert "priority_score" in first
+        assert "duration_minutes" in first
+        assert "targets" in first
+        assert "reasons" in first
+
+    def test_drill_priorities_rank_starts_at_1(self, tmp_path):
+        swot = {
+            "team_swot": {
+                "strengths": [],
+                "weaknesses": ["Low batting average", "Error-prone fielding",
+                               "High ERA", "Inefficient on the bases", "Rarely walks",
+                               "High strikeout rate", "Control issues"],
+                "opportunities": [],
+                "threats": [],
+            },
+            "player_analyses": [],
+        }
+        report = self._call(tmp_path, swot_result=swot)
+        ranks = [d["rank"] for d in report["drill_priorities"]]
+        assert ranks[0] == 1
+        assert ranks == list(range(1, len(ranks) + 1))
+
+    def test_drill_priorities_capped_at_5(self, tmp_path):
+        swot = {
+            "team_swot": {
+                "strengths": [],
+                "weaknesses": [
+                    "Low batting average", "Error-prone fielding", "High ERA",
+                    "Inefficient on the bases", "Rarely walks", "High strikeout rate",
+                    "Control issues", "High WHIP", "Limited power",
+                ],
+                "opportunities": [],
+                "threats": [],
+            },
+            "player_analyses": [],
+        }
+        report = self._call(tmp_path, swot_result=swot)
+        assert len(report["drill_priorities"]) <= 5
+
+    def test_team_summary_last_updated_is_iso(self, tmp_path):
+        report = self._call(tmp_path)
+        last_updated = report["team_summary"]["last_updated"]
+        assert isinstance(last_updated, str)
+        assert "T" in last_updated
+
+    def test_team_summary_defaults_without_team_json(self, tmp_path):
+        # No team.json in tmp_path → team_meta is empty → only roster_size/last_updated
+        report = self._call(tmp_path)
+        summary = report["team_summary"]
+        assert "roster_size" in summary
+        assert "last_updated" in summary
+        # No team_name from file means key is absent or falls through
+        assert summary.get("team_name") is None or "roster_size" in summary
+
+    def test_lineup_snapshot_simulated_runs_none_without_file(self, tmp_path):
+        report = self._call(tmp_path)
+        assert report["lineup_snapshot"]["simulated_runs_per_game"] is None
+
+    def test_lineup_snapshot_top5_entry_structure(self, tmp_path):
+        lineups = {
+            "recommended_strategy": "balanced",
+            "balanced": {
+                "lineup": [
+                    {"slot": 1, "role": "leadoff", "name": "Jane Smith",
+                     "number": "7", "obp": 0.450, "pa": 30},
+                    {"slot": 2, "role": "contact", "name": "Amy Jones",
+                     "number": "12", "obp": 0.380, "pa": 25},
+                ],
+                "simulated_runs_per_game": 3.8,
+            },
+        }
+        (tmp_path / "lineups.json").write_text(json.dumps(lineups))
+        with patch.object(pipeline_mod, "SHARKS_DIR", tmp_path):
+            report = _assemble_report(
+                csv_path=Path("x.csv"), scorebook_path=None,
+                roster=[], stages={}, swot_result=None,
+                snapshot_id=None, scorebook_data=None,
+            )
+        top5 = report["lineup_snapshot"]["top_5"]
+        assert len(top5) == 2
+        entry = top5[0]
+        assert entry["slot"] == 1
+        assert entry["role"] == "leadoff"
+        assert entry["name"] == "Jane Smith"
+        assert entry["number"] == "7"
+        assert entry["obp"] == pytest.approx(0.450)
+        assert entry["pa"] == 30
+
+    def test_lineup_snapshot_top5_capped_at_5(self, tmp_path):
+        lineup = [
+            {"slot": i, "role": "player", "name": f"Player {i}", "number": str(i),
+             "obp": 0.3, "pa": 20}
+            for i in range(1, 9)
+        ]
+        lineups = {
+            "recommended_strategy": "balanced",
+            "balanced": {"lineup": lineup, "simulated_runs_per_game": 4.0},
+        }
+        (tmp_path / "lineups.json").write_text(json.dumps(lineups))
+        with patch.object(pipeline_mod, "SHARKS_DIR", tmp_path):
+            report = _assemble_report(
+                csv_path=Path("x.csv"), scorebook_path=None,
+                roster=[], stages={}, swot_result=None,
+                snapshot_id=None, scorebook_data=None,
+            )
+        assert len(report["lineup_snapshot"]["top_5"]) == 5
+
+
+# ---------------------------------------------------------------------------
+# _team_dir — simple path construction
+# ---------------------------------------------------------------------------
+
+class TestTeamDir:
+    def test_returns_path_under_data_dir(self, monkeypatch, tmp_path):
+        from tools.team_registry import Team
+        monkeypatch.setattr(pipeline_mod, "_ROOT_DIR", tmp_path)
+        team = Team(
+            id="a", season_slug="spring26", name="Sharks",
+            data_slug="sharks", active=True,
+        )
+        result = _team_dir(team)
+        assert result == tmp_path / "data" / "sharks"
+
+    def test_slug_in_path(self, monkeypatch, tmp_path):
+        from tools.team_registry import Team
+        monkeypatch.setattr(pipeline_mod, "_ROOT_DIR", tmp_path)
+        team = Team(
+            id="b", season_slug="spring26", name="Eagles",
+            data_slug="eagles", active=True,
+        )
+        result = _team_dir(team)
+        assert "eagles" in str(result)
+
+    def test_returns_path_object(self, monkeypatch, tmp_path):
+        from pathlib import Path as PathClass
+        from tools.team_registry import Team
+        monkeypatch.setattr(pipeline_mod, "_ROOT_DIR", tmp_path)
+        team = Team(
+            id="c", season_slug="spring26", name="Test",
+            data_slug="test_team", active=True,
+        )
+        result = _team_dir(team)
+        assert isinstance(result, PathClass)

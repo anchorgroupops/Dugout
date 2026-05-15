@@ -98,3 +98,42 @@ def test_subject_and_push_include_team_name():
     assert "Dolphins" in subject
     msg = push.notify.call_args[0][0]
     assert "Dolphins" in msg
+
+
+def test_no_n8n_url_skips_post():
+    gmail = MagicMock()
+    n8n = MagicMock()
+    push = MagicMock()
+    notifier = n.Notifier(gmail_sender=gmail, n8n_poster=n8n, pusher=push,
+                          status_webhook_url="", notify_to_email="a@b")
+    notifier.emit(_summary(outcome="success"))
+    n8n.post.assert_not_called()
+
+
+def test_no_email_to_skips_send():
+    gmail = MagicMock()
+    n8n = MagicMock()
+    push = MagicMock()
+    notifier = n.Notifier(gmail_sender=gmail, n8n_poster=n8n, pusher=push,
+                          status_webhook_url="https://x/y", notify_to_email="")
+    notifier.emit(_summary(outcome="failure", failure_reason="x"))
+    gmail.send.assert_not_called()
+
+
+def test_short_message_quarantined_no_critical():
+    s = _summary(outcome="quarantined", failure_reason="bad schema", drift="none")
+    msg = n.Notifier._short_message(s)
+    assert "quarantined" in msg.lower()
+    assert "bad schema" in msg
+
+
+def test_short_message_quarantined_uses_default_when_no_reason():
+    s = _summary(outcome="quarantined", failure_reason=None, drift="none")
+    msg = n.Notifier._short_message(s)
+    assert "bad CSV" in msg
+
+
+def test_short_message_success_fallthrough():
+    s = _summary(outcome="success", drift="none")
+    msg = n.Notifier._short_message(s)
+    assert "success" in msg

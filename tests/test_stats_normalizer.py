@@ -6,6 +6,7 @@ import math
 import pytest
 
 from tools.stats_normalizer import (
+    _pick,
     build_player_metric_profile,
     count_populated_fields,
     detect_player_outlier_stats,
@@ -85,6 +86,11 @@ class TestSafeInt:
     def test_negative(self):
         assert safe_int(-3.2) == -3
 
+    def test_infinity_returns_default(self):
+        # safe_float filters infinity to the default, so safe_int returns it too
+        assert safe_int(float("inf"), default=99) == 99
+        assert safe_int(float("-inf"), default=7) == 7
+
 
 # ====================================================================
 # safe_pct_ratio
@@ -110,6 +116,26 @@ class TestSafePctRatio:
 
     def test_default_for_none(self):
         assert safe_pct_ratio(None, default=0.25) == 0.25
+
+
+# ====================================================================
+# _pick
+# ====================================================================
+class TestPick:
+    def test_non_dict_returns_none(self):
+        assert _pick(None, "ab") is None
+        assert _pick("not-a-dict", "ab") is None
+        assert _pick(42, "ab") is None
+
+    def test_returns_first_matching_key(self):
+        assert _pick({"ab": 5}, "ab") == 5
+
+    def test_skips_sentinel_values(self):
+        assert _pick({"ab": "-"}, "ab", "fallback") is None
+        assert _pick({"ab": None, "fallback": 3}, "ab", "fallback") == 3
+
+    def test_returns_none_when_no_keys_match(self):
+        assert _pick({"x": 1}, "ab") is None
 
 
 # ====================================================================
@@ -362,6 +388,12 @@ class TestNormalizePitchingAdvancedRow:
         row = {"pitching_advanced": {"bf": 30, "so": 10}}
         assert normalize_pitching_advanced_row(row)["k_bf"] == pytest.approx(10 / 30, abs=1e-4)
 
+    def test_uses_pitching_dict_when_has_adv_keys(self):
+        """When pitching dict contains advanced keys like k_bf, use it as the source."""
+        row = {"pitching": {"bf": 20, "so": 6, "k_bf": 0.3, "bb": 2}}
+        result = normalize_pitching_advanced_row(row)
+        assert "k_bf" in result
+
 
 # ====================================================================
 # player_identity_key
@@ -510,6 +542,15 @@ class TestCountPopulatedFields:
     def test_empty_rows_empty_counts(self):
         counts = count_populated_fields([], ["ab"], normalize_batting_row)
         assert counts == {"ab": 0}
+
+    def test_non_numeric_non_sentinel_string_counted(self):
+        """A non-numeric string that's not a sentinel is counted as populated."""
+        def _identity(row):
+            return row
+
+        rows = [{"label": "active"}, {"label": None}, {"label": ""}]
+        counts = count_populated_fields(rows, ["label"], _identity)
+        assert counts["label"] == 1  # only "active" qualifies
 
 
 # ====================================================================

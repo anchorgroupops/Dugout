@@ -1,13 +1,756 @@
 {
-  "_doc": "Empty-state fallback shipped in the image. Served by nginx when /srv/data/sharks/swot_analysis.json is missing on the Pi. Real values are written by swot_analyzer.run_sharks_analysis().",
   "team_name": "The Sharks",
-  "last_updated": null,
-  "source_app_stats_mtime": null,
-  "player_analyses": [],
+  "player_analyses": [
+    {
+      "player_id": "unknown",
+      "name": "Ember Hourahan",
+      "number": "00",
+      "derived_stats": {
+        "hitting": {
+          "ba": 0.727,
+          "obp": 0.824,
+          "slg": 1.455,
+          "ops": 2.278,
+          "k_rate": 0.059,
+          "bb_rate": 0.294,
+          "pa": 17.0,
+          "total_bases": 16.0
+        },
+        "pitching": {
+          "era": 98.0,
+          "whip": 13.0,
+          "k_per_ip": 1.0,
+          "bb_per_ip": 11.0
+        },
+        "fielding": {
+          "fielding_pct": 0.846
+        },
+        "baserunning": {
+          "sb_success_rate": 1.0
+        }
+      },
+      "swot": {
+        "strengths": [
+          "High batting average (BA: 0.727)",
+          "Gets on base frequently (OBP: 0.824)",
+          "Strong extra-base power (SLG: 1.455)"
+        ],
+        "weaknesses": [
+          "Error-prone fielding (F%: 0.846)"
+        ],
+        "opportunities": [
+          "1 areas identified for targeted training improvement"
+        ],
+        "threats": [
+          "Errors could be exploited by aggressive baserunning opponents"
+        ]
+      }
+    },
+    {
+      "player_id": "unknown",
+      "name": "Maylani Nixon",
+      "number": "1",
+      "derived_stats": {
+        "hitting": {
+          "ba": 0.667,
+          "obp": 0.833,
+          "slg": 1.0,
+          "ops": 1.833,
+          "k_rate": 0.0,
+          "bb_rate": 0.5,
+          "pa": 6.0,
+          "total_bases": 3.0
+        },
+        "pitching": {
+          "era": 33.6,
+          "whip": 6.0,
+          "k_per_ip": 1.8,
+          "bb_per_ip": 4.2
+        },
+        "fielding": {
+          "fielding_pct": 0.0
+        },
+        "baserunning": {
+          "sb_success_rate": 1.0
+        }
+      },
+      "swot": {
+        "strengths": [
+          "High batting average (BA: 0.667)",
+          "Gets on base frequently (OBP: 0.833)",
+          "Strong extra-base power (SLG: 1.0)"
+        ],
+        "weaknesses": [
+          "Error-prone fielding (F%: 0.0)"
+        ],
+        "opportunities": [
+          "Limited plate appearances \u2014 sample size too small; potential upside",
+          "1 areas identified for targeted training improvement"
+        ],
+        "threats": [
+          "Errors could be exploited by aggressive baserunning opponents"
+        ]
+      }
+    },
+    {
+      "player_id": "unknown",
+      "name": "Emma Williams",
+      "number": "4",
+      "derived_stats": {
+        "hitting": {
+          "ba": 0.0,
+          "obp": 0.667,
+          "slg": 0.0,
+          "ops": 0.667,
+          "k_rate": 0.333,
+          "bb_rate": 0.5,
+          "pa": 6.0,
+          "total_bases": 0.0
+        },
+        "pitching": {
+          "era": 0.0,
+          "whip": 0.0,
+          "k_per_ip": 0.0,
+          "bb_per_ip": 0.0
+        },
+        "fielding": {
+          "fielding_pct": 0.0
+        },
+        "baserunning": {
+          "sb_success_rate": 1.0
+        }
+      },
+      "swot": {
+        "strengths": [
+          "Gets on base frequently (OBP: 0.667)",
+          "Good plate discipline (BB%: 0.5)",
+          "High quality at-bat profile (QAB%: 0.667)"
+        ],
+        "weaknesses": [
+          "Low batting average (BA: 0.0)",
+          "Limited power (SLG: 0.0)",
+          "Error-prone fielding (F%: 0.0)"
+        ],
+        "opportunities": [
+          "Limited plate appearances \u2014 sample size too small; potential upside",
+          "3 areas identified for targeted training improvement"
+        ],
+        "threats": [
+          "Errors could be exploited by aggressive baserunning opponents"
+        ]
+      }
+    },
+    {
+      "player_id": "unknown",
+      "name": "Brielle P",
+      "number": "5",
+      "derived_stats": {
+        "hitting": {
+          "ba": 0.0,
+          "obp": 1.0,
+          "slg": 0.0,
+          "ops": 1.0,
+          "k_rate": 0.0,
+          "bb_rate": 1.0,
+          "pa": 2.0,
+          "total_bases": 0.0
+        },
+        "pitching": {
+          "era": 0.0,
+          "whip": 0.0,
+          "k_per_ip": 0.0,
+          "bb_per_ip": 0.0
+        },
+        "fielding": {
+          "fielding_pct": 0.0
+        },
+        "baserunning": {
+          "sb_success_rate": 1.0
+        }
+      },
+      "swot": {
+        "strengths": [
+          "Effective base stealer (SB%: 1.0)"
+        ],
+        "weaknesses": [
+          "Error-prone fielding (F%: 0.0)"
+        ],
+        "opportunities": [
+          "Limited plate appearances \u2014 sample size too small; potential upside",
+          "1 areas identified for targeted training improvement"
+        ],
+        "threats": [
+          "Errors could be exploited by aggressive baserunning opponents"
+        ]
+      }
+    },
+    {
+      "player_id": "unknown",
+      "name": "Delilah Gomez",
+      "number": "7",
+      "derived_stats": {
+        "hitting": {
+          "ba": 0.167,
+          "obp": 0.722,
+          "slg": 0.333,
+          "ops": 1.056,
+          "k_rate": 0.167,
+          "bb_rate": 0.667,
+          "pa": 18.0,
+          "total_bases": 2.0
+        },
+        "pitching": {
+          "era": 0.0,
+          "whip": 0.0,
+          "k_per_ip": 0.0,
+          "bb_per_ip": 0.0
+        },
+        "fielding": {
+          "fielding_pct": 0.5
+        },
+        "baserunning": {
+          "sb_success_rate": 0.714
+        }
+      },
+      "swot": {
+        "strengths": [
+          "Gets on base frequently (OBP: 0.722)",
+          "Elite overall hitting (OPS: 1.056)",
+          "Low strikeout rate as batter (K%: 0.167)"
+        ],
+        "weaknesses": [
+          "Low batting average (BA: 0.167)",
+          "Error-prone fielding (F%: 0.5)"
+        ],
+        "opportunities": [
+          "2 areas identified for targeted training improvement"
+        ],
+        "threats": [
+          "Errors could be exploited by aggressive baserunning opponents"
+        ]
+      }
+    },
+    {
+      "player_id": "unknown",
+      "name": "Sephina Santiago",
+      "number": "8",
+      "derived_stats": {
+        "hitting": {
+          "ba": 0.182,
+          "obp": 0.4,
+          "slg": 0.273,
+          "ops": 0.673,
+          "k_rate": 0.267,
+          "bb_rate": 0.2,
+          "pa": 15.0,
+          "total_bases": 3.0
+        },
+        "pitching": {
+          "era": 68.25,
+          "whip": 12.75,
+          "k_per_ip": 1.5,
+          "bb_per_ip": 10.5
+        },
+        "fielding": {
+          "fielding_pct": 1.0
+        },
+        "baserunning": {
+          "sb_success_rate": 1.0
+        }
+      },
+      "swot": {
+        "strengths": [
+          "Good plate discipline (BB%: 0.2)",
+          "Reliable fielder (F%: 1.0)",
+          "Effective base stealer (SB%: 1.0)"
+        ],
+        "weaknesses": [
+          "Low batting average (BA: 0.182)"
+        ],
+        "opportunities": [
+          "1 areas identified for targeted training improvement"
+        ],
+        "threats": [
+          "No specific threats identified"
+        ]
+      }
+    },
+    {
+      "player_id": "unknown",
+      "name": "Addy A",
+      "number": "11",
+      "derived_stats": {
+        "hitting": {
+          "ba": 0.5,
+          "obp": 0.8,
+          "slg": 0.5,
+          "ops": 1.3,
+          "k_rate": 0.2,
+          "bb_rate": 0.6,
+          "pa": 5.0,
+          "total_bases": 1.0
+        },
+        "pitching": {
+          "era": 0.0,
+          "whip": 0.0,
+          "k_per_ip": 0.0,
+          "bb_per_ip": 0.0
+        },
+        "fielding": {
+          "fielding_pct": 0.0
+        },
+        "baserunning": {
+          "sb_success_rate": 0.0
+        }
+      },
+      "swot": {
+        "strengths": [
+          "High batting average (BA: 0.5)",
+          "Gets on base frequently (OBP: 0.8)",
+          "Strong extra-base power (SLG: 0.5)"
+        ],
+        "weaknesses": [
+          "Error-prone fielding (F%: 0.0)",
+          "Inefficient on the bases (SB%: 0.0)"
+        ],
+        "opportunities": [
+          "Limited plate appearances \u2014 sample size too small; potential upside",
+          "2 areas identified for targeted training improvement"
+        ],
+        "threats": [
+          "Errors could be exploited by aggressive baserunning opponents"
+        ]
+      }
+    },
+    {
+      "player_id": "unknown",
+      "name": "Arielle M",
+      "number": "12",
+      "derived_stats": {
+        "hitting": {
+          "ba": 0.0,
+          "obp": 0.0,
+          "slg": 0.0,
+          "ops": 0.0,
+          "k_rate": 0.0,
+          "bb_rate": 0.0,
+          "pa": 0.0,
+          "total_bases": 0.0
+        },
+        "pitching": {
+          "era": 0.0,
+          "whip": 0.0,
+          "k_per_ip": 0.0,
+          "bb_per_ip": 0.0
+        },
+        "fielding": {
+          "fielding_pct": 0.0
+        },
+        "baserunning": {
+          "sb_success_rate": 0.0
+        }
+      },
+      "swot": {
+        "strengths": [
+          "No standout strengths yet (need more data)"
+        ],
+        "weaknesses": [
+          "Error-prone fielding (F%: 0.0)",
+          "Inefficient on the bases (SB%: 0.0)"
+        ],
+        "opportunities": [
+          "Limited plate appearances \u2014 sample size too small; potential upside",
+          "2 areas identified for targeted training improvement"
+        ],
+        "threats": [
+          "Errors could be exploited by aggressive baserunning opponents"
+        ]
+      }
+    },
+    {
+      "player_id": "unknown",
+      "name": "Leila VanDeusen",
+      "number": "13",
+      "derived_stats": {
+        "hitting": {
+          "ba": 0.455,
+          "obp": 0.625,
+          "slg": 0.545,
+          "ops": 1.17,
+          "k_rate": 0.188,
+          "bb_rate": 0.25,
+          "pa": 16.0,
+          "total_bases": 6.0
+        },
+        "pitching": {
+          "era": 0.0,
+          "whip": 0.0,
+          "k_per_ip": 0.0,
+          "bb_per_ip": 0.0
+        },
+        "fielding": {
+          "fielding_pct": 1.0
+        },
+        "baserunning": {
+          "sb_success_rate": 1.0
+        }
+      },
+      "swot": {
+        "strengths": [
+          "High batting average (BA: 0.455)",
+          "Gets on base frequently (OBP: 0.625)",
+          "Strong extra-base power (SLG: 0.545)"
+        ],
+        "weaknesses": [
+          "No major weaknesses identified"
+        ],
+        "opportunities": [
+          "Continue developing all-around skills"
+        ],
+        "threats": [
+          "No specific threats identified"
+        ]
+      }
+    },
+    {
+      "player_id": "unknown",
+      "name": "Chloe Johnson",
+      "number": "19",
+      "derived_stats": {
+        "hitting": {
+          "ba": 0.25,
+          "obp": 0.625,
+          "slg": 0.25,
+          "ops": 0.875,
+          "k_rate": 0.25,
+          "bb_rate": 0.0,
+          "pa": 8.0,
+          "total_bases": 1.0
+        },
+        "pitching": {
+          "era": 33.0,
+          "whip": 6.64,
+          "k_per_ip": 2.14,
+          "bb_per_ip": 4.71
+        },
+        "fielding": {
+          "fielding_pct": 0.0
+        },
+        "baserunning": {
+          "sb_success_rate": 1.0
+        }
+      },
+      "swot": {
+        "strengths": [
+          "Gets on base frequently (OBP: 0.625)",
+          "Elite overall hitting (OPS: 0.875)",
+          "High strikeout rate as pitcher (K/IP: 2.14)"
+        ],
+        "weaknesses": [
+          "Limited power (SLG: 0.25)",
+          "Rarely walks (BB%: 0.0)",
+          "High ERA (33.0)"
+        ],
+        "opportunities": [
+          "Limited plate appearances \u2014 sample size too small; potential upside",
+          "6 areas identified for targeted training improvement"
+        ],
+        "threats": [
+          "Errors could be exploited by aggressive baserunning opponents"
+        ]
+      }
+    },
+    {
+      "player_id": "unknown",
+      "name": "Mikayla J",
+      "number": "26",
+      "derived_stats": {
+        "hitting": {
+          "ba": 0.0,
+          "obp": 0.333,
+          "slg": 0.0,
+          "ops": 0.333,
+          "k_rate": 0.333,
+          "bb_rate": 0.333,
+          "pa": 3.0,
+          "total_bases": 0.0
+        },
+        "pitching": {
+          "era": 0.0,
+          "whip": 0.0,
+          "k_per_ip": 0.0,
+          "bb_per_ip": 0.0
+        },
+        "fielding": {
+          "fielding_pct": 1.0
+        },
+        "baserunning": {
+          "sb_success_rate": 0.0
+        }
+      },
+      "swot": {
+        "strengths": [
+          "Reliable fielder (F%: 1.0)"
+        ],
+        "weaknesses": [
+          "Inefficient on the bases (SB%: 0.0)"
+        ],
+        "opportunities": [
+          "Limited plate appearances \u2014 sample size too small; potential upside",
+          "1 areas identified for targeted training improvement"
+        ],
+        "threats": [
+          "No specific threats identified"
+        ]
+      }
+    },
+    {
+      "player_id": "unknown",
+      "name": "Juliette Moros",
+      "number": "27",
+      "derived_stats": {
+        "hitting": {
+          "ba": 0.0,
+          "obp": 0.231,
+          "slg": 0.0,
+          "ops": 0.231,
+          "k_rate": 0.308,
+          "bb_rate": 0.154,
+          "pa": 13.0,
+          "total_bases": 0.0
+        },
+        "pitching": {
+          "era": 0.0,
+          "whip": 0.0,
+          "k_per_ip": 0.0,
+          "bb_per_ip": 0.0
+        },
+        "fielding": {
+          "fielding_pct": 0.0
+        },
+        "baserunning": {
+          "sb_success_rate": 1.0
+        }
+      },
+      "swot": {
+        "strengths": [
+          "Good plate discipline (BB%: 0.154)",
+          "Effective base stealer (SB%: 1.0)"
+        ],
+        "weaknesses": [
+          "Low batting average (BA: 0.0)",
+          "Struggles to reach base (OBP: 0.231)",
+          "Limited power (SLG: 0.0)"
+        ],
+        "opportunities": [
+          "Limited plate appearances \u2014 sample size too small; potential upside",
+          "6 areas identified for targeted training improvement"
+        ],
+        "threats": [
+          "Errors could be exploited by aggressive baserunning opponents"
+        ]
+      }
+    },
+    {
+      "player_id": "unknown",
+      "name": "Ava W",
+      "number": "28",
+      "derived_stats": {
+        "hitting": {
+          "ba": 0.0,
+          "obp": 0.0,
+          "slg": 0.0,
+          "ops": 0.0,
+          "k_rate": 0.0,
+          "bb_rate": 0.0,
+          "pa": 0.0,
+          "total_bases": 0.0
+        },
+        "pitching": {
+          "era": 0.0,
+          "whip": 0.0,
+          "k_per_ip": 0.0,
+          "bb_per_ip": 0.0
+        },
+        "fielding": {
+          "fielding_pct": 0.0
+        },
+        "baserunning": {
+          "sb_success_rate": 0.0
+        }
+      },
+      "swot": {
+        "strengths": [
+          "No standout strengths yet (need more data)"
+        ],
+        "weaknesses": [
+          "Error-prone fielding (F%: 0.0)",
+          "Inefficient on the bases (SB%: 0.0)"
+        ],
+        "opportunities": [
+          "Limited plate appearances \u2014 sample size too small; potential upside",
+          "2 areas identified for targeted training improvement"
+        ],
+        "threats": [
+          "Errors could be exploited by aggressive baserunning opponents"
+        ]
+      }
+    },
+    {
+      "player_id": "unknown",
+      "name": "Ruby VanDeusen",
+      "number": "67",
+      "derived_stats": {
+        "hitting": {
+          "ba": 0.3,
+          "obp": 0.611,
+          "slg": 0.4,
+          "ops": 1.011,
+          "k_rate": 0.278,
+          "bb_rate": 0.333,
+          "pa": 18.0,
+          "total_bases": 4.0
+        },
+        "pitching": {
+          "era": 0.0,
+          "whip": 0.0,
+          "k_per_ip": 0.0,
+          "bb_per_ip": 0.0
+        },
+        "fielding": {
+          "fielding_pct": 1.0
+        },
+        "baserunning": {
+          "sb_success_rate": 0.917
+        }
+      },
+      "swot": {
+        "strengths": [
+          "Gets on base frequently (OBP: 0.611)",
+          "Elite overall hitting (OPS: 1.011)",
+          "Good plate discipline (BB%: 0.333)"
+        ],
+        "weaknesses": [
+          "No major weaknesses identified"
+        ],
+        "opportunities": [
+          "Continue developing all-around skills"
+        ],
+        "threats": [
+          "No specific threats identified"
+        ]
+      }
+    },
+    {
+      "player_id": "unknown",
+      "name": "Lexi McKinney",
+      "number": "99",
+      "derived_stats": {
+        "hitting": {
+          "ba": 0.364,
+          "obp": 0.611,
+          "slg": 0.455,
+          "ops": 1.066,
+          "k_rate": 0.167,
+          "bb_rate": 0.222,
+          "pa": 18.0,
+          "total_bases": 5.0
+        },
+        "pitching": {
+          "era": 40.38,
+          "whip": 7.85,
+          "k_per_ip": 1.15,
+          "bb_per_ip": 6.0
+        },
+        "fielding": {
+          "fielding_pct": 1.0
+        },
+        "baserunning": {
+          "sb_success_rate": 1.0
+        }
+      },
+      "swot": {
+        "strengths": [
+          "High batting average (BA: 0.364)",
+          "Gets on base frequently (OBP: 0.611)",
+          "Strong extra-base power (SLG: 0.455)"
+        ],
+        "weaknesses": [
+          "Low quality at-bat profile (QAB%: 0.278)",
+          "High ERA (40.38)",
+          "High WHIP (7.85)"
+        ],
+        "opportunities": [
+          "4 areas identified for targeted training improvement"
+        ],
+        "threats": [
+          "No specific threats identified"
+        ]
+      }
+    },
+    {
+      "player_id": "unknown",
+      "name": "Amelia",
+      "number": "",
+      "derived_stats": {
+        "hitting": {
+          "ba": 1.0,
+          "obp": 1.0,
+          "slg": 1.0,
+          "ops": 2.0,
+          "k_rate": 0.0,
+          "bb_rate": 0.667,
+          "pa": 3.0,
+          "total_bases": 1.0
+        },
+        "pitching": {
+          "era": 52.5,
+          "whip": 10.5,
+          "k_per_ip": 1.5,
+          "bb_per_ip": 9.0
+        },
+        "fielding": {
+          "fielding_pct": 1.0
+        },
+        "baserunning": {
+          "sb_success_rate": 0.8
+        }
+      },
+      "swot": {
+        "strengths": [
+          "Reliable fielder (F%: 1.0)",
+          "Effective base stealer (SB%: 0.8)"
+        ],
+        "weaknesses": [
+          "No major weaknesses identified"
+        ],
+        "opportunities": [
+          "Limited plate appearances \u2014 sample size too small; potential upside"
+        ],
+        "threats": [
+          "No specific threats identified"
+        ]
+      }
+    }
+  ],
   "team_swot": {
-    "strengths": [],
-    "weaknesses": [],
-    "opportunities": [],
-    "threats": []
+    "strengths": [
+      "Gets on base frequently (9 players)",
+      "High batting average (5 players)",
+      "Strong extra-base power (5 players)"
+    ],
+    "weaknesses": [
+      "Error-prone fielding (8 players)",
+      "Low batting average (4 players)",
+      "Inefficient on the bases (4 players)"
+    ],
+    "opportunities": [
+      "4 players with multiple areas for growth",
+      "Targeted practice plans can address common weaknesses"
+    ],
+    "threats": [
+      "Errors could be exploited by aggressive baserunning opponents (10 players)",
+      "No specific threats identified (6 players)"
+    ]
   }
 }

@@ -61,3 +61,63 @@ def test_rejects_missing_required_keys():
     adapter = la.ClaudeLocatorAdapter(client=client, model="claude-sonnet-4-6")
     with pytest.raises(la.LLMAdapterError):
         adapter("<html>...</html>")
+
+
+# ---------------------------------------------------------------------------
+# build_default_adapter
+# ---------------------------------------------------------------------------
+
+def test_build_default_adapter_returns_adapter():
+    from unittest.mock import patch, MagicMock
+    fake_client = MagicMock()
+    with patch("tools.autopull.llm_adapter.Anthropic", return_value=fake_client) if False else __import__("contextlib").nullcontext():
+        # Patch at the module level where it's imported inside the function
+        with patch("anthropic.Anthropic", return_value=fake_client):
+            adapter = la.build_default_adapter(api_key="fake-key", model="test-model")
+    assert isinstance(adapter, la.ClaudeLocatorAdapter)
+
+
+def test_build_default_adapter_passes_model():
+    from unittest.mock import patch, MagicMock
+    fake_client = MagicMock()
+    with patch("anthropic.Anthropic", return_value=fake_client):
+        adapter = la.build_default_adapter(api_key="fake-key", model="claude-sonnet-4-6")
+    assert adapter.model == "claude-sonnet-4-6"
+
+
+def test_rejects_response_with_no_text_block():
+    """When the API response has no text-type content block, raise LLMAdapterError."""
+    client = MagicMock()
+    resp = MagicMock()
+    resp.content = [MagicMock(type="tool_use")]  # no text block
+    resp.usage.input_tokens = 1; resp.usage.output_tokens = 1
+    resp.usage.cache_creation_input_tokens = 0; resp.usage.cache_read_input_tokens = 0
+    client.messages.create.return_value = resp
+    adapter = la.ClaudeLocatorAdapter(client=client, model="claude-sonnet-4-6")
+    with pytest.raises(la.LLMAdapterError):
+        adapter("<html></html>")
+
+
+def test_rejects_json_list_response():
+    """When the response JSON is a list (not a dict), raise LLMAdapterError."""
+    client = MagicMock()
+    resp = MagicMock()
+    resp.content = [MagicMock(type="text", text='["not", "a", "dict"]')]
+    resp.usage.input_tokens = 1; resp.usage.output_tokens = 1
+    resp.usage.cache_creation_input_tokens = 0; resp.usage.cache_read_input_tokens = 0
+    client.messages.create.return_value = resp
+    adapter = la.ClaudeLocatorAdapter(client=client, model="claude-sonnet-4-6")
+    with pytest.raises(la.LLMAdapterError):
+        adapter("<html></html>")
+
+
+def test_rejects_unknown_strategy():
+    """When strategy is not 'css' or 'xpath', raise LLMAdapterError."""
+    client = MagicMock()
+    client.messages.create.return_value = _fake_anthropic_response({
+        "strategy": "locator", "selector": "role=button",
+        "confidence": 0.9, "reasoning": "",
+    })
+    adapter = la.ClaudeLocatorAdapter(client=client, model="claude-sonnet-4-6")
+    with pytest.raises(la.LLMAdapterError):
+        adapter("<html></html>")
