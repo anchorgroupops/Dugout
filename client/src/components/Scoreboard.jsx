@@ -103,24 +103,21 @@ const BaseDiagram = ({ runners }) => {
 
 // ─── Count Widget ─────────────────────────────────────────────────────────────
 
-const CountWidget = ({ outs, batterKey }) => {
-  const [balls, setBalls] = useState(0);
-  const [strikes, setStrikes] = useState(0);
+const Dots = ({ filled, max, color }) => (
+  <div style={{ display: 'flex', gap: '5px', justifyContent: 'center' }}>
+    {Array.from({ length: max }).map((_, i) => (
+      <div key={i} style={{
+        width: 13, height: 13, borderRadius: '50%',
+        background: i < filled ? color : 'rgba(255,255,255,0.1)',
+        border: `2px solid ${i < filled ? color : 'rgba(255,255,255,0.18)'}`,
+        transition: 'background 0.12s',
+      }} />
+    ))}
+  </div>
+);
 
-  useEffect(() => { setBalls(0); setStrikes(0); }, [batterKey]);
-
-  const Dots = ({ filled, max, color }) => (
-    <div style={{ display: 'flex', gap: '5px', justifyContent: 'center' }}>
-      {Array.from({ length: max }).map((_, i) => (
-        <div key={i} style={{
-          width: 13, height: 13, borderRadius: '50%',
-          background: i < filled ? color : 'rgba(255,255,255,0.1)',
-          border: `2px solid ${i < filled ? color : 'rgba(255,255,255,0.18)'}`,
-          transition: 'background 0.12s',
-        }} />
-      ))}
-    </div>
-  );
+const CountWidget = ({ outs }) => {
+  const [count, setCount] = useState({ balls: 0, strikes: 0 });
 
   const outsCount = outs ?? 0;
 
@@ -140,15 +137,15 @@ const CountWidget = ({ outs, batterKey }) => {
   return (
     <div>
       <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-        <button type="button" onClick={() => setBalls(b => (b + 1) % 4)} style={cell('#4CAF50', balls > 0)} aria-label="Add ball">
+        <button type="button" onClick={() => setCount(c => ({ ...c, balls: (c.balls + 1) % 4 }))} style={cell('#4CAF50', count.balls > 0)} aria-label="Add ball">
           <span style={lbl}>Balls</span>
-          <span style={num('#4CAF50')}>{balls}</span>
-          <Dots filled={balls} max={4} color="#4CAF50" />
+          <span style={num('#4CAF50')}>{count.balls}</span>
+          <Dots filled={count.balls} max={4} color="#4CAF50" />
         </button>
-        <button type="button" onClick={() => setStrikes(s => (s + 1) % 3)} style={cell('#FFD700', strikes > 0)} aria-label="Add strike">
+        <button type="button" onClick={() => setCount(c => ({ ...c, strikes: (c.strikes + 1) % 3 }))} style={cell('#FFD700', count.strikes > 0)} aria-label="Add strike">
           <span style={lbl}>Strikes</span>
-          <span style={num('#FFD700')}>{strikes}</span>
-          <Dots filled={strikes} max={3} color="#FFD700" />
+          <span style={num('#FFD700')}>{count.strikes}</span>
+          <Dots filled={count.strikes} max={3} color="#FFD700" />
         </button>
         <div style={{ ...cell('#ff4444', outsCount > 0), cursor: 'default' }}>
           <span style={lbl}>Outs</span>
@@ -158,7 +155,7 @@ const CountWidget = ({ outs, batterKey }) => {
       </div>
       <button
         type="button"
-        onClick={() => { setBalls(0); setStrikes(0); }}
+        onClick={() => setCount({ balls: 0, strikes: 0 })}
         style={{
           width: '100%', padding: '9px', background: 'rgba(255,255,255,0.05)',
           border: '1px solid rgba(255,255,255,0.12)', borderRadius: 8,
@@ -606,7 +603,7 @@ const LiveScoreboardPanel = ({ data, isMobile, isLandscape, fetchScoreboard, las
       </div>
 
       {/* Count Widget */}
-      <CountWidget outs={outs} batterKey={batterKey} />
+      <CountWidget key={batterKey} outs={outs} />
 
       {/* AT BAT / ON DECK */}
       {(atBatPlayer || onDeckPlayer) && (
@@ -818,8 +815,8 @@ const Scoreboard = ({ isMobile = false, isLandscape = false, team, schedule }) =
     );
   }
 
-  // ── Live ──
-  if (isLive) {
+  // ── Live / Final ──
+  if (isLive || isFinal) {
     return (
       <div>
         <h2 className="view-title" style={{ margin: '0 0 var(--space-md)' }}>
