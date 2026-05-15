@@ -2245,7 +2245,7 @@ class TestHandleRegenerateLineups:
 # ---------------------------------------------------------------------------
 
 class TestHandleAnnouncerRoster:
-    def test_returns_500_when_announcer_engine_raises(self, flask_app, monkeypatch):
+    def test_returns_fallback_when_announcer_engine_raises(self, flask_app, monkeypatch):
         import types
         fake_ae = types.ModuleType("announcer_engine")
         fake_ae.load_announcer_roster = MagicMock(side_effect=RuntimeError("engine broke"))
@@ -2253,8 +2253,10 @@ class TestHandleAnnouncerRoster:
         monkeypatch.setitem(sys.modules, "announcer_engine", fake_ae)
         with flask_app.test_client() as client:
             resp = client.get("/api/announcer/roster")
-        assert resp.status_code == 500
-        assert "announcer_roster_failed" in resp.get_json().get("error", "")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data.get("fallback") is True
+        assert "load_roster_failed" in data.get("fallback_reason", "")
 
     def test_returns_roster_and_stats(self, flask_app, monkeypatch, tmp_path):
         monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
@@ -4143,7 +4145,7 @@ class TestHandleAnnouncerRosterEndpoint:
         assert "roster" in data
         assert "stats" in data
 
-    def test_exception_returns_500(self, flask_app, monkeypatch):
+    def test_exception_returns_fallback(self, flask_app, monkeypatch):
         import types
         fake = types.ModuleType("announcer_engine")
         fake.load_announcer_roster = MagicMock(side_effect=RuntimeError("db error"))
@@ -4151,7 +4153,8 @@ class TestHandleAnnouncerRosterEndpoint:
         monkeypatch.setitem(sys.modules, "announcer_engine", fake)
         with flask_app.test_client() as client:
             resp = client.get("/api/announcer/roster")
-        assert resp.status_code == 500
+        assert resp.status_code == 200
+        assert resp.get_json().get("fallback") is True
 
     def test_ghost_detection_marks_unknown_player_as_ghost(self, flask_app, monkeypatch, tmp_path):
         monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)

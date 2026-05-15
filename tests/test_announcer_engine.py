@@ -12,6 +12,7 @@ import pytest
 
 import tools.announcer_engine as ae_mod
 from tools.announcer_engine import (
+    EdgeTTSProvider,
     MockTTS,
     _apply_phonetics,
     _bootstrap_roster_from_team,
@@ -229,7 +230,8 @@ class TestGetTtsProvider:
         monkeypatch.delenv("ELEVENLABS_API_KEY", raising=False)
         monkeypatch.delenv("ANNOUNCER_VOICE_REF_URL", raising=False)
         provider = get_tts_provider()
-        assert isinstance(provider, MockTTS)
+        # EdgeTTS is always in the chain and available without credentials
+        assert isinstance(provider, EdgeTTSProvider)
 
     def test_quick_returns_mock_when_no_env_vars(self, monkeypatch):
         monkeypatch.delenv("LOCAL_TTS_URL", raising=False)
@@ -237,7 +239,8 @@ class TestGetTtsProvider:
         monkeypatch.delenv("ELEVENLABS_API_KEY", raising=False)
         monkeypatch.delenv("ANNOUNCER_VOICE_REF_URL", raising=False)
         provider = get_quick_tts_provider()
-        assert isinstance(provider, MockTTS)
+        # EdgeTTS is always in the chain and available without credentials
+        assert isinstance(provider, EdgeTTSProvider)
 
 
 # ---------------------------------------------------------------------------
@@ -978,13 +981,13 @@ class TestGetTtsProviderBranches:
         assert isinstance(ae_mod.get_tts_provider(), ae_mod.ReplicateTTS)
 
     def test_returns_elevenlabs_when_only_el_key(self, monkeypatch):
-        """Line 365: only ELEVENLABS_API_KEY set → ElevenLabsTTS."""
+        """With only ELEVENLABS_API_KEY set, EdgeTTS wins (it's earlier in chain and credential-free)."""
         monkeypatch.delenv("LOCAL_TTS_URL", raising=False)
         monkeypatch.delenv("REPLICATE_API_TOKEN", raising=False)
         monkeypatch.delenv("ANNOUNCER_VOICE_REF_URL", raising=False)
         monkeypatch.setenv("ELEVENLABS_API_KEY", "el_fakekey")
         monkeypatch.setitem(sys.modules, "sync_daemon", None)
-        assert isinstance(ae_mod.get_tts_provider(), ae_mod.ElevenLabsTTS)
+        assert isinstance(ae_mod.get_tts_provider(), ae_mod.EdgeTTSProvider)
 
 
 class TestGetQuickTtsProviderBranches:
@@ -1001,13 +1004,13 @@ class TestGetQuickTtsProviderBranches:
         assert isinstance(ae_mod.get_quick_tts_provider(), ae_mod.Replicate06bTTS)
 
     def test_returns_elevenlabs_when_only_el_key(self, monkeypatch):
-        """Line 383: only ELEVENLABS_API_KEY → ElevenLabsTTS for quick."""
+        """With only ELEVENLABS_API_KEY set, EdgeTTS wins (it's earlier in chain and credential-free)."""
         monkeypatch.delenv("LOCAL_TTS_URL", raising=False)
         monkeypatch.delenv("REPLICATE_API_TOKEN", raising=False)
         monkeypatch.delenv("ANNOUNCER_VOICE_REF_URL", raising=False)
         monkeypatch.setenv("ELEVENLABS_API_KEY", "el_fakekey")
         monkeypatch.setitem(sys.modules, "sync_daemon", None)
-        assert isinstance(ae_mod.get_quick_tts_provider(), ae_mod.ElevenLabsTTS)
+        assert isinstance(ae_mod.get_quick_tts_provider(), ae_mod.EdgeTTSProvider)
 
 
 # ---------------------------------------------------------------------------
@@ -1016,14 +1019,13 @@ class TestGetQuickTtsProviderBranches:
 
 class TestCheckProviderHealth:
     def test_returns_dict_with_all_keys(self, monkeypatch):
-        """Lines 391: result always has local_tts, replicate, elevenlabs, mock."""
+        """Result always has edge_tts and mock keys (provider names); mock is always True."""
         monkeypatch.delenv("LOCAL_TTS_URL", raising=False)
         monkeypatch.delenv("REPLICATE_API_TOKEN", raising=False)
         monkeypatch.delenv("ELEVENLABS_API_KEY", raising=False)
         monkeypatch.setitem(sys.modules, "sync_daemon", None)
         result = ae_mod.check_provider_health()
-        assert "local_tts" in result and "replicate" in result
-        assert "elevenlabs" in result and "mock" in result
+        assert "edge_tts" in result and "mock" in result
 
     def test_mock_always_true(self, monkeypatch):
         """Line 391: mock field is always True."""
@@ -1034,33 +1036,33 @@ class TestCheckProviderHealth:
         assert ae_mod.check_provider_health()["mock"] is True
 
     def test_local_tts_healthy(self, monkeypatch):
-        """Lines 394-398: LOCAL_TTS_URL set, /health returns 200 → local_tts True."""
+        """LOCAL_TTS_URL set, /health returns 200 → local_tts_ping True."""
         monkeypatch.setenv("LOCAL_TTS_URL", "http://local:8080")
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         monkeypatch.setattr(ae_mod.requests, "get", lambda *a, **kw: mock_resp)
         result = ae_mod.check_provider_health()
-        assert result["local_tts"] is True
+        assert result["local_tts_ping"] is True
 
     def test_local_tts_unhealthy_when_non_200(self, monkeypatch):
-        """Lines 397: non-200 response → local_tts False."""
+        """Non-200 response → local_tts_ping False."""
         monkeypatch.setenv("LOCAL_TTS_URL", "http://local:8080")
         mock_resp = MagicMock()
         mock_resp.status_code = 503
         monkeypatch.setattr(ae_mod.requests, "get", lambda *a, **kw: mock_resp)
         result = ae_mod.check_provider_health()
-        assert result["local_tts"] is False
+        assert result["local_tts_ping"] is False
 
     def test_local_tts_exception_swallowed(self, monkeypatch):
-        """Lines 398-399: request exception → local_tts stays False."""
+        """Request exception → local_tts_ping False (not re-raised)."""
         monkeypatch.setenv("LOCAL_TTS_URL", "http://local:8080")
         monkeypatch.setattr(ae_mod.requests, "get",
                             lambda *a, **kw: (_ for _ in ()).throw(ConnectionError("refused")))
         result = ae_mod.check_provider_health()
-        assert result["local_tts"] is False
+        assert result["local_tts_ping"] is False
 
     def test_replicate_healthy(self, monkeypatch):
-        """Lines 401-410: REPLICATE_API_TOKEN set, account check returns 200."""
+        """REPLICATE_API_TOKEN set, account check returns 200 → replicate_ping True."""
         monkeypatch.setenv("REPLICATE_API_TOKEN", "r8_fake")
         monkeypatch.delenv("LOCAL_TTS_URL", raising=False)
         monkeypatch.delenv("ELEVENLABS_API_KEY", raising=False)
@@ -1068,7 +1070,7 @@ class TestCheckProviderHealth:
         mock_resp.status_code = 200
         monkeypatch.setattr(ae_mod.requests, "get", lambda *a, **kw: mock_resp)
         result = ae_mod.check_provider_health()
-        assert result["replicate"] is True
+        assert result["replicate_ping"] is True
 
     def test_elevenlabs_healthy(self, monkeypatch):
         """Lines 413-423: ELEVENLABS_API_KEY set, user check returns 200."""
@@ -1083,7 +1085,7 @@ class TestCheckProviderHealth:
         assert result["elevenlabs"] is True
 
     def test_replicate_exception_swallowed(self, monkeypatch):
-        """Lines 410-411: replicate GET raises → exception swallowed, stays False."""
+        """Replicate GET raises → replicate_ping False (exception swallowed)."""
         monkeypatch.setenv("REPLICATE_API_TOKEN", "r8_fake")
         monkeypatch.delenv("LOCAL_TTS_URL", raising=False)
         monkeypatch.delenv("ELEVENLABS_API_KEY", raising=False)
@@ -1091,10 +1093,10 @@ class TestCheckProviderHealth:
         monkeypatch.setattr(ae_mod.requests, "get",
                             lambda *a, **kw: (_ for _ in ()).throw(ConnectionError("refused")))
         result = ae_mod.check_provider_health()
-        assert result["replicate"] is False
+        assert result["replicate_ping"] is False
 
     def test_elevenlabs_exception_swallowed(self, monkeypatch):
-        """Lines 422-423: elevenlabs GET raises → exception swallowed, stays False."""
+        """ElevenLabs GET raises → elevenlabs_ping False (exception swallowed)."""
         monkeypatch.setenv("ELEVENLABS_API_KEY", "el_fake")
         monkeypatch.delenv("LOCAL_TTS_URL", raising=False)
         monkeypatch.delenv("REPLICATE_API_TOKEN", raising=False)
@@ -1102,7 +1104,7 @@ class TestCheckProviderHealth:
         monkeypatch.setattr(ae_mod.requests, "get",
                             lambda *a, **kw: (_ for _ in ()).throw(ConnectionError("refused")))
         result = ae_mod.check_provider_health()
-        assert result["elevenlabs"] is False
+        assert result["elevenlabs_ping"] is False
 
 
 # ---------------------------------------------------------------------------

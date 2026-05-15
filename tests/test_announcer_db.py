@@ -586,12 +586,12 @@ class TestPickWalkupSong:
     def test_returns_url_when_songs_exist(self, db):
         adb.add_player_song("player-1", "http://example.com/walkup.mp3")
         result = adb.pick_walkup_song("player-1", "session-1")
-        assert result == "http://example.com/walkup.mp3"
+        assert result["song_url"] == "http://example.com/walkup.mp3"
 
     def test_returns_string(self, db):
         adb.add_player_song("player-1", "http://example.com/song.mp3")
         result = adb.pick_walkup_song("player-1", "session-1")
-        assert isinstance(result, str)
+        assert isinstance(result, dict) and "song_url" in result
 
     def test_same_session_no_error(self, db):
         adb.add_player_song("player-1", "http://example.com/a.mp3")
@@ -621,7 +621,7 @@ class TestPickWalkupSong:
         picked = set()
         for _ in range(4):
             result = adb.pick_walkup_song("player-1", "session-all")
-            picked.add(result)
+            picked.add(result["song_url"])
         assert picked == set(urls)
 
     def test_cycle_resets_after_all_played(self, db):
@@ -630,17 +630,17 @@ class TestPickWalkupSong:
         for url in urls:
             adb.add_player_song("player-1", url)
         # Play through all songs once
-        picked_first = {adb.pick_walkup_song("player-1", "session-cycle") for _ in range(3)}
+        picked_first = {adb.pick_walkup_song("player-1", "session-cycle")["song_url"] for _ in range(3)}
         assert picked_first == set(urls)
         # Next pick should work without error (full cycle reset)
         extra = adb.pick_walkup_song("player-1", "session-cycle")
-        assert extra in urls
+        assert extra["song_url"] in urls
 
     def test_single_song_always_returned(self, db):
         adb.add_player_song("player-1", "http://example.com/only.mp3")
         for _ in range(5):
             result = adb.pick_walkup_song("player-1", "session-solo")
-            assert result == "http://example.com/only.mp3"
+            assert result["song_url"] == "http://example.com/only.mp3"
 
     def test_different_sessions_independent(self, db):
         adb.add_player_song("player-1", "http://example.com/s1.mp3")
