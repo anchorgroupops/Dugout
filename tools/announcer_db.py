@@ -53,6 +53,18 @@ _V2_COLUMN_ALTERS = [
     "ALTER TABLE player_songs ADD COLUMN duration_ms     INTEGER",
 ]
 
+# v3: file-backed walk-up tracks. `file_path` stores the local SSD path of
+# the trimmed + LUFS-normalized hook clip (set when source='local' or after
+# yt-dlp ingest finishes). `is_active` lets coaches deactivate songs without
+# losing play-history.
+_V3_COLUMN_ALTERS = [
+    "ALTER TABLE player_songs ADD COLUMN file_path       TEXT",
+    "ALTER TABLE player_songs ADD COLUMN is_active       INTEGER DEFAULT 1",
+    "ALTER TABLE player_songs ADD COLUMN bpm             REAL",
+    "ALTER TABLE player_songs ADD COLUMN bpm_offset_ms   INTEGER DEFAULT 0",
+    "ALTER TABLE player_songs ADD COLUMN normalized_lufs REAL",
+]
+
 _SCHEMA_V2_NEW_TABLES = """
 CREATE TABLE IF NOT EXISTS walkup_catalog (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -82,6 +94,10 @@ CREATE TABLE IF NOT EXISTS music_auth (
 );
 
 INSERT OR IGNORE INTO schema_version VALUES (2);
+"""
+
+_SCHEMA_V3_FINALIZE = """
+INSERT OR IGNORE INTO schema_version VALUES (3);
 """
 
 _SCHEMA_V1 = """
@@ -160,6 +176,15 @@ def init_db() -> None:
                     pass  # column already exists
             conn.executescript(_SCHEMA_V2_NEW_TABLES)
             log.info("[announcer_db] Applied schema v2")
+
+        if current < 3:
+            for sql in _V3_COLUMN_ALTERS:
+                try:
+                    conn.execute(sql)
+                except sqlite3.OperationalError:
+                    pass  # column already exists
+            conn.executescript(_SCHEMA_V3_FINALIZE)
+            log.info("[announcer_db] Applied schema v3")
 
 
 # ---------------------------------------------------------------------------
@@ -295,6 +320,10 @@ def add_player_song(
     source_id: str | None = None,
     optimal_start_ms: int = 0,
     duration_ms: int | None = None,
+    file_path: str | None = None,
+    bpm: float | None = None,
+    bpm_offset_ms: int = 0,
+    normalized_lufs: float | None = None,
 ) -> list[dict]:
     """Add a song to a player's pool. Ignores duplicates. Returns updated pool."""
     now = datetime.now(timezone.utc).isoformat()
@@ -302,12 +331,43 @@ def add_player_song(
         conn.execute(
             """INSERT OR IGNORE INTO player_songs
                (player_id, song_url, song_label, source, source_id,
-                optimal_start_ms, duration_ms, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                optimal_start_ms, duration_ms, file_path, bpm, bpm_offset_ms,
+                normalized_lufs, is_active, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)""",
             (player_id, song_url, song_label, source, source_id,
-             optimal_start_ms, duration_ms, now),
+             optimal_start_ms, duration_ms, file_path, bpm, bpm_offset_ms,
+             normalized_lufs, now),
         )
     return get_player_songs(player_id)
+
+
+def update_player_song_file(song_id: int, file_path: str,
+                            bpm: float | None = None,
+                            bpm_offset_ms: int = 0,
+                            normalized_lufs: float | None = None,
+                            duration_ms: int | None = None) -> None:
+    """Attach a normalized local file to an existing pool entry.
+
+    Called by music_ingest after yt-dlp + ffmpeg loudnorm finishes.
+    """
+    with _conn() as conn:
+        conn.execute(
+            """UPDATE player_songs
+               SET file_path = ?, bpm = ?, bpm_offset_ms = ?,
+                   normalized_lufs = ?,
+                   duration_ms = COALESCE(?, duration_ms)
+               WHERE id = ?""",
+            (file_path, bpm, bpm_offset_ms, normalized_lufs, duration_ms, song_id),
+        )
+
+
+def set_song_active(song_id: int, player_id: str, is_active: bool) -> None:
+    """Activate / deactivate a song without dropping play-history."""
+    with _conn() as conn:
+        conn.execute(
+            "UPDATE player_songs SET is_active = ? WHERE id = ? AND player_id = ?",
+            (1 if is_active else 0, song_id, player_id),
+        )
 
 
 def remove_player_song(song_id: int, player_id: str) -> None:
@@ -319,17 +379,32 @@ def remove_player_song(song_id: int, player_id: str) -> None:
         )
 
 
-def get_player_songs(player_id: str) -> list[dict]:
+def get_player_songs(player_id: str, only_active: bool = False) -> list[dict]:
+    """Return all songs for a player.
+
+    `only_active=True` filters out is_active=0 — shuffle uses this; the PWA
+    pool view shows everything (including inactive) so coaches can re-enable.
+    """
     with _conn() as conn:
         cur = conn.cursor()
-        cur.execute(
-            """SELECT * FROM player_songs
-               WHERE player_id = ?
-               ORDER BY play_count ASC,
-                        CASE WHEN last_played_at IS NULL THEN 0 ELSE 1 END ASC,
-                        last_played_at ASC""",
-            (player_id,),
-        )
+        if only_active:
+            cur.execute(
+                """SELECT * FROM player_songs
+                   WHERE player_id = ? AND is_active = 1
+                   ORDER BY play_count ASC,
+                            CASE WHEN last_played_at IS NULL THEN 0 ELSE 1 END ASC,
+                            last_played_at ASC""",
+                (player_id,),
+            )
+        else:
+            cur.execute(
+                """SELECT * FROM player_songs
+                   WHERE player_id = ?
+                   ORDER BY play_count ASC,
+                            CASE WHEN last_played_at IS NULL THEN 0 ELSE 1 END ASC,
+                            last_played_at ASC""",
+                (player_id,),
+            )
         return [dict(r) for r in cur.fetchall()]
 
 
@@ -337,25 +412,27 @@ def get_player_songs(player_id: str) -> list[dict]:
 # Shuffle Engine — Least-Recently-Played
 # ---------------------------------------------------------------------------
 
-def pick_walkup_song(player_id: str, game_session_id: str) -> str | None:
+def pick_walkup_song(player_id: str, game_session_id: str,
+                     commit: bool = True) -> dict | None:
     """Pick the next walk-up song using Least-Recently-Played logic.
 
-    Algorithm:
-      1. Load all songs, ordered by (play_count ASC, last_played_at ASC NULLS FIRST).
+    Algorithm (cycle-first variety):
+      1. Load all is_active=1 songs, ordered by (play_count ASC, last_played_at ASC NULLS FIRST).
       2. Filter to songs not yet played this game session.
       3. If all played this session, reset the session played list (full cycle).
       4. Pick randomly from the lowest play_count tier among available songs.
-      5. Increment play_count, set last_played_at, record in shuffle_state.
+      5. If commit=True: increment play_count, set last_played_at, record in shuffle_state.
 
-    Returns song_url or None if no songs configured.
+    Returns the full song row dict (or None if no songs configured).
+    Use commit=False for "peek" (pre-buffering); the caller can then call
+    pick_walkup_song(..., commit=True) at "Play" time.
     """
     with _conn() as conn:
         cur = conn.cursor()
 
         cur.execute(
-            """SELECT id, song_url, play_count
-               FROM player_songs
-               WHERE player_id = ?
+            """SELECT * FROM player_songs
+               WHERE player_id = ? AND is_active = 1
                ORDER BY play_count ASC,
                         CASE WHEN last_played_at IS NULL THEN 0 ELSE 1 END ASC,
                         last_played_at ASC""",
@@ -384,6 +461,9 @@ def pick_walkup_song(player_id: str, game_session_id: str) -> str | None:
             tier = [s for s in available if s["play_count"] == min_count]
             chosen = random.choice(tier)
 
+        if not commit:
+            return chosen
+
         # Commit the play
         now = datetime.now(timezone.utc).isoformat()
         conn.execute(
@@ -407,7 +487,11 @@ def pick_walkup_song(player_id: str, game_session_id: str) -> str | None:
             (player_id, game_session_id, json.dumps(session_played), now),
         )
 
-        return chosen["song_url"]
+        # Reflect committed values on the returned dict so callers don't
+        # need a second SELECT.
+        chosen["play_count"] = (chosen.get("play_count") or 0) + 1
+        chosen["last_played_at"] = now
+        return chosen
 
 
 def peek_next_songs(player_ids: list[str], game_session_id: str) -> dict[str, str]:
@@ -429,9 +513,10 @@ def peek_next_songs(player_ids: list[str], game_session_id: str) -> dict[str, st
             played_ids = json.loads(state_row["played_song_ids"]) if state_row else []
 
             cur.execute(
-                """SELECT id, song_url, play_count
+                """SELECT id, song_url, play_count, file_path, optimal_start_ms,
+                          duration_ms, song_label, bpm, bpm_offset_ms
                    FROM player_songs
-                   WHERE player_id = ?
+                   WHERE player_id = ? AND is_active = 1
                    ORDER BY play_count ASC,
                             CASE WHEN last_played_at IS NULL THEN 0 ELSE 1 END ASC,
                             last_played_at ASC""",
@@ -447,7 +532,11 @@ def peek_next_songs(player_ids: list[str], game_session_id: str) -> dict[str, st
 
             min_count = available[0]["play_count"]
             tier = [s for s in available if s["play_count"] == min_count]
-            result[pid] = random.choice(tier)["song_url"]
+            chosen = random.choice(tier)
+            # Prefer the local file URL when we have a normalized hook on
+            # the SSD; fall back to the original song_url otherwise.
+            audio_url = (chosen.get("file_path") or chosen.get("song_url") or "")
+            result[pid] = audio_url
 
     return result
 

@@ -110,6 +110,24 @@ Use GameChanger statistics to build a comprehensive softball analyzer and traini
 2.  **Navigation**: Agentic orchestration to process data and generate insights.
 3.  **Tools**: Atomic Python scripts in `tools/` (scrapers, memory, optimizers).
 
+## Self-Improvement Protocol (Karpathy Loop)
+
+Every non-trivial change must follow the **Modify-Verify-Harvest** cycle:
+
+1. **Change** — Modify exactly one file or logic block per iteration.
+2. **Measure** — Run a deterministic command (e.g. `python tools/opcheck.py` or `pytest`). Pass/fail only. No subjective judgement.
+3. **Harvest** — If the variant beats the baseline, commit to Git as the new baseline and append a one-line note to `progress.md`. If it fails, log to `guardrails.md` as a new SIGN and reset.
+
+**Guardrails:** `guardrails.md` is the living record of confirmed failure patterns. Consult it before every session. Never repeat a SIGN.
+
+**Self-Evolution Authorization:** If this Constitution (`gemini.md`) contains a rule that contradicts observed codebase reality, this agent is authorized to propose an edit to this file. The proposal must be surfaced to the user as a diff before committing. Never silently mutate the Constitution.
+
+**Ralph Loop:** For stuck failures, run `tools/ralph.sh <verify_cmd> [max_iterations]`. Each iteration logs to `progress.md`. Loop exits on first pass or after max iterations with a manual-review flag.
+
+**Anti-Gravity Skills:** Global Gemini skills reside in `~/.gemini/antigravity/skills/`. Reference `audit-website`, `UIUX Pro`, and the W.R.A.P.S. orchestrator for complex multi-step workflows.
+
+**NotebookLM Second Brain:** Use `tools/notebooklm_sync.py` or the NotebookLM MCP to retrieve research context without expanding the working context window. Push all GC-ingested data here after each game.
+
 ## Directory Structure
 
 ```text

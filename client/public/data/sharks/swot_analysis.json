@@ -1,0 +1,13 @@
+{
+  "_doc": "Empty-state fallback shipped in the image. Served by nginx when /srv/data/sharks/swot_analysis.json is missing on the Pi. Real values are written by swot_analyzer.run_sharks_analysis().",
+  "team_name": "The Sharks",
+  "last_updated": null,
+  "source_app_stats_mtime": null,
+  "player_analyses": [],
+  "team_swot": {
+    "strengths": [],
+    "weaknesses": [],
+    "opportunities": [],
+    "threats": []
+  }
+}

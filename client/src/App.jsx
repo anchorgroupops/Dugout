@@ -7,12 +7,14 @@ import Roster from './components/Roster';
 import Lineup from './components/Lineup';
 import Scoreboard from './components/Scoreboard';
 import ErrorBoundary from './components/ErrorBoundary';
-const Swot = React.lazy(() => import('./components/Swot'));
-const Games = React.lazy(() => import('./components/Games'));
-const League = React.lazy(() => import('./components/League'));
-const Practice = React.lazy(() => import('./components/Practice'));
-const Scouting = React.lazy(() => import('./components/Scouting'));
-const Announcer = React.lazy(() => import('./components/Announcer'));
+import { lazyWithRetry } from './utils/lazyWithRetry';
+import { fetchWithBackoff } from './utils/apiClient';
+const Swot = lazyWithRetry(() => import('./components/Swot'));
+const Games = lazyWithRetry(() => import('./components/Games'));
+const League = lazyWithRetry(() => import('./components/League'));
+const Practice = lazyWithRetry(() => import('./components/Practice'));
+const Scouting = lazyWithRetry(() => import('./components/Scouting'));
+const Announcer = lazyWithRetry(() => import('./components/Announcer'));
 
 
 function SyncProgressBar({ progress, stage, milestones }) {
@@ -59,30 +61,38 @@ function App() {
   const [syncMilestones, setSyncMilestones] = useState([]);
   const [syncLoading, setSyncLoading] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const [loadingTimedOut, setLoadingTimedOut] = useState(false);
+  // Hydrate team/availability/lineups from localStorage so the UI has
+  // something to show before (or instead of) a successful network fetch.
+  const cachedFromLocal = (() => {
+    try {
+      const raw = window.localStorage.getItem('sharks_data_cache');
+      return raw ? JSON.parse(raw) : null;
+    } catch { return null; }
+  })();
   const [data, setData] = useState({
-    team: null,
-    swot: null,
-    lineups: null,
-    availability: null,
-    games: null,
-    schedule: null,
+    team: cachedFromLocal?.team || null,
+    swot: cachedFromLocal?.swot || null,
+    lineups: cachedFromLocal?.lineups || null,
+    availability: cachedFromLocal?.availability || null,
+    games: cachedFromLocal?.games || null,
+    schedule: cachedFromLocal?.schedule || null,
     loading: true,
-    error: null
+    error: null,
+    isCached: Boolean(cachedFromLocal?.team),
+    cachedAt: cachedFromLocal?.cachedAt || null,
+    staleKeys: [],
   });
   const audioRef = useRef(null);
   const audioUrlRef = useRef('');
   const syncPollRef = useRef(null);
 
-  const fetchWithRetry = useCallback(async (url, retries = 2) => {
-    for (let i = 0; i <= retries; i++) {
-      try {
-        const res = await fetch(url);
-        if (res.ok || i === retries) return res;
-      } catch (e) {
-        if (i === retries) throw e;
-      }
-      await new Promise(r => setTimeout(r, 300 * (i + 1)));
-    }
+  const fetchWithRetry = useCallback(async (url) => {
+    // Delegate to apiClient's fetchWithBackoff: exponential backoff with
+    // jitter, 429-aware global pause, idempotent-GET-only retry policy.
+    // The previous bespoke linear retry hammered the API on every loop
+    // tick during an outage; backoff cuts that to the bone.
+    return fetchWithBackoff(url);
   }, []);
 
   const fetchData = useCallback(async () => {
@@ -96,16 +106,117 @@ function App() {
         fetchWithRetry('/api/schedule')
       ]);
 
-      if (!teamRes.ok) throw new Error('Failed to load team data');
+      // Graceful team fallback. The previous code threw on a non-OK
+      // /api/team response, which crashed the entire data-loading
+      // pipeline and left every tab showing the "Failed to load team
+      // data" error banner. Instead: try the bundled static fallbacks
+      // (/data/sharks/team.json from the image) and the localStorage
+      // cache, then degrade-but-still-render. If we genuinely have
+      // nothing, pass `team: null` through and let downstream tabs
+      // show their own empty states.
+      let team = null;
+      let teamFromFallback = false;
+      if (teamRes.ok) {
+        try { team = await teamRes.json(); } catch { team = null; }
+      }
+      if (!team || (typeof team === 'object' && !team.roster)) {
+        try {
+          const staticRes = await fetch('/data/sharks/team.json', { cache: 'no-store' });
+          if (staticRes.ok) {
+            team = await staticRes.json();
+            teamFromFallback = true;
+          }
+        } catch { /* fall through to localStorage */ }
+        if (!team) {
+          try {
+            const raw = window.localStorage.getItem('sharks_data_cache');
+            const parsed = raw ? JSON.parse(raw) : null;
+            if (parsed?.team) {
+              team = parsed.team;
+              teamFromFallback = true;
+            }
+          } catch { /* nothing — render empty */ }
+        }
+      }
 
-      const team = await teamRes.json();
       const swot = swotRes.ok ? await swotRes.json() : null;
       const lineups = lineupsRes.ok ? await lineupsRes.json() : null;
       const availability = availRes.ok ? await availRes.json() : {};
       const games = gamesRes.ok ? await gamesRes.json() : null;
       const schedule = scheduleRes.ok ? await scheduleRes.json() : null;
 
-      setData({ team, swot, lineups, availability, games, schedule, loading: false, error: null });
+      // "Never downgrade" cache policy: if a fresh fetch produced a null /
+      // empty value but our previous cache had real data, keep the prior
+      // value. This prevents the Games tab from emptying out and the
+      // Schedule from disappearing when the upstream scraper has a bad day.
+      // We MERGE rather than overwrite — every key independently chooses
+      // between the new value and the prior cached value.
+      const isUseful = (v) => {
+        if (v == null) return false;
+        if (Array.isArray(v)) return v.length > 0;
+        if (typeof v === 'object') {
+          // For schedule: {upcoming:[], past:[]} is empty even though it's an object
+          if (Array.isArray(v.upcoming) || Array.isArray(v.past)) {
+            return (v.upcoming?.length || 0) + (v.past?.length || 0) > 0;
+          }
+          return Object.keys(v).length > 0;
+        }
+        return true;
+      };
+      // Read the latest cached values FRESHLY from localStorage rather than
+      // relying on the closure value (which would be stale on the 2nd+ fetch
+      // since this useCallback only re-creates when fetchWithRetry changes).
+      let priorCache = null;
+      try {
+        const raw = window.localStorage.getItem('sharks_data_cache');
+        priorCache = raw ? JSON.parse(raw) : null;
+      } catch { priorCache = null; }
+
+      // Helper: prefer fresh value if useful, else prior-cached value if
+      // useful, else fall back to fresh (which may be null/empty). This
+      // prevents the case where both fresh AND priorCache contain empty
+      // arrays — without it, ?? would keep the empty object indefinitely.
+      const pickUseful = (fresh, prior, defaultEmpty = null) => {
+        if (isUseful(fresh)) return fresh;
+        if (isUseful(prior)) return prior;
+        return fresh ?? defaultEmpty;
+      };
+      const merged = {
+        team:         pickUseful(team,         priorCache?.team,         team),
+        swot:         pickUseful(swot,         priorCache?.swot,         swot),
+        lineups:      pickUseful(lineups,      priorCache?.lineups,      lineups),
+        availability: pickUseful(availability, priorCache?.availability, availability),
+        games:        pickUseful(games,        priorCache?.games,        null),
+        schedule:     pickUseful(schedule,     priorCache?.schedule,     null),
+      };
+      // Track which keys came from the prior cache so we can surface a
+      // "stale" indicator in components that depend on them.
+      const staleKeys = [];
+      if (!isUseful(games) && isUseful(priorCache?.games)) staleKeys.push('games');
+      if (!isUseful(schedule) && isUseful(priorCache?.schedule)) staleKeys.push('schedule');
+
+      const cachedAt = new Date().toISOString();
+      setData({
+        ...merged,
+        loading: false,
+        error: null,
+        isCached: teamFromFallback,
+        isOffline: teamFromFallback,
+        cachedAt,
+        staleKeys,
+      });
+      setLoadingTimedOut(false);
+      try {
+        // Never persist a non-useful schedule/games payload — that's how
+        // localStorage.schedule ended up frozen at {upcoming:[], past:[]}.
+        const persisted = { ...merged, cachedAt };
+        if (!isUseful(persisted.schedule)) delete persisted.schedule;
+        if (!isUseful(persisted.games)) delete persisted.games;
+        window.localStorage.setItem('sharks_data_cache', JSON.stringify(persisted));
+      } catch { /* localStorage may be full or disabled */ }
+      if (staleKeys.length > 0) {
+        console.warn('[Cache] preserving prior values for empty/null fetch result:', staleKeys);
+      }
 
       // Check pipeline health and sync status (non-blocking)
       try {
@@ -127,14 +238,67 @@ function App() {
       } catch { /* ignore health/sync check failures */ }
     } catch (err) {
       console.error("Data fetch error", err);
-      setData(prev => ({ ...prev, loading: false, error: err.message }));
+      setData(prev => ({ ...prev, loading: false, error: err.message, isCached: Boolean(prev.team) }));
     }
   }, [fetchWithRetry]);
 
   useEffect(() => {
-    fetchData();
-    const intervalId = setInterval(fetchData, 30000);
-    return () => clearInterval(intervalId);
+    // Backoff-aware polling loop. Replace the naive 30s setInterval with
+    // a setTimeout chain that doubles delay on consecutive failed loads
+    // (network OR /api/team !ok) to keep the rate-limit cascade from
+    // re-igniting itself. A successful fetch resets to BASE_INTERVAL.
+    let cancelled = false;
+    let nextTimer = null;
+    const BASE_INTERVAL = 30_000;
+    const MAX_INTERVAL = 300_000; // 5 min
+    let consecutiveFailures = 0;
+
+    const loop = async () => {
+      if (cancelled) return;
+      let success = false;
+      try {
+        await fetchData();
+        // We reach here even on caught errors inside fetchData (it sets
+        // its own error state). Decide success on whether we currently
+        // have team data — that's the critical signal.
+        success = true;
+      } catch {
+        success = false;
+      }
+      // Use the post-fetch React state hook isn't available here, so we
+      // approximate by reading from localStorage: if team was successfully
+      // refreshed in the last loop the cache will hold a fresh value.
+      // Simpler: just trust fetchData not to throw — it logs but resolves.
+      // Instead read /api/health for an authoritative pulse.
+      try {
+        const h = await fetch('/api/health', { cache: 'no-store' });
+        if (!h.ok) success = false;
+      } catch {
+        success = false;
+      }
+
+      if (success) {
+        consecutiveFailures = 0;
+      } else {
+        consecutiveFailures += 1;
+      }
+      const delay = Math.min(
+        BASE_INTERVAL * Math.pow(2, consecutiveFailures),
+        MAX_INTERVAL,
+      );
+      if (cancelled) return;
+      nextTimer = setTimeout(loop, delay);
+    };
+
+    // Initial fire (also paced via the loop helper).
+    loop();
+    // After 10s, flip the "Loading..." subtitle to an offline fallback.
+    const timeoutId = setTimeout(() => setLoadingTimedOut(true), 10000);
+    return () => {
+      cancelled = true;
+      if (nextTimer) clearTimeout(nextTimer);
+      clearTimeout(timeoutId);
+    };
   }, [fetchData]);
 
   // Handle Spotify OAuth callback — SPA catches /spotify-callback via nginx try_files
@@ -193,7 +357,7 @@ function App() {
         let detail = 'Voice update unavailable';
         try {
           const body = await res.json();
-          if (body?.detail) detail = body.detail;
+          if (body?.detail || body?.message) detail = body.detail || body.message;
         } catch {
           // ignored: non-json response
         }
@@ -311,7 +475,7 @@ function App() {
     }
   }, [fetchData]);
 
-  // All nav items for desktop
+  // All nav items for desktop — order: Live → Scout → SWOT → Roster → Lineups → Games → League → Practice → Announcer
   const navItems = [
     { id: 'scoreboard', label: 'Live', icon: <Radio size={18} /> },
     { id: 'scout', label: 'Scout', icon: <Target size={18} /> },
@@ -321,22 +485,21 @@ function App() {
     { id: 'games', label: 'Games', icon: <Calendar size={18} /> },
     { id: 'league', label: 'League', icon: <Trophy size={18} /> },
     { id: 'practice', label: 'Practice', icon: <Dumbbell size={18} /> },
-    { id: 'announcer', label: 'Announcer', icon: <Mic size={18} /> }
+    { id: 'announcer', label: 'Announcer', icon: <Mic size={18} /> },
   ];
 
   // Mobile: 4 primary bottom tabs + "More" overflow
-  // Live scoreboard gets primary position for game-day dugout use
   const primaryNavItems = [
     { id: 'scoreboard', label: 'Live', icon: <Radio size={22} /> },
-    { id: 'scout', label: 'Scout', icon: <Target size={22} /> },
-    { id: 'lineups', label: 'Lineups', icon: <ListOrdered size={22} /> },
-    { id: 'practice', label: 'Practice', icon: <Dumbbell size={22} /> },
     { id: 'announcer', label: 'Announcer', icon: <Mic size={22} /> },
+    { id: 'practice', label: 'Practice', icon: <Dumbbell size={22} /> },
+    { id: 'roster', label: 'Roster', icon: <Users size={22} /> },
   ];
 
   const overflowNavItems = [
+    { id: 'scout', label: 'Scout', icon: <Activity size={20} /> },
     { id: 'swot', label: 'SWOT', icon: <Activity size={20} /> },
-    { id: 'roster', label: 'Roster', icon: <Users size={20} /> },
+    { id: 'lineups', label: 'Lineups', icon: <ListOrdered size={20} /> },
     { id: 'games', label: 'Games', icon: <Calendar size={20} /> },
     { id: 'league', label: 'League', icon: <Trophy size={20} /> },
   ];
@@ -461,9 +624,11 @@ function App() {
                 key={item.id}
                 className={`nav-btn ${currentView === item.id ? 'active' : ''}`}
                 onClick={() => setCurrentView(item.id)}
+                title={item.label}
+                aria-label={item.label}
               >
                 {item.icon}
-                {item.label}
+                <span className="nav-label">{item.label}</span>
               </button>
             ))}
           </div>
@@ -479,7 +644,17 @@ function App() {
             </h1>
             <div className="hero-meta-row">
               <p style={{ color: 'var(--text-muted)', fontSize: '1.1rem' }}>
-                {data.team ? `${data.team.league} \u2022 Last Updated: ${formatDateTime(data.team.last_updated)}` : 'Loading...'}
+                {(() => {
+                  if (data.team) {
+                    const offlineSuffix = (data.error || data.isCached) ? '  \u26a0 offline' : '';
+                    return `${data.team.league} \u2022 Last Updated: ${formatDateTime(data.team.last_updated)}${offlineSuffix}`;
+                  }
+                  if (loadingTimedOut || data.error) {
+                    const ts = data.cachedAt ? formatDateTime(data.cachedAt) : 'unknown';
+                    return `Offline \u2014 last updated ${ts}`;
+                  }
+                  return 'Loading...';
+                })()}
               </p>
               {canInstall && (
                 <button 
