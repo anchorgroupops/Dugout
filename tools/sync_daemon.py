@@ -54,6 +54,7 @@ N8N_WEBHOOK_URL = os.getenv("N8N_WEBHOOK_URL", "").strip()
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 SHARKS_DIR = DATA_DIR / "sharks"
+WALKUP_DIR = SHARKS_DIR / "walkup"
 LOG_DIR = Path(__file__).parent.parent / "logs"
 CONFIG_DIR = Path(__file__).parent.parent / "config"
 SCOREBOOKS_DIR = Path(__file__).parent.parent / "Scorebooks"
@@ -397,9 +398,63 @@ def _write_json_file(path: Path, data, indent: int = 2):
             pass
         raise
 
+def _apply_player_overrides(roster: list[dict]) -> list[dict]:
+    """Apply manual jersey-number / name overrides from config/player_overrides.json.
+
+    GameChanger occasionally emits empty `number` for fill-in players (e.g.
+    Amelia in Spring 2026). The manager can't always fix that at the source,
+    so this pipeline step applies a small, version-controlled override map.
+
+    Match key: lowercased 'first last', falling back to lowercased 'first'
+    when the last name is blank. No-op when the override file is missing.
+    """
+    overrides_file = CONFIG_DIR / "player_overrides.json"
+    if not overrides_file.exists():
+        return roster
+    try:
+        ov = _read_json_file(overrides_file, default={}) or {}
+    except Exception:
+        return roster
+    num_map = {k.lower(): v for k, v in (ov.get("number_overrides") or {}).items()}
+    name_map = {k.lower(): v for k, v in (ov.get("name_overrides") or {}).items()}
+    if not num_map and not name_map:
+        return roster
+    for p in roster or []:
+        if not isinstance(p, dict):
+            continue
+        first = (p.get("first") or "").strip().lower()
+        last = (p.get("last") or "").strip().lower()
+        keys = []
+        if first and last:
+            keys.append(f"{first} {last}")
+        if first:
+            keys.append(first)
+        for key in keys:
+            if key in num_map and not str(p.get("number") or "").strip():
+                override = str(num_map[key]).strip()
+                if override and override.upper() != "TBD":
+                    p["number"] = override
+                    p.setdefault("number_source", "override")
+            if key in name_map:
+                rename = name_map[key]
+                if isinstance(rename, dict):
+                    if rename.get("first"):
+                        p["first"] = rename["first"]
+                    if rename.get("last"):
+                        p["last"] = rename["last"]
+                break
+    return roster
+
+
 def _enrich_team_with_app_stats(team_data: dict) -> dict:
     """Apply app_stats.json stats to Sharks roster (batting, pitching, fielding).
     Keyed by jersey number. Mutates team_data in place and returns it."""
+    # Apply manual overrides first so jersey-number-keyed enrichment below
+    # picks up the corrected number.
+    try:
+        _apply_player_overrides(team_data.get("roster") or [])
+    except Exception as _oe:
+        logging.warning("[Roster] override apply failed: %s", _oe)
     app_stats_file = SHARKS_DIR / "app_stats.json"
     if not app_stats_file.exists():
         return team_data
@@ -1136,6 +1191,19 @@ def run_sync_cycle():
                     stat_scraper = GameChangerScraper()
                     stat_scraper.login(pw)
                     stat_scraper.scrape_team_stats()
+
+                    # Scrape per-player stats for all opponents (same authenticated session)
+                    try:
+                        import json as _json
+                        _discovery_file = SHARKS_DIR / "opponent_discovery.json"
+                        if _discovery_file.exists():
+                            _discovery = _json.loads(_discovery_file.read_text(encoding="utf-8"))
+                            _opponents = _discovery.get("teams", [])
+                            if _opponents:
+                                logging.info("[Sync] Scraping opponent season stats (%d teams)...", len(_opponents))
+                                stat_scraper.scrape_opponent_season_stats(_opponents)
+                    except Exception as _oe:
+                        logging.warning("[Sync] Opponent stat scrape failed (non-fatal): %s", _oe)
             except Exception as e:
                 logging.warning(f"[Sync] Live stat scrape failed; continuing with fallback data: {e}")
         else:
@@ -1258,6 +1326,20 @@ def run_sync_cycle():
         if isinstance(enriched_team_data, dict):
             _record_stats_db_snapshot(enriched_team_data, source="sync_cycle")
 
+        # Push voice script to Modal for GPU synthesis
+        try:
+            modal_url = _resolve_secret("MODAL_VOICE_WEBHOOK_URL") or os.getenv("MODAL_VOICE_WEBHOOK_URL", "")
+            if modal_url:
+                ctx = _load_voice_context()
+                script = _build_voice_overview_text(ctx)
+                if script:
+                    r = requests.post(modal_url, json={"script": script}, timeout=30)
+                    logging.info("[Voice] Modal push %s: %s", r.status_code, r.text[:120])
+                else:
+                    logging.debug("[Voice] Skipping Modal push — no voice script generated")
+        except Exception as e:
+            logging.warning("[Voice] Modal push skipped: %s", e)
+
         _set_sync_stage("idle")
         _SYNC_STATUS["last_completed"] = datetime.now(ET).isoformat()
         logging.info("--- Sync Cycle Complete ---")
@@ -1271,7 +1353,7 @@ def run_sync_cycle():
 # ---------------------------------------------------------
 # API SERVER (Flask)
 # ---------------------------------------------------------
-from flask import Flask, Response, jsonify, request
+from flask import Flask, Response, jsonify, request, send_from_directory
 from flask_cors import CORS
 import threading
 from werkzeug.exceptions import BadRequest, RequestEntityTooLarge, HTTPException
@@ -2186,6 +2268,35 @@ def handle_scoreboard():
         except Exception as e:
             logging.debug("[Scoreboard] Live events fetch failed: %s", e)
 
+    # 8. Derive next_batter from the opponent batting order when the events
+    # API didn't supply one. This is the lineup we have on disk (box-score
+    # order) — not perfect when subs come in mid-game, but a solid fallback
+    # so the PWA can ALWAYS show "AT BAT / ON DECK" while live.
+    try:
+        live_play = result.get("live_play") or {}
+        current_batter = (live_play.get("current_batter") or {})
+        if not live_play.get("next_batter") and current_batter:
+            opp_batting = result.get("opponent_batting") or []
+            if isinstance(opp_batting, list) and opp_batting:
+                cur_num = str(current_batter.get("number", "")).strip()
+                cur_name = (current_batter.get("name") or "").strip().lower()
+                idx = -1
+                for i, b in enumerate(opp_batting):
+                    bn = str(b.get("number", "")).strip()
+                    nm = (b.get("name") or b.get("player") or "").strip().lower()
+                    if (cur_num and bn == cur_num) or (cur_name and nm == cur_name):
+                        idx = i
+                        break
+                if idx >= 0 and idx + 1 < len(opp_batting):
+                    nxt = opp_batting[idx + 1]
+                    nxt_name = nxt.get("name") or nxt.get("player") or ""
+                    nxt_num = str(nxt.get("number", "") or "")
+                    if nxt_name or nxt_num:
+                        live_play["next_batter"] = {"name": nxt_name, "number": nxt_num}
+                        result["live_play"] = live_play
+    except Exception as e:
+        logging.debug("[Scoreboard] next_batter derivation failed: %s", e)
+
     return jsonify(result)
 
 
@@ -2428,7 +2539,7 @@ def _build_opponent_scouting(opp_slug: str, live_batting: list) -> dict:
 
 def _fetch_gc_live_events(gc_game_id: str) -> dict | None:
     """Attempt to fetch live play-by-play from GC events API.
-    Returns current batter, runners, outs, last play — or None on failure."""
+    Returns current batter, on-deck batter, runners, outs, last play — or None on failure."""
     gc_api_base = "https://api.team-manager.gc.com"
 
     try:
@@ -2443,14 +2554,15 @@ def _fetch_gc_live_events(gc_game_id: str) -> dict | None:
         if not isinstance(events, list) or not events:
             return None
 
-        # Parse the most recent events to determine game state
-        last_event = events[-1] if events else {}
         current_batter = None
+        next_batter = None
         runners = []
         outs = 0
         last_play = ""
 
-        # Walk backwards through events to find current at-bat and game state
+        # Walk backwards through events to find current at-bat and game state.
+        # Some streams expose `on_deck`/`next_batter` on plate-appearance events;
+        # capture either alongside `current_batter`.
         for ev in reversed(events):
             ev_type = str(ev.get("type", "")).lower()
             ev_data = ev.get("data") or ev
@@ -2461,6 +2573,15 @@ def _fetch_gc_live_events(gc_game_id: str) -> dict | None:
                     "name": batter_info.get("name", ""),
                     "number": str(batter_info.get("number", "")),
                 }
+                # Some GC streams attach the on-deck batter to the same event.
+                on_deck_info = (ev_data.get("on_deck")
+                                or ev_data.get("next_batter")
+                                or ev_data.get("on_deck_batter") or {})
+                if isinstance(on_deck_info, dict) and (on_deck_info.get("name") or on_deck_info.get("number")):
+                    next_batter = {
+                        "name": on_deck_info.get("name", ""),
+                        "number": str(on_deck_info.get("number", "")),
+                    }
 
             if ev_data.get("outs") is not None:
                 outs = int(ev_data.get("outs", 0))
@@ -2498,7 +2619,7 @@ def _fetch_gc_live_events(gc_game_id: str) -> dict | None:
             if not last_play and ev_data.get("description"):
                 last_play = str(ev_data["description"])[:200]
 
-            if current_batter and last_play:
+            if current_batter and last_play and next_batter:
                 break
 
         if not current_batter and not last_play:
@@ -2506,6 +2627,7 @@ def _fetch_gc_live_events(gc_game_id: str) -> dict | None:
 
         return {
             "current_batter": current_batter,
+            "next_batter": next_batter,
             "outs": outs,
             "runners": runners,
             "last_play": last_play,
@@ -2608,37 +2730,68 @@ def handle_standings():
     standings.append(sharks_row)
 
     standings.sort(key=lambda x: (-x["w"], x["l"]))
-    return jsonify({"league": league_name, "standings": standings})
+    payload = {
+        "league": league_name,
+        "standings": standings,
+        "last_updated": datetime.now(ET).isoformat(),
+    }
+    # Persist a static fallback so nginx can serve the table when this
+    # process is rate-limited or down. Only write when standings is
+    # non-empty — never overwrite a good cache with garbage.
+    if standings:
+        try:
+            _write_json_file(SHARKS_DIR / "standings.json", payload)
+        except Exception as _we:
+            logging.warning("[Standings] static cache write failed: %s", _we)
+    return jsonify(payload)
 
 
 @app.route('/api/opponents', methods=['GET'])
 def handle_opponents():
-    """List all scraped opponent teams."""
-    opponents_dir = DATA_DIR / "opponents"
-    teams = []
-    if opponents_dir.exists():
-        for team_dir in opponents_dir.iterdir():
-            if team_dir.is_dir():
-                team_file = team_dir / "team.json"
-                if team_file.exists():
-                    try:
-                        with open(team_file) as f:
-                            td = json.load(f)
-                        teams.append({
-                            "slug": team_dir.name,
-                            "team_name": _canonical_team_name(td.get("team_name", team_dir.name), team_dir.name),
-                            "record": td.get("record", {}),
-                            "gc_team_id": td.get("gc_team_id", ""),
-                            "gc_season_slug": td.get("gc_season_slug", ""),
-                            "roster_size": len(td.get("roster", [])),
-                            "batting_rows": len(td.get("batting_stats", [])),
-                            "pitching_rows": len(td.get("pitching_stats", [])),
-                            "public_game_metrics": td.get("public_game_metrics", {}),
-                        })
-                    except Exception as e:
-                        logging.error(f"Error reading opponent {team_dir.name}: {e}")
-    teams.sort(key=lambda t: t["team_name"].lower())
-    return jsonify(teams)
+    """List all scraped opponent teams.
+
+    Hardened: never returns 500. Persists each successful response to
+    /data/sharks/opponents.json so nginx can serve the static fallback
+    when this Flask process is down.
+    """
+    try:
+        opponents_dir = DATA_DIR / "opponents"
+        teams = []
+        if opponents_dir.exists():
+            for team_dir in opponents_dir.iterdir():
+                if team_dir.is_dir():
+                    team_file = team_dir / "team.json"
+                    if team_file.exists():
+                        try:
+                            with open(team_file) as f:
+                                td = json.load(f)
+                            teams.append({
+                                "slug": team_dir.name,
+                                "team_name": _canonical_team_name(td.get("team_name", team_dir.name), team_dir.name),
+                                "record": td.get("record", {}),
+                                "gc_team_id": td.get("gc_team_id", ""),
+                                "gc_season_slug": td.get("gc_season_slug", ""),
+                                "roster_size": len(td.get("roster", [])),
+                                "batting_rows": len(td.get("batting_stats", [])),
+                                "pitching_rows": len(td.get("pitching_stats", [])),
+                                "public_game_metrics": td.get("public_game_metrics", {}),
+                            })
+                        except Exception as e:
+                            logging.error(f"Error reading opponent {team_dir.name}: {e}")
+        teams.sort(key=lambda t: t["team_name"].lower())
+        # Persist a static fallback for nginx when this process is down.
+        if teams:
+            try:
+                _write_json_file(SHARKS_DIR / "opponents.json", {
+                    "last_updated": datetime.now(ET).isoformat(),
+                    "teams": teams,
+                })
+            except Exception as _we:
+                logging.warning("[Opponents] static cache write failed: %s", _we)
+        return jsonify(teams)
+    except Exception as e:
+        logging.error("[Opponents] handler failed: %s", e, exc_info=True)
+        return jsonify({"error": "service_unavailable", "reason": str(e), "teams": []}), 503
 
 
 @app.route('/api/opponents/<slug>', methods=['GET'])
@@ -3228,6 +3381,87 @@ def handle_team():
     return jsonify(team)
 
 
+def _read_team_roster_payload() -> dict:
+    """Shared helper for /api/roster and /api/players — returns roster + meta."""
+    try:
+        team_files = [
+            SHARKS_DIR / "team_enriched.json",
+            SHARKS_DIR / "team_merged.json",
+            SHARKS_DIR / "team.json",
+        ]
+        team = None
+        for tf in team_files:
+            if tf.exists():
+                team = _read_json_file(tf, default=None)
+                if isinstance(team, dict):
+                    break
+        if not isinstance(team, dict):
+            return {"roster": [], "last_updated": None}
+        return {
+            "roster": team.get("roster", []) or [],
+            "team_name": team.get("team_name"),
+            "last_updated": team.get("last_updated"),
+        }
+    except Exception as e:
+        logging.error("[Roster helper] failed: %s", e, exc_info=True)
+        return {"roster": [], "last_updated": None}
+
+
+@app.route('/api/roster', methods=['GET'])
+def handle_roster():
+    """Return just the roster array from team data.
+
+    Convenience endpoint — same shape as `/api/team` `.roster[]`. Used by
+    components that only need the player list and want to avoid the
+    larger team payload (stats, schedule cross-refs, etc.).
+
+    NOTE on frontend usage (2026-04 audit): the PWA Roster tab does not
+    call this endpoint anymore — it receives roster via App.jsx's
+    `/api/team` fetch, which is enriched from app_stats.json. This route
+    is kept as a public/debug API and as the source for any future
+    tooling that wants a slim payload. If it 502s under load, the Roster
+    tab is unaffected; consumers should gracefully degrade.
+    """
+    try:
+        payload = _read_team_roster_payload()
+        if not isinstance(payload, dict):
+            payload = {"roster": [], "last_updated": None}
+        return jsonify(payload)
+    except Exception as e:
+        # Mirror the announcer-roster pattern: never bubble a 500 that
+        # gives nginx nothing to forward. Return a 503 with a JSON body so
+        # the client can stop retrying immediately.
+        logging.error("[Roster] handler failed: %s", e, exc_info=True)
+        return jsonify({
+            "roster": [],
+            "last_updated": None,
+            "error": "service_unavailable",
+            "reason": str(e),
+        }), 503
+
+
+@app.route('/api/players', methods=['GET'])
+def handle_players():
+    """Backwards-compat alias for /api/roster.
+
+    Older builds (and stale-cached service workers) call /api/players. Rather
+    than 404 and log noise into rate limiters, return the same payload as
+    /api/roster so the legacy client can continue functioning during a
+    rolling deploy.
+    """
+    return jsonify(_read_team_roster_payload())
+
+
+@app.route('/api/announcer/players', methods=['GET'])
+def handle_announcer_players_alias():
+    """Backwards-compat alias for /api/announcer/roster.
+
+    Some older builds called /api/announcer/players. Forward to the same
+    handler so a stale-cached client doesn't 404 during deploy churn.
+    """
+    return handle_announcer_roster()
+
+
 @app.route('/api/borrowed-player', methods=['POST'])
 def handle_borrowed_player():
     """Add a borrowed player to roster_manifest.json, optionally trigger stat scrape."""
@@ -3727,9 +3961,33 @@ def handle_voice_update():
     except Exception as e:
         logging.debug("[Voice] ElevenLabs fallback unavailable: %s", e)
 
+    # Try Pi-local TTS (same service used by announcer clips)
+    try:
+        local_tts_url = os.getenv("LOCAL_TTS_URL", "http://localhost:8766")
+        ctx = _load_voice_context()
+        text = _build_voice_overview_text(ctx)
+        tts_resp = requests.post(
+            f"{local_tts_url}/synthesize",
+            json={"text": text, "voice": "default"},
+            timeout=120,
+        )
+        if tts_resp.ok and tts_resp.content:
+            now_iso = datetime.now(ET).isoformat()
+            mp3_out = SHARKS_DIR / "voice_overview_latest.mp3"
+            with open(mp3_out, "wb") as f:
+                f.write(tts_resp.content)
+            _write_json_file(meta_file, {"generated_at": now_iso, "script": text, "provider": "local_tts"})
+            response = Response(tts_resp.content, mimetype="audio/mpeg")
+            response.headers["Content-Disposition"] = 'inline; filename="voice_update.mp3"'
+            response.headers["X-Voice-Generated-At"] = now_iso
+            response.headers["X-Voice-Provider"] = "local_tts"
+            return response
+    except Exception as e:
+        logging.debug("[Voice] Local TTS fallback unavailable: %s", e)
+
     return jsonify({
         "error": "no_voice_available",
-        "message": "Voice update will be generated during the next daily sync (Qwen3-TTS on Modal GPU)."
+        "message": "Voice update unavailable. Add ELEVENLABS_API_KEY to .env or ensure local TTS is running on port 8766."
     }), 404
 
 
@@ -3897,7 +4155,7 @@ def handle_practice_insights():
                     "focus_players": need.get("focus_players", []),
                 })
 
-        return jsonify({
+        payload = {
             "generated_at": datetime.now(ET).isoformat(),
             "team_name": team.get("team_name", "The Sharks"),
             "default_player_source": default_source,
@@ -3906,7 +4164,17 @@ def handle_practice_insights():
             "available_players": core_names,
             "needs": needs,
             "recommended_plan": recommended_plan,
-        })
+        }
+        # Persist a static fallback so nginx can serve the last-known-good
+        # practice plan when this process is rate-limited or down. Only on
+        # GET (POST requests are session-specific player overrides we don't
+        # want to freeze into the cache).
+        if request.method == "GET" and needs:
+            try:
+                _write_json_file(SHARKS_DIR / "practice_insights.json", payload)
+            except Exception as _we:
+                logging.warning("[PracticeInsights] static cache write failed: %s", _we)
+        return jsonify(payload)
     except Exception as e:
         logging.error(f"[PracticeInsights] Unhandled error: {e}")
         return jsonify({
@@ -4048,21 +4316,117 @@ def handle_announcer_game_state_set():
     return jsonify(_LIVE_GAME_STATE)
 
 
+def _team_roster_fallback() -> list[dict]:
+    """Build a minimal announcer-shaped roster from team data when announcer_engine is unavailable.
+
+    Returns players with the same shape as load_announcer_roster() so the PWA
+    Announcer tab keeps working even if the announcer DB / engine is broken.
+    """
+    import re as _re
+    team_files = [
+        SHARKS_DIR / "team_enriched.json",
+        SHARKS_DIR / "team_merged.json",
+        SHARKS_DIR / "team.json",
+    ]
+    team = None
+    for tf in team_files:
+        if tf.exists():
+            team = _read_json_file(tf, default=None)
+            if isinstance(team, dict):
+                break
+    if not isinstance(team, dict):
+        return []
+    out = []
+    for p in team.get("roster", []) or []:
+        if not isinstance(p, dict):
+            continue
+        first = (p.get("first") or "").strip()
+        last = (p.get("last") or "").strip()
+        number = str(p.get("number") or "").strip()
+        if not first:
+            continue
+        raw_id = f"{number}-{first}-{last}".strip("-").lower()
+        player_id = _re.sub(r"[^a-z0-9_-]", "-", raw_id) or first.lower()
+        out.append({
+            "id": player_id,
+            "first": first,
+            "last": last,
+            "number": number,
+            "phonetic_hint": "",
+            "tts_instruction": "",
+            "walkup_song_url": "",
+            "intro_timestamp": 5.0,
+            "announcer_audio_url": "",
+            "status": "pending",
+            "is_active": True,
+            "rendered_at": "",
+            "error_message": "",
+            "is_ghost": False,
+        })
+    return out
+
+
 @app.route('/api/announcer/roster', methods=['GET'])
 def handle_announcer_roster():
-    """Return all active players with announcer metadata, flagging ghost players."""
+    """Return all active players with announcer metadata, flagging ghost players.
+
+    Hardened: never returns 500. If announcer_engine import or DB access fails,
+    falls back to the team roster with default announcer fields so the PWA
+    Announcer tab can always render the player list.
+    """
+    roster: list[dict] = []
+    stats: dict = {"total": 0, "ready": 0, "pending": 0, "error": 0}
+    fallback_used = False
+    fallback_reason = ""
     try:
-        from announcer_engine import load_announcer_roster, get_roster_stats
-        roster = load_announcer_roster()
-        stats = get_roster_stats()
+        try:
+            from announcer_engine import load_announcer_roster, get_roster_stats
+        except Exception as _ie:
+            logging.error("[Announcer] engine import failed: %s", _ie, exc_info=True)
+            fallback_used = True
+            fallback_reason = f"engine_import_failed: {_ie}"
+            roster = _team_roster_fallback()
+        else:
+            try:
+                roster = load_announcer_roster() or []
+            except Exception as _le:
+                logging.error("[Announcer] load_announcer_roster failed: %s", _le, exc_info=True)
+                fallback_used = True
+                fallback_reason = f"load_roster_failed: {_le}"
+                roster = _team_roster_fallback()
+
+            if not roster:
+                fallback_used = True
+                fallback_reason = fallback_reason or "empty_roster"
+                roster = _team_roster_fallback()
+
+            if not fallback_used:
+                try:
+                    stats = get_roster_stats()
+                except Exception as _se:
+                    logging.warning("[Announcer] get_roster_stats failed: %s", _se, exc_info=True)
+                    active = [p for p in roster if p.get("is_active")]
+                    stats = {
+                        "total": len(active),
+                        "ready": sum(1 for p in active if p.get("status") == "ready"),
+                        "pending": sum(1 for p in active if p.get("status") in ("pending", "rendering")),
+                        "error": sum(1 for p in active if p.get("status") == "error"),
+                    }
+
+        if fallback_used:
+            stats = {
+                "total": len(roster),
+                "ready": 0,
+                "pending": len(roster),
+                "error": 0,
+            }
+
         # Cross-reference with team to detect ghost players (in announcer DB but not on roster)
         try:
             team_data = _read_json_file(SHARKS_DIR / "team_enriched.json", default={}) or \
                         _read_json_file(SHARKS_DIR / "team.json", default={}) or {}
-            manifest_data = _read_json_file(SHARKS_DIR / "roster_manifest.json", default={}) or {}
-            core_names = set(manifest_data.get("core_players", []))
             team_names = set()
-            for p in team_data.get("roster", []):
+            for p in team_data.get("roster", []) or []:
                 full = f"{(p.get('first') or '').strip()} {(p.get('last') or '').strip()}".strip()
                 if full:
                     team_names.add(full)
@@ -4072,10 +4436,35 @@ def handle_announcer_roster():
                     p["is_ghost"] = bool(full and full not in team_names)
         except Exception as _ge:
             logging.debug("[Announcer] Ghost detection skipped: %s", _ge)
-        return jsonify({"roster": roster, "stats": stats})
+
+        payload = {"roster": roster, "stats": stats}
+        if fallback_used:
+            payload["fallback"] = True
+            payload["fallback_reason"] = fallback_reason
+        # Persist a static cache so nginx can serve the last-known-good
+        # roster directly (under /data/sharks/announcer_roster.json) when
+        # this Flask process is down or returning 502/503. Only write when
+        # we actually have players to avoid overwriting a good cache with
+        # an empty list.
+        if roster:
+            try:
+                static_payload = dict(payload)
+                static_payload["last_updated"] = datetime.now(ET).isoformat()
+                _write_json_file(SHARKS_DIR / "announcer_roster.json", static_payload)
+            except Exception as _we:
+                logging.warning("[Announcer] static roster cache write failed: %s", _we)
+        return jsonify(payload)
     except Exception as e:
-        logging.error("[Announcer] roster error: %s", e)
-        return jsonify({"error": "announcer_roster_failed"}), 500
+        logging.error("[Announcer] roster route failed catastrophically: %s", e, exc_info=True)
+        # Never return 500 — return a 503 JSON payload so the client knows
+        # to fall back to the static cache instead of hot-retrying.
+        return jsonify({
+            "roster": [],
+            "stats": {"total": 0, "ready": 0, "pending": 0, "error": 0},
+            "fallback": True,
+            "fallback_reason": f"unhandled: {e}",
+            "error": "service_unavailable",
+        }), 503
 
 
 @app.route('/api/announcer/player/<player_id>', methods=['DELETE'])
@@ -4560,9 +4949,284 @@ def handle_announcer_songs_delete(player_id, song_id):
     return jsonify({"player_id": player_id, "songs": songs})
 
 
+@app.route('/api/announcer/songs/search', methods=['GET'])
+def handle_song_search():
+    """YouTube walk-up song search via yt-dlp.
+
+    Query params:
+      q     — search string (required)
+      limit — max results 1-20 (default 8)
+
+    Returns: [{video_id, title, uploader, duration, thumbnail}]
+    """
+    q = request.args.get('q', '').strip()[:200]
+    if not q:
+        return jsonify({'error': 'q_required'}), 400
+    limit = min(int(request.args.get('limit', 8)), 20)
+    try:
+        import yt_dlp  # installed via requirements.txt
+        ydl_opts = {
+            'quiet': True,
+            'extract_flat': True,
+            'no_warnings': True,
+            'default_search': f'ytsearch{limit}',
+        }
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(f"ytsearch{limit}:{q}", download=False)
+        results = [
+            {
+                'video_id': e.get('id'),
+                'title': e.get('title'),
+                'uploader': e.get('uploader') or e.get('channel'),
+                'duration': e.get('duration'),
+                'thumbnail': e.get('thumbnail'),
+            }
+            for e in (info.get('entries') or [])
+            if e.get('id')
+        ]
+        return jsonify({'results': results, 'query': q})
+    except ImportError:
+        return jsonify({'error': 'yt_dlp_not_installed', 'detail': 'Run: pip install yt-dlp on the Pi'}), 503
+    except Exception as e:
+        logging.error("[Walkup] Search error: %s", e)
+        return jsonify({'error': 'search_failed', 'detail': str(e)}), 500
+
+
+@app.route('/api/announcer/songs/download', methods=['POST'])
+def handle_song_download():
+    """Download a YouTube video as a local MP3 walk-up song.
+
+    Body: {video_id: "11charYTid", title: "Song Title"}
+    Returns: {status, file_url: "/audio/walkup/{id}.mp3", title}
+    """
+    blocked = _guard_mutating_request()
+    if blocked:
+        return blocked
+
+    data = request.get_json(silent=True) or {}
+    video_id = (data.get('video_id') or '').strip()
+    title = (data.get('title') or '').strip()[:200]
+
+    if not re.match(r'^[A-Za-z0-9_-]{11}$', video_id):
+        return jsonify({'error': 'invalid_video_id'}), 400
+
+    WALKUP_DIR.mkdir(parents=True, exist_ok=True)
+    out_mp3 = WALKUP_DIR / f"{video_id}.mp3"
+
+    if out_mp3.exists() and out_mp3.stat().st_size > 10000:
+        return jsonify({'status': 'cached', 'file_url': f'/audio/walkup/{video_id}.mp3', 'title': title})
+
+    try:
+        import yt_dlp
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',
+            }],
+            'outtmpl': str(WALKUP_DIR / f'{video_id}.%(ext)s'),
+            'quiet': True,
+            'no_warnings': True,
+        }
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([f"https://www.youtube.com/watch?v={video_id}"])
+
+        if out_mp3.exists() and out_mp3.stat().st_size > 10000:
+            logging.info("[Walkup] Downloaded: %s → %s", video_id, out_mp3.name)
+            return jsonify({'status': 'downloaded', 'file_url': f'/audio/walkup/{video_id}.mp3', 'title': title})
+        return jsonify({'error': 'download_failed', 'detail': 'MP3 not found after extraction — ffmpeg may be missing'}), 500
+    except ImportError:
+        return jsonify({'error': 'yt_dlp_not_installed', 'detail': 'Run: pip install yt-dlp on the Pi'}), 503
+    except Exception as e:
+        logging.error("[Walkup] Download error for %s: %s", video_id, e)
+        return jsonify({'error': 'download_failed', 'detail': str(e)}), 500
+
+
+@app.route('/audio/walkup/<filename>', methods=['GET'])
+def serve_walkup_audio(filename):
+    """Serve a locally downloaded walk-up song MP3."""
+    if not re.match(r'^[A-Za-z0-9_-]+\.mp3$', filename):
+        return '', 404
+    return send_from_directory(str(WALKUP_DIR), filename, mimetype='audio/mpeg')
+
+
+# ---------------------------------------------------------------------------
+# Apex Music Fetcher — local-file scan, URL ingest, LRP "next" endpoint
+# ---------------------------------------------------------------------------
+
+@app.route('/audio/music/<player_id>/<filename>', methods=['GET'])
+def serve_music_clip(player_id, filename):
+    """Serve a normalized hook clip from data/music/clips/<player_id>/."""
+    try:
+        from music_ingest import serve_music_path
+    except ImportError as e:
+        logging.error("[Music] serve import failed: %s", e)
+        return '', 503
+    target = serve_music_path(player_id, filename)
+    if not target:
+        return '', 404
+    return send_from_directory(str(target.parent), target.name, mimetype='audio/mpeg')
+
+
+@app.route('/api/music/scan/<player_id>', methods=['POST'])
+def handle_music_scan(player_id):
+    """Index local files in data/music/raw/<player_id>/ and produce hooks.
+
+    Idempotent — files already registered with normalized hooks are skipped.
+    """
+    blocked = _guard_mutating_request()
+    if blocked:
+        return blocked
+    invalid = _validate_player_id(player_id)
+    if invalid:
+        return invalid
+    try:
+        from music_ingest import scan_local_files, ffmpeg_available
+        if not ffmpeg_available():
+            return jsonify({'error': 'ffmpeg_unavailable', 'detail': 'Install ffmpeg on the Pi'}), 503
+        results = scan_local_files(player_id)
+        return jsonify({'player_id': player_id, 'tracks': results, 'count': len(results)})
+    except Exception as e:
+        logging.error("[Music] scan failed for %s: %s", player_id, e, exc_info=True)
+        return jsonify({'error': 'scan_failed', 'detail': str(e)}), 500
+
+
+@app.route('/api/music/ingest', methods=['POST'])
+def handle_music_ingest():
+    """Ingest a URL via yt-dlp → trim hook → -14 LUFS normalize.
+
+    Body: {player_id, url, hook_start_ms?, hook_duration_s?, label?}
+    Returns: {song_id, file_path, label, duration_ms, normalized_lufs, hook_start_ms}
+
+    Synchronous: blocks until the hook clip is written to disk. The PWA
+    "Add Song" UI shows a progress spinner during this call.
+    """
+    blocked = _guard_mutating_request()
+    if blocked:
+        return blocked
+
+    data = request.get_json(silent=True) or {}
+    player_id = (data.get('player_id') or '').strip()
+    url = (data.get('url') or '').strip()
+    hook_start_ms = data.get('hook_start_ms')
+    hook_duration_s = int(data.get('hook_duration_s') or 18)
+    label = (data.get('label') or '').strip()[:200] or None
+
+    if not re.match(r'^[A-Za-z0-9_-]+$', player_id) or len(player_id) > 80:
+        return jsonify({'error': 'invalid_player_id'}), 400
+    if not re.match(r'^https?://', url) or len(url) > 1024:
+        return jsonify({'error': 'invalid_url'}), 400
+    if hook_duration_s < 5 or hook_duration_s > 60:
+        return jsonify({'error': 'hook_duration_out_of_range', 'detail': '5-60s'}), 400
+    if hook_start_ms is not None:
+        try:
+            hook_start_ms = int(hook_start_ms)
+            if hook_start_ms < 0 or hook_start_ms > 600_000:
+                raise ValueError("out of range")
+        except (TypeError, ValueError):
+            return jsonify({'error': 'invalid_hook_start_ms'}), 400
+
+    try:
+        from music_ingest import ingest_url, ffmpeg_available, has_yt_dlp
+        if not has_yt_dlp():
+            return jsonify({'error': 'yt_dlp_not_installed'}), 503
+        if not ffmpeg_available():
+            return jsonify({'error': 'ffmpeg_unavailable'}), 503
+        result = ingest_url(player_id, url,
+                            hook_start_ms=hook_start_ms,
+                            hook_duration_s=hook_duration_s,
+                            label=label)
+        return jsonify(result), 201
+    except Exception as e:
+        logging.error("[Music] ingest failed for %s/%s: %s", player_id, url, e, exc_info=True)
+        return jsonify({'error': 'ingest_failed', 'detail': str(e)}), 500
+
+
+@app.route('/api/music/next/<player_id>', methods=['GET'])
+def handle_music_next(player_id):
+    """Pick the next walk-up song for `player_id` and commit the play.
+
+    Query params:
+      session — game session id (default: today YYYY-MM-DD ET)
+      peek    — '1' to NOT commit (used for pre-buffering)
+
+    Response:
+      {
+        audio_url:        "/audio/music/<player_id>/<slug>-hook.mp3" (or original song_url),
+        song_id:          int,
+        song_label:       str,
+        bpm_offset_ms:    int,
+        bpm:              float | null,
+        duration_ms:      int,
+        optimal_start_ms: int,
+        play_count:       int,
+        committed:        bool,
+        source:           "local" | "url" | ...,
+      }
+    """
+    invalid = _validate_player_id(player_id)
+    if invalid:
+        return invalid
+    session_id = (request.args.get('session') or
+                  datetime.now(ET).strftime('%Y-%m-%d'))[:32]
+    peek = request.args.get('peek') == '1'
+
+    try:
+        adb = _announcer_db()
+        chosen = adb.pick_walkup_song(player_id, session_id, commit=not peek)
+        if not chosen:
+            return jsonify({'error': 'no_songs_in_pool', 'player_id': player_id}), 404
+
+        audio_url = chosen.get('file_path') or chosen.get('song_url') or ''
+        return jsonify({
+            'audio_url':        audio_url,
+            'song_id':          chosen.get('id'),
+            'song_label':       chosen.get('song_label') or '',
+            'bpm':              chosen.get('bpm'),
+            'bpm_offset_ms':    chosen.get('bpm_offset_ms') or 0,
+            'duration_ms':      chosen.get('duration_ms'),
+            'optimal_start_ms': chosen.get('optimal_start_ms') or 0,
+            'play_count':       chosen.get('play_count') or 0,
+            'last_played_at':   chosen.get('last_played_at'),
+            'committed':        not peek,
+            'source':           chosen.get('source') or 'url',
+            'session':          session_id,
+        })
+    except Exception as e:
+        logging.error("[Music] next lookup failed for %s: %s", player_id, e, exc_info=True)
+        return jsonify({'error': 'next_failed', 'detail': str(e)}), 500
+
+
+@app.route('/api/music/songs/<player_id>/<int:song_id>/active', methods=['POST'])
+def handle_music_set_active(player_id, song_id):
+    """Toggle a song's is_active flag without dropping play-history.
+
+    Body: {is_active: bool}
+    """
+    blocked = _guard_mutating_request()
+    if blocked:
+        return blocked
+    invalid = _validate_player_id(player_id)
+    if invalid:
+        return invalid
+    data = request.get_json(silent=True) or {}
+    is_active = bool(data.get('is_active', True))
+    try:
+        adb = _announcer_db()
+        adb.set_song_active(song_id, player_id, is_active)
+        return jsonify({'song_id': song_id, 'is_active': is_active})
+    except Exception as e:
+        logging.error("[Music] set_active failed: %s", e, exc_info=True)
+        return jsonify({'error': 'set_active_failed', 'detail': str(e)}), 500
+
+
 @app.route('/api/announcer/worker-status', methods=['GET'])
 def handle_announcer_worker_status():
     """Return full render worker health payload for the PWA Worker Status Badge.
+
+    Hardened: never returns 500. If the announcer DB is unavailable, returns a
+    valid OFFLINE/RAPID payload so the badge renders correctly.
 
     Response shape:
       hub_status: "ONLINE" (always — Pi is responding)
@@ -4570,35 +5234,59 @@ def handle_announcer_worker_status():
       failover_worker: { id, status: "READY" }
       current_mode: "ELITE" (Mac alive) | "RAPID" (failover active)
     """
-    adb = _announcer_db()
-    hb = adb.get_heartbeat_info()
-    pending_count = len(adb.get_pending_jobs(quality="best"))
-    alive = adb.is_worker_alive(max_age_seconds=_MAC_HEARTBEAT_MAX_AGE)
-
-    if hb:
-        # ACTIVE = alive and has jobs to work; STANDBY = alive, queue empty
-        worker_status = ("ACTIVE" if pending_count > 0 else "STANDBY") if alive else "OFFLINE"
-        last_heartbeat = hb.get("last_seen_at")
-        worker_id = hb.get("worker_id", "mac")
-    else:
-        worker_status = "OFFLINE"
-        last_heartbeat = None
-        worker_id = "mac"
-
-    return jsonify({
+    failover_id = os.getenv("PI_WORKER_ID", "Pi-5-Edge")
+    offline_payload = {
         "hub_status": "ONLINE",
         "primary_worker": {
-            "id": worker_id,
-            "status": worker_status,
-            "last_heartbeat": last_heartbeat,
-            "queue_depth": pending_count,
+            "id": "mac",
+            "status": "OFFLINE",
+            "last_heartbeat": None,
+            "queue_depth": 0,
         },
-        "failover_worker": {
-            "id": os.getenv("PI_WORKER_ID", "Pi-5-Edge"),
-            "status": "READY",
-        },
-        "current_mode": "ELITE" if alive else "RAPID",
-    })
+        "failover_worker": {"id": failover_id, "status": "READY"},
+        "current_mode": "RAPID",
+    }
+    try:
+        adb = _announcer_db()
+        try:
+            hb = adb.get_heartbeat_info()
+        except Exception as _hbe:
+            logging.warning("[Announcer] heartbeat read failed: %s", _hbe)
+            hb = None
+        try:
+            pending_count = len(adb.get_pending_jobs(quality="best"))
+        except Exception as _pe:
+            logging.warning("[Announcer] pending jobs read failed: %s", _pe)
+            pending_count = 0
+        try:
+            alive = adb.is_worker_alive(max_age_seconds=_MAC_HEARTBEAT_MAX_AGE)
+        except Exception as _ae:
+            logging.warning("[Announcer] alive check failed: %s", _ae)
+            alive = False
+
+        if hb:
+            worker_status = ("ACTIVE" if pending_count > 0 else "STANDBY") if alive else "OFFLINE"
+            last_heartbeat = hb.get("last_seen_at")
+            worker_id = hb.get("worker_id", "mac")
+        else:
+            worker_status = "OFFLINE"
+            last_heartbeat = None
+            worker_id = "mac"
+
+        return jsonify({
+            "hub_status": "ONLINE",
+            "primary_worker": {
+                "id": worker_id,
+                "status": worker_status,
+                "last_heartbeat": last_heartbeat,
+                "queue_depth": pending_count,
+            },
+            "failover_worker": {"id": failover_id, "status": "READY"},
+            "current_mode": "ELITE" if alive else "RAPID",
+        })
+    except Exception as e:
+        logging.error("[Announcer] worker-status route failed: %s", e, exc_info=True)
+        return jsonify(offline_payload)
 
 
 @app.route('/api/announcer/next-songs', methods=['GET'])
@@ -4956,6 +5644,29 @@ def handle_announcer_provider_health():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/announcer/tts-probe', methods=['GET'])
+def handle_announcer_tts_probe():
+    """Probe all TTS providers and return ordered availability list.
+
+    Response: {providers: [{name, available, selected, reason}], selected, non_mock_available}
+    Used by opcheck and the pre-render script to pick the best source.
+    """
+    try:
+        from announcer_engine import probe_tts_providers
+        providers = probe_tts_providers()
+        selected = next((p for p in providers if p.get("selected")), None)
+        return jsonify({
+            "providers": providers,
+            "selected": selected["name"] if selected else "mock",
+            "non_mock_available": any(
+                p["available"] and p["name"] != "mock" for p in providers
+            ),
+        })
+    except Exception as e:
+        logging.error("[Announcer] tts-probe error: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
 def _load_roster_players() -> list[dict]:
     """Return a minimal player list [{id, number, first, last}] from the roster JSON."""
     roster_path = SHARKS_DIR / "roster.json"
@@ -5281,6 +5992,72 @@ def main():
 # Bootstrap from CSV on module import (covers Gunicorn-served API process
 # which never calls main()).  This is a no-op if team.json already exists.
 _bootstrap_from_csv()
+
+
+def _bootstrap_static_fallbacks():
+    """Seed /data/sharks/*.json static-fallback files at container startup.
+
+    Each route handler that owns a static cache (announcer roster, opponents,
+    standings, practice insights) writes its fallback after a successful
+    response. But on a fresh deploy the file may not yet exist, and if the
+    handler later starts 502'ing the frontend's static-file fallback chain
+    has nothing to read.
+
+    Solution: hit each handler exactly once at module import via Flask's
+    test_client. Each one's existing "write static fallback on success"
+    branch then seeds the file. test_client invokes the route in-process —
+    no socket, no auth, no rate-limiter.
+
+    Also: regenerate swot_analysis.json if it's older than app_stats.json,
+    so the SWOT page never shows stats older than the underlying source.
+    """
+    try:
+        client = app.test_client()
+        for ep in (
+            '/api/announcer/roster',
+            '/api/opponents',
+            '/api/standings',
+            '/api/practice-insights',
+        ):
+            try:
+                resp = client.get(ep)
+                logging.info("[Bootstrap-static] %s -> %s", ep, resp.status_code)
+            except Exception as e:
+                logging.warning("[Bootstrap-static] %s -> %s", ep, e)
+    except Exception as e:
+        logging.warning("[Bootstrap-static] handler-seed failed: %s", e)
+
+    # SWOT staleness check: regen if the source app_stats.json is newer
+    # than the derived swot_analysis.json. Avoids the user seeing AVG/OBP
+    # values that pre-date the latest CSV ingest.
+    try:
+        app_stats_file = SHARKS_DIR / "app_stats.json"
+        swot_file = SHARKS_DIR / "swot_analysis.json"
+        needs_regen = (
+            app_stats_file.exists() and
+            (not swot_file.exists() or
+             app_stats_file.stat().st_mtime > swot_file.stat().st_mtime)
+        )
+        if needs_regen:
+            logging.info(
+                "[Bootstrap-static] SWOT stale (app_stats mtime > swot mtime) — regenerating"
+            )
+            try:
+                from swot_analyzer import run_sharks_analysis
+                run_sharks_analysis()
+            except Exception as _se:
+                logging.warning("[Bootstrap-static] SWOT regen failed: %s", _se)
+    except Exception as e:
+        logging.warning("[Bootstrap-static] SWOT staleness check failed: %s", e)
+
+
+try:
+    _bootstrap_static_fallbacks()
+except Exception as _be:
+    # Last-resort guard: under no circumstance let bootstrap take down
+    # the gunicorn worker. A missing static file is recoverable; a
+    # crashed worker means /api/health 502 forever.
+    logging.warning("[Bootstrap-static] outer guard caught: %s", _be)
 
 
 def _announcer_auto_repair_loop():

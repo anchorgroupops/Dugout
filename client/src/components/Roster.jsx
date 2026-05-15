@@ -14,7 +14,7 @@ const fmt3 = (val) => {
   if (val === null || val === undefined || val === '') return '\u2014';
   if (typeof val === 'string' && val.startsWith('.')) return val;
   const n = parseFloat(val);
-  if (isNaN(n)) return '\u2014';
+  if (isNaN(n) || n === 0) return '\u2014';
   const s = n.toFixed(3);
   return (n >= 0 && n < 1) ? s.replace(/^0/, '') : s;
 };
@@ -465,14 +465,15 @@ const Roster = ({ team, availability, isMobile = false, isLandscape = false }) =
               }}
               onClick={() => setExpandedPlayer(isExpanded ? null : playerKey)}
             >
-              {/* Watermark number */}
+              {/* Watermark number — fall back to "?" when GC hasn't issued
+                  one yet (e.g. brand-new sub players). */}
               {!isMobile && (
                 <div style={{
                   position: 'absolute', top: '-15px', right: '-10px',
                   fontSize: '4rem', fontWeight: '900', opacity: '0.05',
                   fontFamily: 'var(--font-heading)'
                 }}>
-                  {player.number}
+                  {(player.number != null && String(player.number).trim() !== '') ? player.number : '?'}
                 </div>
               )}
 
@@ -496,7 +497,7 @@ const Roster = ({ team, availability, isMobile = false, isLandscape = false }) =
                     : '#444',
                   transition: 'all 0.3s ease'
                 }}>
-                  {player.number}
+                  {(player.number != null && String(player.number).trim() !== '') ? player.number : '?'}
                 </div>
                 <div style={{ flex: 1 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>

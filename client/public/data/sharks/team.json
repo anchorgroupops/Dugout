@@ -1,0 +1,8 @@
+{
+  "_doc": "Empty-state fallback shipped in the image. Served by nginx when /srv/data/sharks/team.json is missing on the Pi. Real values are written by the GameChanger CSV ingest pipeline (gc_csv_ingest.py).",
+  "team_name": "The Sharks",
+  "league": "PCLL Majors",
+  "season": "Spring 2026",
+  "last_updated": null,
+  "roster": []
+}

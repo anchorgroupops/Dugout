@@ -1,0 +1,6 @@
+{
+  "_doc": "Empty-state fallback shipped in the image. Served by nginx when /srv/data/sharks/standings.json is missing on the Pi. Real values are written by sync_daemon's /api/standings handler.",
+  "league": "PCLL Spring '26 Majors Softball",
+  "last_updated": null,
+  "standings": []
+}

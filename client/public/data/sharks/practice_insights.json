@@ -1,0 +1,11 @@
+{
+  "_doc": "Empty-state fallback shipped in the image. Served by nginx when /srv/data/sharks/practice_insights.json is missing on the Pi. Real values are written by sync_daemon's /api/practice-insights handler.",
+  "generated_at": null,
+  "team_name": "The Sharks",
+  "default_player_source": "static_seed",
+  "practice_meta": {"date": null, "title": null},
+  "selected_players": [],
+  "available_players": [],
+  "needs": [],
+  "recommended_plan": []
+}

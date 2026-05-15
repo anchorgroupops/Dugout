@@ -4,9 +4,10 @@ import {
   Mic, Music, Play, Square, SkipBack, SkipForward,
   ChevronDown, ChevronUp, RefreshCw, UserPlus, Save,
   AlertCircle, CheckCircle, Clock, Volume2, Settings2, List,
-  Zap, Target, Activity, Plus, X, Upload, Wand2
+  Zap, Target, Activity, Plus, X, Upload, Wand2, Search, Download
 } from 'lucide-react';
 import { playIntro, playClip, stop as stopAudio, preload, cleanup, detectBPM, calcBeatOffset, loadBuffer } from '../utils/audioController';
+import { usePrebuffer } from '../utils/usePrebuffer';
 import WorkerBadge from './WorkerBadge';
 
 function StatusLed({ status }) {
@@ -114,6 +115,10 @@ function PlayerCard({ player, onSavePhonetics, onRender, onRemove }) {
   const [addingSong, setAddingSong] = useState(false);
   const [detecting, setDetecting] = useState(false);
   const [renderQuality, setRenderQuality] = useState('best');
+  const [songSearch, setSongSearch] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const [downloadingId, setDownloadingId] = useState(null);
 
   useEffect(() => {
     if (!expanded) return;
@@ -189,6 +194,51 @@ function PlayerCard({ player, onSavePhonetics, onRender, onRemove }) {
     }
   };
 
+  const handleSongSearch = async () => {
+    const q = songSearch.trim();
+    if (!q) return;
+    setSearching(true);
+    setSearchResults([]);
+    try {
+      const r = await fetch(`/api/announcer/songs/search?q=${encodeURIComponent(q)}`);
+      if (r.ok) {
+        const d = await r.json();
+        setSearchResults(d.results || []);
+      }
+    } catch { /* silent */ } finally {
+      setSearching(false);
+    }
+  };
+
+  const handleDownloadAndAdd = async (result) => {
+    setDownloadingId(result.video_id);
+    try {
+      // Download to Pi local storage
+      const dlRes = await fetch('/api/announcer/songs/download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ video_id: result.video_id, title: result.title }),
+      });
+      if (!dlRes.ok) return;
+      const dlData = await dlRes.json();
+
+      // Auto-add to this player's walk-up pool
+      const addRes = await fetch(`/api/announcer/songs/${player.id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ song_url: dlData.file_url, song_label: result.title }),
+      });
+      if (addRes.ok) {
+        const addData = await addRes.json();
+        setSongs(addData.songs || []);
+        setSearchResults([]);
+        setSongSearch('');
+      }
+    } catch { /* silent */ } finally {
+      setDownloadingId(null);
+    }
+  };
+
   const numWord = numToWord(player.number);
   const displayName = phonetic || `${player.first} ${player.last}`;
   const previewText = `Now batting, number ${numWord}, ${displayName}!`;
@@ -257,7 +307,7 @@ function PlayerCard({ player, onSavePhonetics, onRender, onRemove }) {
       )}
       <button className="announcer-player-header" onClick={() => setExpanded(!expanded)} aria-expanded={expanded}>
         <div className="announcer-player-info">
-          <span className="announcer-jersey">#{player.number || '?'}</span>
+          <span className="announcer-jersey">#{player.number || '—'}</span>
           <span className="announcer-player-name">{player.first} {player.last}</span>
           <StatusLed status={player.status} />
         </div>
@@ -393,13 +443,74 @@ function PlayerCard({ player, onSavePhonetics, onRender, onRemove }) {
               </ul>
             )}
 
+            {/* YouTube search */}
+            <div style={{ display: 'flex', gap: 6, margin: '8px 0 4px' }}>
+              <input
+                className="announcer-song-input"
+                style={{ flex: 1 }}
+                value={songSearch}
+                onChange={e => setSongSearch(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleSongSearch()}
+                placeholder="Search YouTube for a walk-up song…"
+                maxLength={200}
+              />
+              <button
+                onClick={handleSongSearch}
+                disabled={searching || !songSearch.trim()}
+                className="announcer-btn announcer-btn-secondary"
+                style={{ flexShrink: 0, fontSize: '0.75rem', padding: '4px 10px' }}
+              >
+                {searching ? <RefreshCw size={12} className="sync-spin" /> : <Search size={12} />}
+                {searching ? 'Searching…' : 'Search'}
+              </button>
+            </div>
+            {searchResults.length > 0 && (
+              <ul style={{ listStyle: 'none', margin: '0 0 8px', padding: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {searchResults.map(r => {
+                  const mins = r.duration ? Math.floor(r.duration / 60) : 0;
+                  const secs = r.duration ? String(r.duration % 60).padStart(2, '0') : '';
+                  const dur = r.duration ? `${mins}:${secs}` : '';
+                  return (
+                    <li
+                      key={r.video_id}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 6,
+                        background: 'rgba(255,255,255,0.04)', borderRadius: 6,
+                        padding: '4px 8px', fontSize: 'var(--text-xs)',
+                      }}
+                    >
+                      <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {r.title}
+                      </span>
+                      {dur && (
+                        <span style={{ color: 'var(--text-muted)', flexShrink: 0, fontSize: '0.7rem' }}>{dur}</span>
+                      )}
+                      <button
+                        onClick={() => handleDownloadAndAdd(r)}
+                        disabled={downloadingId === r.video_id}
+                        className="announcer-btn announcer-btn-secondary"
+                        style={{ flexShrink: 0, fontSize: '0.7rem', padding: '3px 8px' }}
+                        title="Download to Pi and add to pool"
+                      >
+                        {downloadingId === r.video_id
+                          ? <RefreshCw size={11} className="sync-spin" />
+                          : <Download size={11} />}
+                        {downloadingId === r.video_id ? 'Saving…' : 'Add'}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+
+            {/* Manual URL entry (fallback / paste direct links) */}
             <div className="announcer-song-add">
               <input
                 className="announcer-song-input"
                 value={newSongUrl}
                 onChange={e => { setNewSongUrl(e.target.value); setNewSongOptimalStart(0); }}
                 onKeyDown={e => e.key === 'Enter' && handleAddSong()}
-                placeholder="https://… audio URL"
+                placeholder="…or paste a direct audio URL"
                 type="url"
                 maxLength={500}
               />
@@ -540,6 +651,16 @@ function NowPlayingView({ roster, lineups, onBack }) {
 
   const current = battingOrder[currentIdx] || null;
   const progressPct = progress.duration > 0 ? Math.min(100, (progress.elapsed / progress.duration) * 100) : 0;
+
+  // Anticipatory walk-up audio pre-buffering — fetch + decode + SW-cache
+  // the next 3 batters' hooks so taps on "Play" are instant even if the
+  // field's Wi-Fi drops for 30s.
+  usePrebuffer({
+    lineup: battingOrder,
+    currentIndex: currentIdx,
+    lookahead: 3,
+    enabled: battingOrder.length > 0,
+  });
 
   const pushGameState = useCallback(async (next) => {
     setGameState(next);
@@ -763,7 +884,7 @@ function NowPlayingView({ roster, lineups, onBack }) {
       )}
 
       <div className="announcer-np-card glass-panel">
-        <div className="announcer-np-jersey">#{current?.number || '?'}</div>
+        <div className="announcer-np-jersey">#{current?.number || '—'}</div>
         <div className="announcer-np-name">{current?.first} {current?.last}</div>
         <StatusLed status={current?.status || 'pending'} />
       </div>
@@ -901,28 +1022,196 @@ function numToWord(num) {
 
 function useWorkerStatus() {
   const [workerStatus, setWorkerStatus] = useState(null);
+  // Permanently-stopped flag is exposed so the badge can render a manual
+  // "Refresh" button and the consumer can call restart() to resume polling.
+  const [stopped, setStopped] = useState(false);
+  // Increment to force the polling effect to re-run from scratch (used by
+  // the manual refresh button after the permanent stop).
+  const [resetTick, setResetTick] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
+    let timeoutId = null;
+    // Backoff per spec: BASE 10s, doubles on each failure, cap at 5 minutes.
+    const BASE_DELAY = 10_000;
+    const MAX_DELAY = 300_000; // 5 min
+    // 429-specific: at minimum 120s before the next attempt, regardless
+    // of what Retry-After says. Spec is explicit on this.
+    const MIN_429_WAIT = 120_000;
+    // Stop polling entirely after this many consecutive failures of any
+    // kind (5xx, 4xx, 429, network). Manual restart() required to resume.
+    const MAX_CONSECUTIVE_FAILURES = 5;
+    // Circuit breaker: failures within this rolling window count toward
+    // the disable-until-reload threshold even if separated by a successful
+    // recovery in between.
+    const CIRCUIT_WINDOW_MS = 60_000;
+    const CIRCUIT_THRESHOLD = 5;
+    const failureTimestamps = [];
+    let failures = 0;
+    let interval = BASE_DELAY;
+    let stoppedPermanently = false;
+    setStopped(false);
 
-    const poll = async () => {
-      try {
-        const res = await fetch('/api/announcer/worker-status');
-        if (res.ok && !cancelled) setWorkerStatus(await res.json());
-      } catch {
-        // leave previous value on network error
+    const computeBackoff = () =>
+      Math.min(BASE_DELAY * Math.pow(2, failures), MAX_DELAY);
+
+    const recordFailure = () => {
+      failures += 1;
+      const now = Date.now();
+      failureTimestamps.push(now);
+      // Drop timestamps outside the rolling window.
+      while (failureTimestamps.length && now - failureTimestamps[0] > CIRCUIT_WINDOW_MS) {
+        failureTimestamps.shift();
       }
     };
 
-    poll();
-    const id = setInterval(poll, 10_000);
+    const stopPermanent = (reason) => {
+      stoppedPermanently = true;
+      if (!cancelled) {
+        setWorkerStatus({
+          hub_status: 'OFFLINE',
+          primary_worker: { id: 'mac', status: 'OFFLINE', last_heartbeat: null, queue_depth: 0 },
+          failover_worker: { id: 'Pi-5-Edge', status: 'READY' },
+          current_mode: 'OFFLINE',
+          stopped: true,
+          error: reason || 'worker unavailable',
+        });
+        setStopped(true);
+      }
+    };
+
+    const schedule = (ms) => {
+      if (cancelled || stoppedPermanently) return;
+      timeoutId = setTimeout(poll, ms);
+    };
+
+    const poll = async () => {
+      if (cancelled || stoppedPermanently) return;
+
+      // Honor global 429 pause window — skip this tick, retry later.
+      let apiClient = null;
+      try {
+        apiClient = await import('../utils/apiClient');
+        if (apiClient.isPollingPaused()) {
+          // Resume polling shortly after the pause expires.
+          const remaining = Math.max(2_000, apiClient.getPausedUntil() - Date.now() + 1_000);
+          schedule(Math.min(MAX_DELAY, remaining));
+          return;
+        }
+      } catch { /* apiClient unavailable — degrade gracefully */ }
+
+      let nextDelay = interval;
+      try {
+        const res = await fetch('/api/announcer/worker-status');
+        if (res.ok) {
+          if (!cancelled) {
+            try {
+              const data = await res.json();
+              setWorkerStatus(data);
+            } catch { /* ignore parse error, keep prior value */ }
+          }
+          // Only a successful 200 resets the failure counters and cadence.
+          failures = 0;
+          failureTimestamps.length = 0;
+          interval = BASE_DELAY;
+          nextDelay = BASE_DELAY;
+        } else if (res.status === 429) {
+          // 429 is the canary for nginx-level rate limiting. Treat as
+          // "offline" immediately. Honor Retry-After if present, but
+          // never wait less than MIN_429_WAIT (120s) before retrying,
+          // AND pause every other poller globally.
+          recordFailure();
+          let retryAfterMs = MIN_429_WAIT;
+          const ra = res.headers.get('Retry-After');
+          if (ra) {
+            const asInt = parseInt(ra, 10);
+            if (!Number.isNaN(asInt) && asInt > 0) {
+              retryAfterMs = Math.max(MIN_429_WAIT, asInt * 1000);
+            } else {
+              const asDate = Date.parse(ra);
+              if (!Number.isNaN(asDate)) {
+                retryAfterMs = Math.max(MIN_429_WAIT, asDate - Date.now());
+              }
+            }
+          }
+          if (apiClient && typeof apiClient.pausePollingFor === 'function') {
+            apiClient.pausePollingFor(retryAfterMs);
+          }
+          interval = Math.min(MAX_DELAY, retryAfterMs);
+          nextDelay = interval;
+        } else {
+          // Any other non-2xx (4xx, 5xx) — exponential backoff.
+          recordFailure();
+          interval = computeBackoff();
+          nextDelay = interval;
+        }
+      } catch {
+        // Network error — count as failure and back off too.
+        recordFailure();
+        interval = computeBackoff();
+        nextDelay = interval;
+      }
+
+      // Permanent stop checks. Either condition disables polling until
+      // the user calls restart() (badge "Refresh") or reloads the page.
+      if (failures >= MAX_CONSECUTIVE_FAILURES) {
+        stopPermanent('worker unavailable (too many failures)');
+        return;
+      }
+      if (failureTimestamps.length >= CIRCUIT_THRESHOLD) {
+        stopPermanent('circuit breaker open');
+        return;
+      }
+
+      schedule(nextDelay);
+    };
+
+    // Health pre-gate: do not start polling until /api/health returns 200.
+    // Spec: when the backend is already 4xx/5xx-ing, hammering worker-status
+    // is what creates the rate-limit cascade. Re-check health every 30s
+    // until it returns 200, then begin the normal polling loop.
+    const HEALTH_RECHECK_MS = 30_000;
+    const startWhenHealthy = async () => {
+      if (cancelled || stoppedPermanently) return;
+      try {
+        const res = await fetch('/api/health', { cache: 'no-store' });
+        if (res.ok) {
+          poll();
+          return;
+        }
+        // Treat a non-200 health as one strike toward the circuit, so
+        // an unreachable backend at page load doesn't pretend everything
+        // is fine forever.
+        recordFailure();
+        if (failures >= MAX_CONSECUTIVE_FAILURES ||
+            failureTimestamps.length >= CIRCUIT_THRESHOLD) {
+          stopPermanent('backend health check failing');
+          return;
+        }
+      } catch {
+        recordFailure();
+        if (failures >= MAX_CONSECUTIVE_FAILURES ||
+            failureTimestamps.length >= CIRCUIT_THRESHOLD) {
+          stopPermanent('backend unreachable');
+          return;
+        }
+      }
+      timeoutId = setTimeout(startWhenHealthy, HEALTH_RECHECK_MS);
+    };
+    startWhenHealthy();
+
     return () => {
       cancelled = true;
-      clearInterval(id);
+      if (timeoutId) clearTimeout(timeoutId);
     };
+  }, [resetTick]);
+
+  const restart = useCallback(() => {
+    setStopped(false);
+    setResetTick(t => t + 1);
   }, []);
 
-  return workerStatus;
+  return { workerStatus, stopped, restart };
 }
 
 function WizardModal({ onClose, roster, onAddSong }) {
@@ -1205,22 +1494,89 @@ export default function Announcer({ lineups }) {
   const [csvImporting, setCsvImporting] = useState(false);
   const csvInputRef = useRef(null);
   const [error, setError] = useState('');
+  const [degradedReason, setDegradedReason] = useState('');
   const [showFormer, setShowFormer] = useState(false);
   const pollRef = useRef(null);
   const renderToRef = useRef(null);
   const pollStopToRef = useRef(null);
-  const workerStatus = useWorkerStatus();
+  const { workerStatus, stopped: workerStopped, restart: restartWorkerPoll } = useWorkerStatus();
 
   const fetchRoster = useCallback(async () => {
+    // Fallback chain when /api/announcer/roster is unavailable (502/503/etc):
+    //   1) /data/sharks/announcer_roster.json — last good cache nginx-served
+    //   2) /data/sharks/app_stats.json        — derive minimal player list
+    const buildFromAppStats = (data) => {
+      const batting = Array.isArray(data?.batting) ? data.batting : [];
+      const seen = new Set();
+      return batting.map((row) => {
+        const fullName = String(row?.name || '').trim();
+        if (!fullName) return null;
+        const parts = fullName.split(/\s+/);
+        const first = parts[0] || fullName;
+        const last = parts.slice(1).join(' ') || '';
+        const number = String(row?.number || '').trim();
+        const id = `${number}-${first}-${last}`
+          .toLowerCase()
+          .replace(/[^a-z0-9_-]/g, '-')
+          .replace(/-+/g, '-')
+          .replace(/^-|-$/g, '') || first.toLowerCase();
+        if (seen.has(id)) return null;
+        seen.add(id);
+        return {
+          id, first, last, number,
+          phonetic_hint: '', tts_instruction: '', walkup_song_url: '',
+          intro_timestamp: 5.0, announcer_audio_url: '',
+          status: 'pending', is_active: true, rendered_at: '',
+          error_message: '', is_ghost: false,
+        };
+      }).filter(Boolean);
+    };
+
     try {
       const res = await fetch('/api/announcer/roster');
       if (!res.ok) throw new Error(`${res.status}`);
       const data = await res.json();
-      setRoster(data.roster || []);
+      const list = data.roster || [];
+      if (!list.length) throw new Error('empty roster from API');
+      setRoster(list);
       setStats(data.stats || { total: 0, ready: 0, pending: 0, error: 0 });
       setError('');
-    } catch (e) {
-      setError(`Failed to load roster: ${e.message}`);
+      setDegradedReason('');
+      return;
+    } catch (apiErr) {
+      // Fallback 1: static cache.
+      try {
+        const sRes = await fetch('/data/sharks/announcer_roster.json', { cache: 'no-store' });
+        if (sRes.ok) {
+          const sData = await sRes.json();
+          const list = sData.roster || [];
+          if (list.length) {
+            setRoster(list);
+            setStats(sData.stats || { total: list.length, ready: 0, pending: list.length, error: 0 });
+            setError('');
+            setDegradedReason(`Using cached roster — live generation unavailable (${apiErr.message})`);
+            return;
+          }
+        }
+      } catch { /* fall through to app_stats */ }
+
+      // Fallback 2: derive from app_stats batting list.
+      try {
+        const aRes = await fetch('/data/sharks/app_stats.json', { cache: 'no-store' });
+        if (aRes.ok) {
+          const aData = await aRes.json();
+          const list = buildFromAppStats(aData);
+          if (list.length) {
+            setRoster(list);
+            setStats({ total: list.length, ready: 0, pending: list.length, error: 0 });
+            setError('');
+            setDegradedReason('Using cached roster — live generation unavailable');
+            return;
+          }
+        }
+      } catch { /* both fallbacks failed */ }
+
+      setError(`Failed to load roster: ${apiErr.message}`);
     } finally {
       setLoading(false);
     }
@@ -1375,6 +1731,20 @@ export default function Announcer({ lineups }) {
         </h2>
         <div className="announcer-header-actions">
           <WorkerBadge workerStatus={workerStatus} />
+          {workerStopped && (
+            <button
+              onClick={restartWorkerPoll}
+              title="Worker offline — tap to retry"
+              aria-label="Retry worker connection"
+              className="announcer-btn announcer-btn-secondary"
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: '0.3rem',
+                padding: '0.35rem 0.55rem', fontSize: '0.7rem', fontWeight: '700',
+              }}
+            >
+              <RefreshCw size={12} /> Retry
+            </button>
+          )}
           <button onClick={() => setView('nowplaying')} className="announcer-btn announcer-btn-accent">
             <Play size={14} /> Now Playing
           </button>
@@ -1382,6 +1752,19 @@ export default function Announcer({ lineups }) {
       </div>
 
       {error && <div className="voice-error"><AlertCircle size={14} /> {error}</div>}
+      {!error && degradedReason && (
+        <div
+          className="voice-error"
+          role="status"
+          style={{
+            background: 'rgba(240,180,41,0.10)',
+            border: '1px solid rgba(240,180,41,0.35)',
+            color: '#f0b429',
+          }}
+        >
+          <AlertCircle size={14} /> {degradedReason}
+        </div>
+      )}
 
       <StatsBar stats={stats} />
 
@@ -1416,7 +1799,7 @@ export default function Announcer({ lineups }) {
             onRemove={handleRemovePlayer}
           />
         ))}
-        {roster.filter(p => !p.is_ghost).length === 0 && (
+        {roster.filter(p => !p.is_ghost).length === 0 && !degradedReason && (
           <div className="glass-panel" style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
             No players found. Make sure team data has been synced.
           </div>
