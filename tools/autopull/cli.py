@@ -135,15 +135,67 @@ def _breaker_hours(e: Exception) -> int:
 
 # --- Real runner wiring (used in production, stubbed in unit tests) -----------
 
+class SharedGCSession:
+    """Lazy browser + GC login shared across a multi-team sweep.
+
+    The first `page()` call launches Playwright and logs in (reusing the
+    saved storage_state when still valid); later calls return the same
+    page, so one login — and at most one 2FA email — serves every team.
+    """
+
+    def __init__(self, cfg: config_mod.AutopullConfig):
+        self._cfg = cfg
+        self._pw_cm = None
+        self._page = None
+        self._refreshed = False
+
+    def page(self) -> tuple[Any, bool]:
+        if self._page is None:
+            import os
+            from playwright.sync_api import sync_playwright
+            from tools.autopull import (
+                session_manager as sm,
+                gmail_2fa_fetcher as g2fa,
+            )
+            cfg = self._cfg
+            gmail_client = g2fa.build_client(
+                username=cfg.gmail_username,
+                app_password=cfg.gmail_app_password,
+            )
+            gmail_fetcher = lambda min_uid=0: g2fa.fetch_latest_code(
+                gmail_client, min_uid=min_uid,
+            )
+            session = sm.SessionManager(
+                auth_file=cfg.data_root / "autopull" / "gc_session.json",
+                email=os.getenv("GC_EMAIL", ""),
+                password=os.getenv("GC_PASSWORD", ""),
+                gmail_fetcher=gmail_fetcher,
+            )
+            self._pw_cm = sync_playwright()
+            pw = self._pw_cm.__enter__()
+            self._page, self._refreshed = session.new_logged_in_page(
+                pw, headless=True,
+            )
+        return self._page, self._refreshed
+
+    def close(self) -> None:
+        if self._pw_cm is not None:
+            self._pw_cm.__exit__(None, None, None)
+            self._pw_cm = None
+            self._page = None
+
+
 def default_runner(*, cfg: config_mod.AutopullConfig,
-                   db: StateDB, run_id: int, team) -> dict:
-    """Actual run for one team: Playwright + locator + validate + ingest."""
-    from playwright.sync_api import sync_playwright
+                   db: StateDB, run_id: int, team,
+                   shared_session: SharedGCSession | None = None) -> dict:
+    """Actual run for one team: Playwright + locator + validate + ingest.
+
+    Pass `shared_session` to reuse one browser/login across teams; without
+    it a private session is created and closed for this call.
+    """
     from tools.autopull import (
-        session_manager as sm,
         locator_engine as le,
         csv_validator as cv,
-        gmail_2fa_fetcher as g2fa,
         llm_adapter as lla,
     )
     le.seed_builtin_strategies(db)
@@ -155,23 +207,6 @@ def default_runner(*, cfg: config_mod.AutopullConfig,
     quarantine.mkdir(parents=True, exist_ok=True)
     team_dir.mkdir(parents=True, exist_ok=True)
 
-    gmail_client = g2fa.build_client(
-        username=cfg.gmail_username,
-        app_password=cfg.gmail_app_password,
-    )
-    gmail_fetcher = lambda min_uid=0: g2fa.fetch_latest_code(
-        gmail_client, min_uid=min_uid,
-    )
-    auth_file = cfg.data_root / "autopull" / "gc_session.json"
-
-    import os
-    session = sm.SessionManager(
-        auth_file=auth_file,
-        email=os.getenv("GC_EMAIL", ""),
-        password=os.getenv("GC_PASSWORD", ""),
-        gmail_fetcher=gmail_fetcher,
-    )
-
     llm = None
     if cfg.llm_adapt_enabled and cfg.anthropic_api_key:
         llm = lla.build_default_adapter(
@@ -181,10 +216,14 @@ def default_runner(*, cfg: config_mod.AutopullConfig,
         db=db, llm_adapter=llm, llm_enabled=cfg.llm_adapt_enabled,
     )
 
-    with sync_playwright() as pw:
-        page, refreshed = session.new_logged_in_page(pw, headless=True)
+    session_ctx = shared_session or SharedGCSession(cfg)
+    try:
+        page, refreshed = session_ctx.page()
         page.goto(team.stats_url, wait_until="networkidle", timeout=60_000)
         result = engine.find_and_download(page, out_dir=staging)
+    finally:
+        if shared_session is None:
+            session_ctx.close()
 
     if result.downloaded_path is None:
         return {
@@ -342,7 +381,17 @@ def main(argv: list[str] | None = None) -> int:
     from dotenv import load_dotenv
     load_dotenv(Path(__file__).resolve().parents[2] / ".env")
     cfg = config_mod.load(require_gmail=True)
-    result = run_once(cfg=cfg, trigger=args.trigger, runner=default_runner)
+    # One lazy browser/login shared by every team in the sweep — the session
+    # only launches if at least one team actually runs.
+    import functools
+    shared = SharedGCSession(cfg)
+    try:
+        result = run_once(
+            cfg=cfg, trigger=args.trigger,
+            runner=functools.partial(default_runner, shared_session=shared),
+        )
+    finally:
+        shared.close()
 
     # Fan out per-team notifications (skipped runs stay silent overall).
     if result.get("outcome") not in ("skipped",):

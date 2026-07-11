@@ -139,6 +139,22 @@ class SessionManager:
         context = browser.new_context(**ctx_kwargs)
         page = context.new_page()
 
+        # Probe the saved session before touching the login page. Navigating
+        # straight to /login makes is_login_page() true by URL alone, which
+        # forced a fresh email+code login (and a GC verification email) on
+        # every run even when the stored cookies were still valid.
+        if "storage_state" in ctx_kwargs:
+            page.goto(GC_BASE, wait_until="domcontentloaded", timeout=60_000)
+            page.wait_for_load_state("networkidle", timeout=30_000)
+            if not is_login_page(page):
+                log.info("Reused saved GC session from %s — no login needed",
+                         self.auth_file)
+                return page, False
+            log.info("Saved GC session is stale — performing full login")
+        else:
+            log.info("No saved GC session at %s — performing full login",
+                     self.auth_file)
+
         page.goto(self.login_url, wait_until="domcontentloaded", timeout=60_000)
         page.wait_for_load_state("networkidle", timeout=30_000)
 
