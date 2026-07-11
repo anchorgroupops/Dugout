@@ -67,6 +67,20 @@ const MatchupPanel = ({ defaultOpponent, isMobile = false }) => {
   const [matchup, setMatchup] = useState(null);
   const [loading, setLoading] = useState(false);
 
+  const handleSelect = async (slug) => {
+    setSelected(slug);
+    if (!slug) { setMatchup(null); return; }
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/matchup/${slug}`);
+      if (res.ok) setMatchup(await res.json());
+    } catch (e) {
+      console.error('Matchup fetch failed', e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchSharedJson('/api/opponents', { fallback: [] })
       .then(data => {
@@ -82,20 +96,6 @@ const MatchupPanel = ({ defaultOpponent, isMobile = false }) => {
       .catch(() => setOpponents([]));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [defaultOpponent]);
-
-  const handleSelect = async (slug) => {
-    setSelected(slug);
-    if (!slug) { setMatchup(null); return; }
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/matchup/${slug}`);
-      if (res.ok) setMatchup(await res.json());
-    } catch (e) {
-      console.error('Matchup fetch failed', e);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const isNextGame = defaultOpponent && selected === opponents.find(o =>
     o.team_name.toLowerCase() === defaultOpponent.toLowerCase() ||

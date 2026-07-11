@@ -404,6 +404,73 @@ def test_new_logged_in_page_wait_for_selector_exception(tmp_path, monkeypatch):
     assert refreshed is True
 
 
+def test_valid_saved_session_triggers_no_email(tmp_path, monkeypatch):
+    """Regression: a valid storage_state must NOT submit the email form or
+    touch Gmail — this is what flooded the inbox with verification codes."""
+    auth = tmp_path / "gc_session.json"
+    auth.write_text("{}")
+
+    page = FakePage(url="https://web.gc.com/home")
+    pw_ctx, context = _make_playwright_ctx(page)
+
+    monkeypatch.setattr(sm, "is_login_page", lambda p: False)
+
+    fetcher = MagicMock(return_value=(None, None))
+    mgr = _make_manager(tmp_path, auth_file=auth, gmail_fetcher=fetcher)
+    monkeypatch.setattr(mgr, "_submit_email", MagicMock())
+
+    result_page, refreshed = mgr.new_logged_in_page(pw_ctx)
+    assert refreshed is False
+    mgr._submit_email.assert_not_called()
+    fetcher.assert_not_called()
+    context.storage_state.assert_not_called()
+    # The probe hits the base site, never the login URL.
+    assert page.goto.call_count == 1
+    assert page.goto.call_args[0][0] == sm.GC_BASE
+
+
+def test_stale_saved_session_falls_through_to_login(tmp_path, monkeypatch):
+    """Saved session exists but is logged out → full login flow runs."""
+    auth = tmp_path / "gc_session.json"
+    auth.write_text("{}")
+
+    page = FakePage()
+    pw_ctx, _ = _make_playwright_ctx(page)
+
+    calls = {"n": 0}
+    def login_probe(p):
+        calls["n"] += 1
+        return calls["n"] <= 2  # probe + login-page check True, final check False
+
+    monkeypatch.setattr(sm, "is_login_page", login_probe)
+    monkeypatch.setattr(sm, "is_2fa_page", lambda p: False)
+
+    fetcher = MagicMock(return_value=(None, None))
+    mgr = _make_manager(tmp_path, auth_file=auth, gmail_fetcher=fetcher)
+    monkeypatch.setattr(mgr, "_submit_email", MagicMock())
+
+    result_page, refreshed = mgr.new_logged_in_page(pw_ctx)
+    assert refreshed is True
+    mgr._submit_email.assert_called_once()
+    # Probe first, then the login page.
+    goto_urls = [c[0][0] for c in page.goto.call_args_list]
+    assert goto_urls == [sm.GC_BASE, mgr.login_url]
+
+
+def test_no_saved_session_goes_straight_to_login(tmp_path, monkeypatch):
+    """No auth file → skip the probe and navigate directly to /login."""
+    page = FakePage()
+    pw_ctx, _ = _make_playwright_ctx(page)
+
+    monkeypatch.setattr(sm, "is_login_page", lambda p: False)
+    monkeypatch.setattr(sm, "is_2fa_page", lambda p: False)
+
+    mgr = _make_manager(tmp_path)  # auth file does not exist
+    mgr.new_logged_in_page(pw_ctx)
+    goto_urls = [c[0][0] for c in page.goto.call_args_list]
+    assert goto_urls == [mgr.login_url]
+
+
 # ── _submit_email ─────────────────────────────────────────────────────────────
 
 def _make_page_with_locators(**named_locators):
