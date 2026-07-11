@@ -872,6 +872,7 @@ const Scoreboard = ({ isMobile = false, isLandscape = false, team, schedule }) =
 
   useEffect(() => {
     mountedRef.current = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchScoreboard();
     return () => { mountedRef.current = false; };
   }, [fetchScoreboard]);

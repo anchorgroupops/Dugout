@@ -239,6 +239,7 @@ const Practice = ({ team, schedule, isMobile = false, isLandscape = false }) => 
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchInsights();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -249,6 +250,7 @@ const Practice = ({ team, schedule, isMobile = false, isLandscape = false }) => 
       const coreSet = new Set(coreRosterNames);
       const shouldSelect = availablePlayers.filter(n => coreSet.has(n));
       if (shouldSelect.length > 0 && shouldSelect.length !== selected.length) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setSelected(shouldSelect);
       }
     }

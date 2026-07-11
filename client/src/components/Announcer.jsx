@@ -123,6 +123,7 @@ function PlayerCard({ player, onSavePhonetics, onRender, onRemove }) {
   useEffect(() => {
     if (!expanded) return;
     let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSongsLoading(true);
     fetch(`/api/announcer/songs/${player.id}`)
       .then(r => r.ok ? r.json() : null)
@@ -1050,6 +1051,7 @@ function useWorkerStatus() {
     let failures = 0;
     let interval = BASE_DELAY;
     let stoppedPermanently = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setStopped(false);
 
     const computeBackoff = () =>
@@ -1236,6 +1238,7 @@ function WizardModal({ onClose, roster, onAddSong }) {
 
   useEffect(() => {
     if (tab !== 'roster') return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
     fetch('/api/announcer/music-wizard')
       .then(r => r.ok ? r.json() : null)
@@ -1282,8 +1285,9 @@ function WizardModal({ onClose, roster, onAddSong }) {
     }
   };
 
-  // Player selector shown in Catalog and Spotify tabs
-  const PlayerSelector = () => (
+  // Player selector shown in Catalog and Spotify tabs — plain JSX (not a
+  // nested component) so it isn't recreated/remounted on every render.
+  const playerSelector = (
     <div className="announcer-wizard-player-selector">
       <label>Add to:</label>
       <select value={selectedPlayerId} onChange={e => setSelectedPlayerId(e.target.value)}>
@@ -1315,7 +1319,7 @@ function WizardModal({ onClose, roster, onAddSong }) {
 
         {tab === 'search' && (
           <div className="announcer-wizard-body">
-            <PlayerSelector />
+            {playerSelector}
             <form onSubmit={handleSearch} className="announcer-wizard-search-form">
               <input
                 className="announcer-song-input"
@@ -1423,7 +1427,7 @@ function WizardModal({ onClose, roster, onAddSong }) {
               </div>
             ) : (
               <>
-                <PlayerSelector />
+                {playerSelector}
                 <form onSubmit={handleSpotifySearch} className="announcer-wizard-search-form">
                   <input
                     className="announcer-song-input"
@@ -1583,6 +1587,7 @@ export default function Announcer({ lineups }) {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchRoster();
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [fetchRoster]);
