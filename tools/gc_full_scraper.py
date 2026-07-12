@@ -64,6 +64,10 @@ from gc_scraper import (
     is_auth_on_cooldown,
     set_auth_cooldown,
     clear_auth_cooldown,
+    login_budget_exhausted,
+    record_login_email_submit,
+    gc_code_baseline_uid,
+    fetch_emailed_gc_code,
 )
 
 SOURCE_TAG = "gc_full_scraper_v2"
@@ -198,6 +202,13 @@ class GCFullScraper:
         return "UNKNOWN"
 
     def _do_login_flow(self) -> None:
+        if login_budget_exhausted():
+            raise RuntimeError(
+                "[GCFull] Verification-email budget exhausted — refusing login. "
+                "Cooldown set."
+            )
+        baseline_uid = gc_code_baseline_uid()
+        record_login_email_submit()
         _log("Entering credentials...")
         try:
             email_field = self._page.locator('input[type="email"], input[name="email"]').first
@@ -231,11 +242,17 @@ class GCFullScraper:
                 # If running non-interactively, read from GC_2FA_CODE env var
                 otp = os.getenv("GC_2FA_CODE", "").strip()
                 if not otp:
+                    # Read the emailed code from Gmail (same mechanism autopull uses)
+                    otp = fetch_emailed_gc_code(baseline_uid)
+                    if otp:
+                        _log(f"[2FA] Fetched emailed code from Gmail: {otp[:2]}****")
+                if not otp:
                     # In daemon mode, set cooldown and abort instead of blocking
                     if os.getenv("SYNC_DAEMON_MODE", "").strip():
-                        set_auth_cooldown("2FA required in GCFull but no GC_2FA_CODE set (daemon mode)")
+                        set_auth_cooldown("2FA required in GCFull — no emailed code readable "
+                                          "(set GMAIL_USERNAME/GMAIL_APP_PASSWORD)")
                         raise RuntimeError("[GCFull] 2FA required — cooldown activated. "
-                                           "Set GC_2FA_CODE or run save_session.py interactively.")
+                                           "Set GMAIL_USERNAME/GMAIL_APP_PASSWORD or GC_2FA_CODE.")
                     _log("[2FA] Enter the code (or set GC_2FA_CODE env var):")
                     try:
                         otp = input("[2FA] Code: ").strip()

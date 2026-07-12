@@ -16,6 +16,7 @@ import argparse
 import json
 import os
 import re
+import time
 from pathlib import Path
 from datetime import datetime
 from typing import Any
@@ -99,6 +100,116 @@ def is_auth_on_cooldown() -> bool:
     except Exception:
         pass
     return False
+
+
+# ---------- Global login budget + emailed-code reader ---------- #
+# Every submission of GC's login email form triggers a verification-code
+# email to the account owner. These guards are shared by ALL login engines
+# (gc_scraper, gc_full_scraper, autopull) across every process/container —
+# the state files live in data/, which the sync and API containers and the
+# systemd autopull unit all share.
+
+GC_LOGIN_EMAIL_BUDGET = int(os.getenv("GC_LOGIN_EMAIL_BUDGET", "3"))
+GC_LOGIN_EMAIL_WINDOW_HOURS = float(os.getenv("GC_LOGIN_EMAIL_WINDOW_HOURS", "24"))
+_LOGIN_ATTEMPTS_FILE = Path(
+    os.getenv("GC_LOGIN_ATTEMPTS_FILE", str(DATA_DIR / ".gc_login_attempts.json"))
+)
+
+
+def _recent_login_submits() -> list[datetime]:
+    try:
+        stamps = json.loads(_LOGIN_ATTEMPTS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    cutoff = datetime.now(ET).timestamp() - GC_LOGIN_EMAIL_WINDOW_HOURS * 3600
+    out = []
+    for s in stamps:
+        try:
+            dt = datetime.fromisoformat(s)
+            if dt.timestamp() >= cutoff:
+                out.append(dt)
+        except Exception:
+            continue
+    return out
+
+
+def record_login_email_submit() -> None:
+    """Call immediately before submitting GC's login email form."""
+    stamps = [dt.isoformat() for dt in _recent_login_submits()]
+    stamps.append(datetime.now(ET).isoformat())
+    try:
+        _LOGIN_ATTEMPTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _LOGIN_ATTEMPTS_FILE.write_text(json.dumps(stamps), encoding="utf-8")
+    except Exception as e:
+        print(f"[GC] [WARN] Could not record login attempt: {e}")
+
+
+def login_budget_exhausted() -> bool:
+    """True if the 24h verification-email budget is spent. Sets a cooldown so
+    every other engine backs off too."""
+    recent = _recent_login_submits()
+    if len(recent) >= GC_LOGIN_EMAIL_BUDGET:
+        set_auth_cooldown(
+            f"login email budget exhausted ({len(recent)} submits in "
+            f"{GC_LOGIN_EMAIL_WINDOW_HOURS:.0f}h, budget={GC_LOGIN_EMAIL_BUDGET})"
+        )
+        return True
+    return False
+
+
+def _gmail_2fa_module():
+    try:
+        from tools.autopull import gmail_2fa_fetcher as g2fa
+    except ImportError:  # tools/ itself on sys.path (daemon-style imports)
+        from autopull import gmail_2fa_fetcher as g2fa
+    return g2fa
+
+
+def gc_code_baseline_uid() -> int:
+    """Highest existing GC-sender UID in the inbox; codes with UID above this
+    belong to the login attempt about to happen. 0 if Gmail unavailable."""
+    username = os.getenv("GMAIL_USERNAME", "").strip()
+    app_password = os.getenv("GMAIL_APP_PASSWORD", "").strip()
+    if not (username and app_password):
+        return 0
+    try:
+        g2fa = _gmail_2fa_module()
+        client = g2fa.build_client(username=username, app_password=app_password)
+        return g2fa.current_max_uid(client)
+    except Exception as e:
+        print(f"[GC] [WARN] Could not read 2FA baseline UID: {e}")
+        return 0
+
+
+def fetch_emailed_gc_code(baseline_uid: int = 0, *, max_attempts: int = 12,
+                          sleep_seconds: int = 10) -> str | None:
+    """Poll Gmail (IMAP) for the verification code GC just emailed.
+
+    Returns the 6-digit code, or None when Gmail creds are absent or no new
+    code arrives within the poll window.
+    """
+    username = os.getenv("GMAIL_USERNAME", "").strip()
+    app_password = os.getenv("GMAIL_APP_PASSWORD", "").strip()
+    if not (username and app_password):
+        return None
+    try:
+        g2fa = _gmail_2fa_module()
+        client = g2fa.build_client(username=username, app_password=app_password)
+    except Exception as e:
+        print(f"[GC] [WARN] Gmail 2FA client unavailable: {e}")
+        return None
+    for attempt in range(max_attempts):
+        try:
+            code, _uid = g2fa.fetch_latest_code(client, min_uid=baseline_uid)
+        except Exception as e:
+            print(f"[GC] [WARN] Gmail 2FA poll failed: {e}")
+            return None
+        if code:
+            return code
+        if attempt < max_attempts - 1:
+            time.sleep(sleep_seconds)
+    return None
+
 
 # ---------- Column mappings for each stat category ---------- #
 # Maps raw GC column header -> clean JSON key name
@@ -300,6 +411,15 @@ class GameChangerScraper:
 
     def _complete_login_flow(self):
         """Handle current GC login UX (email step -> password step -> optional OTP)."""
+        if login_budget_exhausted():
+            raise RuntimeError(
+                "[GC] Verification-email budget exhausted — refusing login to "
+                "protect the GC account inbox. Cooldown set."
+            )
+        # Baseline BEFORE the email submit so the OTP handler only accepts a
+        # code emailed for THIS attempt.
+        self._otp_baseline_uid = gc_code_baseline_uid()
+        record_login_email_submit()
         print("[GC] Entering credentials...")
 
         try:
@@ -381,14 +501,31 @@ class GameChangerScraper:
             print("[GC] [OK] TOTP submitted.")
             return
 
-        # Strategy 2: Headless without TOTP — fail clearly
+        # Strategy 2: Read the emailed code from Gmail (GC's actual 2FA is an
+        # emailed 6-digit code — this is what lets headless logins SUCCEED
+        # instead of dripping unanswered verification emails forever).
+        emailed_code = fetch_emailed_gc_code(getattr(self, "_otp_baseline_uid", 0))
+        if emailed_code:
+            print(f"[GC] Fetched emailed 2FA code from Gmail: {emailed_code[:2]}****")
+            otp_field.fill(emailed_code)
+            submit_btn = self.page.get_by_role("button", name=re.compile("Verify|Continue|Submit|Confirm", re.I)).first
+            if submit_btn.count() > 0:
+                submit_btn.click()
+            else:
+                otp_field.press("Enter")
+            self.page.wait_for_load_state("networkidle", timeout=30000)
+            print("[GC] [OK] Emailed 2FA code submitted.")
+            return
+
+        # Strategy 3: Headless without any code source — fail clearly
         is_headless = GC_HEADLESS or os.getenv("SYNC_DAEMON_MODE", "").strip()
         if is_headless:
-            set_auth_cooldown("2FA code required — set GC_TOTP_SECRET or GC_SESSION_COOKIES")
+            set_auth_cooldown("2FA code required — set GMAIL_USERNAME/GMAIL_APP_PASSWORD, "
+                              "GC_TOTP_SECRET, or GC_SESSION_COOKIES")
             raise RuntimeError(
-                "[GC] 2FA/OTP required but no GC_TOTP_SECRET set. "
-                "Add GC_TOTP_SECRET to Modal secrets at "
-                "modal.com/secrets/anchorgroupops/main/softball-sharks-auth"
+                "[GC] 2FA/OTP required but no code source available. "
+                "Set GMAIL_USERNAME + GMAIL_APP_PASSWORD so the emailed code "
+                "can be read automatically."
             )
 
         # Strategy 3: Interactive mode — wait for manual entry
@@ -547,10 +684,15 @@ class GameChangerScraper:
         print(f"[GC] Authenticated. Current URL: {self.page.url}")
         clear_auth_cooldown()
 
-        # Save session for next time (even if using persistent context, helps on Modal)
-        if not context_dir:
+        # Save session for next time. Always write auth.json — even with a
+        # persistent context dir — so GCFullScraper/gc_csv_auto/autopull can
+        # restore this same session instead of logging in (and triggering a
+        # verification email) on their own.
+        try:
             self.context.storage_state(path=str(auth_file))
             print(f"[GC] Session state saved to {auth_file.name}")
+        except Exception as e:
+            print(f"[GC] [WARN] Could not save session state: {e}")
 
         return self.page
 
