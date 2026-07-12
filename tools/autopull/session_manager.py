@@ -236,7 +236,24 @@ class SessionManager:
         return page, refreshed
 
     def _submit_email(self, page: Any) -> None:
-        """Step 1 of GC login: fill email, click Continue."""
+        """Step 1 of GC login: fill email, click Continue.
+
+        Submitting this form makes GC email a verification code, so it is
+        gated by the global login budget shared with the daemon scrapers.
+        """
+        try:
+            from tools.gc_scraper import (
+                login_budget_exhausted, record_login_email_submit,
+            )
+        except Exception:  # keep autopull usable if gc_scraper import breaks
+            login_budget_exhausted = lambda: False
+            record_login_email_submit = lambda: None
+        if login_budget_exhausted():
+            raise SessionError(
+                "Verification-email budget exhausted — refusing login to "
+                "protect the GC account inbox."
+            )
+        record_login_email_submit()
         for sel in ("input[type='email']", "input[name='email']",
                     "input[autocomplete='username']"):
             loc = page.locator(sel).first

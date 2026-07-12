@@ -1141,15 +1141,18 @@ def run_sync_cycle():
         except Exception as e:
             logging.warning(f"[Sync] Opponent discovery skipped: {e}")
         
-        # Check auth cooldown — if GC login recently failed (2FA required),
-        # skip all authenticated scrapers to avoid flooding the GC account with codes.
-        _auth_available = not is_auth_on_cooldown()
-        if not _auth_available:
-            logging.warning("[Sync] Auth on cooldown — skipping all authenticated GC scrapers this cycle.")
+        # Auth cooldown gate — re-checked before EVERY authenticated stage, so
+        # a cooldown set mid-cycle (e.g. the schedule scraper hit 2FA) stops
+        # the remaining stages from also triggering verification emails.
+        def _auth_ok() -> bool:
+            if is_auth_on_cooldown():
+                logging.warning("[Sync] Auth on cooldown — skipping authenticated GC scraper stage.")
+                return False
+            return True
 
         # 1. Scrape Schedule (requires auth)
         _set_sync_stage("scraping_schedule")
-        if _auth_available:
+        if _auth_ok():
             logging.info("Scraping Schedule...")
             try:
                 sched_scraper = ScheduleScraper()
@@ -1182,7 +1185,7 @@ def run_sync_cycle():
         
         # 2. Scrape Stats (requires auth)
         _set_sync_stage("scraping_stats")
-        if _auth_available:
+        if _auth_ok():
             logging.info("Scraping Live Stats...")
             try:
                 from playwright.sync_api import sync_playwright
@@ -1272,7 +1275,7 @@ def run_sync_cycle():
             logging.warning(f"[Sync] Practice planner skipped: {e}")
 
         # Full-depth GC scrape: all stat tabs, both teams, every game (requires auth).
-        if _auth_available:
+        if _auth_ok():
             try:
                 from gc_full_scraper import GCFullScraper
                 full_scraper = GCFullScraper()
@@ -1287,8 +1290,11 @@ def run_sync_cycle():
             except Exception as e:
                 logging.warning(f"[Sync] gc_full_scraper skipped: {e}")
 
-            # Automated CSV download + ingest (requires auth).
+            # Automated CSV download + ingest (requires auth). Re-check the
+            # cooldown in case the full scrape just tripped it.
             try:
+                if not _auth_ok():
+                    raise RuntimeError("auth cooldown set during this cycle")
                 from gc_csv_auto import run_auto_csv
                 csv_result = run_auto_csv(headless=True, skip_ingest=False)
                 logging.info(

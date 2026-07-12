@@ -6,6 +6,7 @@ Fixture scope conventions:
 """
 from __future__ import annotations
 
+import importlib
 import os
 import sys
 from pathlib import Path
@@ -15,6 +16,26 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(REPO_ROOT / "tools"))
+
+
+@pytest.fixture(autouse=True)
+def _isolate_gc_login_state(tmp_path, monkeypatch):
+    """Keep the shared GC login-budget/cooldown files out of the real data/
+    dir so tests never rate-limit each other (or leave state behind)."""
+    # tools/ is importable both as `gc_scraper` and `tools.gc_scraper`;
+    # patch every loaded instance so no code path hits the real files.
+    modules = []
+    for name in ("gc_scraper", "tools.gc_scraper"):
+        try:
+            modules.append(importlib.import_module(name))
+        except Exception:
+            continue
+    for mod in modules:
+        monkeypatch.setattr(mod, "_LOGIN_ATTEMPTS_FILE",
+                            tmp_path / ".gc_login_attempts.json")
+        monkeypatch.setattr(mod, "_AUTH_COOLDOWN_FILE",
+                            tmp_path / ".auth_cooldown")
+    yield
 
 
 @pytest.fixture

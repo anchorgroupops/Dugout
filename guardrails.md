@@ -50,6 +50,13 @@ cp -r /tmp/skills-tmp/skills/* ~/.gemini/antigravity/skills/
 
 ---
 
+## SIGN-007: Multiple GC Login Engines Cause 2FA Email Storms
+**Symptom:** GC account inbox flooded with verification-code emails; scrapers log `2FA required` + cooldown cycles.
+**Fix:** All GC logins must (1) reuse the shared session store `data/auth.json`, (2) read the emailed code via `fetch_emailed_gc_code()` (`tools/gc_scraper.py`, needs `GMAIL_USERNAME`/`GMAIL_APP_PASSWORD`), and (3) pass `login_budget_exhausted()` before submitting the login email form. Never add a new login flow — reuse `GameChangerScraper.login` or `tools/autopull/session_manager.SessionManager`.
+**Ref:** PR #126 follow-up, session 2026-07-11
+
+---
+
 ## Adding a New SIGN
 
 When a new failure pattern is confirmed (not hypothetical):

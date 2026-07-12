@@ -165,8 +165,14 @@ class SharedGCSession:
             gmail_fetcher = lambda min_uid=0: g2fa.fetch_latest_code(
                 gmail_client, min_uid=min_uid,
             )
+            # Canonical session store shared with the daemon scrapers
+            # (gc_scraper / gc_full_scraper) so one login serves everything.
+            auth_file = cfg.data_root / "auth.json"
+            legacy = cfg.data_root / "autopull" / "gc_session.json"
+            if not auth_file.exists() and legacy.exists():
+                auth_file = legacy
             session = sm.SessionManager(
-                auth_file=cfg.data_root / "autopull" / "gc_session.json",
+                auth_file=auth_file,
                 email=os.getenv("GC_EMAIL", ""),
                 password=os.getenv("GC_PASSWORD", ""),
                 gmail_fetcher=gmail_fetcher,
