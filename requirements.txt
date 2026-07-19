@@ -14,7 +14,7 @@ pdfplumber>=0.11.10,<1
 Pillow>=10.0,<13
 
 # AI / vector APIs
-google-generativeai>=0.8,<1
+google-generativeai>=0.8.6,<1
 pinecone>=8.1.2,<9
 
 # FastAPI (used by modal_app.py)
