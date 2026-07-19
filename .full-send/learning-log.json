@@ -1,0 +1,16 @@
+{
+  "project": "dugout-portal",
+  "runs": [],
+  "patterns": {
+    "recurring_issues": [],
+    "project_quirks": [
+      "Next.js 16 App Router (not Pages Router)",
+      "Supabase RLS is enforced — never use service-role key in client code",
+      "n8n webhooks on Pi 5 must degrade gracefully (Cloudflare Tunnel can drop)",
+      "Brand palette: #157676 / #89ced1 / #ffffff — no other accent colours",
+      "GitOps: never push to main without human approval"
+    ],
+    "fragile_files": [],
+    "failed_fixes": []
+  }
+}
