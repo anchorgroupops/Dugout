@@ -18,7 +18,7 @@ google-generativeai>=0.8.6,<1
 pinecone>=8.1.2,<9
 
 # FastAPI (used by modal_app.py)
-fastapi[standard]>=0.110,<1
+fastapi[standard]>=0.140.0,<1
 uvicorn>=0.47.0,<1
 
 # Utilities
