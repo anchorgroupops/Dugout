@@ -5,4 +5,4 @@ structlog>=25.0,<26
 
 pytest>=9.0.3,<10
 pytest-cov>=7.1.0,<8
-hypothesis>=6.163.0,<7
+hypothesis>=6.165.1,<7
