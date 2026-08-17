@@ -15,7 +15,7 @@ Pillow>=12.3.0,<13
 
 # AI / vector APIs
 google-generativeai>=0.8.6,<1
-pinecone>=8.1.2,<9
+pinecone>=9.1.0,<10
 
 # FastAPI (used by modal_app.py)
 fastapi[standard]>=0.141.1,<1
