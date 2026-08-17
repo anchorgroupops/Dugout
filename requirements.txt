@@ -23,7 +23,7 @@ uvicorn>=0.52.1,<1
 
 # Utilities
 python-dotenv>=1.2.2,<2
-pyotp>=2.9,<3
+pyotp>=2.10.0,<3
 tzdata>=2026.3
 
 # GC CSV autopull — Gmail OAuth (2FA code read + notification send)
