@@ -1,7 +1,7 @@
 -r requirements.txt
 
 # api.py uses structlog for JSON logging; missing in requirements.txt
-structlog>=25.0,<26
+structlog>=26.1.0,<27
 
 pytest>=9.0.3,<10
 pytest-cov>=7.1.0,<8
