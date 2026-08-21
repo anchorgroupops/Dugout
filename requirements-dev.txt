@@ -3,6 +3,6 @@
 # api.py uses structlog for JSON logging; missing in requirements.txt
 structlog>=25.0,<26
 
-pytest>=9.0.3,<10
+pytest>=9.1.1,<10
 pytest-cov>=7.1.0,<8
 hypothesis>=6.165.1,<7
