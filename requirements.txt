@@ -22,7 +22,7 @@ fastapi[standard]>=0.141.1,<1
 uvicorn>=0.52.1,<1
 
 # Utilities
-python-dotenv>=1.2.2,<2
+python-dotenv>=1.2.3,<2
 pyotp>=2.10.0,<3
 tzdata>=2026.3
 
