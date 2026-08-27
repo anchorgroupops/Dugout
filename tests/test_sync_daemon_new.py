@@ -9977,10 +9977,24 @@ class TestRunSyncCycle:
         # Don't create team.json and don't patch the file read → it'll fail
         # but all individual steps are in try/except, so the fatal outer except
         # would have to be triggered by something else
+        # The cooldown check only runs when live scraping is enabled (SIGN-008).
+        monkeypatch.setattr(sd, "GC_LIVE_SCRAPE_ENABLED", True)
         monkeypatch.setattr(sd, "is_auth_on_cooldown", MagicMock(side_effect=RuntimeError("fatal error")))
         monkeypatch.setattr(sd, "send_alert", MagicMock())
         result = sd.run_sync_cycle()
         assert result is False
+
+    def test_run_sync_cycle_live_scrape_disabled_never_touches_gc_auth(self, monkeypatch, tmp_path):
+        """SIGN-008: with GC_LIVE_SCRAPE_ENABLED off (the default) no authenticated
+        scraper stage runs, so the cooldown check — and any GC login — is never reached."""
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(sd, "GC_LIVE_SCRAPE_ENABLED", False)
+        cooldown = MagicMock(side_effect=RuntimeError("must not be called"))
+        monkeypatch.setattr(sd, "is_auth_on_cooldown", cooldown)
+        monkeypatch.setattr(sd, "send_alert", MagicMock())
+        result = sd.run_sync_cycle()
+        assert result is True
+        cooldown.assert_not_called()
 
 
 # ===========================================================================
