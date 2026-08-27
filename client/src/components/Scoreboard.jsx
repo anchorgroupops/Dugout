@@ -695,7 +695,7 @@ const LiveScoreboardPanel = ({ data, isMobile, isLandscape, fetchScoreboard, las
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
           {data.gc_game_id && (
             <a
-              href={`https://web.gc.com/teams/${team?.gc_team_id || 'NuGgx6WvP7TO'}/${team?.gc_season_slug || '2026-spring-sharks'}/schedule/${data.gc_game_id}/plays`}
+              href={`https://web.gc.com/teams/${team?.gc_team_id || 'LFdMZvC8bLpr'}/${team?.gc_season_slug || team?.season || '2026-fall-sharks'}/schedule/${data.gc_game_id}/plays`}
               target="_blank" rel="noopener noreferrer"
               style={{ display: 'flex', alignItems: 'center', gap: 3, background: 'rgba(4,101,104,0.2)', color: '#82CBC3', border: '1px solid rgba(4,101,104,0.3)', padding: '4px 10px', borderRadius: 6, fontSize: '0.65rem', fontWeight: 600, textDecoration: 'none' }}
             ><ExternalLink size={10} /> GC</a>
@@ -1027,7 +1027,7 @@ const Scoreboard = ({ isMobile = false, isLandscape = false, team, schedule }) =
           </button>
           {data.gc_game_id && (
             <a
-              href={`https://web.gc.com/teams/${team?.gc_team_id || 'NuGgx6WvP7TO'}/${team?.gc_season_slug || '2026-spring-sharks'}/schedule/${data.gc_game_id}/plays`}
+              href={`https://web.gc.com/teams/${team?.gc_team_id || 'LFdMZvC8bLpr'}/${team?.gc_season_slug || team?.season || '2026-fall-sharks'}/schedule/${data.gc_game_id}/plays`}
               target="_blank"
               rel="noopener noreferrer"
               style={{
