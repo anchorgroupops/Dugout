@@ -25,7 +25,8 @@ const filesToSync = [
   'team_merged.json',
   'swot_analysis.json',
   'lineups.json',
-  'practice_insights.json'
+  'practice_insights.json',
+  'evals.json'
 ];
 
 console.log('Syncing GameChanger data to client/public/data...');

@@ -4213,6 +4213,59 @@ def handle_practice():
     return handle_practice_insights()
 
 
+@app.route('/api/evals', methods=['GET', 'POST'])
+def handle_evals():
+    """Preseason player-eval drills, record log, and position-fit rankings.
+
+    GET  → drill library + logged records + computed fits (also persists a
+           static fallback to data/sharks/evals.json for nginx / the PWA).
+    POST → full-replace the record log: {"records": [...]} (same pattern as
+           /api/availability), then return the recomputed payload.
+    """
+    try:
+        import eval_engine
+
+        records_path = SHARKS_DIR / "eval_records.json"
+
+        if request.method == "POST":
+            blocked = _guard_mutating_request()
+            if blocked:
+                return blocked
+            body = request.get_json(silent=True) or {}
+            if not isinstance(body, dict):
+                return jsonify({"error": "invalid_body"}), 400
+            records, errors = eval_engine.sanitize_records(body.get("records"))
+            if errors:
+                return jsonify({"error": "invalid_records", "details": errors[:10]}), 400
+            _write_json_file(records_path, records)
+        else:
+            records, _ = eval_engine.sanitize_records(_read_json_file(records_path, default=[]))
+
+        team_file = SHARKS_DIR / "team_enriched.json"
+        if not team_file.exists():
+            team_file = SHARKS_DIR / ("team_merged.json" if (SHARKS_DIR / "team_merged.json").exists() else "team.json")
+        team = _read_json_file(team_file, default={}) or {}
+        if not isinstance(team, dict):
+            team = {}
+        team["team_name"] = _canonical_team_name(team.get("team_name", "The Sharks"), "sharks")
+
+        payload = eval_engine.build_eval_payload(
+            team, records, generated_at=datetime.now(ET).isoformat()
+        )
+        # Persist a static fallback so nginx serves the last-known-good eval
+        # board when this process is rate-limited or down (mirrors
+        # practice_insights.json). POST already changed state, so persist on
+        # both methods.
+        try:
+            _write_json_file(SHARKS_DIR / "evals.json", payload)
+        except Exception as _we:
+            logging.warning("[Evals] static cache write failed: %s", _we)
+        return jsonify(payload)
+    except Exception as e:
+        logging.error(f"[Evals] Unhandled error: {e}")
+        return jsonify({"error": "evals_failed"}), 500
+
+
 @app.route('/api/stats-db/status', methods=['GET'])
 def handle_stats_db_status():
     """Return snapshot DB status for operational visibility."""

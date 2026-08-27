@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Users, Activity, RefreshCw, ListOrdered, Calendar, Trophy, Dumbbell, Volume2, Target, AlertTriangle, MoreHorizontal, Download, Globe, GlobeLock, Clock, Radio, Mic } from 'lucide-react';
+import { Users, Activity, RefreshCw, ListOrdered, Calendar, Trophy, Dumbbell, Volume2, Target, AlertTriangle, MoreHorizontal, Download, Globe, GlobeLock, Clock, Radio, Mic, ClipboardList } from 'lucide-react';
 import { formatDateTime, formatRelative } from './utils/formatDate';
 import { usePWAInstall } from './utils/usePWAInstall';
 import { useOnlineStatus } from './utils/useOnlineStatus';
@@ -15,6 +15,7 @@ const League = lazyWithRetry(() => import('./components/League'));
 const Practice = lazyWithRetry(() => import('./components/Practice'));
 const Scouting = lazyWithRetry(() => import('./components/Scouting'));
 const Announcer = lazyWithRetry(() => import('./components/Announcer'));
+const Evals = lazyWithRetry(() => import('./components/Evals'));
 
 
 function SyncProgressBar({ progress, stage, milestones }) {
@@ -485,6 +486,7 @@ function App() {
     { id: 'games', label: 'Games', icon: <Calendar size={18} /> },
     { id: 'league', label: 'League', icon: <Trophy size={18} /> },
     { id: 'practice', label: 'Practice', icon: <Dumbbell size={18} /> },
+    { id: 'evals', label: 'Eval', icon: <ClipboardList size={18} /> },
     { id: 'announcer', label: 'Announcer', icon: <Mic size={18} /> },
   ];
 
@@ -502,6 +504,7 @@ function App() {
     { id: 'lineups', label: 'Lineups', icon: <ListOrdered size={20} /> },
     { id: 'games', label: 'Games', icon: <Calendar size={20} /> },
     { id: 'league', label: 'League', icon: <Trophy size={20} /> },
+    { id: 'evals', label: 'Eval', icon: <ClipboardList size={20} /> },
   ];
 
   const renderContent = () => {
@@ -545,6 +548,9 @@ function App() {
       case 'announcer': return (
         <Announcer lineups={data.lineups} />
       );
+      case 'evals': return (
+        <Evals team={data.team} isMobile={isMobile} isLandscape={isLandscape} />
+      );
       default: return (
         <Roster
           team={data.team}
@@ -571,7 +577,7 @@ function App() {
               <img src="/sharks-logo-round.png" alt="Sharks" className="logo-avatar" />
               <span className="brand" style={{ fontSize: '1.125rem' }}>
                 {(() => {
-                  const labels = { scoreboard: 'Live', scout: 'Scout', swot: 'SWOT', lineups: 'Lineups', practice: 'Practice', roster: 'Roster', games: 'Games', league: 'League', announcer: 'Announcer' };
+                  const labels = { scoreboard: 'Live', scout: 'Scout', swot: 'SWOT', lineups: 'Lineups', practice: 'Practice', roster: 'Roster', games: 'Games', league: 'League', announcer: 'Announcer', evals: 'Eval' };
                   return labels[currentView] || 'Sharks';
                 })()}
               </span>
