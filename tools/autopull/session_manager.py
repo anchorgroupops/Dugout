@@ -60,6 +60,27 @@ def is_2fa_page(page: Any) -> bool:
     return False
 
 
+def is_authenticated(page: Any) -> bool:
+    """True only when GC's header no longer offers "Sign In".
+
+    GC serves the same team URLs to anonymous visitors (public "download the
+    app" view), so "not on the login form" is NOT proof of a live session —
+    a dead storage_state used to pass the probe and then fail downstream with
+    "No strategy located the CSV export button".
+    """
+    def _count(sel: str) -> int:
+        try:
+            n = page.locator(sel).count()
+            return n if isinstance(n, int) else 0
+        except Exception:
+            return 0
+    if _count("input[type='password'], input[type='email']") > 0:
+        return False
+    # Header "Sign In" control (button or link) only renders for anonymous
+    # visitors; the login form's own submit is excluded by the check above.
+    return _count("button:has-text('Sign In'), a:has-text('Sign In')") == 0
+
+
 def _has_password_input(page: Any) -> bool:
     try:
         return page.locator("input[type='password']").count() > 0
@@ -153,7 +174,7 @@ class SessionManager:
         if "storage_state" in ctx_kwargs:
             page.goto(GC_BASE, wait_until="domcontentloaded", timeout=60_000)
             page.wait_for_load_state("networkidle", timeout=30_000)
-            if not is_login_page(page):
+            if not is_login_page(page) and is_authenticated(page):
                 log.info("Reused saved GC session from %s — no login needed",
                          self.auth_file)
                 return page, False
@@ -224,7 +245,7 @@ class SessionManager:
             page.wait_for_load_state("networkidle", timeout=30_000)
             page.wait_for_timeout(3_000)
 
-        if is_login_page(page) or is_2fa_page(page):
+        if is_login_page(page) or is_2fa_page(page) or not is_authenticated(page):
             # Dump diagnostics for post-mortem
             try:
                 from pathlib import Path
@@ -239,8 +260,9 @@ class SessionManager:
             except Exception as e:
                 log.warning("Diagnostic capture failed: %s", e)
             raise SessionError(
-                f"Still on login/2FA page after credential + code submission "
-                f"(url={page.url})"
+                f"Still on login/2FA page or not authenticated after credential "
+                f"submission (url={page.url}, login_form={is_login_page(page)}, "
+                f"2fa_form={is_2fa_page(page)})"
             )
 
         if refreshed:
