@@ -38,10 +38,18 @@ export function lazyWithRetry(factory) {
       const now = Date.now();
       if (now - last > RELOAD_COOLDOWN_MS) {
         window.sessionStorage.setItem(RELOAD_FLAG, String(now));
+        // A stale service worker keeps serving the precached OLD index.html
+        // (whose chunk hashes are gone from the server after a deploy), so
+        // r.update() + reload just fails again. Drop the SW and every cache;
+        // the next load fetches a fresh index.html and re-registers the SW.
         try {
           if ('serviceWorker' in navigator) {
             const regs = await navigator.serviceWorker.getRegistrations();
-            await Promise.all(regs.map(r => r.update().catch(() => {})));
+            await Promise.all(regs.map(r => r.unregister().catch(() => {})));
+          }
+          if (typeof caches !== 'undefined') {
+            const keys = await caches.keys();
+            await Promise.all(keys.map(k => caches.delete(k).catch(() => {})));
           }
         } catch { /* ignore */ }
         window.location.reload();

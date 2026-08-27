@@ -72,26 +72,13 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  notify-deploy:
-    runs-on: ubuntu-latest
-    needs: [build-dashboard, build-api]
-    if: success()
-    steps:
-      - name: Trigger deploy webhook (best-effort)
-        continue-on-error: true
-        run: |
-          curl -sf -X POST \
-            -H "Authorization: Bearer ${{ secrets.DEPLOY_WEBHOOK_TOKEN }}" \
-            -H "Content-Type: application/json" \
-            https://dugout.joelycannoli.com/api/deploy \
-            --max-time 15
-        # Best-effort because Cloudflare bot-fight rejects the GH Actions curl before
-        # it reaches the Pi. Watchtower (WATCHTOWER_POLL_INTERVAL=300) picks up the
-        # new image within 5 min regardless, and verify-deploy below is the real gate.
-
   verify-deploy:
     runs-on: ubuntu-latest
-    needs: [notify-deploy]
+    # Deploy is Watchtower-only. The old notify-deploy webhook made sharks_api
+    # SSH to the host and `docker compose up -d`, which stopped its own
+    # container mid-recreate and left sharks_api/sharks_sync in `Created`
+    # (never started) — a 502 outage until someone ran `docker start`.
+    needs: [build-dashboard, build-api]
     if: success()
     steps:
       - name: Health check dugout.joelycannoli.com

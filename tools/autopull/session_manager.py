@@ -60,6 +60,13 @@ def is_2fa_page(page: Any) -> bool:
     return False
 
 
+def _has_password_input(page: Any) -> bool:
+    try:
+        return page.locator("input[type='password']").count() > 0
+    except Exception:
+        return False
+
+
 def submit_2fa_code(page: Any, code: str) -> None:
     for sel in ("input[name='code']", "input[autocomplete='one-time-code']"):
         try:
@@ -206,6 +213,12 @@ class SessionManager:
                      mid, pre_submit_uid)
             self._submit_code_and_password(page, code)
             refreshed = True
+        elif _has_password_input(page):
+            # GC recognised this device (cookie in the saved storage_state):
+            # step 2 is password-only, no code and no verification email.
+            log.info("GC password-only step (device remembered) — no 2FA code needed")
+            self._submit_code_and_password(page, None)
+            refreshed = True
             # GC's SPA can take a moment to navigate away after submit; give it
             # a few seconds in addition to networkidle.
             page.wait_for_load_state("networkidle", timeout=30_000)
@@ -282,19 +295,21 @@ class SessionManager:
         # Last resort: submit by pressing Enter in the email field
         loc.press("Enter")
 
-    def _submit_code_and_password(self, page: Any, code: str) -> None:
-        """Step 2 of GC login: fill 2FA code + password, click Sign in."""
-        # Fill the 2FA code
-        for sel in ("input[name='code']", "input[placeholder*='ode']",
-                    "input[aria-label*='ode']",
-                    "input[autocomplete='one-time-code']",
-                    "input[inputmode='numeric']"):
-            loc = page.locator(sel).first
-            if loc.count() > 0:
-                loc.fill(code)
-                break
-        else:
-            raise SessionError("Code input not found on 2FA page")
+    def _submit_code_and_password(self, page: Any, code: str | None) -> None:
+        """Step 2 of GC login: fill 2FA code (if GC asked for one) + password,
+        click Sign in. `code=None` means the password-only variant GC shows
+        for a remembered device."""
+        if code is not None:
+            for sel in ("input[name='code']", "input[placeholder*='ode']",
+                        "input[aria-label*='ode']",
+                        "input[autocomplete='one-time-code']",
+                        "input[inputmode='numeric']"):
+                loc = page.locator(sel).first
+                if loc.count() > 0:
+                    loc.fill(code)
+                    break
+            else:
+                raise SessionError("Code input not found on 2FA page")
 
         # Fill the password (GC shows this on the same page as the code)
         for sel in ("input[type='password']", "input[name='password']"):

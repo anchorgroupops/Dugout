@@ -49,6 +49,12 @@ POLL_INTERVAL_LIVE = 90          # 1.5 minutes (90 seconds)
 GAME_DURATION_HOURS = 2.5        # Assumed max length of a softball game
 PREGAME_WINDOW_HOURS = 1.0       # Time before game to enter PREGAME state
 POST_GAME_DEDUP_MINUTES = 30     # Idempotency guard for post-game trigger
+# Kill switch for every authenticated live-page GC scraper in this daemon.
+# Default OFF: the Constitution (gemini.md) makes the CSV export the sole data
+# source and tools/autopull (Gmail 2FA + cookie persistence) the only
+# sanctioned GC login. Each scraper below otherwise hits GC's email-code step,
+# fails, and mails the owner a verification code — 4 per cycle, every 12h.
+GC_LIVE_SCRAPE_ENABLED = os.getenv("GC_LIVE_SCRAPE_ENABLED", "false").strip().lower() in ("1", "true", "yes", "on")
 
 N8N_WEBHOOK_URL = os.getenv("N8N_WEBHOOK_URL", "").strip()
 
@@ -1145,6 +1151,9 @@ def run_sync_cycle():
         # a cooldown set mid-cycle (e.g. the schedule scraper hit 2FA) stops
         # the remaining stages from also triggering verification emails.
         def _auth_ok() -> bool:
+            if not GC_LIVE_SCRAPE_ENABLED:
+                logging.info("[Sync] GC_LIVE_SCRAPE_ENABLED is off — skipping authenticated GC scraper stage (CSV autopull is the data path).")
+                return False
             if is_auth_on_cooldown():
                 logging.warning("[Sync] Auth on cooldown — skipping authenticated GC scraper stage.")
                 return False
@@ -3509,8 +3518,11 @@ def handle_borrowed_player():
         _write_json_file(manifest_file, manifest)
         logging.info(f"Added borrowed player: {first} {last} #{number}")
 
-    # Optionally scrape stats from their home team
-    if gc_team_id:
+    # Optionally scrape stats from their home team (same live-scrape gate as
+    # the sync cycle — this path also triggers a GC verification email).
+    if gc_team_id and not GC_LIVE_SCRAPE_ENABLED:
+        logging.info("Borrowed player stat scrape skipped: GC_LIVE_SCRAPE_ENABLED is off.")
+    elif gc_team_id:
         try:
             threading.Thread(
                 target=_scrape_borrowed_player_stats,
