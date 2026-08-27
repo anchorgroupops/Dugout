@@ -57,6 +57,20 @@ cp -r /tmp/skills-tmp/skills/* ~/.gemini/antigravity/skills/
 
 ---
 
+## SIGN-007: Deploy Webhook Recreates Its Own Container → API Stuck in `Created`
+**Symptom:** After a push to main, `dugout.joelycannoli.com/api/*` returns 502; `docker ps -a` shows `sharks_api`/`sharks_sync` in state `Created` (never started). Watchtower logs look clean.
+**Fix:** Deploy is Watchtower-only. Never call `/api/deploy` (or `scripts/pi-deploy.sh` via SSH from inside a container): `docker compose up -d` stops the calling container mid-recreate and the `start` step never runs. If it happens: `docker compose -f docker-compose.sharks.yml up -d` on the Pi.
+**Ref:** 2026-08-27 council audit (GHA `notify-deploy` job removed)
+
+---
+
+## SIGN-008: Live GC Scrapers Cause a Verification-Code Email Storm
+**Symptom:** Owner receives bursts of 4 "Your GameChanger code is …" emails every 12 h (and on every container restart).
+**Fix:** `sync_daemon` live-page scrapers are gated behind `GC_LIVE_SCRAPE_ENABLED` (default off) — leave it off. The Constitution makes the CSV export the sole data source; `tools/autopull` is the only sanctioned GC login (Gmail 2FA + saved session, password-only step once the device is remembered). Never add another `.login(` path.
+**Ref:** 2026-08-27 council audit
+
+---
+
 ## Adding a New SIGN
 
 When a new failure pattern is confirmed (not hypothetical):

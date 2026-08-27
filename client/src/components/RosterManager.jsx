@@ -33,7 +33,7 @@ const ToggleRow = ({ player, available, onToggle, updating, isMobile = false }) 
         </div>
         <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
           {b.gp != null ? `${b.gp} GP` : ''}
-          {b.avg != null ? ` · .${String(Math.round((b.avg || 0) * 1000)).padStart(3, '0')} AVG` : ''}
+          {b.avg != null ? ` · ${Number(b.avg || 0).toFixed(3).replace(/^0/, '')} AVG` : ''}
           {isSub && <span style={{ color: 'var(--accent-sub)', marginLeft: '0.4rem', fontWeight: '600' }}>SUB</span>}
         </div>
       </div>
