@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { playIntro, playClip, stop as stopAudio, preload, cleanup, detectBPM, calcBeatOffset, loadBuffer } from '../utils/audioController';
 import { usePrebuffer } from '../utils/usePrebuffer';
+import { apiRequest } from '../utils/apiClient';
 import WorkerBadge from './WorkerBadge';
 
 function StatusLed({ status }) {
@@ -147,7 +148,7 @@ function PlayerCard({ player, onSavePhonetics, onRender, onRemove }) {
       const token = await getToken();
       if (!token) return;
       const analysis = await getAudioAnalysis(trackId);
-      const res = await fetch('/api/announcer/optimal-start', {
+      const res = await apiRequest('/api/announcer/optimal-start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ audio_analysis: analysis }),
@@ -166,7 +167,7 @@ function PlayerCard({ player, onSavePhonetics, onRender, onRemove }) {
     if (!url) return;
     setAddingSong(true);
     try {
-      const res = await fetch(`/api/announcer/songs/${player.id}`, {
+      const res = await apiRequest(`/api/announcer/songs/${player.id}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -188,7 +189,7 @@ function PlayerCard({ player, onSavePhonetics, onRender, onRemove }) {
   };
 
   const handleDeleteSong = async (songId) => {
-    const res = await fetch(`/api/announcer/songs/${player.id}/${songId}`, { method: 'DELETE' });
+    const res = await apiRequest(`/api/announcer/songs/${player.id}/${songId}`, { method: 'DELETE' });
     if (res.ok) {
       const data = await res.json();
       setSongs(data.songs || []);
@@ -215,7 +216,7 @@ function PlayerCard({ player, onSavePhonetics, onRender, onRemove }) {
     setDownloadingId(result.video_id);
     try {
       // Download to Pi local storage
-      const dlRes = await fetch('/api/announcer/songs/download', {
+      const dlRes = await apiRequest('/api/announcer/songs/download', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ video_id: result.video_id, title: result.title }),
@@ -224,7 +225,7 @@ function PlayerCard({ player, onSavePhonetics, onRender, onRemove }) {
       const dlData = await dlRes.json();
 
       // Auto-add to this player's walk-up pool
-      const addRes = await fetch(`/api/announcer/songs/${player.id}`, {
+      const addRes = await apiRequest(`/api/announcer/songs/${player.id}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ song_url: dlData.file_url, song_label: result.title }),
@@ -667,7 +668,7 @@ function NowPlayingView({ roster, lineups, onBack }) {
     setGameState(next);
     localStorage.setItem('apex_game_state', JSON.stringify(next));
     try {
-      await fetch('/api/announcer/game-state', {
+      await apiRequest('/api/announcer/game-state', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(next),
@@ -700,7 +701,7 @@ function NowPlayingView({ roster, lineups, onBack }) {
     await pushGameState(newState);
     // Request a fresh render with achievement context
     try {
-      await fetch(`/api/announcer/render/${current.id}`, {
+      await apiRequest(`/api/announcer/render/${current.id}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ game_context: newState }),
@@ -1616,7 +1617,7 @@ export default function Announcer({ lineups }) {
     setRenderAllLoading(true);
     startPolling();
     try {
-      await fetch('/api/announcer/render-all', {
+      await apiRequest('/api/announcer/render-all', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Origin': window.location.origin },
         body: '{}',
@@ -1636,7 +1637,7 @@ export default function Announcer({ lineups }) {
   const handleRender = async (playerId, quality = 'best') => {
     startPolling();
     try {
-      await fetch(`/api/announcer/render/${playerId}`, {
+      await apiRequest(`/api/announcer/render/${playerId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Origin': window.location.origin },
         body: JSON.stringify({ quality }),
@@ -1649,7 +1650,7 @@ export default function Announcer({ lineups }) {
   };
 
   const handleSavePhonetics = async (playerId, data) => {
-    const res = await fetch(`/api/announcer/phonetics/${playerId}`, {
+    const res = await apiRequest(`/api/announcer/phonetics/${playerId}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Origin': window.location.origin },
       body: JSON.stringify(data),
@@ -1667,7 +1668,7 @@ export default function Announcer({ lineups }) {
     try {
       const form = new FormData();
       form.append('file', file);
-      const res = await fetch('/api/announcer/csv-import', {
+      const res = await apiRequest('/api/announcer/csv-import', {
         method: 'POST',
         headers: { 'Origin': window.location.origin },
         body: form,
@@ -1685,7 +1686,7 @@ export default function Announcer({ lineups }) {
   };
 
   const handleAddSongFromWizard = async (playerId, url, label, startMs) => {
-    const res = await fetch(`/api/announcer/songs/${playerId}`, {
+    const res = await apiRequest(`/api/announcer/songs/${playerId}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Origin': window.location.origin },
       body: JSON.stringify({ song_url: url, song_label: label, optimal_start_ms: startMs || 0 }),
@@ -1696,7 +1697,7 @@ export default function Announcer({ lineups }) {
 
   const handleAddSub = async (data) => {
     startPolling();
-    const res = await fetch('/api/announcer/add-sub', {
+    const res = await apiRequest('/api/announcer/add-sub', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Origin': window.location.origin },
       body: JSON.stringify(data),
@@ -1708,7 +1709,7 @@ export default function Announcer({ lineups }) {
 
   const handleRemovePlayer = async (playerId) => {
     try {
-      const res = await fetch(`/api/announcer/player/${playerId}`, {
+      const res = await apiRequest(`/api/announcer/player/${playerId}`, {
         method: 'DELETE',
         headers: { 'Origin': window.location.origin },
       });

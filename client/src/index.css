@@ -1,12 +1,19 @@
-@import '@fontsource/inter/400.css';
-@import '@fontsource/inter/500.css';
-@import '@fontsource/inter/600.css';
-@import '@fontsource/inter/700.css';
-@import '@fontsource/inter/800.css';
-@import '@fontsource/outfit/400.css';
-@import '@fontsource/outfit/600.css';
-@import '@fontsource/outfit/700.css';
-@import '@fontsource/outfit/800.css';
+/* Latin-subset-only imports (dashboard is English-only) — the plain
+   `@fontsource/<family>/<weight>.css` files bundle latin + latin-ext +
+   cyrillic + cyrillic-ext + greek + greek-ext + vietnamese @font-face
+   blocks per weight, all of which the Workbox precache force-downloads
+   on SW install regardless of `unicode-range` (see vite.config.js
+   globPatterns). The `latin-<weight>.css` variants ship a single latin
+   @font-face per weight, cutting precached font weight ~7x. */
+@import '@fontsource/inter/latin-400.css';
+@import '@fontsource/inter/latin-500.css';
+@import '@fontsource/inter/latin-600.css';
+@import '@fontsource/inter/latin-700.css';
+@import '@fontsource/inter/latin-800.css';
+@import '@fontsource/outfit/latin-400.css';
+@import '@fontsource/outfit/latin-600.css';
+@import '@fontsource/outfit/latin-700.css';
+@import '@fontsource/outfit/latin-800.css';
 
 :root {
   --bg-color: #060d1c;

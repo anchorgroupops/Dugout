@@ -8,7 +8,7 @@ import Lineup from './components/Lineup';
 import Scoreboard from './components/Scoreboard';
 import ErrorBoundary from './components/ErrorBoundary';
 import { lazyWithRetry } from './utils/lazyWithRetry';
-import { fetchWithBackoff } from './utils/apiClient';
+import { fetchWithBackoff, apiRequest } from './utils/apiClient';
 const Swot = lazyWithRetry(() => import('./components/Swot'));
 const Games = lazyWithRetry(() => import('./components/Games'));
 const League = lazyWithRetry(() => import('./components/League'));
@@ -387,7 +387,7 @@ function App() {
     setSyncStatusText('Triggering sync...');
     try {
       // 1. Try local sync first
-      let res = await fetch('/api/run', { method: 'POST' }).catch(() => ({ ok: false }));
+      let res = await apiRequest('/api/run', { method: 'POST' }).catch(() => ({ ok: false }));
       
       // 2. Fallback to Modal cloud if local fails (e.g. dev environment vs cloud production)
       if (!res.ok) {
@@ -574,7 +574,7 @@ function App() {
         <nav className="navbar navbar-mobile">
           <div className="mobile-header">
             <div className="mobile-header-left">
-              <img src="/sharks-logo-round.png" alt="Sharks" className="logo-avatar" />
+              <img src="/sharks-logo-round.png" alt="Sharks" className="logo-avatar" width="52" height="52" />
               <span className="brand" style={{ fontSize: '1.125rem' }}>
                 {(() => {
                   const labels = { scoreboard: 'Live', scout: 'Scout', swot: 'SWOT', lineups: 'Lineups', practice: 'Practice', roster: 'Roster', games: 'Games', league: 'League', announcer: 'Announcer', evals: 'Eval' };
@@ -621,7 +621,7 @@ function App() {
       ) : (
         <nav className="navbar">
           <div className="brand">
-            <img src="/sharks-logo-round.png" alt="Sharks" className="logo-avatar" />
+            <img src="/sharks-logo-round.png" alt="Sharks" className="logo-avatar" width="52" height="52" />
             The Sharks
           </div>
           <div className="nav-links">

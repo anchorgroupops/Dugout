@@ -5,6 +5,8 @@
  * Tokens are kept in localStorage under 'spotify_auth'.
  */
 
+import { apiRequest } from '../utils/apiClient';
+
 const CLIENT_ID = import.meta.env.VITE_SPOTIFY_CLIENT_ID || '';
 const REDIRECT_URI = `${window.location.origin}/spotify-callback`;
 const SCOPES = 'user-read-private playlist-read-private';
@@ -72,7 +74,7 @@ export async function handleCallback(code) {
 
   // Persist to Pi via announcer music-auth endpoint
   try {
-    await fetch('/api/announcer/music-auth/spotify', {
+    await apiRequest('/api/announcer/music-auth/spotify', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
