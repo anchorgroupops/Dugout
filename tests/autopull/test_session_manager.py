@@ -687,3 +687,106 @@ def test_submit_code_and_password_no_button_presses_enter(tmp_path):
 
     mgr._submit_code_and_password(page, "555666")
     pwd_loc.press.assert_called_once_with("Enter")
+
+
+# --- SIGN-009: "not authenticated" false negative at url=/teams -------------
+
+def _page_with_counts(counts: dict[str, int], url="https://web.gc.com/teams"):
+    p = FakePage(url=url)
+    for sel, n in counts.items():
+        p._locator_results[sel] = _make_loc(count=n)
+    return p
+
+
+def test_is_authenticated_sign_in_control_means_anonymous():
+    p = _page_with_counts({sm.SIGN_IN_CONTROL_SELECTOR: 1})
+    assert sm.is_authenticated(p) is False
+
+
+def test_is_authenticated_ignores_generic_sign_in_text():
+    """Regression for run #146: the logged-in /teams page can contain a
+    button/link whose text includes "Sign In" — that must not count."""
+    p = _page_with_counts({
+        "button:has-text('Sign In'), a:has-text('Sign In')": 3,
+        sm.SIGN_IN_CONTROL_SELECTOR: 0,
+    })
+    assert sm.is_authenticated(p) is True
+
+
+def test_is_authenticated_login_inputs_win_over_cookie():
+    p = _page_with_counts({sm.LOGIN_INPUT_SELECTOR: 1})
+    p.context = MagicMock()
+    p.context.cookies.return_value = [{"name": "jwt", "value": "tok"}]
+    assert sm.is_authenticated(p) is False
+
+
+def test_is_authenticated_jwt_cookie_overrides_sign_in_control():
+    """A live session cookie is proof even if the header hasn't re-rendered."""
+    p = _page_with_counts({sm.SIGN_IN_CONTROL_SELECTOR: 1})
+    p.context = MagicMock()
+    p.context.cookies.return_value = [{"name": "jwt", "value": "tok"}]
+    assert sm.is_authenticated(p) is True
+
+
+def test_has_auth_cookie_variants():
+    p = FakePage()
+    assert sm.has_auth_cookie(p) is False  # no .context on the fake
+    p.context = MagicMock()
+    p.context.cookies.return_value = [{"name": "jwt", "value": ""}]
+    assert sm.has_auth_cookie(p) is False
+    p.context.cookies.return_value = [{"name": "other", "value": "x"}, "junk"]
+    assert sm.has_auth_cookie(p) is False
+    p.context.cookies.side_effect = RuntimeError("closed")
+    assert sm.has_auth_cookie(p) is False
+
+
+def test_wait_until_authenticated_settles_after_polls(monkeypatch):
+    """SPA renders the anonymous header first; the poll must ride it out."""
+    p = FakePage()
+    calls = {"n": 0}
+    def flips(page):
+        calls["n"] += 1
+        return calls["n"] >= 3
+    monkeypatch.setattr(sm, "is_login_page", lambda page: False)
+    monkeypatch.setattr(sm, "is_2fa_page", lambda page: False)
+    monkeypatch.setattr(sm, "is_authenticated", flips)
+    assert sm.wait_until_authenticated(p, max_polls=5, poll_ms=1) is True
+    assert p.wait_for_timeout.call_count == 2
+
+
+def test_wait_until_authenticated_gives_up(monkeypatch):
+    p = FakePage()
+    p.wait_for_timeout = MagicMock(side_effect=RuntimeError("no page"))
+    monkeypatch.setattr(sm, "is_login_page", lambda page: True)
+    assert sm.wait_until_authenticated(p, max_polls=3, poll_ms=1) is False
+
+
+def test_new_logged_in_page_2fa_flow_waits_for_auth_to_settle(tmp_path, monkeypatch):
+    """Run #146 shape: credentials accepted, url=/teams, header still
+    anonymous on the first check — must succeed and persist the session."""
+    page = FakePage(url="https://web.gc.com/teams")
+    pw_ctx, context = _make_playwright_ctx(page)
+
+    login_calls = {"n": 0}
+    def login_probe(p):
+        login_calls["n"] += 1
+        return login_calls["n"] == 1  # only the initial /login check
+    monkeypatch.setattr(sm, "is_login_page", login_probe)
+    monkeypatch.setattr(sm, "is_2fa_page", lambda p: False)
+    monkeypatch.setattr(sm, "_has_password_input", lambda p: True)
+    auth_calls = {"n": 0}
+    def auth_probe(p):
+        auth_calls["n"] += 1
+        return auth_calls["n"] >= 3
+    monkeypatch.setattr(sm, "is_authenticated", auth_probe)
+
+    fetcher = MagicMock(return_value=(None, None))
+    mgr = _make_manager(tmp_path, gmail_fetcher=fetcher)
+    monkeypatch.setattr(mgr, "_submit_email", MagicMock())
+    monkeypatch.setattr(mgr, "_submit_code_and_password", MagicMock())
+
+    result_page, refreshed = mgr.new_logged_in_page(pw_ctx)
+    assert result_page is page
+    assert refreshed is True
+    assert page.wait_for_timeout.call_count == 2
+    context.storage_state.assert_called_once()
