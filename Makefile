@@ -10,7 +10,7 @@ help:
 	@echo "  test         Run pytest"
 	@echo "  cov          Run pytest with coverage (term-missing)"
 	@echo "  cov-html     Run pytest with HTML coverage report (htmlcov/)"
-	@echo "  run          Run API server (gunicorn on :8000)"
+	@echo "  run          Run dev Flask app (sync_daemon.py on :5000) — legacy local convenience"
 	@echo "  clean        Remove venv, caches, coverage artifacts"
 
 install-dev:
@@ -27,7 +27,8 @@ cov-html:
 	$(ACT) && pytest --cov=. --cov-report=html
 
 run:
-	$(ACT) && gunicorn -b 0.0.0.0:8000 api:app
+	@echo "legacy local convenience — production uses docker compose (see docker-compose.sharks.yml)"
+	$(ACT) && python tools/sync_daemon.py
 
 clean:
 	rm -rf $(VENV) .pytest_cache htmlcov .coverage coverage.xml

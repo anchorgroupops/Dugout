@@ -5,6 +5,13 @@ name: Deploy to Raspberry Pi (legacy)
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-legacy-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   legacy:
     runs-on: ubuntu-latest

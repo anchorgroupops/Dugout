@@ -10,6 +10,19 @@ setup_ai_hive.ps1
 # Runtime-mounted volumes — not baked into image
 data/
 logs/
+auth.json
+*.db
+
+# Local/dependency dirs — never needed in the build context
+.venv/
+node_modules/
+client/dist/
+
+# Test artifacts / coverage
+tests/
+htmlcov/
+coverage.xml
+.coverage
 
 # Development artifacts
 .claude/
