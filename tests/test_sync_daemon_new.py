@@ -33,6 +33,13 @@ import sync_daemon as sd
 ET = ZoneInfo("America/New_York")
 
 
+@pytest.fixture(autouse=True)
+def _enable_deploy_webhook(monkeypatch):
+    """/api/deploy* is dormant unless DEPLOY_WEBHOOK_ENABLED=1 (SIGN-007).
+    These tests exercise the endpoint itself, so switch it on."""
+    monkeypatch.setenv("DEPLOY_WEBHOOK_ENABLED", "1")
+
+
 # ---------------------------------------------------------------------------
 # _set_sync_stage
 # ---------------------------------------------------------------------------
@@ -3654,7 +3661,7 @@ class TestHandleHealth:
         with flask_app.test_client() as client:
             resp = client.get("/api/health")
         data = resp.get_json()
-        for name in ("team_enriched", "swot_analysis", "lineups", "pipeline_health"):
+        for name in ("team", "swot_analysis", "lineups", "pipeline_health"):
             assert data["sources"][name]["exists"] is False
 
     def test_required_missing_adds_stale_sources(self, flask_app, monkeypatch, tmp_path):
@@ -3662,7 +3669,7 @@ class TestHandleHealth:
         with flask_app.test_client() as client:
             resp = client.get("/api/health")
         data = resp.get_json()
-        assert "team_enriched" in data["stale_sources"]
+        assert "team" in data["stale_sources"]
         assert "swot_analysis" in data["stale_sources"]
 
     def test_optional_missing_not_in_stale_sources(self, flask_app, monkeypatch, tmp_path):
@@ -3680,7 +3687,7 @@ class TestHandleHealth:
         with flask_app.test_client() as client:
             resp = client.get("/api/health")
         data = resp.get_json()
-        src = data["sources"]["team_enriched"]
+        src = data["sources"]["team"]
         assert src["exists"] is True
         assert src["stale"] is False
         assert "last_updated" in src
@@ -3706,7 +3713,7 @@ class TestHandleHealth:
         with flask_app.test_client() as client:
             resp = client.get("/api/health")
         data = resp.get_json()
-        assert data["sources"]["team_enriched"]["required"] is True
+        assert data["sources"]["team"]["required"] is True
         assert data["sources"]["app_stats"]["required"] is False
 
 
@@ -4397,8 +4404,8 @@ class TestHandleHealthStaleness:
         with flask_app.test_client() as client:
             resp = client.get("/api/health")
         data = resp.get_json()
-        assert "team_enriched" in data["stale_sources"]
-        assert data["sources"]["team_enriched"]["stale"] is True
+        assert "team" in data["stale_sources"]
+        assert data["sources"]["team"]["stale"] is True
 
     def test_stale_optional_file_not_in_stale_sources(self, flask_app, monkeypatch, tmp_path):
         import os
@@ -8926,10 +8933,10 @@ class TestBootstrapFromCsvEmptyRosterWarningLine:
 # ===========================================================================
 
 class TestRenderQueueClaimProcessingPath:
-    """Lines 4376-4384: PROCESSING status → direct SQLite UPDATE."""
+    """PROCESSING status → announcer_db.claim_job()."""
     _ORIGIN = "https://test.queue.processing.com"
 
-    def test_processing_status_executes_direct_sql(self, flask_app, monkeypatch, tmp_path):
+    def test_processing_status_calls_claim_job(self, flask_app, monkeypatch, tmp_path):
         monkeypatch.setattr(sd, "WRITE_ORIGINS", [self._ORIGIN])
         sd._MUTATE_RATE_BUCKETS.clear()
 
@@ -8938,21 +8945,8 @@ class TestRenderQueueClaimProcessingPath:
             {"id": "job-001", "player_id": "07-jane", "worker_id": None},
             {"id": "job-001", "status": "PROCESSING"},
         ])
+        adb.claim_job = MagicMock()
         monkeypatch.setattr(sd, "_announcer_db", lambda: adb)
-
-        # Inject fake announcer_db with _conn context manager
-        import types, contextlib
-        fake_adb_mod = types.ModuleType("announcer_db")
-        fake_conn = MagicMock()
-        fake_conn.execute = MagicMock()
-
-        @contextlib.contextmanager
-        def fake_conn_ctx():
-            yield fake_conn
-
-        fake_adb_mod._conn = fake_conn_ctx
-        fake_adb_mod.DB_PATH = str(tmp_path / "announcer.db")
-        monkeypatch.setitem(sys.modules, "announcer_db", fake_adb_mod)
 
         with flask_app.test_client() as client:
             resp = client.patch(
@@ -8962,10 +8956,8 @@ class TestRenderQueueClaimProcessingPath:
                 headers={"Origin": self._ORIGIN},
             )
         assert resp.status_code == 200
-        # The direct SQL execute was called
-        fake_conn.execute.assert_called_once()
-        call_sql = fake_conn.execute.call_args[0][0]
-        assert "PROCESSING" in call_sql
+        adb.claim_job.assert_called_once_with("job-001", "mac-studio")
+        adb.update_job_status.assert_not_called()
 
 
 # ===========================================================================
