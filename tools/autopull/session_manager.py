@@ -60,25 +60,83 @@ def is_2fa_page(page: Any) -> bool:
     return False
 
 
+# Header controls GC renders ONLY for anonymous visitors. Verified against
+# GC's shipped bundle (2026-09-02): the header sign-in component returns
+# null when `isLoggedIn`, and both buttons carry these data-testids. Same
+# selectors as tools/gc_scraper.py `_get_auth_state`.
+SIGN_IN_CONTROL_SELECTOR = (
+    "[data-testid='desktop-sign-in-button'], "
+    "[data-testid='mobile-sign-in-button']"
+)
+LOGIN_INPUT_SELECTOR = "input[type='password'], input[type='email']"
+# GC's web app keeps the session token in a cookie named `jwt`.
+AUTH_COOKIE_NAME = "jwt"
+# After credential submission GC's SPA lands on /teams and renders the
+# anonymous header until its session request resolves — poll instead of
+# checking once.
+AUTH_SETTLE_POLLS = 30
+AUTH_SETTLE_POLL_MS = 500
+
+
+def _count(page: Any, sel: str) -> int:
+    try:
+        n = page.locator(sel).count()
+        return n if isinstance(n, int) else 0
+    except Exception:
+        return 0
+
+
+def has_auth_cookie(page: Any) -> bool:
+    """True when the browser context holds a non-empty GC `jwt` cookie."""
+    try:
+        cookies = page.context.cookies()
+    except Exception:
+        return False
+    for c in cookies or []:
+        try:
+            if c.get("name") == AUTH_COOKIE_NAME and c.get("value"):
+                return True
+        except Exception:
+            continue
+    return False
+
+
 def is_authenticated(page: Any) -> bool:
-    """True only when GC's header no longer offers "Sign In".
+    """True when GC is showing a logged-in view.
 
     GC serves the same team URLs to anonymous visitors (public "download the
     app" view), so "not on the login form" is NOT proof of a live session —
     a dead storage_state used to pass the probe and then fail downstream with
     "No strategy located the CSV export button".
+
+    A login/2FA form on the page always means "not authenticated". Otherwise a
+    live `jwt` cookie is proof of a session, and failing that we require the
+    anonymous-only header sign-in controls to be absent. SIGN-009: matching
+    the *text* "Sign In" anywhere in a button/link is NOT safe — the
+    logged-in /teams page can contain such text and every run failed with
+    "not authenticated" at url=/teams.
     """
-    def _count(sel: str) -> int:
-        try:
-            n = page.locator(sel).count()
-            return n if isinstance(n, int) else 0
-        except Exception:
-            return 0
-    if _count("input[type='password'], input[type='email']") > 0:
+    if _count(page, LOGIN_INPUT_SELECTOR) > 0:
         return False
-    # Header "Sign In" control (button or link) only renders for anonymous
-    # visitors; the login form's own submit is excluded by the check above.
-    return _count("button:has-text('Sign In'), a:has-text('Sign In')") == 0
+    if has_auth_cookie(page):
+        return True
+    return _count(page, SIGN_IN_CONTROL_SELECTOR) == 0
+
+
+def wait_until_authenticated(page: Any, *, max_polls: int = AUTH_SETTLE_POLLS,
+                             poll_ms: int = AUTH_SETTLE_POLL_MS) -> bool:
+    """Poll until the page shows a logged-in view (no login/2FA form and
+    `is_authenticated`). Returns False once `max_polls` polls are spent."""
+    for i in range(max_polls):
+        if (not is_login_page(page) and not is_2fa_page(page)
+                and is_authenticated(page)):
+            return True
+        if i < max_polls - 1:
+            try:
+                page.wait_for_timeout(poll_ms)
+            except Exception:
+                time.sleep(poll_ms / 1000)
+    return False
 
 
 def _has_password_input(page: Any) -> bool:
@@ -240,12 +298,16 @@ class SessionManager:
             log.info("GC password-only step (device remembered) — no 2FA code needed")
             self._submit_code_and_password(page, None)
             refreshed = True
-            # GC's SPA can take a moment to navigate away after submit; give it
-            # a few seconds in addition to networkidle.
-            page.wait_for_load_state("networkidle", timeout=30_000)
-            page.wait_for_timeout(3_000)
 
-        if is_login_page(page) or is_2fa_page(page) or not is_authenticated(page):
+        if refreshed:
+            # GC's SPA can take a moment to navigate away after submit; wait
+            # for the network to go quiet, then poll for the logged-in view.
+            try:
+                page.wait_for_load_state("networkidle", timeout=30_000)
+            except Exception as e:
+                log.info("networkidle not reached after submit: %s", e)
+
+        if not wait_until_authenticated(page):
             # Dump diagnostics for post-mortem
             try:
                 from pathlib import Path
@@ -262,7 +324,9 @@ class SessionManager:
             raise SessionError(
                 f"Still on login/2FA page or not authenticated after credential "
                 f"submission (url={page.url}, login_form={is_login_page(page)}, "
-                f"2fa_form={is_2fa_page(page)})"
+                f"2fa_form={is_2fa_page(page)}, "
+                f"sign_in_controls={_count(page, SIGN_IN_CONTROL_SELECTOR)}, "
+                f"auth_cookie={has_auth_cookie(page)})"
             )
 
         if refreshed:
