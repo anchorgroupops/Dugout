@@ -16,6 +16,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# Bootstrap tooling: pip<26.1/setuptools<83 have known CVEs (path-traversal /
+# arbitrary-write on install, MANIFEST.in exclusion bypass) — upgrade first.
+RUN pip install --no-cache-dir --upgrade "pip>=26.2" "setuptools>=83"
+
 # Install Python dependencies first (layer-cached until requirements.txt changes)
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt

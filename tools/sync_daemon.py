@@ -8,6 +8,7 @@ import traceback
 import requests
 import hmac
 import ipaddress
+import socket
 import sqlite3
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -334,6 +335,137 @@ def _is_private_or_loopback(ip_str: str) -> bool:
         return ip_obj.is_private or ip_obj.is_loopback
     except Exception:
         return False
+
+
+# ---------------------------------------------------------
+# Shared-secret gate for mutating /api requests
+# ---------------------------------------------------------
+# The Origin/Referer check below is CSRF protection, not authentication: any
+# non-browser client can set those headers freely. DUGOUT_WRITE_TOKEN adds a
+# shared secret that every mutating /api request must present (in addition to
+# the Origin check). /api/deploy* and /api/sync/kick* are exempt because they
+# already require DEPLOY_WEBHOOK_TOKEN via _require_deploy_token().
+WRITE_TOKEN_EXEMPT_PREFIXES = ("/api/deploy", "/api/sync/kick")
+
+
+def _write_token_expected() -> str:
+    """Configured write token ('' when the gate is disabled). Read per-request
+    so the value can be rotated/overridden without re-importing the module."""
+    return os.getenv("DUGOUT_WRITE_TOKEN", "").strip()
+
+
+def _write_token_exempt_path(path: str) -> bool:
+    return any(
+        path == prefix or path.startswith(prefix + "/")
+        for prefix in WRITE_TOKEN_EXEMPT_PREFIXES
+    )
+
+
+def _presented_write_token() -> str:
+    """Token from X-Dugout-Token, or the Authorization: Bearer form."""
+    header = (request.headers.get("X-Dugout-Token") or "").strip()
+    if header:
+        return header
+    auth = (request.headers.get("Authorization") or "").strip()
+    if auth[:7].lower() == "bearer ":
+        return auth[7:].strip()
+    return ""
+
+
+def _guard_write_token():
+    """Require the shared write token on mutating /api requests.
+
+    Returns (response, status) on rejection, else None. No-op when
+    DUGOUT_WRITE_TOKEN is unset (legacy Origin-only behaviour). The token
+    value itself is never logged.
+    """
+    expected = _write_token_expected()
+    if not expected:
+        return None
+    if _write_token_exempt_path(request.path):
+        return None
+
+    presented = _presented_write_token()
+    if not presented:
+        logging.warning(
+            "[Security] Missing write token for %s %s from %s",
+            request.method, _sanitize_log(request.path), _sanitize_log(_client_ip()),
+        )
+        return jsonify({"error": "write_token_required"}), 401
+    if not hmac.compare_digest(presented.encode(), expected.encode()):
+        logging.warning(
+            "[Security] Invalid write token for %s %s from %s",
+            request.method, _sanitize_log(request.path), _sanitize_log(_client_ip()),
+        )
+        return jsonify({"error": "write_token_invalid"}), 401
+    return None
+
+
+if not os.getenv("DUGOUT_WRITE_TOKEN", "").strip():
+    logging.warning(
+        "[Security] DUGOUT_WRITE_TOKEN not set — mutating /api endpoints are "
+        "protected by Origin check only"
+    )
+
+
+# Hosts /api/music/ingest may hand to yt-dlp. music_ingest.ingest_url() drives
+# yt-dlp generically, so the allow-list is the set of sources the walk-up flow
+# actually uses (YouTube family). Extend via MUSIC_INGEST_ALLOWED_HOSTS (CSV).
+DEFAULT_MUSIC_INGEST_HOSTS = [
+    "youtube.com",
+    "www.youtube.com",
+    "m.youtube.com",
+    "music.youtube.com",
+    "youtu.be",
+    "www.youtu.be",
+]
+MUSIC_INGEST_ALLOWED_HOSTS = {
+    h.strip().lower()
+    for h in os.getenv(
+        "MUSIC_INGEST_ALLOWED_HOSTS", ",".join(DEFAULT_MUSIC_INGEST_HOSTS)
+    ).split(",")
+    if h.strip()
+}
+
+
+def _is_ingest_url_allowed(url: str) -> bool:
+    """SSRF guard for user-supplied download URLs.
+
+    http(s) only, host on the allow-list, no IP literals / localhost /
+    *.local / *.internal, and DNS must resolve to at least one public address.
+    """
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return False
+    if parsed.scheme not in ("http", "https"):
+        return False
+    host = (parsed.hostname or "").strip().lower().rstrip(".")
+    if not host:
+        return False
+    # Reject IP literals outright — the allow-list is hostname-based.
+    try:
+        ipaddress.ip_address(host)
+        return False
+    except ValueError:
+        pass
+    if host == "localhost" or host.endswith((".local", ".internal", ".localhost")):
+        return False
+    if host not in MUSIC_INGEST_ALLOWED_HOSTS:
+        return False
+
+    # Even an allow-listed name must not resolve into private space (DNS rebinding
+    # / poisoned internal resolver).
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except Exception:
+        return False
+    addrs = {info[4][0] for info in infos}
+    if not addrs:
+        return False
+    if all(_is_private_or_loopback(str(addr).split("%")[0]) for addr in addrs):
+        return False
+    return True
 
 
 def _guard_mutating_request():
@@ -1376,7 +1508,9 @@ from werkzeug.exceptions import BadRequest, RequestEntityTooLarge, HTTPException
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = MAX_JSON_BODY_BYTES
 app.config["JSONIFY_PRETTYPRINT_REGULAR"] = False
-CORS(app, origins=CORS_ORIGINS)
+# always_send=False: without it flask-cors stamps the first allowed origin
+# onto every response, including requests that carry no Origin header.
+CORS(app, origins=CORS_ORIGINS, always_send=False)
 _MUTATE_RATE_LOCK = threading.Lock()
 
 _API_SECURITY_HEADERS = {
@@ -1512,7 +1646,13 @@ def _security_before_request():
         return jsonify({"error": "payload_too_large", "max_bytes": MAX_JSON_BODY_BYTES}), 413
 
     if _is_mutating_api_request():
-        return _guard_mutating_rate_limit()
+        limited = _guard_mutating_rate_limit()
+        if limited:
+            return limited
+        # Central shared-secret gate: covers every mutating /api route,
+        # including multipart ones (/api/announcer/csv-import) and the
+        # render-queue PATCH that bypass _guard_mutating_request().
+        return _guard_write_token()
     return None
 
 
@@ -3142,13 +3282,37 @@ _DEPLOY_STATUS: dict = {"status": "idle", "last_triggered": "", "last_completed"
 _DEPLOY_LOCK = threading.Lock()
 
 
+def _deploy_webhook_enabled() -> bool:
+    """SIGN-007: deploys are Watchtower-driven; build-deploy.yml no longer calls
+    /api/deploy. The webhook stays dormant unless DEPLOY_WEBHOOK_ENABLED=1."""
+    return os.getenv("DEPLOY_WEBHOOK_ENABLED", "0").strip().lower() in ("1", "true", "yes")
+
+
+def _guard_deploy_webhook_enabled():
+    """404 the deploy webhook when it is switched off (checked before any token)."""
+    if _deploy_webhook_enabled():
+        return None
+    return jsonify({"error": "deploy_webhook_disabled"}), 404
+
+
+if not _deploy_webhook_enabled():
+    logging.info(
+        "[Deploy] /api/deploy webhook disabled (DEPLOY_WEBHOOK_ENABLED != 1) — "
+        "deploys are Watchtower-driven."
+    )
+
+
 @app.route('/api/deploy', methods=['POST'])
 def handle_deploy_webhook():
     """Webhook endpoint for GitHub Actions to trigger a pull + rebuild.
 
     Secured with a bearer token set via DEPLOY_WEBHOOK_TOKEN env var.
     If no token is configured, the endpoint is disabled for safety.
+    Dormant entirely unless DEPLOY_WEBHOOK_ENABLED=1.
     """
+    disabled = _guard_deploy_webhook_enabled()
+    if disabled:
+        return disabled
     auth_err = _require_deploy_token()
     if auth_err:
         return auth_err
@@ -3201,6 +3365,9 @@ def handle_deploy_webhook():
 @app.route('/api/deploy/status', methods=['GET'])
 def handle_deploy_status():
     """Check the current deploy status. Requires same bearer token as /api/deploy."""
+    disabled = _guard_deploy_webhook_enabled()
+    if disabled:
+        return disabled
     auth_err = _require_deploy_token()
     if auth_err:
         return auth_err
@@ -3222,12 +3389,22 @@ def handle_health():
     """
     STALE_THRESHOLD_HOURS = 48
     now = datetime.now(ET)
+    # The team snapshot lives under one of three names depending on how far the
+    # pipeline got; resolve the same priority chain swot_analyzer.py uses so a
+    # CSV-first deployment (which never writes team_enriched.json) is not
+    # reported as missing its required team data.
+    team_candidates = [
+        SHARKS_DIR / "team_enriched.json",
+        SHARKS_DIR / "team_merged.json",
+        SHARKS_DIR / "team.json",
+    ]
+    team_file = next((p for p in team_candidates if p.exists()), team_candidates[0])
+
     # Required: files the sync daemon pipeline directly creates/updates
     required_sources = {
-        "team_enriched": SHARKS_DIR / "team_enriched.json",
+        "team": team_file,
         "swot_analysis": SHARKS_DIR / "swot_analysis.json",
         "lineups": SHARKS_DIR / "lineups.json",
-        "pipeline_health": SHARKS_DIR / "pipeline_health.json",
     }
     # Optional: external feed files (gc_app_auto produces these; the daemon
     # consumes them but does not generate them)
@@ -3235,11 +3412,26 @@ def handle_health():
         "app_stats": SHARKS_DIR / "app_stats.json",
         "schedule": SHARKS_DIR / "schedule_manual.json",
     }
-    result = {"checked_at": now.isoformat(), "stale_sources": [], "sources": {}}
+    # pipeline_health.json is only written by the legacy live-scrape cycle
+    # (SIGN-008 keeps that off by default), so it can only be *required* when
+    # live scraping is actually enabled — otherwise it is stale forever.
+    if GC_LIVE_SCRAPE_ENABLED:
+        required_sources["pipeline_health"] = SHARKS_DIR / "pipeline_health.json"
+    else:
+        optional_sources["pipeline_health"] = SHARKS_DIR / "pipeline_health.json"
+    result = {
+        "checked_at": now.isoformat(),
+        "stale_sources": [],
+        "sources": {},
+        # Lets the PWA know whether it must send X-Dugout-Token on writes.
+        "write_token_required": bool(_write_token_expected()),
+    }
     for name, path in {**required_sources, **optional_sources}.items():
         is_required = name in required_sources
         if not path.exists():
-            result["sources"][name] = {"exists": False, "stale": True, "required": is_required}
+            result["sources"][name] = {
+                "exists": False, "stale": True, "required": is_required, "file": path.name,
+            }
             if is_required:
                 result["stale_sources"].append(name)
             continue
@@ -3252,10 +3444,25 @@ def handle_health():
             "age_hours": round(age_hours, 1),
             "stale": stale,
             "required": is_required,
+            "file": path.name,
         }
         if stale and is_required:
             result["stale_sources"].append(name)
     return jsonify(result)
+
+
+@app.route('/api/auth/verify', methods=['POST'])
+def handle_auth_verify():
+    """Validate a write token the user typed into the PWA.
+
+    Mutating verb on /api/, so _security_before_request's central
+    _guard_write_token() has already rejected a missing/bad token by the time
+    this body runs; the Origin check still applies like every other write.
+    """
+    blocked = _guard_mutating_request()
+    if blocked:
+        return blocked
+    return jsonify({"ok": True})
 
 
 @app.route('/api/h2h/<opponent_slug>', methods=['GET'])
@@ -4833,18 +5040,11 @@ def handle_announcer_render_queue_claim(job_id):
         return jsonify({"error": "job_not_found"}), 404
 
     if new_status == "PROCESSING":
-        claimed = adb.claim_next_job.__module__ and True  # ensure init
-        # Use direct update for explicit claim by worker
-        adb.update_job_status.__func__ if hasattr(adb.update_job_status, "__func__") else None
-        import sqlite3 as _sq3
-        from announcer_db import _conn as _adb_conn, DB_PATH as _ADB_PATH
-        from datetime import datetime, timezone as _tz
-        now = datetime.now(_tz.utc).isoformat()
-        with _adb_conn() as conn:
-            conn.execute(
-                "UPDATE render_queue SET status='PROCESSING', worker_id=?, claimed_at=? WHERE id=?",
-                (worker_id, now, job_id),
-            )
+        # Explicit claim of a specific job (as opposed to claim_next_job()'s
+        # pick-the-head-of-queue). update_job_status() writes completed_at and
+        # clears error/draft_quality, so it is NOT equivalent here — the claim
+        # goes through announcer_db.claim_job() instead of inline SQL.
+        adb.claim_job(job_id, worker_id)
     else:
         error = str(data.get("error") or "")[:500] if new_status == "FAILED" else None
         draft = bool(data.get("draft_quality", False))
@@ -5188,6 +5388,9 @@ def handle_music_ingest():
         return jsonify({'error': 'invalid_player_id'}), 400
     if not re.match(r'^https?://', url) or len(url) > 1024:
         return jsonify({'error': 'invalid_url'}), 400
+    if not _is_ingest_url_allowed(url):
+        logging.warning("[Music] Rejected ingest URL (not allow-listed): %s", _sanitize_log(url))
+        return jsonify({'error': 'url_not_allowed'}), 400
     if hook_duration_s < 5 or hook_duration_s > 60:
         return jsonify({'error': 'hook_duration_out_of_range', 'detail': '5-60s'}), 400
     if hook_start_ms is not None:
@@ -6150,7 +6353,28 @@ def _announcer_auto_repair_loop():
             logging.error("[Announcer] Auto-repair loop error: %s", e)
 
 
-threading.Thread(target=_announcer_auto_repair_loop, daemon=True, name="announcer-repair").start()
+# Leader election for the auto-repair loop.
+#
+# This module is imported by BOTH the gunicorn API (`sharks_api`, --workers 2,
+# RUN_API_SERVER unset/1) and the background worker (`sharks_sync`,
+# RUN_API_SERVER=0). Starting the thread at import time therefore ran it in
+# three processes, each doing an unlocked read-modify-write of
+# data/announcer_roster.json — concurrent writers clobber each other.
+#
+# The loop now runs in exactly one place: the sync container, which already
+# owns every other background job. Also runs when this file is executed
+# directly (`python tools/sync_daemon.py`, the dev path). Gunicorn workers
+# never start it. ANNOUNCER_REPAIR_LEADER=1 forces it on for a bespoke
+# deployment that has no sync container.
+_REPAIR_RUN_API_SERVER = os.getenv("RUN_API_SERVER", "1").strip().lower() in ("1", "true", "yes")
+_REPAIR_LEADER_FORCED = os.getenv("ANNOUNCER_REPAIR_LEADER", "").strip().lower() in ("1", "true", "yes")
+if _REPAIR_LEADER_FORCED or not _REPAIR_RUN_API_SERVER or __name__ == "__main__":
+    threading.Thread(target=_announcer_auto_repair_loop, daemon=True, name="announcer-repair").start()
+else:
+    logging.info(
+        "[Announcer] Auto-repair loop not started in this process "
+        "(API worker); the sync container owns it."
+    )
 
 
 if __name__ == "__main__":

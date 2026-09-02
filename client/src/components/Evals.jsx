@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ClipboardList, RefreshCw, Target, AlertTriangle, Plus, Trash2, Timer } from 'lucide-react';
-import { getLocalCachedJson, setLocalCachedJson, isPollingPaused } from '../utils/apiClient';
+import { getLocalCachedJson, setLocalCachedJson, isPollingPaused, apiRequest } from '../utils/apiClient';
 
 const CATEGORY_ICONS = {
   Fielding: '🧤',
@@ -278,7 +278,7 @@ const Evals = ({ team, isMobile = false, isLandscape = false }) => {
     setSaving(true);
     setError('');
     try {
-      const res = await fetch('/api/evals', {
+      const res = await apiRequest('/api/evals', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ records }),

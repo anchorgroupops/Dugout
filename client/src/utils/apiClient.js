@@ -4,6 +4,108 @@
 //    `isPolingPausedUntil()` before scheduling their next fetch.
 //  - Stale-while-revalidate cache: shared across the app so tab switches
 //    don't trigger redundant network fetches.
+//  - Write-token plumbing: attaches X-Dugout-Token to mutating /api/*
+//    requests (see tools/sync_daemon.py `_guard_write_token`) and recovers
+//    from a missing/invalid token by prompting once and retrying.
+
+import { getWriteToken, setWriteToken } from './writeToken.js';
+
+const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+// Kept in sync with tools/sync_daemon.py WRITE_TOKEN_EXEMPT_PREFIXES — these
+// endpoints use their own DEPLOY_WEBHOOK_TOKEN bearer auth instead.
+const WRITE_TOKEN_EXEMPT_PREFIXES = ['/api/deploy', '/api/sync/kick'];
+
+function resolveSameOriginApiPath(url) {
+  try {
+    const parsed = new URL(url, window.location.origin);
+    if (parsed.origin !== window.location.origin) return null;
+    return parsed.pathname.startsWith('/api/') ? parsed.pathname : null;
+  } catch {
+    return null;
+  }
+}
+
+function isWriteTokenExemptPath(path) {
+  return WRITE_TOKEN_EXEMPT_PREFIXES.some((p) => path === p || path.startsWith(p + '/'));
+}
+
+function withTokenHeader(headersInit, token) {
+  const headers = new Headers(headersInit || {});
+  if (token) headers.set('X-Dugout-Token', token);
+  return headers;
+}
+
+async function isWriteTokenErrorResponse(res) {
+  if (res.status !== 401) return false;
+  try {
+    const data = await res.clone().json();
+    return !!data && (data.error === 'write_token_required' || data.error === 'write_token_invalid');
+  } catch {
+    return false;
+  }
+}
+
+async function verifyWriteToken(token) {
+  try {
+    const res = await fetch('/api/auth/verify', {
+      method: 'POST',
+      headers: withTokenHeader({ 'Content-Type': 'application/json' }, token),
+      body: JSON.stringify({}),
+    });
+    if (!res.ok) return false;
+    const data = await res.json();
+    return !!data.ok;
+  } catch {
+    return false;
+  }
+}
+
+// Serializes concurrent prompts so a burst of mutating requests (e.g. a
+// batch of availability toggles) only asks the coach once.
+let pendingPrompt = null;
+async function promptForWriteToken() {
+  if (pendingPrompt) return pendingPrompt;
+  pendingPrompt = (async () => {
+    const entered = typeof window.prompt === 'function'
+      ? window.prompt('Enter the Dugout write token')
+      : null;
+    const trimmed = (entered || '').trim();
+    if (!trimmed) return '';
+    const valid = await verifyWriteToken(trimmed);
+    if (!valid) return '';
+    setWriteToken(trimmed);
+    return trimmed;
+  })();
+  try {
+    return await pendingPrompt;
+  } finally {
+    pendingPrompt = null;
+  }
+}
+
+// Fetch wrapper every mutating call into our own /api/* should go through.
+// GETs, other origins, and the deploy/sync-kick webhooks (which use their
+// own bearer token) pass straight through to `fetch` unchanged.
+export async function apiRequest(url, options = {}) {
+  const method = (options.method || 'GET').toUpperCase();
+  const apiPath = resolveSameOriginApiPath(url);
+
+  if (!MUTATING_METHODS.has(method) || !apiPath || isWriteTokenExemptPath(apiPath)) {
+    return fetch(url, options);
+  }
+
+  const baseHeaders = options.headers;
+  let res = await fetch(url, { ...options, headers: withTokenHeader(baseHeaders, getWriteToken()) });
+
+  if (await isWriteTokenErrorResponse(res)) {
+    const newToken = await promptForWriteToken();
+    if (newToken) {
+      res = await fetch(url, { ...options, headers: withTokenHeader(baseHeaders, newToken) });
+    }
+  }
+
+  return res;
+}
 
 const PAUSE_KEY = '__sharks_polling_paused_until';
 const PAUSE_MS = 60_000;

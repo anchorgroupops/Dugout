@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Settings, ShieldCheck, RefreshCw, Clock, Home, Plane } from 'lucide-react';
 import { getTodayEST, formatDateMMDDYYYY } from '../utils/formatDate';
+import { apiRequest } from '../utils/apiClient';
 import { TipBadge, PlayerName } from './StatTooltip';
 import RosterManager from './RosterManager';
 
@@ -81,7 +82,7 @@ const Lineup = ({
   const handleRegenerate = async () => {
     setRegenerating(true);
     try {
-      const res = await fetch('/api/regenerate-lineups', {
+      const res = await apiRequest('/api/regenerate-lineups', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ swot: true })

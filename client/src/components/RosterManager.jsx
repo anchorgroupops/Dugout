@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Settings2, UserPlus, Check, X, Search, ChevronDown } from 'lucide-react';
+import { apiRequest } from '../utils/apiClient';
 import { PlayerName } from './StatTooltip';
 
 const ToggleRow = ({ player, available, onToggle, updating, isMobile = false }) => {
@@ -177,7 +178,7 @@ const RosterManager = ({
     const newAvailability = { ...availability, [name]: newStatus };
     setUpdatingPlayer(name);
     try {
-      const res = await fetch('/api/availability', {
+      const res = await apiRequest('/api/availability', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newAvailability)
@@ -200,7 +201,7 @@ const RosterManager = ({
       newAvailability[name] = status;
     }
     try {
-      const res = await fetch('/api/availability', {
+      const res = await apiRequest('/api/availability', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newAvailability)
@@ -221,7 +222,7 @@ const RosterManager = ({
       newAvailability[name] = p.core !== false;
     }
     try {
-      const res = await fetch('/api/availability', {
+      const res = await apiRequest('/api/availability', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newAvailability)
@@ -251,7 +252,7 @@ const RosterManager = ({
     if (!borrowForm.first.trim()) return;
     setBorrowStatus('adding');
     try {
-      const res = await fetch('/api/borrowed-player', {
+      const res = await apiRequest('/api/borrowed-player', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(borrowForm)

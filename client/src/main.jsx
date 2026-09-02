@@ -67,4 +67,19 @@ if ('serviceWorker' in navigator) {
       console.warn('[SW] registration failed:', err);
     }
   });
+
+  // `skipWaiting` + `clientsClaim` (vite.config.js) mean a newly-installed
+  // SW takes control of this tab right after a deploy, but the tab's
+  // in-memory JS keeps running the old build until something reloads it.
+  // Reload once when control changes so an already-open dugout tab picks
+  // up the new build immediately instead of waiting for a stale-chunk
+  // fetch to fail first. Guarded (module-level flag, not sessionStorage)
+  // so a pathological repeated-controllerchange burst can't reload-loop —
+  // this only ever needs to fire once per page life.
+  let hasReloadedForController = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (hasReloadedForController) return;
+    hasReloadedForController = true;
+    window.location.reload();
+  });
 }

@@ -244,6 +244,22 @@ def claim_next_job(worker_id: str, quality: str = "best") -> dict | None:
         return dict(job_row) if job_row else None
 
 
+def claim_job(job_id: str, worker_id: str) -> None:
+    """Mark one specific job PROCESSING on behalf of `worker_id`.
+
+    Same write claim_next_job() performs, but for a job the worker already
+    picked (the PATCH /api/announcer/render-queue/<job_id> path). Distinct
+    from update_job_status(), which stamps completed_at and resets
+    error/draft_quality.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    with _conn() as conn:
+        conn.execute(
+            "UPDATE render_queue SET status = 'PROCESSING', worker_id = ?, claimed_at = ? WHERE id = ?",
+            (worker_id, now, job_id),
+        )
+
+
 def update_job_status(job_id: str, status: str, error: str | None = None,
                       draft_quality: bool = False) -> None:
     now = datetime.now(timezone.utc).isoformat()
