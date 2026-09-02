@@ -27,13 +27,13 @@ pyotp>=2.10.0,<3
 tzdata>=2026.3
 
 # GC CSV autopull — Gmail OAuth (2FA code read + notification send)
-google-api-python-client>=2.199.0
-google-auth>=2.56.2
-google-auth-oauthlib>=1.4.0
-google-auth-httplib2>=0.4.2
+google-api-python-client>=2.199.0,<3
+google-auth>=2.56.2,<3
+google-auth-oauthlib>=1.4.0,<2
+google-auth-httplib2>=0.4.2,<1
 
 # GC CSV autopull — LLM-adaptive locator fallback
-anthropic>=1.0.0
+anthropic>=1.0.0,<2
 
 # Multi-team registry
 PyYAML>=6.0.3,<7
@@ -43,7 +43,7 @@ yt-dlp>=2026.7.4
 
 # TTS providers — free tier chain (install whichever are available on the host)
 # Edge TTS: Microsoft neural voices, no API key, works on Pi
-edge-tts>=7.2.8
+edge-tts>=7.2.8,<8
 # Kokoro ONNX: local 82M-param model, MIT license, ARM64-compatible, ~300MB download on first use
 # pip install kokoro-onnx   (optional — not pinned here, install manually on Pi/PC)
 # Google Cloud TTS: free tier 1M Neural2 chars/month

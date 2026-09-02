@@ -75,6 +75,14 @@ python tools/notebooklm_sync.py
 modal deploy tools/modal_app.py
 ```
 
+### Security env (Pi `.env`)
+
+- `DUGOUT_WRITE_TOKEN` — required `X-Dugout-Token` on every mutating `/api`
+  request (SIGN-011). Unset = Origin-check only; never run the public site
+  without it.
+- `DEPLOY_WEBHOOK_ENABLED=0` keeps `/api/deploy` dormant (SIGN-007).
+- nginx serves only `/data/sharks/*.json` from the data mount (SIGN-010).
+
 ### Deploy
 
 ```bash

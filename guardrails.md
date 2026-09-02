@@ -76,6 +76,16 @@ cp -r /tmp/skills-tmp/skills/* ~/.gemini/antigravity/skills/
 **Fix:** Never detect GC auth by matching the text "Sign In" in any button/link — the logged-in `/teams` page can contain such text, and the SPA renders the anonymous header until its session request resolves. `tools/autopull/session_manager.is_authenticated` must use GC's anonymous-only controls (`[data-testid='desktop-sign-in-button'], [data-testid='mobile-sign-in-button']`, same as `gc_scraper._get_auth_state`) plus the `jwt` cookie as positive proof, and `wait_until_authenticated` must poll after submission rather than checking once.
 **Ref:** autopull run #146, session 2026-09-02
 
+## SIGN-010: nginx Served the Whole ./data Mount Publicly
+**Symptom:** `https://dugout.joelycannoli.com/data/auth.json` returned the live GameChanger session (cookies + localStorage) to anyone; `data/autopull/` state and raw exports were equally reachable.
+**Fix:** `client/nginx.conf` serves only `^/data/sharks/[A-Za-z0-9_-]+\.json$` (the dashboard snapshots) and hard-404s everything else under `/data/`. Never widen that allow-list to a directory; add a filename pattern. After a leak, rotate the GC session (log out all sessions / change the GC password) and delete `data/auth.json` on the Pi so autopull re-logs in.
+**Ref:** 2026-09-02 site audit
+
+## SIGN-011: Mutating /api Routes Were Gated by the Origin Header Only
+**Symptom:** ~35 POST/PATCH/DELETE routes (roster overrides, evals, announcer deletes, music ingest) accepted any request whose `Origin` header said `https://dugout.joelycannoli.com` — trivially spoofed with curl.
+**Fix:** Set `DUGOUT_WRITE_TOKEN` in the Pi `.env`; the API then requires `X-Dugout-Token` on every mutating `/api` request (`_guard_write_token`, enforced in `_security_before_request`). The PWA prompts once for the token and stores it per browser. Never add a mutating route that bypasses `_is_mutating_api_request()`.
+**Ref:** 2026-09-02 site audit
+
 ## Adding a New SIGN
 
 When a new failure pattern is confirmed (not hypothetical):
