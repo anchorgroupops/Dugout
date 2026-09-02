@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { ChevronDown, ChevronUp } from 'lucide-react';
-import { TipBadge, PlayerName } from './StatTooltip';
+import { TipBadge, TipIcon, PlayerName } from './StatTooltip';
 
 const MIN_PA = 10;
 
@@ -66,8 +66,14 @@ const ExpandedStats = ({ player }) => {
   const ip = player.innings_played || {};
 
   const sectionStyle = { marginBottom: '0.75rem' };
-  const rowStyle = { display: 'flex', gap: '0.4rem', flexWrap: 'wrap' };
-  const rowGapStyle = { display: 'flex', gap: '0.4rem', flexWrap: 'wrap', marginTop: '0.4rem' };
+  // Each of these rows holds 7-8 `.stat-badge` chips, and every badge carries a
+  // 48px CSS min-width. With `flex-wrap: wrap` a 360px phone turned a single
+  // expanded card into ~15 stacked rows of chips. Switching to `nowrap` inside
+  // a `.scroll-x` container keeps one stat section on ONE swipeable line, so the
+  // section headings above them stay a usable index. Badges still `flex: 1`, so
+  // short rows (4 badges) look exactly as before on a wide screen.
+  const rowStyle = { display: 'flex', gap: '0.4rem', flexWrap: 'nowrap', paddingBottom: '2px' };
+  const rowGapStyle = { ...rowStyle, marginTop: '0.4rem' };
 
   return (
     <div style={{ marginTop: '1rem', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '1rem' }}>
@@ -75,13 +81,13 @@ const ExpandedStats = ({ player }) => {
       {/* ===== BATTING STANDARD ===== */}
       <div style={sectionStyle}>
         <div className="section-label">Batting</div>
-        <div style={rowStyle}>
+        <div className="scroll-x" style={rowStyle}>
           <TipBadge label="AVG" value={fmt3(b.avg ?? player.avg)} dim={ratesDim} />
           <TipBadge label="OBP" value={fmt3(b.obp ?? player.obp)} dim={ratesDim} />
           <TipBadge label="SLG" value={fmt3(b.slg ?? player.slg)} dim={ratesDim} />
           <TipBadge label="OPS" value={fmt3(b.ops ?? player.ops)} dim={ratesDim} />
         </div>
-        <div style={rowGapStyle}>
+        <div className="scroll-x" style={rowGapStyle}>
           <TipBadge label="GP" value={fmt(b.gp)} />
           <TipBadge label="PA" value={fmt(b.pa ?? player.pa)} />
           <TipBadge label="AB" value={fmt(b.ab ?? player.ab)} />
@@ -91,7 +97,7 @@ const ExpandedStats = ({ player }) => {
           <TipBadge label="3B" value={fmt(b['3b'] ?? b.triples)} />
           <TipBadge label="HR" value={fmt(b.hr)} />
         </div>
-        <div style={rowGapStyle}>
+        <div className="scroll-x" style={rowGapStyle}>
           <TipBadge label="RBI" value={fmt(b.rbi ?? player.rbi)} />
           <TipBadge label="R" value={fmt(b.r ?? player.r)} />
           <TipBadge label="BB" value={fmt(b.bb)} />
@@ -100,7 +106,7 @@ const ExpandedStats = ({ player }) => {
           <TipBadge label="K-L" value={fmt(b.kl)} />
           <TipBadge label="ROE" value={fmt(b.roe)} />
         </div>
-        <div style={rowGapStyle}>
+        <div className="scroll-x" style={rowGapStyle}>
           <TipBadge label="SB" value={fmt(b.sb ?? player.sb)} />
           <TipBadge label="CS" value={fmt(b.cs)} />
           <TipBadge label="SB%" value={fmtPct(b.sb_pct)} />
@@ -116,13 +122,13 @@ const ExpandedStats = ({ player }) => {
       {hasData(ba) && (
         <div style={sectionStyle}>
           <div className="section-label">Batting Advanced</div>
-          <div style={rowStyle}>
+          <div className="scroll-x" style={rowStyle}>
             <TipBadge label="BABIP" value={fmt3(ba.babip)} />
             <TipBadge label="BA/RISP" value={fmt3(ba.ba_risp)} />
             <TipBadge label="QAB%" value={fmtPct(ba.qab_pct)} />
             <TipBadge label="BB/K" value={fmt2(ba.bb_k ?? ba.bb_per_k)} />
           </div>
-          <div style={rowGapStyle}>
+          <div className="scroll-x" style={rowGapStyle}>
             <TipBadge label="TB" value={fmt(ba.tb)} />
             <TipBadge label="XBH" value={fmt(ba.xbh)} />
             <TipBadge label="HHB" value={fmt(ba.hhb)} />
@@ -131,13 +137,13 @@ const ExpandedStats = ({ player }) => {
             <TipBadge label="QAB" value={fmt(ba.qab)} />
             <TipBadge label="AB/HR" value={fmt2(ba.ab_hr)} />
           </div>
-          <div style={rowGapStyle}>
+          <div className="scroll-x" style={rowGapStyle}>
             <TipBadge label="FB%" value={fmtPct(ba.fb_pct)} />
             <TipBadge label="GB%" value={fmtPct(ba.gb_pct)} />
             <TipBadge label="LD%" value={fmtPct(ba.ld_pct)} />
             <TipBadge label="C%" value={fmtPct(ba.c_pct)} />
           </div>
-          <div style={rowGapStyle}>
+          <div className="scroll-x" style={rowGapStyle}>
             <TipBadge label="2OUTRBI" value={fmt(ba.two_out_rbi)} />
             <TipBadge label="GIDP" value={fmt(ba.gidp)} />
             <TipBadge label="GITP" value={fmt(ba.gitp)} />
@@ -153,13 +159,13 @@ const ExpandedStats = ({ player }) => {
       {hasData(p) && (
         <div style={sectionStyle}>
           <div className="section-label">Pitching</div>
-          <div style={rowStyle}>
+          <div className="scroll-x" style={rowStyle}>
             <TipBadge label="IP" value={fmt(p.ip)} />
             <TipBadge label="ERA" value={fmt2(p.era)} />
             <TipBadge label="WHIP" value={fmt2(p.whip)} />
             <TipBadge label="BAA" value={fmt3(p.baa)} />
           </div>
-          <div style={rowGapStyle}>
+          <div className="scroll-x" style={rowGapStyle}>
             <TipBadge label="W-L" value={`${fmt(p.w)}-${fmt(p.l)}`} />
             <TipBadge label="GP" value={fmt(p.gp)} />
             <TipBadge label="GS" value={fmt(p.gs)} />
@@ -167,7 +173,7 @@ const ExpandedStats = ({ player }) => {
             <TipBadge label="SVO" value={fmt(p.svo)} />
             <TipBadge label="SV%" value={fmtPct(p.sv_pct)} />
           </div>
-          <div style={rowGapStyle}>
+          <div className="scroll-x" style={rowGapStyle}>
             <TipBadge label="BF" value={fmt(p.bf)} />
             <TipBadge label="#P" value={fmt(p.np)} />
             <TipBadge label="SO" value={fmt(p.so)} />
@@ -175,7 +181,7 @@ const ExpandedStats = ({ player }) => {
             <TipBadge label="BB" value={fmt(p.bb)} />
             <TipBadge label="HBP" value={fmt(p.hbp)} />
           </div>
-          <div style={rowGapStyle}>
+          <div className="scroll-x" style={rowGapStyle}>
             <TipBadge label="H" value={fmt(p.h)} />
             <TipBadge label="R" value={fmt(p.r)} />
             <TipBadge label="ER" value={fmt(p.er)} />
@@ -184,7 +190,7 @@ const ExpandedStats = ({ player }) => {
             <TipBadge label="PIK" value={fmt(p.pik)} />
             <TipBadge label="LOB" value={fmt(p.lob)} />
           </div>
-          <div style={rowGapStyle}>
+          <div className="scroll-x" style={rowGapStyle}>
             <TipBadge label="SB" value={fmt(p.sb)} />
             <TipBadge label="CS" value={fmt(p.cs)} />
             <TipBadge label="SB%" value={fmtPct(p.sb_pct)} />
@@ -196,39 +202,39 @@ const ExpandedStats = ({ player }) => {
       {hasData(pa2) && (
         <div style={sectionStyle}>
           <div className="section-label">Pitching Advanced</div>
-          <div style={rowStyle}>
+          <div className="scroll-x" style={rowStyle}>
             <TipBadge label="FIP" value={fmt2(pa2.fip)} />
             <TipBadge label="S%" value={fmtPct(pa2.s_pct)} />
             <TipBadge label="K/BF" value={fmt2(pa2.k_bf)} />
             <TipBadge label="K/BB" value={fmt2(pa2.k_bb)} />
           </div>
-          <div style={rowGapStyle}>
+          <div className="scroll-x" style={rowGapStyle}>
             <TipBadge label="P/IP" value={fmt1(pa2.p_ip)} />
             <TipBadge label="P/BF" value={fmt1(pa2.p_bf)} />
             <TipBadge label="BB/INN" value={fmt2(pa2.bb_inn)} />
             <TipBadge label="GO/AO" value={fmt2(pa2.go_ao)} />
           </div>
-          <div style={rowGapStyle}>
+          <div className="scroll-x" style={rowGapStyle}>
             <TipBadge label="FPS%" value={fmtPct(pa2.fps_pct)} />
             <TipBadge label="FPSW%" value={fmtPct(pa2.fpsw_pct)} />
             <TipBadge label="FPSO%" value={fmtPct(pa2.fpso_pct)} />
             <TipBadge label="FPSH%" value={fmtPct(pa2.fpsh_pct)} />
           </div>
-          <div style={rowGapStyle}>
+          <div className="scroll-x" style={rowGapStyle}>
             <TipBadge label="123INN" value={fmt(pa2.one23_inn)} />
             <TipBadge label="0BBINN" value={fmt(pa2.zero_bb_inn)} />
             <TipBadge label="&lt;3%" value={fmtPct(pa2.lt3_pct)} />
             <TipBadge label="1ST2OUT" value={fmt(pa2.first_2out)} />
             <TipBadge label="LOO" value={fmt(pa2.loo)} />
           </div>
-          <div style={rowGapStyle}>
+          <div className="scroll-x" style={rowGapStyle}>
             <TipBadge label="BABIP" value={fmt3(pa2.babip)} />
             <TipBadge label="BA/RISP" value={fmt3(pa2.ba_risp)} />
             <TipBadge label="LD%" value={fmtPct(pa2.ld_pct)} />
             <TipBadge label="GB%" value={fmtPct(pa2.gb_pct)} />
             <TipBadge label="FB%" value={fmtPct(pa2.fb_pct)} />
           </div>
-          <div style={rowGapStyle}>
+          <div className="scroll-x" style={rowGapStyle}>
             <TipBadge label="HHB%" value={fmtPct(pa2.hhb_pct)} />
             <TipBadge label="WEAK%" value={fmtPct(pa2.weak_pct)} />
             <TipBadge label="SM%" value={fmtPct(pa2.sm_pct)} />
@@ -240,12 +246,12 @@ const ExpandedStats = ({ player }) => {
       {hasData(pb) && (
         <div style={sectionStyle}>
           <div className="section-label">Pitch Arsenal</div>
-          <div style={rowStyle}>
+          <div className="scroll-x" style={rowStyle}>
             <TipBadge label="#P" value={fmt(pb.np)} />
           </div>
           {/* Fastball */}
           {(pb.fb != null || pb.mph_fb != null) && (
-            <div style={rowGapStyle}>
+            <div className="scroll-x" style={rowGapStyle}>
               <TipBadge label="FB" value={fmt(pb.fb)} />
               <TipBadge label="S%" value={fmtPct(pb.fbs_pct)} />
               <TipBadge label="SM%" value={fmtPct(pb.fbsm_pct)} />
@@ -255,7 +261,7 @@ const ExpandedStats = ({ player }) => {
           )}
           {/* Change-Up */}
           {(pb.ch != null || pb.mph_ch != null) && (
-            <div style={rowGapStyle}>
+            <div className="scroll-x" style={rowGapStyle}>
               <TipBadge label="CH" value={fmt(pb.ch)} />
               <TipBadge label="S%" value={fmtPct(pb.chs_pct)} />
               <TipBadge label="SM%" value={fmtPct(pb.chsm_pct)} />
@@ -265,7 +271,7 @@ const ExpandedStats = ({ player }) => {
           )}
           {/* Curveball */}
           {(pb.cb != null || pb.mph_cb != null) && (
-            <div style={rowGapStyle}>
+            <div className="scroll-x" style={rowGapStyle}>
               <TipBadge label="CB" value={fmt(pb.cb)} />
               <TipBadge label="S%" value={fmtPct(pb.cbs_pct)} />
               <TipBadge label="SM%" value={fmtPct(pb.cbsm_pct)} />
@@ -275,7 +281,7 @@ const ExpandedStats = ({ player }) => {
           )}
           {/* Slider/Cutter */}
           {(pb.sc != null || pb.mph_sc != null) && (
-            <div style={rowGapStyle}>
+            <div className="scroll-x" style={rowGapStyle}>
               <TipBadge label="SC" value={fmt(pb.sc)} />
               <TipBadge label="S%" value={fmtPct(pb.scs_pct)} />
               <TipBadge label="SM%" value={fmtPct(pb.scsm_pct)} />
@@ -285,7 +291,7 @@ const ExpandedStats = ({ player }) => {
           )}
           {/* Riseball */}
           {(pb.rb != null || pb.mph_rb != null) && (
-            <div style={rowGapStyle}>
+            <div className="scroll-x" style={rowGapStyle}>
               <TipBadge label="RB" value={fmt(pb.rb)} />
               <TipBadge label="S%" value={fmtPct(pb.rbs_pct)} />
               <TipBadge label="SM%" value={fmtPct(pb.rbsm_pct)} />
@@ -295,7 +301,7 @@ const ExpandedStats = ({ player }) => {
           )}
           {/* Dropball */}
           {(pb.db != null || pb.mph_db != null) && (
-            <div style={rowGapStyle}>
+            <div className="scroll-x" style={rowGapStyle}>
               <TipBadge label="DB" value={fmt(pb.db)} />
               <TipBadge label="S%" value={fmtPct(pb.dbs_pct)} />
               <TipBadge label="SM%" value={fmtPct(pb.dbsm_pct)} />
@@ -305,7 +311,7 @@ const ExpandedStats = ({ player }) => {
           )}
           {/* Drop Curve */}
           {(pb.dc != null || pb.mph_dc != null) && (
-            <div style={rowGapStyle}>
+            <div className="scroll-x" style={rowGapStyle}>
               <TipBadge label="DC" value={fmt(pb.dc)} />
               <TipBadge label="S%" value={fmtPct(pb.dcs_pct)} />
               <TipBadge label="SM%" value={fmtPct(pb.dcsm_pct)} />
@@ -315,7 +321,7 @@ const ExpandedStats = ({ player }) => {
           )}
           {/* Knuckle Ball */}
           {(pb.kb != null || pb.mph_kb != null) && (
-            <div style={rowGapStyle}>
+            <div className="scroll-x" style={rowGapStyle}>
               <TipBadge label="KB" value={fmt(pb.kb)} />
               <TipBadge label="S%" value={fmtPct(pb.kbs_pct)} />
               <TipBadge label="SM%" value={fmtPct(pb.kbsm_pct)} />
@@ -325,7 +331,7 @@ const ExpandedStats = ({ player }) => {
           )}
           {/* Knuckle Curve */}
           {(pb.kc != null || pb.mph_kc != null) && (
-            <div style={rowGapStyle}>
+            <div className="scroll-x" style={rowGapStyle}>
               <TipBadge label="KC" value={fmt(pb.kc)} />
               <TipBadge label="S%" value={fmtPct(pb.kcs_pct)} />
               <TipBadge label="SM%" value={fmtPct(pb.kcsm_pct)} />
@@ -335,7 +341,7 @@ const ExpandedStats = ({ player }) => {
           )}
           {/* Other/Off-Speed */}
           {pb.os_pitch != null && (
-            <div style={rowGapStyle}>
+            <div className="scroll-x" style={rowGapStyle}>
               <TipBadge label="OS" value={fmt(pb.os_pitch)} />
               <TipBadge label="S%" value={fmtPct(pb.oss_pct)} />
               <TipBadge label="SM%" value={fmtPct(pb.ossm_pct)} />
@@ -349,7 +355,7 @@ const ExpandedStats = ({ player }) => {
       {hasData(f) && (
         <div style={sectionStyle}>
           <div className="section-label">Fielding</div>
-          <div style={rowStyle}>
+          <div className="scroll-x" style={rowStyle}>
             <TipBadge label="FPCT" value={fmt3(f.fpct)} />
             <TipBadge label="TC" value={fmt(f.tc)} />
             <TipBadge label="PO" value={fmt(f.po)} />
@@ -367,7 +373,7 @@ const ExpandedStats = ({ player }) => {
         return (
           <div style={sectionStyle}>
             <div className="section-label">Catching</div>
-            <div style={rowStyle}>
+            <div className="scroll-x" style={rowStyle}>
               <TipBadge label="INN" value={fmt(c.inn)} />
               <TipBadge label="SB-ATT" value={fmt(sbAtt)} />
               <TipBadge label="CS%" value={fmtPct(c.cs_pct)} />
@@ -385,14 +391,14 @@ const ExpandedStats = ({ player }) => {
       {hasData(ip) && (
         <div style={sectionStyle}>
           <div className="section-label">Innings Played</div>
-          <div style={rowStyle}>
+          <div className="scroll-x" style={rowStyle}>
             <TipBadge label="Total" value={fmt(ip.total)} />
             <TipBadge label="P" value={fmt(ip.p)} />
             <TipBadge label="C" value={fmt(ip.c)} />
             <TipBadge label="1B" value={fmt(ip.first_base)} />
             <TipBadge label="SS" value={fmt(ip.ss)} />
           </div>
-          <div style={rowGapStyle}>
+          <div className="scroll-x" style={rowGapStyle}>
             <TipBadge label="2B" value={fmt(ip.second_base)} />
             <TipBadge label="3B" value={fmt(ip.third_base)} />
             <TipBadge label="LF" value={fmt(ip.lf)} />
@@ -436,7 +442,11 @@ const Roster = ({ team, availability, isMobile = false, isLandscape = false }) =
           {activeCount} Available
         </span>
       </h2>
-      <div className="card-grid" style={isLandscape ? { gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))' } : undefined}>
+      {/* Landscape column sizing lives in index.css
+          (`@media (orientation: landscape) and (max-height: 500px)`), which is
+          exactly the condition `isLandscape` tracks. The inline override just
+          duplicated it — let the stylesheet own the breakpoint. */}
+      <div className="card-grid">
         {sortedRoster.map(player => {
           const playerKey = `${player.number}-${player.last}`;
           const isExpanded = expandedPlayer === playerKey;
@@ -464,6 +474,21 @@ const Roster = ({ team, availability, isMobile = false, isLandscape = false }) =
                 background: isSub && isActive ? 'rgba(63, 143, 136, 0.06)' : undefined
               }}
               onClick={() => setExpandedPlayer(isExpanded ? null : playerKey)}
+              /* The card was a bare `div onClick` with `cursor: pointer`: no
+                 keyboard route in, and a screen reader announced no control at
+                 all. `role`/`tabIndex`/`aria-expanded` make the disclosure
+                 real; `aria-label` keeps the announced name short instead of
+                 reading the whole card body. */
+              role="button"
+              tabIndex={0}
+              aria-expanded={isExpanded}
+              aria-label={`${name} — ${isExpanded ? 'hide' : 'show'} full stats`}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+                  e.preventDefault();
+                  setExpandedPlayer(isExpanded ? null : playerKey);
+                }
+              }}
             >
               {/* Watermark number — fall back to "?" when GC hasn't issued
                   one yet (e.g. brand-new sub players). */}
@@ -502,24 +527,31 @@ const Roster = ({ team, availability, isMobile = false, isLandscape = false }) =
                 <div style={{ flex: 1 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                     <PlayerName first={player.first} last={player.last} number={player.number} size="md" />
+                    {/* Emoji-only meaning (🔥 👁️ 💪 ⚡ 🎯) whose whole explanation
+                        lived in a `title` a phone never fires, at ~14px with no
+                        tap target. TipIcon makes each one tap-to-explain, gives
+                        it an accessible name and (via `.tip-icon::after` on
+                        coarse pointers) a 44px hit area. */}
                     {strengthBadges.length > 0 && (
-                      <span style={{ display: 'inline-flex', gap: '0.2rem', fontSize: 'var(--text-sm)' }}>
+                      <span style={{ display: 'inline-flex', gap: '0.35rem', fontSize: 'var(--text-base)' }}>
                         {strengthBadges.map((badge, i) => (
-                          <span key={i} title={badge.tip} style={{ cursor: 'default', lineHeight: 1 }}>{badge.icon}</span>
+                          <TipIcon key={i} text={badge.tip} style={{ lineHeight: 1 }}>{badge.icon}</TipIcon>
                         ))}
                       </span>
                     )}
                   </div>
                   <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', display: 'block', marginTop: '2px' }}>
                     {b.gp != null ? `${b.gp} GP` : ''}{b.pa != null ? ` \u2022 ${b.pa} PA` : ''}
+                    {/* 12px chevrons read as specks in daylight; 16px keeps the
+                        affordance visible without changing the line height. */}
                     {!isExpanded && (
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.2rem', marginLeft: '0.3rem', color: 'var(--primary-color)' }}>
-                        <ChevronDown size={12} /> Stats
+                        <ChevronDown size={16} /> Stats
                       </span>
                     )}
                     {isExpanded && (
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.2rem', marginLeft: '0.3rem', color: 'var(--primary-color)' }}>
-                        <ChevronUp size={12} /> Collapse
+                        <ChevronUp size={16} /> Collapse
                       </span>
                     )}
                   </span>

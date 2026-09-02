@@ -546,7 +546,9 @@ function App() {
         />
       );
       case 'announcer': return (
-        <Announcer lineups={data.lineups} />
+        // Announcer was the only tab not told what size screen it is on, even
+        // though it is the most control-dense one in the app.
+        <Announcer lineups={data.lineups} isMobile={isMobile} isLandscape={isLandscape} />
       );
       case 'evals': return (
         <Evals team={data.team} isMobile={isMobile} isLandscape={isLandscape} />
@@ -584,6 +586,8 @@ function App() {
               <span
                 className={`sync-status-dot ${staleSources.length > 0 ? 'stale' : 'fresh'}`}
                 title={staleSources.length > 0 ? `Stale: ${staleSources.join(', ')}` : 'Data is fresh'}
+                role="img"
+                aria-label={staleSources.length > 0 ? `Data is stale: ${staleSources.join(', ')}` : 'Data is fresh'}
               />
               {!isOnline && (
                 <span className="sync-stage-tag offline" style={{ background: '#711d1c' }}>OFFLINE</span>
@@ -747,6 +751,23 @@ function App() {
                   {item.label}
                 </button>
               ))}
+              {/* Manual Sync used to exist only in the desktop hero row, so on
+                  a phone — the device this dashboard is actually used on —
+                  there was no way to force a refresh of the GameChanger
+                  pipeline at all. It lives here rather than in the header
+                  because it is an occasional action, not a per-minute one. */}
+              <button
+                className="more-menu-item"
+                onClick={() => {
+                  handleManualSync();
+                  setMoreMenuOpen(false);
+                }}
+                disabled={syncLoading || !isOnline}
+                style={(syncLoading || !isOnline) ? { opacity: 0.5 } : undefined}
+              >
+                <RefreshCw size={20} className={syncLoading ? 'sync-spin' : ''} />
+                {syncLoading ? 'Syncing…' : 'Manual Sync'}
+              </button>
               {canInstall && (
                 <button
                   className="more-menu-item install-item"

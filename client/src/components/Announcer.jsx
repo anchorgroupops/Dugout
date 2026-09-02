@@ -6,10 +6,36 @@ import {
   AlertCircle, CheckCircle, Clock, Volume2, Settings2, List,
   Zap, Target, Activity, Plus, X, Upload, Wand2, Search, Download
 } from 'lucide-react';
-import { playIntro, playClip, stop as stopAudio, preload, cleanup, detectBPM, calcBeatOffset, loadBuffer } from '../utils/audioController';
+import { playIntro, playClip, stop as stopAudio, preload, cleanup, detectBPM, calcBeatOffset, loadBuffer, setVolume } from '../utils/audioController';
 import { usePrebuffer } from '../utils/usePrebuffer';
 import { apiRequest } from '../utils/apiClient';
+import { TipIcon } from './StatTooltip';
 import WorkerBadge from './WorkerBadge';
+
+// Modal roots are flex-centred in a full-screen overlay with no height cap, so
+// on a phone (and worse, a phone with the software keyboard up) the top AND
+// bottom of a tall modal are clipped with no way to scroll to them — the Halo
+// grid's Cancel button becomes literally unreachable. Every modal root gets
+// this.
+const MODAL_SCROLL_STYLE = {
+  maxHeight: '85dvh',
+  overflowY: 'auto',
+  overscrollBehavior: 'contain',
+  WebkitOverflowScrolling: 'touch',
+};
+
+// Tapping the scrim already closes these modals; a phone with a keyboard
+// attached (and every desktop user) expects Escape to do the same. Shared so
+// all three modals behave identically.
+function useEscapeToClose(onClose) {
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === 'Escape' || e.key === 'Esc') onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+}
 
 function StatusLed({ status }) {
   const colors = {
@@ -58,6 +84,8 @@ function AddSubModal({ onClose, onAdd }) {
   const [walkupUrl, setWalkupUrl] = useState('');
   const [loading, setLoading] = useState(false);
 
+  useEscapeToClose(onClose);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!first.trim()) return;
@@ -72,7 +100,7 @@ function AddSubModal({ onClose, onAdd }) {
 
   return createPortal(
     <div className="announcer-modal-overlay" onClick={onClose}>
-      <div className="announcer-modal glass-panel" onClick={e => e.stopPropagation()}>
+      <div className="announcer-modal glass-panel" onClick={e => e.stopPropagation()} style={MODAL_SCROLL_STYLE}>
         <h3>Add Sub Player</h3>
         <form onSubmit={handleSubmit}>
           <div className="announcer-form-row">
@@ -84,8 +112,8 @@ function AddSubModal({ onClose, onAdd }) {
             <input placeholder="Walk-up song URL (https://)" value={walkupUrl} onChange={e => setWalkupUrl(e.target.value)} maxLength={500} type="url" pattern="https://.*" />
           </div>
           <div className="announcer-form-actions">
-            <button type="button" onClick={onClose} className="announcer-btn announcer-btn-secondary">Cancel</button>
-            <button type="submit" disabled={loading || !first.trim()} className="announcer-btn announcer-btn-primary">
+            <button type="button" onClick={onClose} className="announcer-btn announcer-btn-secondary" style={{ minHeight: 'var(--touch-min)' }}>Cancel</button>
+            <button type="submit" disabled={loading || !first.trim()} className="announcer-btn announcer-btn-primary" style={{ minHeight: 'var(--touch-min)' }}>
               {loading ? <RefreshCw size={14} className="sync-spin" /> : <UserPlus size={14} />}
               {loading ? 'Adding...' : 'Add Player'}
             </button>
@@ -302,32 +330,53 @@ function PlayerCard({ player, onSavePhonetics, onRender, onRemove }) {
       {player.is_ghost && (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 12px', background: 'rgba(250,204,21,0.08)', borderBottom: '1px solid rgba(250,204,21,0.2)', fontSize: 'var(--text-xs)', color: 'rgba(250,204,21,0.9)' }}>
           <span><AlertCircle size={12} style={{ display: 'inline', marginRight: 4 }} />Not on current roster</span>
-          <button onClick={() => onRemove?.(player.id)} style={{ background: 'rgba(250,204,21,0.15)', border: '1px solid rgba(250,204,21,0.3)', borderRadius: 4, color: 'rgba(250,204,21,0.9)', fontSize: 'var(--text-xs)', padding: '2px 8px', cursor: 'pointer' }}>
+          {/* 2px of vertical padding made this an ~18px-tall target. */}
+          <button type="button" onClick={() => onRemove?.(player.id)} style={{ background: 'rgba(250,204,21,0.15)', border: '1px solid rgba(250,204,21,0.3)', borderRadius: 4, color: 'rgba(250,204,21,0.9)', fontSize: 'var(--text-xs)', padding: '2px 10px', cursor: 'pointer', minHeight: 'var(--touch-min)', minWidth: 'var(--touch-min)', flexShrink: 0 }}>
             Remove
           </button>
         </div>
       )}
-      <button className="announcer-player-header" onClick={() => setExpanded(!expanded)} aria-expanded={expanded}>
-        <div className="announcer-player-info">
-          <span className="announcer-jersey">#{player.number || '—'}</span>
-          <span className="announcer-player-name">{player.first} {player.last}</span>
-          <StatusLed status={player.status} />
-        </div>
-        <div className="announcer-player-actions-mini">
-          {player.status === 'ready' && (
-            <span
-              className="announcer-mini-play"
-              onClick={e => { e.stopPropagation(); handlePreview(); }}
-              role="button"
-              tabIndex={0}
-              aria-label={previewing ? 'Stop preview' : 'Preview clip'}
-            >
-              {previewing ? <Square size={16} /> : <Play size={16} />}
-            </span>
-          )}
-          {expanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
-        </div>
-      </button>
+      {/* The mini-play control used to be a role="button" span nested INSIDE the
+          header <button>. Nested interactive elements are invalid HTML and on
+          touch the inner one is unreliable — iOS routinely delivers the tap to
+          the outer button, so "preview" collapsed the card instead of playing.
+          The row is now a plain flex container holding two sibling buttons. */}
+      <div style={{ display: 'flex', alignItems: 'stretch', minWidth: 0 }}>
+        <button
+          className="announcer-player-header"
+          onClick={() => setExpanded(!expanded)}
+          aria-expanded={expanded}
+          style={{ flex: '1 1 auto', width: 'auto', minWidth: 0, minHeight: 'var(--touch-min)' }}
+        >
+          <div className="announcer-player-info" style={{ minWidth: 0 }}>
+            <span className="announcer-jersey">#{player.number || '—'}</span>
+            <span className="announcer-player-name">{player.first} {player.last}</span>
+            <StatusLed status={player.status} />
+          </div>
+          <div className="announcer-player-actions-mini">
+            {expanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+          </div>
+        </button>
+        {player.status === 'ready' && (
+          <button
+            type="button"
+            className="announcer-mini-play"
+            onClick={handlePreview}
+            aria-label={previewing ? 'Stop preview' : 'Preview clip'}
+            // A real <button> activates on Enter and Space natively, so the
+            // hand-rolled onKeyDown the old <span role="button"> was missing is
+            // no longer needed — adding one here would double-fire on Enter.
+            style={{
+              background: 'transparent', border: 'none', cursor: 'pointer',
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              minWidth: 'var(--touch-min)', minHeight: 'var(--touch-min)',
+              flexShrink: 0, padding: '0 0.75rem 0 0',
+            }}
+          >
+            {previewing ? <Square size={16} /> : <Play size={16} />}
+          </button>
+        )}
+      </div>
 
       {expanded && (
         <div className="announcer-player-details">
@@ -388,7 +437,8 @@ function PlayerCard({ player, onSavePhonetics, onRender, onRemove }) {
                 onClick={handleDetectBPM}
                 disabled={bpmLoading}
                 className="announcer-btn announcer-btn-secondary"
-                style={{ fontSize: '0.75rem', padding: '3px 10px' }}
+                // 3px of vertical padding rendered a ~24px-tall control.
+                style={{ fontSize: '0.75rem', padding: '3px 10px', minHeight: 'var(--touch-min)' }}
               >
                 {bpmLoading ? <RefreshCw size={12} className="sync-spin" /> : <Activity size={12} />}
                 {bpmLoading ? 'Analyzing…' : 'Auto-set Duck Point'}
@@ -422,9 +472,16 @@ function PlayerCard({ player, onSavePhonetics, onRender, onRemove }) {
               <ul className="announcer-song-list">
                 {songs.map(song => (
                   <li key={song.id} className="announcer-song-item">
-                    <span className="announcer-song-label" title={song.song_url}>
+                    {/* The full URL only ever lived in `title`, which a phone
+                        never surfaces. TipIcon makes it tap-to-reveal while
+                        keeping the single-line ellipsis layout. */}
+                    <TipIcon
+                      text={song.song_url}
+                      className="announcer-song-label"
+                      style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'left', minWidth: 0 }}
+                    >
                       {song.song_label || song.song_url.split('/').pop().split('?')[0] || song.song_url}
-                    </span>
+                    </TipIcon>
                     {song.optimal_start_ms > 0 && (
                       <span className="announcer-song-start-badge" title="Optimal start point">
                         {(song.optimal_start_ms / 1000).toFixed(1)}s
@@ -446,10 +503,12 @@ function PlayerCard({ player, onSavePhonetics, onRender, onRemove }) {
             )}
 
             {/* YouTube search */}
-            <div style={{ display: 'flex', gap: 6, margin: '8px 0 4px' }}>
+            {/* Wraps at 360px: a usable search field plus a "Searching…" button
+                will not fit on one line. */}
+            <div style={{ display: 'flex', gap: 6, margin: '8px 0 4px', flexWrap: 'wrap' }}>
               <input
                 className="announcer-song-input"
-                style={{ flex: 1 }}
+                style={{ flex: '1 1 160px', minWidth: 0 }}
                 value={songSearch}
                 onChange={e => setSongSearch(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && handleSongSearch()}
@@ -460,7 +519,7 @@ function PlayerCard({ player, onSavePhonetics, onRender, onRemove }) {
                 onClick={handleSongSearch}
                 disabled={searching || !songSearch.trim()}
                 className="announcer-btn announcer-btn-secondary"
-                style={{ flexShrink: 0, fontSize: '0.75rem', padding: '4px 10px' }}
+                style={{ flexShrink: 0, fontSize: '0.75rem', padding: '4px 10px', minHeight: 'var(--touch-min)' }}
               >
                 {searching ? <RefreshCw size={12} className="sync-spin" /> : <Search size={12} />}
                 {searching ? 'Searching…' : 'Search'}
@@ -491,7 +550,7 @@ function PlayerCard({ player, onSavePhonetics, onRender, onRemove }) {
                         onClick={() => handleDownloadAndAdd(r)}
                         disabled={downloadingId === r.video_id}
                         className="announcer-btn announcer-btn-secondary"
-                        style={{ flexShrink: 0, fontSize: '0.7rem', padding: '3px 8px' }}
+                        style={{ flexShrink: 0, fontSize: '0.7rem', padding: '3px 8px', minHeight: 'var(--touch-min)' }}
                         title="Download to Pi and add to pool"
                       >
                         {downloadingId === r.video_id
@@ -506,9 +565,14 @@ function PlayerCard({ player, onSavePhonetics, onRender, onRemove }) {
             )}
 
             {/* Manual URL entry (fallback / paste direct links) */}
-            <div className="announcer-song-add">
+            {/* URL + Label + (Start) + Add cannot share one 360px line. Let the
+                row wrap, and relax the label field's `flex: 0 0 100px` so it
+                can take its own line instead of squeezing the URL field down to
+                a few characters. */}
+            <div className="announcer-song-add" style={{ flexWrap: 'wrap' }}>
               <input
                 className="announcer-song-input"
+                style={{ flex: '1 1 180px', minWidth: 0 }}
                 value={newSongUrl}
                 onChange={e => { setNewSongUrl(e.target.value); setNewSongOptimalStart(0); }}
                 onKeyDown={e => e.key === 'Enter' && handleAddSong()}
@@ -518,6 +582,7 @@ function PlayerCard({ player, onSavePhonetics, onRender, onRemove }) {
               />
               <input
                 className="announcer-song-input announcer-song-label-input"
+                style={{ flex: '1 1 100px', minWidth: 0 }}
                 value={newSongLabel}
                 onChange={e => setNewSongLabel(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && handleAddSong()}
@@ -529,7 +594,7 @@ function PlayerCard({ player, onSavePhonetics, onRender, onRemove }) {
                   onClick={handleDetectStart}
                   disabled={detecting}
                   className="announcer-btn announcer-btn-secondary"
-                  style={{ flexShrink: 0, fontSize: '0.72rem', padding: '4px 8px' }}
+                  style={{ flexShrink: 0, fontSize: '0.72rem', padding: '4px 8px', minHeight: 'var(--touch-min)', minWidth: 'var(--touch-min)' }}
                   title="Detect optimal start point via Spotify audio analysis"
                 >
                   {detecting ? <RefreshCw size={11} className="sync-spin" /> : '⚡'}
@@ -540,7 +605,7 @@ function PlayerCard({ player, onSavePhonetics, onRender, onRemove }) {
                 onClick={handleAddSong}
                 disabled={addingSong || !newSongUrl.trim()}
                 className="announcer-btn announcer-btn-secondary"
-                style={{ flexShrink: 0, fontSize: '0.75rem', padding: '4px 10px' }}
+                style={{ flexShrink: 0, fontSize: '0.75rem', padding: '4px 10px', minHeight: 'var(--touch-min)' }}
               >
                 {addingSong ? <RefreshCw size={12} className="sync-spin" /> : <Plus size={12} />}
                 Add
@@ -559,28 +624,45 @@ function PlayerCard({ player, onSavePhonetics, onRender, onRemove }) {
           )}
 
           <div className="announcer-card-actions">
-            <button onClick={handleSave} disabled={saving} className="announcer-btn announcer-btn-secondary">
+            <button onClick={handleSave} disabled={saving} className="announcer-btn announcer-btn-secondary" style={{ minHeight: 'var(--touch-min)' }}>
               {saving ? <RefreshCw size={14} className="sync-spin" /> : <Save size={14} />}
               {saving ? 'Saving...' : 'Save'}
             </button>
-            <div className="announcer-quality-toggle">
-              <button
-                className={`announcer-quality-btn${renderQuality === 'best' ? ' active' : ''}`}
-                onClick={() => setRenderQuality('best')}
-                title="Best quality — Qwen2.5-TTS-3B (slow)"
-              >Best</button>
-              <button
-                className={`announcer-quality-btn${renderQuality === 'quick' ? ' active' : ''}`}
-                onClick={() => setRenderQuality('quick')}
-                title="Quick render — faster"
-              >Quick</button>
+            {/* The difference between the two modes existed ONLY in `title`, so
+                on a phone the toggle was two unexplained words. The TipIcon
+                carries the explanation as a tap-to-read popover; it sits beside
+                the toggle rather than wrapping the buttons, because TipIcon is
+                itself role="button" and nesting the two would recreate the
+                nested-interactive bug fixed above. */}
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <div className="announcer-quality-toggle">
+                <button
+                  type="button"
+                  className={`announcer-quality-btn${renderQuality === 'best' ? ' active' : ''}`}
+                  onClick={() => setRenderQuality('best')}
+                  aria-pressed={renderQuality === 'best'}
+                  title="Best quality — Qwen2.5-TTS-3B (slow)"
+                  style={{ minHeight: 'var(--touch-min)' }}
+                >Best</button>
+                <button
+                  type="button"
+                  className={`announcer-quality-btn${renderQuality === 'quick' ? ' active' : ''}`}
+                  onClick={() => setRenderQuality('quick')}
+                  aria-pressed={renderQuality === 'quick'}
+                  title="Quick render — faster"
+                  style={{ minHeight: 'var(--touch-min)' }}
+                >Quick</button>
+              </div>
+              <TipIcon text="Render quality. Best = Qwen2.5-TTS-3B, the highest-fidelity voice but slow (up to ~2 minutes). Quick = a faster, lower-fidelity render for last-minute subs.">
+                <span aria-hidden="true" style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 700 }}>?</span>
+              </TipIcon>
             </div>
-            <button onClick={handleRender} disabled={rendering} className="announcer-btn announcer-btn-primary">
+            <button onClick={handleRender} disabled={rendering} className="announcer-btn announcer-btn-primary" style={{ minHeight: 'var(--touch-min)' }}>
               {rendering ? <RefreshCw size={14} className="sync-spin" /> : <Mic size={14} />}
               {rendering ? 'Rendering...' : 'Re-render'}
             </button>
             {player.status === 'ready' && player.announcer_audio_url && (
-              <button onClick={handlePreview} className="announcer-btn announcer-btn-accent">
+              <button onClick={handlePreview} className="announcer-btn announcer-btn-accent" style={{ minHeight: 'var(--touch-min)' }}>
                 {previewing ? <Square size={14} /> : <Volume2 size={14} />}
                 {previewing ? 'Stop' : 'Preview'}
               </button>
@@ -764,7 +846,7 @@ function NowPlayingView({ roster, lineups, onBack }) {
         <p style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
           No players with rendered audio clips yet. Go to the Roster view and render clips first.
         </p>
-        <button onClick={onBack} className="announcer-btn announcer-btn-secondary" style={{ margin: '1rem auto', display: 'flex' }}>
+        <button onClick={onBack} className="announcer-btn announcer-btn-secondary" style={{ margin: '1rem auto', display: 'flex', minHeight: 'var(--touch-min)' }}>
           <List size={14} /> Back to Roster
         </button>
       </div>
@@ -775,15 +857,18 @@ function NowPlayingView({ roster, lineups, onBack }) {
 
   return (
     <div className="announcer-now-playing">
-      <div className="announcer-np-header">
-        <button onClick={onBack} className="announcer-btn announcer-btn-secondary" aria-label="Back to roster">
+      {/* Five items (Roster, Achievement, Game State, position, source badge)
+          on one unwrappable line blew straight through 360px. Both the outer
+          row and the inner group now wrap. */}
+      <div className="announcer-np-header" style={{ flexWrap: 'wrap', gap: 8 }}>
+        <button onClick={onBack} className="announcer-btn announcer-btn-secondary" aria-label="Back to roster" style={{ minHeight: 'var(--touch-min)' }}>
           <List size={16} /> Roster
         </button>
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end', minWidth: 0 }}>
           <button
             onClick={() => setShowHalo(true)}
             className="announcer-btn announcer-btn-accent"
-            style={{ padding: '4px 10px', fontSize: '0.75rem' }}
+            style={{ padding: '4px 10px', fontSize: '0.75rem', minHeight: 'var(--touch-min)' }}
             aria-label="Halo achievement"
           >
             <Zap size={14} /> Achievement
@@ -791,19 +876,23 @@ function NowPlayingView({ roster, lineups, onBack }) {
           <button
             onClick={() => setShowGamePanel(v => !v)}
             className={`announcer-btn ${showGamePanel ? 'announcer-btn-primary' : 'announcer-btn-secondary'}`}
-            style={{ padding: '4px 10px', fontSize: '0.75rem' }}
+            style={{ padding: '4px 10px', fontSize: '0.75rem', minHeight: 'var(--touch-min)' }}
+            aria-expanded={showGamePanel}
             aria-label="Toggle game state panel"
           >
             <Target size={14} /> Game State
           </button>
           <span className="announcer-np-position">{currentIdx + 1} / {battingOrder.length}</span>
           {gcLineup?.source_label && (
-            <span
+            // Where the batting order came from (and how to refresh it) was a
+            // `title`-only string, i.e. invisible on the device this screen is
+            // built for. TipIcon makes it tappable.
+            <TipIcon
+              text={gcLineup.source === 'gc_game' ? 'Batting order from GameChanger — re-ingest CSV to refresh' : 'Batting order from lineup optimizer'}
               className={`announcer-lineup-source${gcLineup.source === 'gc_game' ? ' announcer-lineup-source--gc' : ''}`}
-              title={gcLineup.source === 'gc_game' ? 'Batting order from GameChanger — re-ingest CSV to refresh' : 'Batting order from lineup optimizer'}
             >
               {gcLineup.source === 'gc_game' ? '⚾' : '📊'} {gcLineup.source_label}
-            </span>
+            </TipIcon>
           )}
         </div>
       </div>
@@ -814,18 +903,26 @@ function NowPlayingView({ roster, lineups, onBack }) {
             {/* Inning */}
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
               <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Inning</span>
+              {/* Game state is edited one-handed between pitches, but every
+                  stepper here was 24px or smaller. The authored width/height
+                  stay so the glyphs keep their proportions; min-width/height do
+                  the real work. */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <button className="announcer-btn announcer-btn-round" style={{ width: 24, height: 24, fontSize: '1rem' }}
+                <button type="button" className="announcer-btn announcer-btn-round" aria-label="Previous inning"
+                  style={{ width: 24, height: 24, fontSize: '1rem', minWidth: 'var(--touch-min)', minHeight: 'var(--touch-min)' }}
                   onClick={() => updateGameField('inning', Math.max(1, gameState.inning - 1))}>−</button>
                 <span style={{ fontWeight: 800, fontSize: '1.1rem', minWidth: 20, textAlign: 'center' }}>{gameState.inning}</span>
-                <button className="announcer-btn announcer-btn-round" style={{ width: 24, height: 24, fontSize: '1rem' }}
+                <button type="button" className="announcer-btn announcer-btn-round" aria-label="Next inning"
+                  style={{ width: 24, height: 24, fontSize: '1rem', minWidth: 'var(--touch-min)', minHeight: 'var(--touch-min)' }}
                   onClick={() => updateGameField('inning', Math.min(15, gameState.inning + 1))}>+</button>
               </div>
               <div style={{ display: 'flex', gap: 4 }}>
                 {['top', 'bottom'].map(h => (
-                  <button key={h} onClick={() => updateGameField('half', h)}
+                  <button type="button" key={h} onClick={() => updateGameField('half', h)}
+                    aria-label={h === 'top' ? 'Top of the inning' : 'Bottom of the inning'}
+                    aria-pressed={gameState.half === h}
                     className={`announcer-btn ${gameState.half === h ? 'announcer-btn-primary' : 'announcer-btn-secondary'}`}
-                    style={{ padding: '2px 6px', fontSize: '0.65rem' }}>{h === 'top' ? '▲' : '▼'}</button>
+                    style={{ padding: '2px 6px', fontSize: '0.65rem', minWidth: 'var(--touch-min)', minHeight: 'var(--touch-min)', justifyContent: 'center' }}>{h === 'top' ? '▲' : '▼'}</button>
                 ))}
               </div>
             </div>
@@ -835,9 +932,11 @@ function NowPlayingView({ roster, lineups, onBack }) {
               <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Outs</span>
               <div style={{ display: 'flex', gap: 4 }}>
                 {[0, 1, 2].map(o => (
-                  <button key={o} onClick={() => updateGameField('outs', o)}
+                  <button type="button" key={o} onClick={() => updateGameField('outs', o)}
+                    aria-label={`${o} out${o === 1 ? '' : 's'}`}
+                    aria-pressed={gameState.outs === o}
                     className={`announcer-btn ${gameState.outs === o ? 'announcer-btn-primary' : 'announcer-btn-secondary'}`}
-                    style={{ width: 28, height: 28, padding: 0, fontWeight: 800 }}>{o}</button>
+                    style={{ width: 28, height: 28, padding: 0, fontWeight: 800, minWidth: 'var(--touch-min)', minHeight: 'var(--touch-min)', justifyContent: 'center' }}>{o}</button>
                 ))}
               </div>
             </div>
@@ -851,25 +950,31 @@ function NowPlayingView({ roster, lineups, onBack }) {
             {/* Score */}
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
               <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Score</span>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              {/* 20px score steppers were the smallest targets on the screen
+                  and the most consequential to mis-tap. */}
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'center' }}>
                 <div style={{ textAlign: 'center' }}>
                   <div style={{ fontSize: '0.6rem', opacity: 0.7 }}>Us</div>
-                  <div style={{ display: 'flex', gap: 3 }}>
-                    <button className="announcer-btn announcer-btn-round" style={{ width: 20, height: 20, fontSize: '0.75rem' }}
+                  <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
+                    <button type="button" className="announcer-btn announcer-btn-round" aria-label="Decrease our score"
+                      style={{ width: 20, height: 20, fontSize: '0.75rem', minWidth: 'var(--touch-min)', minHeight: 'var(--touch-min)' }}
                       onClick={() => updateGameField('score_us', Math.max(0, gameState.score_us - 1))}>−</button>
                     <span style={{ fontWeight: 800, minWidth: 20, textAlign: 'center' }}>{gameState.score_us}</span>
-                    <button className="announcer-btn announcer-btn-round" style={{ width: 20, height: 20, fontSize: '0.75rem' }}
+                    <button type="button" className="announcer-btn announcer-btn-round" aria-label="Increase our score"
+                      style={{ width: 20, height: 20, fontSize: '0.75rem', minWidth: 'var(--touch-min)', minHeight: 'var(--touch-min)' }}
                       onClick={() => updateGameField('score_us', gameState.score_us + 1)}>+</button>
                   </div>
                 </div>
                 <span style={{ opacity: 0.5 }}>–</span>
                 <div style={{ textAlign: 'center' }}>
                   <div style={{ fontSize: '0.6rem', opacity: 0.7 }}>Them</div>
-                  <div style={{ display: 'flex', gap: 3 }}>
-                    <button className="announcer-btn announcer-btn-round" style={{ width: 20, height: 20, fontSize: '0.75rem' }}
+                  <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
+                    <button type="button" className="announcer-btn announcer-btn-round" aria-label="Decrease their score"
+                      style={{ width: 20, height: 20, fontSize: '0.75rem', minWidth: 'var(--touch-min)', minHeight: 'var(--touch-min)' }}
                       onClick={() => updateGameField('score_them', Math.max(0, gameState.score_them - 1))}>−</button>
                     <span style={{ fontWeight: 800, minWidth: 20, textAlign: 'center' }}>{gameState.score_them}</span>
-                    <button className="announcer-btn announcer-btn-round" style={{ width: 20, height: 20, fontSize: '0.75rem' }}
+                    <button type="button" className="announcer-btn announcer-btn-round" aria-label="Increase their score"
+                      style={{ width: 20, height: 20, fontSize: '0.75rem', minWidth: 'var(--touch-min)', minHeight: 'var(--touch-min)' }}
                       onClick={() => updateGameField('score_them', gameState.score_them + 1)}>+</button>
                   </div>
                 </div>
@@ -939,48 +1044,75 @@ const DEFAULT_GAME_STATE = {
   achievement: null,
 };
 
+// Each base used to be an 18x18 rotated <div> carrying an onClick — not
+// focusable, not announced, and a quarter of the area a thumb needs. They are
+// real <button>s now, each with a full 44x44 box.
+//
+// The diamond itself had to grow from 60x60 to 132x132: three 44px targets
+// arranged around a 60px square overlap one another, so a tap aimed at 2nd
+// base would land on 3rd. At 132 the boxes tile edge-to-edge with no overlap.
+// The base name also moved out of `title` (invisible on a phone) into a
+// visible caption under each base.
+const BASE_HIT = 'var(--touch-min)';
+const BASE_LABELS = ['1st base', '2nd base', '3rd base'];
+
 function BaseDiamond({ bases, onToggle }) {
   // bases = [1B, 2B, 3B]
   const occupied = 'var(--warning, #facc15)';
   const empty = 'rgba(255,255,255,0.15)';
   const baseStyle = (idx) => ({
-    width: 18, height: 18,
+    width: 22, height: 22,
     background: bases[idx] ? occupied : empty,
     border: '2px solid rgba(255,255,255,0.4)',
     transform: 'rotate(45deg)',
-    cursor: 'pointer',
     borderRadius: 2,
     transition: 'background 0.15s',
   });
+  const hitStyle = {
+    position: 'absolute',
+    width: BASE_HIT, height: BASE_HIT,
+    display: 'flex', flexDirection: 'column',
+    alignItems: 'center', justifyContent: 'center', gap: 2,
+    background: 'transparent', border: 'none', padding: 0,
+    cursor: 'pointer', color: 'var(--text-muted)',
+  };
+  const capStyle = { fontSize: '0.55rem', fontWeight: 700, lineHeight: 1 };
+
+  const baseButton = (idx, caption, position) => (
+    <button
+      type="button"
+      style={{ ...hitStyle, ...position }}
+      onClick={() => onToggle(idx)}
+      aria-pressed={Boolean(bases[idx])}
+      aria-label={`${BASE_LABELS[idx]} — ${bases[idx] ? 'runner on' : 'empty'}`}
+    >
+      <span style={baseStyle(idx)} />
+      <span aria-hidden="true" style={capStyle}>{caption}</span>
+    </button>
+  );
+
   return (
-    <div style={{ position: 'relative', width: 60, height: 60, flexShrink: 0 }}>
-      {/* 2B — top center */}
-      <div style={{ position: 'absolute', top: 0, left: '50%', transform: 'translateX(-50%)' }}
-           onClick={() => onToggle(1)} title="2nd base">
-        <div style={baseStyle(1)} />
-      </div>
-      {/* 3B — left */}
-      <div style={{ position: 'absolute', top: '50%', left: 0, transform: 'translateY(-50%)' }}
-           onClick={() => onToggle(2)} title="3rd base">
-        <div style={baseStyle(2)} />
-      </div>
-      {/* 1B — right */}
-      <div style={{ position: 'absolute', top: '50%', right: 0, transform: 'translateY(-50%)' }}
-           onClick={() => onToggle(0)} title="1st base">
-        <div style={baseStyle(0)} />
-      </div>
-      {/* Home plate — bottom center */}
-      <div style={{ position: 'absolute', bottom: 0, left: '50%', transform: 'translateX(-50%)' }}>
-        <div style={{ width: 18, height: 18, background: 'rgba(255,255,255,0.3)', border: '2px solid rgba(255,255,255,0.4)', transform: 'rotate(45deg)', borderRadius: 2 }} />
+    <div style={{ position: 'relative', width: 132, height: 132, flexShrink: 0 }}>
+      {baseButton(1, '2B', { top: 0, left: '50%', transform: 'translateX(-50%)' })}
+      {baseButton(2, '3B', { top: '50%', left: 0, transform: 'translateY(-50%)' })}
+      {baseButton(0, '1B', { top: '50%', right: 0, transform: 'translateY(-50%)' })}
+      {/* Home plate — decorative, never toggled */}
+      <div style={{ position: 'absolute', bottom: 0, left: '50%', transform: 'translateX(-50%)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, color: 'var(--text-muted)' }}>
+        <span style={{ width: 22, height: 22, background: 'rgba(255,255,255,0.3)', border: '2px solid rgba(255,255,255,0.4)', transform: 'rotate(45deg)', borderRadius: 2 }} />
+        <span aria-hidden="true" style={capStyle}>H</span>
       </div>
     </div>
   );
 }
 
 function HaloOverlay({ onSelect, onClose }) {
+  useEscapeToClose(onClose);
   return createPortal(
     <div className="announcer-modal-overlay" onClick={onClose}>
-      <div className="announcer-modal glass-panel" onClick={e => e.stopPropagation()} style={{ maxWidth: 340 }}>
+      {/* Seven two-line buttons plus Cancel are taller than a phone viewport;
+          without the scroll cap both ends were clipped and Cancel could not be
+          reached at all. */}
+      <div className="announcer-modal glass-panel" onClick={e => e.stopPropagation()} style={{ maxWidth: 340, ...MODAL_SCROLL_STYLE }}>
         <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <Zap size={18} style={{ color: 'var(--warning, #facc15)' }} /> Halo Achievement
         </h3>
@@ -990,9 +1122,10 @@ function HaloOverlay({ onSelect, onClose }) {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
           {HALO_ACHIEVEMENTS.map(a => (
             <button
+              type="button"
               key={a.key}
               className="announcer-btn announcer-btn-accent"
-              style={{ flexDirection: 'column', padding: '0.5rem', textAlign: 'center', height: 'auto' }}
+              style={{ flexDirection: 'column', padding: '0.5rem', textAlign: 'center', height: 'auto', minHeight: 'var(--touch-min)' }}
               onClick={() => { onSelect(a.key); onClose(); }}
             >
               <span style={{ fontWeight: 700, fontSize: '0.85rem' }}>{a.label}</span>
@@ -1000,7 +1133,7 @@ function HaloOverlay({ onSelect, onClose }) {
             </button>
           ))}
         </div>
-        <button onClick={onClose} className="announcer-btn announcer-btn-secondary" style={{ marginTop: '0.75rem', width: '100%' }}>
+        <button type="button" onClick={onClose} className="announcer-btn announcer-btn-secondary" style={{ marginTop: '0.75rem', width: '100%', minHeight: 'var(--touch-min)', justifyContent: 'center' }}>
           Cancel
         </button>
       </div>
@@ -1231,6 +1364,8 @@ function WizardModal({ onClose, roster, onAddSong }) {
   const [selectedPlayerId, setSelectedPlayerId] = useState(() => roster[0]?.id || '');
   const [addingId, setAddingId] = useState(null); // tracks which row is being added
 
+  useEscapeToClose(onClose);
+
   useEffect(() => {
     import('../services/SpotifyService').then(({ isAuthenticated }) => {
       setSpotifyAuthed(isAuthenticated());
@@ -1301,19 +1436,22 @@ function WizardModal({ onClose, roster, onAddSong }) {
 
   return createPortal(
     <div className="announcer-modal-overlay" onClick={onClose}>
-      <div className="announcer-modal glass-panel" onClick={e => e.stopPropagation()} style={{ maxWidth: 520 }}>
+      {/* Tabs + player selector + search form + results overflow a phone
+          viewport; cap and scroll the modal itself. */}
+      <div className="announcer-modal glass-panel" onClick={e => e.stopPropagation()} style={{ maxWidth: 520, ...MODAL_SCROLL_STYLE }}>
         <div className="announcer-modal-header">
           <h3><Wand2 size={16} /> Music Wizard</h3>
           <button className="announcer-modal-close" onClick={onClose}><X size={18} /></button>
         </div>
+        {/* Tabs computed to ~38px tall from their padding alone. */}
         <div className="announcer-wizard-tabs">
-          <button className={`announcer-wizard-tab${tab === 'search' ? ' active' : ''}`} onClick={() => setTab('search')}>
+          <button type="button" aria-pressed={tab === 'search'} style={{ minHeight: 'var(--touch-min)' }} className={`announcer-wizard-tab${tab === 'search' ? ' active' : ''}`} onClick={() => setTab('search')}>
             Catalog
           </button>
-          <button className={`announcer-wizard-tab${tab === 'roster' ? ' active' : ''}`} onClick={() => setTab('roster')}>
+          <button type="button" aria-pressed={tab === 'roster'} style={{ minHeight: 'var(--touch-min)' }} className={`announcer-wizard-tab${tab === 'roster' ? ' active' : ''}`} onClick={() => setTab('roster')}>
             Roster
           </button>
-          <button className={`announcer-wizard-tab${tab === 'spotify' ? ' active' : ''}`} onClick={() => setTab('spotify')}>
+          <button type="button" aria-pressed={tab === 'spotify'} style={{ minHeight: 'var(--touch-min)' }} className={`announcer-wizard-tab${tab === 'spotify' ? ' active' : ''}`} onClick={() => setTab('spotify')}>
             Spotify
           </button>
         </div>
@@ -1329,7 +1467,7 @@ function WizardModal({ onClose, roster, onAddSong }) {
                 placeholder="Search title or artist…"
                 autoFocus
               />
-              <button type="submit" className="announcer-btn announcer-btn-primary" disabled={loading}>
+              <button type="submit" className="announcer-btn announcer-btn-primary" disabled={loading} style={{ minHeight: 'var(--touch-min)' }}>
                 {loading ? <RefreshCw size={13} className="sync-spin" /> : 'Search'}
               </button>
             </form>
@@ -1346,8 +1484,10 @@ function WizardModal({ onClose, roster, onAddSong }) {
                     )}
                     <span className="announcer-wizard-energy" title="Energy score">{Math.round(row.energy_score * 100)}%</span>
                     <button
+                      type="button"
                       className="announcer-btn announcer-btn-secondary"
-                      style={{ padding: '2px 8px', fontSize: '0.72rem' }}
+                      // 2px of vertical padding rendered a ~20px-tall "Add".
+                      style={{ padding: '2px 8px', fontSize: '0.72rem', minHeight: 'var(--touch-min)', minWidth: 'var(--touch-min)' }}
                       disabled={addingId === row.id || !selectedPlayerId}
                       onClick={() => handleAdd(row.id, row.audio_url || row.url, row.title, row.optimal_start_ms)}
                     >
@@ -1392,8 +1532,9 @@ function WizardModal({ onClose, roster, onAddSong }) {
                           )}
                           <span className="announcer-wizard-energy">{Math.round((row.energy_score || 0) * 100)}%</span>
                           <button
+                            type="button"
                             className="announcer-btn announcer-btn-secondary"
-                            style={{ padding: '2px 8px', fontSize: '0.72rem' }}
+                            style={{ padding: '2px 8px', fontSize: '0.72rem', minHeight: 'var(--touch-min)', minWidth: 'var(--touch-min)' }}
                             disabled={addingId === rowKey}
                             onClick={async () => {
                               setAddingId(rowKey);
@@ -1422,7 +1563,7 @@ function WizardModal({ onClose, roster, onAddSong }) {
                   Connect Spotify to search 100M+ tracks and auto-detect optimal start points.
                   30-second previews are free. Full playback requires Spotify Premium.
                 </p>
-                <button className="announcer-btn announcer-btn-primary" onClick={handleSpotifyConnect}>
+                <button type="button" className="announcer-btn announcer-btn-primary" onClick={handleSpotifyConnect} style={{ minHeight: 'var(--touch-min)' }}>
                   Connect Spotify
                 </button>
               </div>
@@ -1437,34 +1578,43 @@ function WizardModal({ onClose, roster, onAddSong }) {
                     placeholder="Search Spotify…"
                     autoFocus
                   />
-                  <button type="submit" className="announcer-btn announcer-btn-primary" disabled={spotifyLoading}>
+                  <button type="submit" className="announcer-btn announcer-btn-primary" disabled={spotifyLoading} style={{ minHeight: 'var(--touch-min)' }}>
                     {spotifyLoading ? <RefreshCw size={13} className="sync-spin" /> : 'Search'}
                   </button>
                 </form>
                 <div className="announcer-wizard-results">
                   {spotifyResults.map(track => (
-                    <div key={track.spotify_id} className="announcer-wizard-result-row">
-                      <div className="announcer-wizard-result-info">
+                    <div key={track.spotify_id} className="announcer-wizard-result-row" style={{ flexWrap: 'wrap' }}>
+                      <div className="announcer-wizard-result-info" style={{ minWidth: 0 }}>
                         <span className="announcer-wizard-result-title">{track.title}</span>
                         <span className="announcer-wizard-result-artist">{track.artist}</span>
                       </div>
-                      <div className="announcer-wizard-result-meta">
+                      {/* The native player needs a line of its own. The meta row
+                          is flex-shrink:0 in CSS, so give it a definite basis
+                          and let it wrap rather than force the row past 360px —
+                          that basis is also what the audio's width:100%
+                          resolves against. */}
+                      <div className="announcer-wizard-result-meta" style={{ flex: '1 1 220px', flexWrap: 'wrap', justifyContent: 'flex-end', minWidth: 0 }}>
                         {track.duration_ms && (
                           <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>
                             {Math.floor(track.duration_ms / 60000)}:{String(Math.floor((track.duration_ms % 60000) / 1000)).padStart(2, '0')}
                           </span>
                         )}
                         {track.preview_url && (
+                          // iOS Safari ignores a height below its own minimum
+                          // and rendered this 22px scrubber unusable; give the
+                          // control a real 40px row and the full width.
                           <audio
                             src={track.preview_url}
                             controls
-                            style={{ height: 22, width: 140 }}
+                            style={{ width: '100%', maxWidth: 320, height: 40 }}
                             preload="none"
                           />
                         )}
                         <button
+                          type="button"
                           className="announcer-btn announcer-btn-secondary"
-                          style={{ padding: '2px 8px', fontSize: '0.72rem' }}
+                          style={{ padding: '2px 8px', fontSize: '0.72rem', minHeight: 'var(--touch-min)', minWidth: 'var(--touch-min)' }}
                           disabled={addingId === track.spotify_id || !selectedPlayerId}
                           onClick={() => handleAdd(track.spotify_id, track.preview_url, `${track.title} — ${track.artist}`, 0)}
                         >
@@ -1592,6 +1742,43 @@ export default function Announcer({ lineups }) {
     fetchRoster();
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [fetchRoster]);
+
+  // ── iOS AudioContext unlock ────────────────────────────────────────────
+  // This screen builds its AudioContext OUTSIDE any user gesture: usePrebuffer
+  // warms the next batters' hooks on mount, and the preload effect does the
+  // same on every index change. On iOS a context created without a gesture is
+  // born `suspended` and stays that way — audioController's own resume() call
+  // inside getContext() is a no-op unless it happens during one — so the very
+  // first tap on Play produces silence.
+  //
+  // Fix: on the first gesture anywhere, touch the controller so getContext()
+  // runs inside that gesture and its resume() actually takes. setVolume(1) is
+  // the only exported function that reaches getContext() without side effects
+  // (1.0 is the GainNode default, so the level is unchanged); the controller
+  // exposes no context/resume of its own and must not be edited here.
+  //
+  // Listeners go on `document`, not the container ref: the modals portal to
+  // document.body and the Now Playing view replaces the container entirely, so
+  // a container-scoped listener would miss the first tap in both cases.
+  useEffect(() => {
+    let done = false;
+    const opts = { capture: true, passive: true };
+    const unlock = () => {
+      if (done) return;
+      done = true;
+      try { setVolume(1); } catch { /* no Web Audio support — nothing to unlock */ }
+      remove();
+    };
+    function remove() {
+      document.removeEventListener('pointerdown', unlock, opts);
+      document.removeEventListener('touchend', unlock, opts);
+      document.removeEventListener('click', unlock, opts);
+    }
+    document.addEventListener('pointerdown', unlock, opts);
+    document.addEventListener('touchend', unlock, opts);
+    document.addEventListener('click', unlock, opts);
+    return remove;
+  }, []);
 
   // Poll during render operations
   const startPolling = useCallback(() => {
@@ -1735,10 +1922,13 @@ export default function Announcer({ lineups }) {
         <h2>
           <Mic size={22} /> The Announcer
         </h2>
-        <div className="announcer-header-actions">
+        {/* Badge + Retry + Now Playing sit beside an h2 on one line; at 360px
+            they have to be free to drop onto a second row. */}
+        <div className="announcer-header-actions" style={{ flexWrap: 'wrap', justifyContent: 'flex-end', minWidth: 0 }}>
           <WorkerBadge workerStatus={workerStatus} />
           {workerStopped && (
             <button
+              type="button"
               onClick={restartWorkerPoll}
               title="Worker offline — tap to retry"
               aria-label="Retry worker connection"
@@ -1746,12 +1936,13 @@ export default function Announcer({ lineups }) {
               style={{
                 display: 'inline-flex', alignItems: 'center', gap: '0.3rem',
                 padding: '0.35rem 0.55rem', fontSize: '0.7rem', fontWeight: '700',
+                minHeight: 'var(--touch-min)',
               }}
             >
               <RefreshCw size={12} /> Retry
             </button>
           )}
-          <button onClick={() => setView('nowplaying')} className="announcer-btn announcer-btn-accent">
+          <button onClick={() => setView('nowplaying')} className="announcer-btn announcer-btn-accent" style={{ minHeight: 'var(--touch-min)' }}>
             <Play size={14} /> Now Playing
           </button>
         </div>
@@ -1775,21 +1966,25 @@ export default function Announcer({ lineups }) {
       <StatsBar stats={stats} />
 
       <div className="announcer-toolbar">
-        <button onClick={handleRenderAll} disabled={renderAllLoading} className="announcer-btn announcer-btn-primary">
+        {/* .announcer-btn's 0.5rem padding lands at ~34px tall — under the 44px
+            floor for the toolbar that gets used on a phone mid-game. */}
+        <button onClick={handleRenderAll} disabled={renderAllLoading} className="announcer-btn announcer-btn-primary" style={{ minHeight: 'var(--touch-min)' }}>
           {renderAllLoading ? <RefreshCw size={14} className="sync-spin" /> : <Mic size={14} />}
           {renderAllLoading ? 'Rendering...' : 'Render All'}
         </button>
-        <button onClick={() => setShowAddSub(true)} className="announcer-btn announcer-btn-secondary">
+        <button onClick={() => setShowAddSub(true)} className="announcer-btn announcer-btn-secondary" style={{ minHeight: 'var(--touch-min)' }}>
           <UserPlus size={14} /> Add Sub
         </button>
-        <button onClick={() => setShowWizard(true)} className="announcer-btn announcer-btn-secondary" title="Music Wizard">
+        <button onClick={() => setShowWizard(true)} className="announcer-btn announcer-btn-secondary" title="Music Wizard" style={{ minHeight: 'var(--touch-min)' }}>
           <Wand2 size={14} /> Wizard
         </button>
-        <label className={`announcer-btn announcer-btn-secondary${csvImporting ? ' announcer-btn--loading' : ''}`} title="Import songs from CSV">
-          <Upload size={14} />
+        {/* This was an upload glyph whose entire meaning lived in `title` — on
+            a phone it read as an unlabelled arrow. Give it visible text. */}
+        <label className={`announcer-btn announcer-btn-secondary${csvImporting ? ' announcer-btn--loading' : ''}`} title="Import songs from CSV" style={{ minHeight: 'var(--touch-min)' }}>
+          <Upload size={14} /> {csvImporting ? 'Importing…' : 'Import CSV'}
           <input ref={csvInputRef} type="file" accept=".csv" onChange={handleCsvImport} style={{ display: 'none' }} />
         </label>
-        <button onClick={fetchRoster} className="announcer-btn announcer-btn-secondary" aria-label="Refresh roster">
+        <button onClick={fetchRoster} className="announcer-btn announcer-btn-secondary" aria-label="Refresh roster" style={{ minHeight: 'var(--touch-min)', minWidth: 'var(--touch-min)', justifyContent: 'center' }}>
           <RefreshCw size={14} />
         </button>
       </div>
@@ -1814,7 +2009,8 @@ export default function Announcer({ lineups }) {
           <div className="announcer-former-section">
             <button
               className="announcer-btn announcer-btn-secondary"
-              style={{ width: '100%', justifyContent: 'space-between', fontSize: '0.8rem', opacity: 0.7 }}
+              style={{ width: '100%', justifyContent: 'space-between', fontSize: '0.8rem', opacity: 0.7, minHeight: 'var(--touch-min)' }}
+              aria-expanded={showFormer}
               onClick={() => setShowFormer(v => !v)}
             >
               <span>Former Players ({roster.filter(p => p.is_ghost).length})</span>

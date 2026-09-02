@@ -21,10 +21,20 @@
   {"@context":"https://schema.org","@type":"ContactPage","name":"Contact — The Sharks PCLL Softball Dashboard","url":"https://dugout.joelycannoli.com/contact/","datePublished":"2026-02-01","dateModified":"2026-04-26","author":{"@type":"Organization","name":"The Sharks PCLL Softball Coaching Staff"},"isPartOf":{"@type":"WebApplication","name":"The Sharks PCLL Softball Dashboard","url":"https://dugout.joelycannoli.com/"},"contactPoint":{"@type":"ContactPoint","contactType":"coaching staff","areaServed":"Palm Coast, FL"}}
   </script>
   <style>
-    body { font-family: sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.6; }
+    /* -webkit-text-size-adjust stops iOS inflating this copy in landscape;
+       the safe-area padding keeps text clear of the notch on a rotated phone. */
+    html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      max-width: 800px; margin: 2rem auto; color: #222; line-height: 1.6;
+      padding: 0 calc(1rem + env(safe-area-inset-right)) calc(2rem + env(safe-area-inset-bottom)) calc(1rem + env(safe-area-inset-left));
+      overflow-wrap: anywhere;
+    }
     h1, h2 { color: #046568; }
-    nav { margin-bottom: 1.5rem; font-size: 0.9rem; }
-    nav a { color: #046568; margin-right: 0.5rem; }
+    nav { margin-bottom: 1.5rem; font-size: 1rem; display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.5rem; }
+    /* Bare inline links are a ~16px-tall target on a phone. Pad them out to
+       the 44px touch minimum used by the dashboard itself. */
+    nav a { color: #046568; display: inline-flex; align-items: center; min-height: 44px; padding: 0 0.35rem; }
     .byline { color: #666; font-size: 0.9rem; margin-bottom: 1.5rem; }
     .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
   </style>

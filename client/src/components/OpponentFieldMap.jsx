@@ -145,7 +145,9 @@ function heatColor(t) {
     const r = Math.round(4 + t * 3 * (63 - 4));
     const g = Math.round(101 + t * 3 * (143 - 101));
     const b = Math.round(104 + t * 3 * (136 - 104));
-    return `rgba(${r},${g},${b},${0.25 + t * 0.35})`;
+    // Cold end floored at 0.45 for the same reason as typeColor: a 0.25-alpha
+    // teal dot on a near-black field is not visible on a phone.
+    return `rgba(${r},${g},${b},${0.45 + t * 0.3})`;
   }
   if (t < 0.66) {
     const p = (t - 0.33) * 3;
@@ -163,7 +165,9 @@ function heatColor(t) {
 
 /** Type-specific palette: GB=earthy brown, LD=gold, FB=sky blue */
 function typeColor(t, hitType) {
-  const alpha = 0.2 + t * 0.7;
+  // Floor raised from 0.2: a cold dot at 20% alpha was invisible against the
+  // dark field on a phone screen at arm's length.
+  const alpha = 0.45 + t * 0.5;
   if (hitType === 'gb') {
     return `rgba(${Math.round(100 + t * 120)},${Math.round(60 + t * 65)},${Math.round(15 + t * 10)},${alpha})`;
   }
@@ -295,8 +299,10 @@ const FieldSVG = ({ zoneWeights, totalHits = 0, hitType = 'all' }) => {
         const cx = pts.reduce((s, p) => s + p[0], 0) / pts.length;
         const cy = pts.reduce((s, p) => s + p[1], 0) / pts.length;
         return (
-          <text key={id} x={cx} y={cy + 3} textAnchor="middle"
-            fontSize="6" fill="rgba(255,255,255,0.25)" fontWeight="600"
+          // The SVG is capped at 300px wide, so a viewBox fontSize of 6 rendered
+          // at roughly 9px and 25% opacity — unreadable on a phone in daylight.
+          <text key={id} x={cx} y={cy + 3.5} textAnchor="middle"
+            fontSize="9" fill="rgba(255,255,255,0.62)" fontWeight="700"
             style={{ pointerEvents: 'none', userSelect: 'none' }}>
             {label}
           </text>
@@ -307,8 +313,10 @@ const FieldSVG = ({ zoneWeights, totalHits = 0, hitType = 'all' }) => {
       {dots.map((d, i) => {
         const color = hitType === 'all' ? heatColor(d.weight) : typeColor(d.weight, hitType);
         return (
-          <circle key={i} cx={d.x} cy={d.y} r={2.2}
-            fill={color} stroke="rgba(255,255,255,0.3)" strokeWidth="0.4"
+          // Bigger dots with a firmer outline: at 300px wide, r=2.2 rendered as
+          // a ~3px speck that vanished at the low end of the alpha ramp.
+          <circle key={i} cx={d.x} cy={d.y} r={3.2}
+            fill={color} stroke="rgba(255,255,255,0.45)" strokeWidth="0.5"
             style={{ filter: d.weight > 0.7 ? 'drop-shadow(0 0 2px rgba(230,100,50,0.6))' : 'none' }}
           />
         );
@@ -362,7 +370,10 @@ const PlayerThreatRow = ({ player }) => {
         </span>
         {pos && <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginLeft: '0.3rem' }}>{pos}</span>}
       </div>
-      <div style={{ display: 'flex', gap: '0.3rem', flexShrink: 0 }}>
+      {/* Up to four 48px-min badges pinned with flexShrink:0 took ~206px that
+          could not give way, collapsing the player name to a sliver at 360px.
+          Letting them wrap onto a second line keeps the name readable. */}
+      <div style={{ display: 'flex', gap: '0.3rem', flexWrap: 'wrap', justifyContent: 'flex-end', minWidth: 0 }}>
         {!isNaN(avg) && <TipBadge label="AVG" value={fmt3(avg)} />}
         {!isNaN(obp) && <TipBadge label="OBP" value={fmt3(obp)} />}
         {h > 0    && <TipBadge label="H"   value={h} />}
@@ -425,21 +436,27 @@ export default function OpponentFieldMap({ matchup, isMobile = false }) {
 
       {/* Controls: hit type filter + player filter */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
-        {/* Hit type toggle */}
-        <div style={{ display: 'flex', gap: '0.25rem' }}>
+        {/* Hit type toggle. These were ~18px tall and 2px apart — four adjacent
+            mis-tap targets. Now a full 44px each with real spacing between. */}
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
           {HIT_TYPES.map(({ id, label }) => (
             <button
               key={id}
+              type="button"
+              aria-pressed={hitType === id}
               onClick={() => setHitType(id)}
               style={{
-                padding: '2px 9px',
-                borderRadius: '4px',
+                minHeight: 'var(--touch-min)',
+                minWidth: '52px',
+                padding: '0.5rem 1rem',
+                borderRadius: '6px',
                 border: `1px solid ${hitType === id ? 'var(--primary-color)' : 'rgba(255,255,255,0.15)'}`,
                 background: hitType === id ? 'rgba(4,101,104,0.22)' : 'rgba(255,255,255,0.04)',
                 color: hitType === id ? 'var(--primary-color)' : 'var(--text-muted)',
-                fontSize: 'var(--text-xs)',
+                fontSize: 'var(--text-sm)',
                 fontWeight: hitType === id ? '700' : '400',
                 cursor: 'pointer',
+                touchAction: 'manipulation',
               }}
             >
               {label}
@@ -447,18 +464,21 @@ export default function OpponentFieldMap({ matchup, isMobile = false }) {
           ))}
         </div>
 
-        {/* Player filter — only shown when roster stats exist */}
+        {/* Player filter — only shown when roster stats exist. Deliberately no
+            inline fontSize: global CSS forces 16px/44px on coarse pointers and
+            a `var(--text-xs)` here would fight it (and reintroduce iOS
+            focus-zoom). maxWidth keeps a long roster name inside the viewport. */}
         {playersWithStats.length > 1 && (
           <select
             value={selectedPlayer}
             onChange={e => { setSelectedPlayer(e.target.value); }}
             style={{
-              padding: '2px 6px',
-              borderRadius: '4px',
+              padding: '0.4rem 0.6rem',
+              borderRadius: '6px',
               background: 'rgba(0,0,0,0.3)',
               border: '1px solid var(--surface-border)',
               color: 'var(--text-main)',
-              fontSize: 'var(--text-xs)',
+              maxWidth: '100%',
               cursor: 'pointer',
             }}
           >
@@ -490,13 +510,18 @@ export default function OpponentFieldMap({ matchup, isMobile = false }) {
               />
               {/* Legend: hot zones */}
               <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center' }}>
-                <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Hot zones:</span>
+                <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>Hot zones:</span>
                 {topZones.map(z => (
                   <span key={z.id} style={{
                     fontSize: 'var(--text-xs)', color: 'var(--text-muted)',
-                    display: 'inline-flex', alignItems: 'center', gap: '3px',
+                    display: 'inline-flex', alignItems: 'center', gap: '4px',
                   }}>
-                    <svg width="8" height="8"><circle cx="4" cy="4" r="3.5" fill={heatColor(z.w)} stroke="rgba(255,255,255,0.3)" strokeWidth="0.5" /></svg>
+                    {/* The swatch had no viewBox, so it rendered at a fixed 8px
+                        and ignored any sizing. With one it scales, and 12px
+                        matches the label beside it. */}
+                    <svg width="12" height="12" viewBox="0 0 8 8" aria-hidden="true" style={{ flexShrink: 0 }}>
+                      <circle cx="4" cy="4" r="3.5" fill={heatColor(z.w)} stroke="rgba(255,255,255,0.4)" strokeWidth="0.5" />
+                    </svg>
                     {z.label}
                   </span>
                 ))}
@@ -504,7 +529,10 @@ export default function OpponentFieldMap({ matchup, isMobile = false }) {
             </>
           ) : (
             <div style={{
-              height: 180, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              // minHeight, not height: the two-line message wraps to three or
+              // four lines on a narrow phone and would otherwise spill out.
+              minHeight: 180, padding: '1rem',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
               background: 'rgba(255,255,255,0.03)', borderRadius: '8px',
               color: 'var(--text-muted)', fontSize: 'var(--text-sm)', fontStyle: 'italic', textAlign: 'center',
             }}>

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { AlertTriangle, TrendingUp, ShieldAlert, Target, ChevronDown, ChevronUp, Swords, Clock, Home, Plane, Zap, CircleDot, Shield, Eye } from 'lucide-react';
 import { getTodayEST, formatDateMMDDYYYY } from '../utils/formatDate';
-import { TipBadge, PlayerName } from './StatTooltip';
+import { TipBadge, PlayerName, TipIcon } from './StatTooltip';
 import OpponentFieldMap from './OpponentFieldMap';
 import { fetchSharedJson } from '../utils/apiClient';
 
@@ -116,7 +116,9 @@ const MatchupPanel = ({ defaultOpponent, isMobile = false }) => {
   }
 
   return (
-    <div className="glass-panel" style={{ padding: 'var(--space-xl)', marginBottom: '0' }}>
+    // On mobile this panel is nested inside another padded glass-panel; 1.5rem
+    // on both left ~270px of a 360px screen for the stat rows. Tighten it.
+    <div className="glass-panel" style={{ padding: isMobile ? 'var(--space-md)' : 'var(--space-xl)', marginBottom: '0' }}>
       <div style={{ marginBottom: '1rem' }}>
         <h3 style={{ margin: 0, color: 'var(--primary-color)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <Swords size={20} /> {isNextGame ? 'Next Game Matchup' : 'Matchup Analysis'}
@@ -187,8 +189,13 @@ const MatchupPanel = ({ defaultOpponent, isMobile = false }) => {
 
           {!matchup.empty && (
             <>
-              <div style={{ overflowX: 'auto', maxWidth: '100%' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', marginBottom: '1rem' }}>
+              {/* `scroll-x` over a raw overflowX:auto so the escape hatch gets
+                  momentum scrolling, contained overscroll and a visible thumb. */}
+              <div className="scroll-x">
+              {/* Each StatCompare row needs ~232px minimum. Two columns inside a
+                  360px phone gave them ~104px each and the numbers ran out of
+                  the card, so mobile stacks Batting over Pitching. */}
+              <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: isMobile ? '0.75rem' : '1.5rem', marginBottom: '1rem' }}>
                 <div>
                   <div className="section-label">Batting</div>
                   <StatCompare label="AVG" ours={matchup.our_stats.batting.avg} theirs={matchup.their_stats.batting.avg} />
@@ -210,7 +217,8 @@ const MatchupPanel = ({ defaultOpponent, isMobile = false }) => {
               </div>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+              {/* Full sentences do not fit in a ~104px column; stack them. */}
+              <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '1rem' }}>
                 <div>
                   <div className="section-label" style={{ color: 'var(--success)' }}>Our Advantages</div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
@@ -400,15 +408,32 @@ const PlayerSwotCard = ({ player, isMobile, isExpanded, onToggle }) => {
   const hasWeaknesses = weaknesses.length > 0;
 
   return (
+    // The card IS the expand control, so it has to announce itself as one and
+    // be reachable from a keyboard. Enter/Space toggle; nested TipBadge and
+    // TipIcon anchors stopPropagation so tapping a stat explains it instead of
+    // collapsing the card.
     <div
       className="glass-panel"
       style={{ padding: isMobile ? 'var(--space-lg)' : '1.25rem', cursor: 'pointer' }}
       onClick={onToggle}
+      role="button"
+      tabIndex={0}
+      aria-expanded={isExpanded}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+          e.preventDefault();
+          onToggle();
+        }
+      }}
     >
       {/* Collapsed header: name, number, key badges, trait icons */}
       <div style={{
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        overflow: 'hidden',
+        // Was `overflow: hidden`. Its children now wrap (flexWrap + minWidth:0)
+        // and the chevron no longer shrinks, so nothing can spill — and the
+        // clip was cropping the 44px invisible hit areas that TipIcon puts
+        // around the 14px trait glyphs, which is the whole point of them.
+        overflow: 'visible',
         marginBottom: isExpanded ? '0.75rem' : 0,
         paddingBottom: isExpanded ? '0.5rem' : 0,
         borderBottom: isExpanded ? '1px solid var(--surface-border)' : 'none'
@@ -427,39 +452,51 @@ const PlayerSwotCard = ({ player, isMobile, isExpanded, onToggle }) => {
               <TipBadge label="OBP" value={obp} />
               {!isMobile && <TipBadge label="OPS" value={ops} />}
               {pa < 5 && (
-                <span title={`Only ${pa} PA — stats not reliable yet`} style={{
-                  fontSize: '10px', color: 'var(--text-muted)', background: 'rgba(255,255,255,0.07)',
-                  border: '1px solid rgba(255,255,255,0.12)', borderRadius: '4px',
-                  padding: '1px 5px', lineHeight: 1.4,
-                }}>
+                // Was 10px text explained only by `title` — unreadable and
+                // unexplainable on a phone. TipIcon makes the caveat tappable.
+                <TipIcon
+                  text={`Only ${pa} PA — stats not reliable yet`}
+                  style={{
+                    fontSize: '11px', color: 'var(--text-muted)', background: 'rgba(255,255,255,0.07)',
+                    border: '1px solid rgba(255,255,255,0.12)', borderRadius: '4px',
+                    padding: '2px 6px', lineHeight: 1.4, whiteSpace: 'nowrap',
+                  }}
+                >
                   {pa} PA ⚠
-                </span>
+                </TipIcon>
               )}
             </span>
           ) : (
             <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', fontStyle: 'italic', minWidth: 0 }}>No PAs</span>
           )}
           {/* Skill-specific trait icons for quick scanning */}
+          {/* 14px glyphs whose whole meaning lived in `title`, which never
+              fires on touch. TipIcon adds a 44px hit area (layout unchanged)
+              and a tap-to-read popover naming the trait. */}
           <span style={{ display: 'inline-flex', gap: '0.25rem', alignItems: 'center', minWidth: 0 }}>
             {hasStrengths && strengths.slice(0, 3).map((s, i) => {
               const SkillIcon = getSkillIcon(s);
               return (
-                <span key={`s-${i}`} title={s} style={{ color: 'var(--success)', display: 'inline-flex', alignItems: 'center' }}>
+                <TipIcon key={`s-${i}`} text={s} style={{ color: 'var(--success)' }}>
                   <SkillIcon size={14} />
-                </span>
+                </TipIcon>
               );
             })}
             {hasWeaknesses && weaknesses.slice(0, 3).map((w, i) => {
               const SkillIcon = getSkillIcon(w);
               return (
-                <span key={`w-${i}`} title={w} style={{ color: 'var(--danger)', display: 'inline-flex', alignItems: 'center' }}>
+                <TipIcon key={`w-${i}`} text={w} style={{ color: 'var(--danger)' }}>
                   <SkillIcon size={14} />
-                </span>
+                </TipIcon>
               );
             })}
           </span>
         </div>
-        {isExpanded ? <ChevronUp size={18} color="var(--text-muted)" /> : <ChevronDown size={18} color="var(--text-muted)" />}
+        {/* flexShrink:0 — the chevron is the only affordance that the card
+            opens; it must not be squeezed away by a long name. */}
+        <span className="touch-target" style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0 }}>
+          {isExpanded ? <ChevronUp size={18} color="var(--text-muted)" /> : <ChevronDown size={18} color="var(--text-muted)" />}
+        </span>
       </div>
 
       {/* Expanded detail */}
@@ -541,7 +578,11 @@ const Swot = ({ swotData, roster, schedule, isMobile = false, isLandscape = fals
             <h3 style={{ marginBottom: isLandscape ? '0.5rem' : '1rem', color: 'var(--primary-color)', display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: isLandscape ? 'var(--text-sm)' : undefined }}>
               <ShieldAlert size={isLandscape ? 16 : 20} /> Team Analysis
             </h3>
-            <div style={{ display: 'grid', gridTemplateColumns: isLandscape ? 'repeat(4, 1fr)' : '1fr 1fr', gap: isLandscape ? '0.5rem' : '0.85rem' }}>
+            {/* SWOT items are full sentences. 4 columns on a 430px landscape
+                phone is ~90px each and 2 columns in portrait is ~140px — both
+                shred the text into one word per line. Portrait stacks; landscape
+                gets at most 2 columns. */}
+            <div style={{ display: 'grid', gridTemplateColumns: isLandscape ? 'repeat(2, minmax(0, 1fr))' : '1fr', gap: isLandscape ? '0.5rem' : '0.85rem' }}>
               <SwotQuadrant title="Strengths" items={(teamSwot.strengths || []).slice(0, isLandscape ? 3 : 4)} color="var(--success)" icon={<TrendingUp size={14} />} />
               <SwotQuadrant title="Weaknesses" items={(teamSwot.weaknesses || []).slice(0, isLandscape ? 3 : 4)} color="var(--danger)" icon={<AlertTriangle size={14} />} />
               <SwotQuadrant title="Opportunities" items={(teamSwot.opportunities || []).slice(0, isLandscape ? 3 : 4)} color="#3b9ede" icon={<Target size={14} />} />
@@ -568,8 +609,10 @@ const Swot = ({ swotData, roster, schedule, isMobile = false, isLandscape = fals
         <UpcomingGameBanner next={nextGame} />
         {isMobile ? (
           <div className="glass-panel" style={{ padding: 'var(--space-lg)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem' }}>
-              <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
+            {/* Without wrapping, the caption squeezed the button below its
+                44px target on a 360px screen. */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', flex: '1 1 8rem', minWidth: 0 }}>
                 Matchup details are optional on mobile.
               </span>
               <button
@@ -584,6 +627,8 @@ const Swot = ({ swotData, roster, schedule, isMobile = false, isLandscape = fals
                   fontWeight: '700',
                   cursor: 'pointer',
                   minHeight: 'var(--touch-min)',
+                  flexShrink: 0,
+                  whiteSpace: 'nowrap',
                 }}
               >
                 {showMatchup ? 'Hide Matchup' : 'Show Matchup'}
