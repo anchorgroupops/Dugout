@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Target, Shield, Swords, AlertTriangle, Calendar, MapPin } from 'lucide-react';
 import { formatDateMMDDYYYY } from '../utils/formatDate';
 import { fetchSharedJson } from '../utils/apiClient';
+import { TipIcon } from './StatTooltip';
 
 const BulletCard = ({ title, items, color, icon, emptyText }) => (
   <div className="glass-panel" style={{ padding: 'var(--space-lg)', marginBottom: 'var(--space-sm)' }}>
@@ -145,6 +146,16 @@ export default function Scouting({ isMobile, isLandscape = false }) {
   const recommendation = matchup?.recommendation || '';
   const isInsufficient = matchup?.empty;
 
+  // How stale the cached opponent list is used to be reachable only through a
+  // `title` attribute — a phone never renders one, so on the primary device the
+  // information did not exist. TipIcon turns it into a tap-to-read popover.
+  const cachedTip = (() => {
+    if (!opponentsCachedAt) return 'Showing cached opponent data — the live league feed was unavailable.';
+    const d = new Date(opponentsCachedAt);
+    const when = isNaN(d.getTime()) ? String(opponentsCachedAt) : d.toLocaleString();
+    return `Showing cached opponent data, saved ${when}. Tap again to dismiss.`;
+  })();
+
   return (
     <div className="animate-fade-in">
       {/* No upcoming game banner */}
@@ -173,10 +184,13 @@ export default function Scouting({ isMobile, isLandscape = false }) {
         </p>
 
         {/* Team logo placeholder + opponent name */}
+        {/* A long opponent name next to a fixed 44px badge overflowed a 360px
+            screen; wrapping lets the name drop to its own line. */}
         <div style={{
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
+          flexWrap: 'wrap',
           gap: '0.75rem',
           marginBottom: '0.6rem',
         }}>
@@ -205,6 +219,11 @@ export default function Scouting({ isMobile, isLandscape = false }) {
             margin: 0,
             letterSpacing: '-0.01em',
             lineHeight: 1.1,
+            // A flex item defaults to min-width:auto and refuses to shrink below
+            // its longest word — `anywhere` breaks even a single long team name.
+            minWidth: 0,
+            maxWidth: '100%',
+            overflowWrap: 'anywhere',
           }}>
             {nextGame.opponent}
           </h2>
@@ -295,10 +314,14 @@ export default function Scouting({ isMobile, isLandscape = false }) {
               <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-main)', fontWeight: '700', margin: '0 0 0.4rem 0' }}>
                 {h2h.record} ({h2h.games_played} games) &mdash; Avg {h2h.avg_runs_for}-{h2h.avg_runs_against}
               </p>
+              {/* Result pills are deliberately inert (nothing to open), so they
+                  get no touch target — only 12px text that wraps cleanly. */}
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
                 {h2h.games.slice(0, 5).map((g, i) => (
                   <span key={i} style={{
                     fontSize: 'var(--text-xs)',
+                    lineHeight: 1.5,
+                    maxWidth: '100%',
                     padding: '4px 10px',
                     borderRadius: '999px',
                     background: g.result === 'W' ? 'rgba(47,143,98,0.2)' : g.result === 'L' ? 'rgba(179,74,57,0.2)' : 'rgba(255,255,255,0.08)',
@@ -331,17 +354,18 @@ export default function Scouting({ isMobile, isLandscape = false }) {
           >
             {nextGame?.opponent ? 'All Division Opponents' : 'Division Opponents'}
             {opponentsCached && (
-              <span
-                title={opponentsCachedAt ? `Cached at ${opponentsCachedAt}` : 'Showing cached data'}
+              <TipIcon
+                text={cachedTip}
                 style={{
-                  fontSize: '10px', textTransform: 'uppercase',
+                  // 10px was below the legible floor on a phone; 12px minimum.
+                  fontSize: 'var(--text-xs)', textTransform: 'uppercase',
                   color: '#f0b429', background: 'rgba(240,180,41,0.10)',
                   border: '1px solid rgba(240,180,41,0.35)', borderRadius: '4px',
-                  padding: '1px 6px', letterSpacing: '0.05em',
+                  padding: '2px 7px', letterSpacing: '0.05em', fontWeight: 600,
                 }}
               >
                 Cached
-              </span>
+              </TipIcon>
             )}
           </div>
           <div className="card-grid">
@@ -355,20 +379,24 @@ export default function Scouting({ isMobile, isLandscape = false }) {
                   padding: 'var(--space-lg)',
                   borderLeft: isNext ? '3px solid var(--danger)' : undefined,
                 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
-                    <div>
-                      <div style={{ fontWeight: '700', fontSize: 'var(--text-base)' }}>{opp.team_name}</div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                    {/* minWidth:0 lets a long team name wrap instead of pushing
+                        the W-L badge off the edge of a narrow card. */}
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontWeight: '700', fontSize: 'var(--text-base)', overflowWrap: 'anywhere' }}>{opp.team_name}</div>
                       {isNext && <span style={{ fontSize: 'var(--text-xs)', color: 'var(--danger)', fontWeight: '600' }}>NEXT OPPONENT</span>}
                     </div>
                     {rec && (
                       <span style={{
-                        fontSize: 'var(--text-sm)', fontWeight: '700',
+                        fontSize: 'var(--text-sm)', fontWeight: '700', flexShrink: 0,
                         color: 'var(--text-muted)', background: 'rgba(255,255,255,0.06)',
                         borderRadius: '6px', padding: '2px 8px', border: '1px solid rgba(255,255,255,0.1)',
                       }}>{rec}</span>
                     )}
                   </div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
+                  {/* Metric chips are read-only labels, not controls; they stay
+                      inert but wrap at 12px so nothing clips at 360px. */}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', minWidth: 0 }}>
                     {m.avg_runs_scored != null && (
                       <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '4px', padding: '2px 7px' }}>
                         R/G: {typeof m.avg_runs_scored === 'number' ? m.avg_runs_scored.toFixed(1) : m.avg_runs_scored}

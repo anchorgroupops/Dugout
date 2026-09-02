@@ -1,6 +1,7 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ClipboardList, RefreshCw, Target, AlertTriangle, Plus, Trash2, Timer } from 'lucide-react';
 import { getLocalCachedJson, setLocalCachedJson, isPollingPaused, apiRequest } from '../utils/apiClient';
+import { TipIcon } from './StatTooltip';
 
 const CATEGORY_ICONS = {
   Fielding: '🧤',
@@ -175,7 +176,8 @@ const PositionCard = ({ pos, entries, statSpecs, isMobile }) => (
         background: 'var(--primary-color)', color: '#03283a', borderRadius: '8px',
         padding: '2px 9px', fontWeight: 800, fontSize: 'var(--text-sm)',
       }}>{pos}</span>
-      <span style={{ fontSize: '10px', color: 'var(--text-muted)', lineHeight: 1.3 }}>
+      {/* 10px on a ~200px line was effectively decorative. */}
+      <span style={{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.35 }}>
         Key stats: {(statSpecs || []).map(s => statLabel(s.stat) + (s.lower_is_better ? ' ↓' : '')).join(', ')}
       </span>
     </div>
@@ -186,19 +188,30 @@ const PositionCard = ({ pos, entries, statSpecs, isMobile }) => (
           background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.08)',
           borderRadius: '6px', padding: '0.35rem 0.55rem',
         }}>
-          <span style={{ color: 'var(--text-muted)', fontSize: 'var(--text-xs)', fontWeight: 800, width: '1rem' }}>{i + 1}</span>
-          <span style={{ flex: 1, fontSize: 'var(--text-xs)', fontWeight: 700 }}>
+          {/* The fixed rank column and the fit% column squeezed the name into a
+              few characters at 360px; `minWidth: 0` + `overflowWrap` let the
+              name take the slack and wrap instead of being clipped. */}
+          <span style={{ color: 'var(--text-muted)', fontSize: 'var(--text-xs)', fontWeight: 800, width: '1rem', flexShrink: 0 }}>{i + 1}</span>
+          <span style={{ flex: '1 1 auto', minWidth: 0, overflowWrap: 'anywhere', fontSize: 'var(--text-xs)', fontWeight: 700 }}>
             {e.name}
+            {/* `title`-only glyphs a phone can never surface: the R had no
+                legend at all and the drill count was a 10px whisper. */}
             {e.returning && (
-              <span title="Returning player (has last-season stats)" style={{ marginLeft: '0.3rem', color: 'var(--primary-color)', fontWeight: 800 }}>R</span>
+              <TipIcon
+                text="Returning player — last season's stats are blended into this fit score"
+                style={{ marginLeft: '0.3rem', color: 'var(--primary-color)', fontWeight: 800 }}
+              >R</TipIcon>
             )}
           </span>
           {e.drills_logged > 0 && (
-            <span title="Eval drills logged" style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+            <TipIcon
+              text={`${e.drills_logged} eval drill${e.drills_logged > 1 ? 's' : ''} logged for this player`}
+              style={{ fontSize: '12px', color: 'var(--text-muted)', flexShrink: 0, whiteSpace: 'nowrap' }}
+            >
               {e.drills_logged} drill{e.drills_logged > 1 ? 's' : ''}
-            </span>
+            </TipIcon>
           )}
-          <span style={{ fontWeight: 800, fontSize: 'var(--text-sm)', color: fitColor(e.fit), minWidth: '2.6rem', textAlign: 'right' }}>
+          <span style={{ fontWeight: 800, fontSize: 'var(--text-sm)', color: fitColor(e.fit), minWidth: '2.6rem', flexShrink: 0, textAlign: 'right' }}>
             {e.fit == null ? '—' : `${Math.round(e.fit)}%`}
           </span>
         </div>
@@ -215,6 +228,13 @@ const Evals = ({ team, isMobile = false, isLandscape = false }) => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [view, setView] = useState('fits'); // 'fits' | 'drills' | 'log'
+  // Deleting an eval record is destructive and irreversible, and the button sat
+  // flush against the record text. Arm-then-confirm in place (no window.confirm,
+  // which is easy to dismiss blind on a phone); the arm lapses after 4s so a
+  // stray tap can never sit waiting to fire.
+  const [pendingDelete, setPendingDelete] = useState(null);
+  const pendingDeleteTimer = useRef(null);
+  useEffect(() => () => { if (pendingDeleteTimer.current) clearTimeout(pendingDeleteTimer.current); }, []);
 
   const drillsById = useMemo(() => {
     const map = {};
@@ -303,6 +323,17 @@ const Evals = ({ team, isMobile = false, isLandscape = false }) => {
     postRecords(records);
   };
 
+  const requestDelete = (index) => {
+    if (pendingDeleteTimer.current) clearTimeout(pendingDeleteTimer.current);
+    if (pendingDelete === index) {
+      setPendingDelete(null);
+      deleteRecord(index);
+      return;
+    }
+    setPendingDelete(index);
+    pendingDeleteTimer.current = setTimeout(() => setPendingDelete(null), 4000);
+  };
+
   const records = payload?.records || [];
   const groupedDrills = useMemo(() => {
     const groups = {};
@@ -322,6 +353,8 @@ const Evals = ({ team, isMobile = false, isLandscape = false }) => {
         color: view === id ? 'var(--primary-color)' : 'var(--text-main)',
         borderRadius: '8px', padding: '0.45rem 0.8rem', fontWeight: 700,
         fontSize: 'var(--text-xs)', cursor: 'pointer', minHeight: 'var(--touch-min)',
+        // Inside the scroller the pills must hold their size, not squash.
+        flexShrink: 0, whiteSpace: 'nowrap',
       }}
     >
       {label}
@@ -335,8 +368,14 @@ const Evals = ({ team, isMobile = false, isLandscape = false }) => {
       </h2>
 
       <div className="glass-panel" style={{ padding: isMobile ? 'var(--space-lg)' : '1rem 1.25rem', marginBottom: 'var(--space-md)' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+        {/* The segment bar wrapped to two rows at 360px and Refresh changed
+            line position as `Log (N)` grew. `flexWrap: nowrap` on the outer row
+            pins Refresh; the pills get their own snapping scroller instead. */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', flexWrap: 'nowrap' }}>
+          <div
+            className="scroll-x scroll-x--snap"
+            style={{ display: 'flex', gap: '0.4rem', flexWrap: 'nowrap', flex: '1 1 auto', minWidth: 0, paddingBottom: '2px' }}
+          >
             {tabBtn('fits', 'Position Fit')}
             {tabBtn('drills', 'Drills')}
             {tabBtn('log', `Log (${records.length})`)}
@@ -345,7 +384,7 @@ const Evals = ({ team, isMobile = false, isLandscape = false }) => {
             onClick={fetchEvals}
             disabled={loading}
             style={{
-              display: 'inline-flex', alignItems: 'center', gap: '0.4rem',
+              display: 'inline-flex', alignItems: 'center', gap: '0.4rem', flexShrink: 0,
               background: 'var(--primary-glow)', color: 'var(--primary-color)', border: '1px solid rgba(4, 101, 104, 0.27)',
               padding: '0.5rem 0.85rem', borderRadius: '8px', cursor: loading ? 'not-allowed' : 'pointer', fontWeight: 600,
               minHeight: 'var(--touch-min)',
@@ -361,15 +400,26 @@ const Evals = ({ team, isMobile = false, isLandscape = false }) => {
       </div>
 
       {fromCache && payload && (
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: 'var(--space-sm)',
-          padding: '6px 10px', borderRadius: '6px', background: 'rgba(168, 116, 33, 0.15)',
-          border: '1px solid rgba(168, 116, 33, 0.30)', color: 'var(--warning, #facc15)',
-          fontSize: 'var(--text-xs)', fontWeight: 700, cursor: 'pointer',
-        }} onClick={fetchEvals}>
-          <AlertTriangle size={12} />
+        // The banner invites a tap, so it has to be a real button: a bare
+        // `div onClick` at ~30px tall was neither reachable by keyboard nor
+        // reliably hittable with a thumb.
+        <button
+          type="button"
+          onClick={fetchEvals}
+          aria-label="Showing cached evaluations. Retry live data."
+          style={{
+            display: 'flex', alignItems: 'center', gap: '0.5rem', width: '100%',
+            marginBottom: 'var(--space-sm)', textAlign: 'left',
+            padding: '6px 10px', minHeight: 'var(--touch-min)', borderRadius: '6px',
+            background: 'rgba(168, 116, 33, 0.15)',
+            border: '1px solid rgba(168, 116, 33, 0.30)', color: 'var(--warning, #facc15)',
+            fontFamily: 'var(--font-base)', fontSize: 'var(--text-sm)', fontWeight: 700,
+            cursor: 'pointer',
+          }}
+        >
+          <AlertTriangle size={14} style={{ flexShrink: 0 }} />
           <span>Showing cached evals — tap to retry live data</span>
-        </div>
+        </button>
       )}
 
       {error && (
@@ -450,22 +500,34 @@ const Evals = ({ team, isMobile = false, isLandscape = false }) => {
                 }}>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: 'var(--text-xs)', fontWeight: 700 }}>{rec.player}</div>
-                    <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                    {/* 10px alongside a 44px delete target was the smallest text
+                        on the tab; 12px is the readable floor. */}
+                    <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
                       {recordSummary(rec, drillsById)}{rec.date ? ` — ${rec.date}` : ''}
                     </div>
                   </div>
+                  {/* minHeight without minWidth left a ~28px-wide destructive
+                      control sitting flush against a `flex: 1` text block. Now a
+                      full 44x44 target that arms on the first tap. */}
                   <button
-                    onClick={() => deleteRecord(i)}
+                    onClick={() => requestDelete(i)}
                     disabled={saving}
-                    title="Delete record"
-                    aria-label={`Delete ${rec.player} ${rec.drill_id} record`}
+                    title={pendingDelete === i ? 'Tap again to confirm delete' : 'Delete record'}
+                    aria-label={pendingDelete === i
+                      ? `Confirm deleting ${rec.player} ${rec.drill_id} record`
+                      : `Delete ${rec.player} ${rec.drill_id} record`}
                     style={{
-                      background: 'transparent', border: 'none', color: 'var(--danger)',
+                      background: pendingDelete === i ? 'rgba(179, 74, 57, 0.22)' : 'transparent',
+                      border: pendingDelete === i ? '1px solid rgba(179, 74, 57, 0.55)' : '1px solid transparent',
+                      borderRadius: '8px', color: 'var(--danger)',
                       cursor: saving ? 'not-allowed' : 'pointer', padding: '0.4rem',
-                      minHeight: 'var(--touch-min)', display: 'inline-flex', alignItems: 'center',
+                      minHeight: 'var(--touch-min)', minWidth: 'var(--touch-min)', flexShrink: 0,
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.25rem',
+                      fontSize: 'var(--text-xs)', fontWeight: 800,
                     }}
                   >
                     <Trash2 size={15} />
+                    {pendingDelete === i && <span>Sure?</span>}
                   </button>
                 </div>
               ))}

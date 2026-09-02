@@ -4,6 +4,10 @@ import { formatDateMMDDYYYY } from '../utils/formatDate';
 import { TipBadge } from './StatTooltip';
 import { fetchSharedJson, fetchWithLocalCache } from '../utils/apiClient';
 
+// Shared by the standings header and its rows so the two stay column-aligned
+// while they scroll together inside the same `scroll-x` region.
+const STANDINGS_COLUMNS = 'minmax(0, 1fr) 60px 60px 70px';
+
 const PCLL_RIVAL_SLUGS = ['peppers', 'riptide'];
 const isDivisionRival = (slug) => PCLL_RIVAL_SLUGS.some(r => String(slug || '').toLowerCase().includes(r));
 
@@ -74,6 +78,10 @@ const League = ({ isMobile = false, isLandscape = false }) => {
     return raw || 'Unknown Team';
   };
 
+  // Same predicate the header and the row branch used independently before —
+  // hoisted so they cannot drift apart.
+  const useStandingsTable = !isMobile || isLandscape;
+
   const divisionRivals = opponents.filter(o => isDivisionRival(o.slug));
   const otherOpponents = opponents.filter(o => !isDivisionRival(o.slug));
 
@@ -81,33 +89,50 @@ const League = ({ isMobile = false, isLandscape = false }) => {
     const isExpanded = expanded === opp.slug;
     const standRow = standingRows.find(s => s.slug === opp.slug);
     return (
+      // The card is the only control that opens scouting detail, so it has to
+      // announce itself as a button and respond to Enter/Space, not just taps.
       <div
         key={opp.slug}
         className="glass-panel"
         style={{ padding: 'var(--space-lg)', cursor: 'pointer' }}
         onClick={() => setExpanded(isExpanded ? null : opp.slug)}
+        role="button"
+        tabIndex={0}
+        aria-expanded={isExpanded}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+            e.preventDefault();
+            setExpanded(isExpanded ? null : opp.slug);
+          }
+        }}
       >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-          <div>
-            <h3 style={{ fontSize: 'var(--text-base)', margin: '0 0 0.25rem' }}>{opp.team_name}</h3>
-            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem' }}>
+          <div style={{ minWidth: 0 }}>
+            <h3 style={{ fontSize: 'var(--text-base)', margin: '0 0 0.25rem', minWidth: 0, overflowWrap: 'anywhere' }}>{opp.team_name}</h3>
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
               {standRow?.record && (
+                // 12px text in a 2px-tall pill reads as a smudge at arm's
+                // length in a dugout. 13px + more vertical padding.
                 <span style={{
-                  fontSize: 'var(--text-xs)', fontWeight: '700', padding: '2px 8px',
+                  fontSize: '0.8125rem', fontWeight: '700', padding: '3px 9px',
                   borderRadius: '10px',
                   background: parseInt(standRow.w) > parseInt(standRow.l) ? 'rgba(35,134,54,0.15)' : parseInt(standRow.w) < parseInt(standRow.l) ? 'rgba(220,70,70,0.15)' : 'rgba(255,255,255,0.1)',
                   color: parseInt(standRow.w) > parseInt(standRow.l) ? 'var(--success)' : parseInt(standRow.w) < parseInt(standRow.l) ? 'var(--danger)' : 'var(--text-muted)'
                 }}>{standRow.record}</span>
               )}
               {opp.roster_size > 0 && (
-                <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
-                  <Users size={11} style={{ display: 'inline', marginRight: '3px', verticalAlign: 'middle' }} />
+                <span style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                  <Users size={12} style={{ display: 'inline', marginRight: '3px', verticalAlign: 'middle' }} />
                   {opp.roster_size} players
                 </span>
               )}
             </div>
           </div>
-          {isExpanded ? <ChevronUp size={16} color="var(--text-muted)" /> : <ChevronDown size={16} color="var(--text-muted)" />}
+          {/* `touch-target` gives the 16px chevron a 44px invisible hit area
+              on coarse pointers without changing the layout around it. */}
+          <span className="touch-target" style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0 }}>
+            {isExpanded ? <ChevronUp size={16} color="var(--text-muted)" /> : <ChevronDown size={16} color="var(--text-muted)" />}
+          </span>
         </div>
 
         {isExpanded && (
@@ -167,22 +192,55 @@ const League = ({ isMobile = false, isLandscape = false }) => {
           </div>
         )}
 
-        {(!isMobile || isLandscape) && (
-          <div style={{
-            display: 'grid', gridTemplateColumns: '1fr 60px 60px 70px',
-            gap: '0.5rem', padding: '0.3rem 0.5rem',
-            fontSize: 'var(--text-xs)', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: '700'
-          }}>
-            <span>Team</span>
-            <span style={{ textAlign: 'center' }}>W-L</span>
-            <span style={{ textAlign: 'center' }}>PCT</span>
-            <span style={{ textAlign: 'center' }}>Record</span>
-          </div>
-        )}
+        {/* Portrait phones get stacked cards; every other viewport gets the
+            4-column table. `isLandscape` is true for anything <= 500px tall, so
+            a phone held sideways lands here too, and 60+60+70px of stat
+            columns plus gaps reserve ~214px before the team name even starts.
+            Rather than crushing the name, header and rows live together (so
+            they stay column-aligned) inside a `scroll-x` region with a real
+            minimum width. body is overflow-x:hidden, so wide content has to
+            declare its own scroller. */}
+        {useStandingsTable ? (
+          <div className="scroll-x">
+            <div style={{ minWidth: '360px' }}>
+              <div style={{
+                display: 'grid', gridTemplateColumns: STANDINGS_COLUMNS,
+                gap: '0.5rem', padding: '0.3rem 0.5rem',
+                fontSize: 'var(--text-xs)', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: '700'
+              }}>
+                <span>Team</span>
+                <span style={{ textAlign: 'center' }}>W-L</span>
+                <span style={{ textAlign: 'center' }}>PCT</span>
+                <span style={{ textAlign: 'center' }}>Record</span>
+              </div>
 
-        {standingRows.map((team, i) => {
-          const isSharks = team.slug === 'sharks';
-          if (isMobile && !isLandscape) {
+              {standingRows.map((team, i) => {
+                const isSharks = team.slug === 'sharks';
+                return (
+                  <div key={team.slug} style={{
+                    display: 'grid', gridTemplateColumns: STANDINGS_COLUMNS,
+                    gap: '0.5rem', padding: '0.5rem 0.5rem',
+                    borderRadius: '6px', alignItems: 'center',
+                    background: isSharks ? 'rgba(4, 101, 104, 0.15)' : i % 2 === 0 ? 'rgba(255,255,255,0.02)' : 'transparent',
+                    border: isSharks ? '2px solid rgba(4, 101, 104, 0.4)' : '1px solid transparent',
+                    marginBottom: '0.25rem'
+                  }}>
+                    <span style={{ fontWeight: isSharks ? '700' : '500', color: isSharks ? 'var(--primary-color)' : 'var(--text-main)', fontSize: isSharks ? 'var(--text-base)' : 'var(--text-sm)', minWidth: 0, overflowWrap: 'anywhere' }}>
+                      {isSharks ? `\uD83E\uDD88 ${i + 1}. ` : `${i + 1}. `}{formatTeamName(team)}
+                    </span>
+                    <span style={{ textAlign: 'center', fontWeight: isSharks ? '700' : '600', fontSize: 'var(--text-sm)' }}>{team.w}-{team.l}</span>
+                    <span style={{ textAlign: 'center', color: isSharks ? 'var(--text-main)' : 'var(--text-muted)', fontSize: 'var(--text-sm)', fontWeight: isSharks ? '600' : '400' }}>
+                      {team.pct != null ? (team.pct === 1 ? '1.000' : team.pct.toFixed(3)) : '\u2014'}
+                    </span>
+                    <span style={{ textAlign: 'center', color: isSharks ? 'var(--text-main)' : 'var(--text-muted)', fontSize: 'var(--text-xs)', fontWeight: isSharks ? '600' : '400' }}>{team.record}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          standingRows.map((team, i) => {
+            const isSharks = team.slug === 'sharks';
             return (
               <div key={team.slug} style={{
                 padding: '0.625rem 0.75rem',
@@ -195,7 +253,7 @@ const League = ({ isMobile = false, isLandscape = false }) => {
                 flexDirection: 'column',
                 justifyContent: 'center',
               }}>
-                <div style={{ fontWeight: isSharks ? '700' : '600', color: isSharks ? 'var(--primary-color)' : 'var(--text-main)', fontSize: isSharks ? 'var(--text-base)' : 'var(--text-sm)' }}>
+                <div style={{ fontWeight: isSharks ? '700' : '600', color: isSharks ? 'var(--primary-color)' : 'var(--text-main)', fontSize: isSharks ? 'var(--text-base)' : 'var(--text-sm)', overflowWrap: 'anywhere' }}>
                   {isSharks ? `\uD83E\uDD88 ${i + 1}. ` : `${i + 1}. `}{formatTeamName(team)}
                 </div>
                 <div style={{ marginTop: '0.2rem', fontSize: 'var(--text-xs)', color: isSharks ? 'var(--text-main)' : 'var(--text-muted)', fontWeight: isSharks ? '600' : '400' }}>
@@ -203,27 +261,8 @@ const League = ({ isMobile = false, isLandscape = false }) => {
                 </div>
               </div>
             );
-          }
-          return (
-            <div key={team.slug} style={{
-              display: 'grid', gridTemplateColumns: '1fr 60px 60px 70px',
-              gap: '0.5rem', padding: '0.5rem 0.5rem',
-              borderRadius: '6px', alignItems: 'center',
-              background: isSharks ? 'rgba(4, 101, 104, 0.15)' : i % 2 === 0 ? 'rgba(255,255,255,0.02)' : 'transparent',
-              border: isSharks ? '2px solid rgba(4, 101, 104, 0.4)' : '1px solid transparent',
-              marginBottom: '0.25rem'
-            }}>
-              <span style={{ fontWeight: isSharks ? '700' : '500', color: isSharks ? 'var(--primary-color)' : 'var(--text-main)', fontSize: isSharks ? 'var(--text-base)' : 'var(--text-sm)' }}>
-                {isSharks ? `\uD83E\uDD88 ${i + 1}. ` : `${i + 1}. `}{formatTeamName(team)}
-              </span>
-              <span style={{ textAlign: 'center', fontWeight: isSharks ? '700' : '600', fontSize: 'var(--text-sm)' }}>{team.w}-{team.l}</span>
-              <span style={{ textAlign: 'center', color: isSharks ? 'var(--text-main)' : 'var(--text-muted)', fontSize: 'var(--text-sm)', fontWeight: isSharks ? '600' : '400' }}>
-                {team.pct != null ? (team.pct === 1 ? '1.000' : team.pct.toFixed(3)) : '\u2014'}
-              </span>
-              <span style={{ textAlign: 'center', color: isSharks ? 'var(--text-main)' : 'var(--text-muted)', fontSize: 'var(--text-xs)', fontWeight: isSharks ? '600' : '400' }}>{team.record}</span>
-            </div>
-          );
-        })}
+          })
+        )}
       </div>
 
       {/* ── Opponent Scouting Section ── */}
@@ -248,8 +287,10 @@ const League = ({ isMobile = false, isLandscape = false }) => {
             }}>
               PCLL Division Rivals
             </div>
+            {/* Count pills are decoration, not touch targets — they only need
+                to be legible, so bump the text rather than the box. */}
             <span style={{
-              fontSize: 'var(--text-xs)', fontWeight: '600', padding: '2px 8px',
+              fontSize: '0.8125rem', fontWeight: '600', padding: '3px 9px',
               borderRadius: '10px', background: 'rgba(4, 101, 104, 0.15)',
               color: 'var(--primary-color)',
             }}>
@@ -279,7 +320,7 @@ const League = ({ isMobile = false, isLandscape = false }) => {
               Other Opponents
             </div>
             <span style={{
-              fontSize: 'var(--text-xs)', fontWeight: '600', padding: '2px 8px',
+              fontSize: '0.8125rem', fontWeight: '600', padding: '3px 9px',
               borderRadius: '10px', background: 'rgba(255,255,255,0.08)',
               color: 'var(--text-muted)',
             }}>
@@ -336,7 +377,9 @@ const OpponentDetail = ({ slug, hasRoster }) => {
                 <Shield size={11} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '3px' }} />
                 Our Advantages
               </span>
-              <ul style={{ margin: '0.2rem 0 0 1rem', fontSize: 'var(--text-xs)', color: 'var(--text-muted)', paddingLeft: '0.5rem' }}>
+              {/* margin-left 1rem PLUS padding-left 0.5rem stole 24px of indent
+                  from a ~280px line. One small indent is enough for a bullet. */}
+              <ul style={{ margin: '0.2rem 0 0', fontSize: 'var(--text-xs)', color: 'var(--text-muted)', paddingLeft: '1.1rem' }}>
                 {matchup.our_advantages.slice(0, 3).map((a, i) => <li key={i}>{a}</li>)}
               </ul>
             </div>
@@ -347,7 +390,9 @@ const OpponentDetail = ({ slug, hasRoster }) => {
                 <AlertTriangle size={11} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '3px' }} />
                 Their Strengths
               </span>
-              <ul style={{ margin: '0.2rem 0 0 1rem', fontSize: 'var(--text-xs)', color: 'var(--text-muted)', paddingLeft: '0.5rem' }}>
+              {/* margin-left 1rem PLUS padding-left 0.5rem stole 24px of indent
+                  from a ~280px line. One small indent is enough for a bullet. */}
+              <ul style={{ margin: '0.2rem 0 0', fontSize: 'var(--text-xs)', color: 'var(--text-muted)', paddingLeft: '1.1rem' }}>
                 {matchup.their_advantages.slice(0, 3).map((a, i) => <li key={i}>{a}</li>)}
               </ul>
             </div>
@@ -364,9 +409,13 @@ const OpponentDetail = ({ slug, hasRoster }) => {
               const nameB = (b.name || `${b.first || ''} ${b.last || ''}`.trim()).toLowerCase();
               return nameA.localeCompare(nameB);
             }).map((p, i) => (
+              // Roster chips are read, not tapped — 44px isn't required, but
+              // 12px in an 18px chip is unreadable on a phone held at arm's
+              // length. 13px with a taller chip.
               <span key={i} style={{
                 background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)',
-                borderRadius: '6px', padding: '3px 8px', fontSize: 'var(--text-xs)', color: 'var(--text-muted)'
+                borderRadius: '6px', padding: '5px 9px', fontSize: '0.8125rem',
+                color: 'var(--text-muted)', maxWidth: '100%', overflowWrap: 'anywhere'
               }}>
                 {p.number ? <span style={{ color: 'var(--primary-color)', fontWeight: '700', marginRight: '4px' }}>#{p.number}</span> : null}
                 {p.name || `${p.first || ''} ${p.last || ''}`.trim()}

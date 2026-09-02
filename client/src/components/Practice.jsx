@@ -49,7 +49,9 @@ const NeedCard = ({ need }) => (
       <h3 style={{ margin: 0, fontSize: 'var(--text-sm)', fontWeight: '700', flex: 1 }}>{need.title}</h3>
     </div>
 
-    <p style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', margin: '0 0 0.5rem', lineHeight: '1.4' }}>{need.why}</p>
+    {/* 12px muted grey is below the outdoor-legibility floor for the one
+        sentence that explains WHY this priority exists. */}
+    <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: '0 0 0.5rem', lineHeight: '1.45' }}>{need.why}</p>
 
     {need.focus_players?.length > 0 && (
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem', marginBottom: '0.5rem' }}>
@@ -73,7 +75,9 @@ const NeedCard = ({ need }) => (
             {drill.name}
             <span style={{ fontWeight: '500', color: 'var(--text-muted)', marginLeft: '0.3rem' }}>({drill.duration_min}m)</span>
           </div>
-          {drill.goal && <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '0.15rem' }}>{drill.goal}</div>}
+          {/* 10px is unreadable at arm's length on a field, and the drill
+              goal is the line a coach actually reads out. */}
+          {drill.goal && <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '0.2rem', lineHeight: 1.4 }}>{drill.goal}</div>}
         </div>
       ))}
     </div>
@@ -124,6 +128,9 @@ const Practice = ({ team, schedule, isMobile = false, isLandscape = false }) => 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [initialLoaded, setInitialLoaded] = useState(false);
+  // Mobile used to hard-truncate the priority list at 3 with no route to P4+;
+  // keep the short default but make the rest reachable.
+  const [showAllNeeds, setShowAllNeeds] = useState(false);
   const debounceRef = useRef(null);
 
   // ── Opponent field map: fetch matchup for the next scheduled game ──
@@ -299,6 +306,10 @@ const Practice = ({ team, schedule, isMobile = false, isLandscape = false }) => 
     return 'Next game: TBD — generating priorities from full roster';
   })();
 
+  const allNeeds = insights?.needs || [];
+  const needsCollapsed = isMobile && !showAllNeeds && allNeeds.length > 3;
+  const visibleNeeds = needsCollapsed ? allNeeds.slice(0, 3) : allNeeds;
+
   return (
     <div>
       <h2 className="view-title">
@@ -340,9 +351,11 @@ const Practice = ({ team, schedule, isMobile = false, isLandscape = false }) => 
               {availablePlayers.length === 0 ? '(loading roster…)' : `(${selected.length}/${availablePlayers.length})`}
             </span>
           </div>
+          {/* Both were ~43px wide — a hair under the 44px minimum, which is
+              exactly the size that produces mis-taps. minWidth pins them. */}
           <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
-            <button onClick={selectAll} disabled={availablePlayers.length === 0} style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text-main)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '6px', padding: '0.5rem 0.625rem', cursor: availablePlayers.length === 0 ? 'not-allowed' : 'pointer', fontSize: 'var(--text-xs)', minHeight: 'var(--touch-min)', opacity: availablePlayers.length === 0 ? 0.5 : 1 }}>All</button>
-            <button onClick={clearAll} disabled={availablePlayers.length === 0} style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text-main)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '6px', padding: '0.5rem 0.625rem', cursor: availablePlayers.length === 0 ? 'not-allowed' : 'pointer', fontSize: 'var(--text-xs)', minHeight: 'var(--touch-min)', opacity: availablePlayers.length === 0 ? 0.5 : 1 }}>None</button>
+            <button onClick={selectAll} disabled={availablePlayers.length === 0} style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text-main)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '6px', padding: '0.5rem 0.625rem', cursor: availablePlayers.length === 0 ? 'not-allowed' : 'pointer', fontSize: 'var(--text-xs)', minHeight: 'var(--touch-min)', minWidth: 'var(--touch-min)', opacity: availablePlayers.length === 0 ? 0.5 : 1 }}>All</button>
+            <button onClick={clearAll} disabled={availablePlayers.length === 0} style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text-main)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '6px', padding: '0.5rem 0.625rem', cursor: availablePlayers.length === 0 ? 'not-allowed' : 'pointer', fontSize: 'var(--text-xs)', minHeight: 'var(--touch-min)', minWidth: 'var(--touch-min)', opacity: availablePlayers.length === 0 ? 0.5 : 1 }}>None</button>
           </div>
         </div>
 
@@ -372,18 +385,26 @@ const Practice = ({ team, schedule, isMobile = false, isLandscape = false }) => 
           live fetch is failing. Sits ABOVE the cached content rather than
           replacing it, so coaches still see priorities. */}
       {insights && insightsFromCache && error && (
+        // Was a bare `div onClick` at ~30px tall: no keyboard route, nothing
+        // announced as a control, and a target below the 44px minimum. Matches
+        // the role/tabIndex/onKeyDown pattern of the error card below.
         <div
           onClick={() => fetchInsights()}
+          role="button"
+          tabIndex={0}
+          aria-label="Showing cached practice insights. Tap to retry the live fetch."
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fetchInsights(); } }}
           style={{
             display: 'flex', alignItems: 'center', gap: '0.5rem',
-            marginBottom: 'var(--space-sm)', padding: '6px 10px', borderRadius: '6px',
+            marginBottom: 'var(--space-sm)', padding: '0.5rem 0.75rem', borderRadius: '6px',
+            minHeight: 'var(--touch-min)', boxSizing: 'border-box',
             background: 'rgba(168, 116, 33, 0.15)',
             border: '1px solid rgba(168, 116, 33, 0.30)',
             color: 'var(--warning, #facc15)',
             fontSize: 'var(--text-xs)', fontWeight: '700', cursor: 'pointer',
           }}
         >
-          <AlertTriangle size={12} />
+          <AlertTriangle size={14} style={{ flexShrink: 0 }} />
           <span>Showing cached practice insights (last updated {formatRelativeAge(insightsCacheAt)}) — tap to retry</span>
         </div>
       )}
@@ -447,9 +468,27 @@ const Practice = ({ team, schedule, isMobile = false, isLandscape = false }) => 
             <span className="section-label" style={{ marginBottom: 0 }}>Most Needed Practice Work</span>
           </div>
 
-          <div className="card-grid" style={{ marginBottom: 'var(--space-md)' }}>
-            {(insights.needs || []).slice(0, isMobile ? 3 : undefined).map(need => <NeedCard key={need.key} need={need} />)}
+          <div className="card-grid" style={{ marginBottom: isMobile && allNeeds.length > 3 ? 'var(--space-sm)' : 'var(--space-md)' }}>
+            {visibleNeeds.map(need => <NeedCard key={need.key} need={need} />)}
           </div>
+
+          {/* The mobile slice(0, 3) silently dropped priorities 4+ with no way
+              to reach them. Same default, but now escapable. */}
+          {isMobile && allNeeds.length > 3 && (
+            <button
+              onClick={() => setShowAllNeeds(v => !v)}
+              aria-expanded={!needsCollapsed}
+              style={{
+                width: '100%', marginBottom: 'var(--space-md)',
+                background: 'var(--primary-glow)', color: 'var(--primary-color)',
+                border: '1px solid rgba(4, 101, 104, 0.27)', borderRadius: '8px',
+                padding: '0.5rem 0.85rem', cursor: 'pointer', fontWeight: 700,
+                fontSize: 'var(--text-sm)', minHeight: 'var(--touch-min)',
+              }}
+            >
+              {needsCollapsed ? `Show all ${allNeeds.length} priorities` : 'Show top 3 only'}
+            </button>
+          )}
 
           {/* ── Defensive Prep: opponent hit-zone heatmap for next game ── */}
           {nextMatchup && !nextMatchup.empty && (
@@ -471,7 +510,18 @@ const Practice = ({ team, schedule, isMobile = false, isLandscape = false }) => 
 
           {isMobile && (
             <details className="glass-panel" style={{ padding: 'var(--space-lg)' }}>
-              <summary style={{ cursor: 'pointer', color: 'var(--primary-color)', fontWeight: 700, fontSize: 'var(--text-sm)' }}>
+              {/* This summary is the ONLY route to the session plan on a phone,
+                  and it was a ~20px tap strip. Padding + minHeight take it to
+                  44px; `display` is deliberately left alone (summary defaults to
+                  `list-item`) so the native disclosure marker survives, with
+                  listStylePosition pinning it inside the padded box. */}
+              <summary style={{
+                cursor: 'pointer', color: 'var(--primary-color)', fontWeight: 700,
+                fontSize: 'var(--text-sm)',
+                minHeight: 'var(--touch-min)', boxSizing: 'border-box',
+                padding: '0.7rem 0', margin: '-0.7rem 0',
+                listStylePosition: 'inside',
+              }}>
                 Session Build (Top 3 Needs)
               </summary>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem', marginTop: '0.55rem' }}>

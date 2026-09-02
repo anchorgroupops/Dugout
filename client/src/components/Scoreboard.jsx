@@ -74,6 +74,32 @@ const BaseDiagram = ({ runners }) => {
   );
 };
 
+// ─── Inning Diamond ───────────────────────────────────────────────────────────
+//
+// Top / bottom-of-the-inning arrow shown beside the inning number. Sized in
+// viewBox units with no fixed width attribute so it inherits the caller's font
+// scale rather than pinning itself to a pixel size on a phone.
+const InningDiamond = ({ half }) => {
+  const isTop = half === 'top';
+  const isBottom = half === 'bottom';
+  const active = '#FFD700';
+  const idle = 'rgba(255,255,255,0.18)';
+  const label = isTop ? 'Top of the inning' : isBottom ? 'Bottom of the inning' : 'Inning';
+  return (
+    <svg
+      width="14" height="16" viewBox="0 0 14 16"
+      role="img" aria-label={label}
+      style={{ display: 'block', flexShrink: 0 }}
+    >
+      <title>{label}</title>
+      {/* Up arrow = top of the inning */}
+      <polygon points="7,1 12,7 2,7" fill={isTop ? active : idle} />
+      {/* Down arrow = bottom of the inning */}
+      <polygon points="7,15 12,9 2,9" fill={isBottom ? active : idle} />
+    </svg>
+  );
+};
+
 const LivePulse = ({ outdoor = false }) => (
   <span style={{
     display: 'inline-flex', alignItems: 'center', gap: outdoor ? '0.5rem' : '0.35rem',
@@ -121,7 +147,7 @@ const CountWidget = ({ outs }) => {
     fontFamily: 'inherit',
   });
 
-  const lbl = { fontSize: '0.55rem', fontWeight: 900, letterSpacing: '1.5px', color: 'rgba(255,255,255,0.45)', textTransform: 'uppercase' };
+  const lbl = { fontSize: '0.7rem', fontWeight: 900, letterSpacing: '1.5px', color: 'rgba(255,255,255,0.45)', textTransform: 'uppercase' };
   const num = (color) => ({ fontSize: 'clamp(1.5rem, 7vw, 2.2rem)', fontWeight: 900, color, lineHeight: 1, fontVariantNumeric: 'tabular-nums' });
 
   return (
@@ -148,8 +174,10 @@ const CountWidget = ({ outs }) => {
         onClick={() => setCount({ balls: 0, strikes: 0 })}
         style={{
           width: '100%', padding: '9px', background: 'rgba(255,255,255,0.05)',
+          // The most-tapped control during an at-bat: give it a full row.
+          minHeight: 'var(--touch-min)',
           border: '1px solid rgba(255,255,255,0.12)', borderRadius: 8,
-          color: 'rgba(255,255,255,0.55)', fontSize: '0.65rem', fontWeight: 800,
+          color: 'rgba(255,255,255,0.7)', fontSize: '0.78rem', fontWeight: 800,
           letterSpacing: '1px', cursor: 'pointer', fontFamily: 'inherit',
           textTransform: 'uppercase',
         }}
@@ -181,7 +209,7 @@ const ScoreBox = ({ label, score, isUs, compact = false, outdoor = false }) => {
       boxShadow: outdoor ? '0 4px 12px rgba(0,0,0,0.45)' : 'none',
     }}>
       <span style={{
-        fontSize: compact ? '0.6rem' : 'var(--text-xs)', fontWeight: '800',
+        fontSize: compact ? '0.72rem' : 'var(--text-xs)', fontWeight: '800',
         color: labelColor,
         textTransform: 'uppercase', letterSpacing: '1px', marginBottom: compact ? '0.1rem' : '0.25rem',
         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%',
@@ -221,7 +249,14 @@ const MiniSprayChart = ({ zones, size = 100, outdoor = false }) => {
   const maxBoost = outdoor ? 0.55 : 0.70;
   const showLabels = size >= 140;
   return (
-    <svg width={size} height={size * 0.85} viewBox="0 0 200 170" style={{ display: 'block' }}>
+    // Fluid rather than fixed: `size` becomes a cap, not a hard width, so the
+    // chart shrinks to fit a 360px phone instead of pushing its container
+    // wider than the screen. The viewBox keeps the aspect ratio.
+    <svg
+      viewBox="0 0 200 170"
+      preserveAspectRatio="xMidYMid meet"
+      style={{ display: 'block', width: '100%', maxWidth: size, height: 'auto' }}
+    >
       <rect width="200" height="170" fill={fieldBg} rx="8" />
       {ZONE_POLYS.map(z => {
         const weight = Math.max(0, Math.min(1, zones[z.id] || 0));
@@ -278,7 +313,7 @@ const DangerBadge = ({ danger }) => {
     <span style={{
       display: 'inline-flex', alignItems: 'center', gap: '0.2rem',
       background: `${color}22`, color, padding: '2px 8px', borderRadius: 4,
-      fontSize: '0.6rem', fontWeight: 800, letterSpacing: '0.5px',
+      fontSize: '0.72rem', fontWeight: 800, letterSpacing: '0.5px',
       border: `1px solid ${color}44`,
     }}>
       {danger >= 70 && <AlertTriangle size={9} />}
@@ -302,9 +337,11 @@ const ScoutingCard = ({ player, expanded, onToggle, compact = false }) => {
         style={{
           display: 'flex', alignItems: 'center', gap: '0.5rem', width: '100%',
           padding: compact ? '0.35rem 0.5rem' : '0.5rem 0.75rem',
+          // The whole row is the expand control, so it must be thumb-height.
+          minHeight: 'var(--touch-min)',
           background: 'none', border: 'none',
           color: 'var(--text-main)', cursor: 'pointer', fontFamily: 'var(--font-base)',
-          fontSize: compact ? '0.7rem' : '0.8rem', textAlign: 'left',
+          fontSize: compact ? '0.78rem' : '0.85rem', textAlign: 'left',
         }}
       >
         <span style={{ fontWeight: '800', color: 'var(--text-muted)', minWidth: '28px' }}>
@@ -317,14 +354,14 @@ const ScoutingCard = ({ player, expanded, onToggle, compact = false }) => {
       {expanded && (
         <div style={{ padding: '0.5rem 0.75rem', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
           <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-start', flexWrap: 'wrap' }}>
-            <SprayChart zones={player.zones} size={compact ? 80 : 110} />
+            <MiniSprayChart zones={player.zones} size={compact ? 80 : 110} />
             <div style={{ flex: 1, minWidth: 120 }}>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', marginBottom: '0.4rem' }}>
                 {(player.tags || []).map(t => (
-                  <span key={t} style={{ background: 'rgba(130,203,195,0.12)', color: 'var(--primary-color)', padding: '1px 6px', borderRadius: 3, fontSize: '0.6rem', fontWeight: 700 }}>{t}</span>
+                  <span key={t} style={{ background: 'rgba(130,203,195,0.12)', color: 'var(--primary-color)', padding: '1px 6px', borderRadius: 3, fontSize: '0.72rem', fontWeight: 700 }}>{t}</span>
                 ))}
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '0.2rem', fontSize: '0.65rem' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '0.2rem', fontSize: '0.75rem' }}>
                 {[['AVG', fmtStat(player.avg)], ['SLG', fmtStat(player.slg)], ['OBP', fmtStat(player.obp)],
                   ['H', player.h ?? '—'], ['HR', player.hr ?? '—'], ['BB', player.bb ?? '—'],
                   ['SO', player.so ?? '—'], ['SB', player.sb ?? '—'], ['PA', player.pa ?? '—']].map(([k, v]) => (
@@ -403,12 +440,18 @@ const BatterScoutCard = ({ player, role, outdoor, isMobile }) => {
         )}
       </div>
 
-      {/* Spray chart + stats column */}
-      <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'flex-start' }}>
-        <div>
+      {/* Spray chart + stats column.
+          On a phone the 160px chart plus the gap left roughly 86px for a
+          three-column stat grid, which is unreadable. Stack instead: the chart
+          takes the full card width and the stats sit beneath it. */}
+      <div style={{
+        display: 'flex', gap: '0.6rem', alignItems: 'flex-start',
+        flexDirection: isMobile ? 'column' : 'row',
+      }}>
+        <div style={isMobile ? { width: '100%' } : undefined}>
           <MiniSprayChart
             zones={player.zones}
-            size={isMobile ? 160 : 200}
+            size={isMobile ? 240 : 200}
             outdoor={outdoor}
           />
         </div>
@@ -447,7 +490,7 @@ const BatterScoutCard = ({ player, role, outdoor, isMobile }) => {
                 padding: outdoor ? '4px 6px' : '0',
                 borderRadius: '4px',
               }}>
-                <span style={{ color: labelColor, fontSize: outdoor ? '0.65rem' : '0.55rem', fontWeight: '700', letterSpacing: '0.5px' }}>{k}</span>
+                <span style={{ color: labelColor, fontSize: outdoor ? '0.75rem' : '0.7rem', fontWeight: '700', letterSpacing: '0.5px' }}>{k}</span>
                 <span style={{ color: statValueColor, fontWeight: '900', fontVariantNumeric: 'tabular-nums' }}>{v}</span>
               </div>
             ))}
@@ -462,7 +505,7 @@ const BatterScoutCard = ({ player, role, outdoor, isMobile }) => {
                   color: outdoor ? '#000000' : '#82cbc3',
                   padding: outdoor ? '2px 8px' : '1px 6px',
                   borderRadius: '3px',
-                  fontSize: outdoor ? '0.7rem' : '0.6rem',
+                  fontSize: outdoor ? '0.7rem' : '0.72rem',
                   fontWeight: '800',
                 }}>{t}</span>
               ))}
@@ -541,7 +584,7 @@ const LivePlayPanel = ({ livePlay }) => {
         <span style={{ fontSize: '0.7rem', fontWeight: '800', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
           Live Situation
         </span>
-        <span style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.3)', marginLeft: 'auto' }}>
+        <span style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.3)', marginLeft: 'auto' }}>
           {livePlay.outs} out{livePlay.outs !== 1 ? 's' : ''}
         </span>
       </div>
@@ -582,7 +625,7 @@ const OpponentScoutPanel = React.memo(({ scouting, livePlay, isLandscape, hideHe
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem', paddingBottom: '0.35rem', borderBottom: '1px solid rgba(179,74,57,0.3)' }}>
           <Shield size={14} color="var(--danger)" />
           <h3 style={{ fontSize: 'var(--text-sm)', fontWeight: 700, color: 'var(--danger)', margin: 0 }}>Opponent Scouting</h3>
-          <span style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginLeft: 'auto' }}>{players.length} batter{players.length !== 1 ? 's' : ''}</span>
+          <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginLeft: 'auto' }}>{players.length} batter{players.length !== 1 ? 's' : ''}</span>
         </div>
       )}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -591,7 +634,7 @@ const OpponentScoutPanel = React.memo(({ scouting, livePlay, isLandscape, hideHe
           return (
             <div key={p.number || i} style={isCurrent ? { border: '1px solid rgba(255,68,68,0.4)', borderRadius: 8 } : {}}>
               {isCurrent && (
-                <div style={{ fontSize: '0.55rem', fontWeight: 800, color: '#ff4444', textTransform: 'uppercase', letterSpacing: '1px', padding: '3px 8px', background: 'rgba(255,68,68,0.1)', borderRadius: '8px 8px 0 0' }}>AT BAT</div>
+                <div style={{ fontSize: '0.7rem', fontWeight: 800, color: '#ff4444', textTransform: 'uppercase', letterSpacing: '1px', padding: '3px 8px', background: 'rgba(255,68,68,0.1)', borderRadius: '8px 8px 0 0' }}>AT BAT</div>
               )}
               <ScoutingCard
                 player={p}
@@ -610,12 +653,13 @@ const OpponentScoutPanel = React.memo(({ scouting, livePlay, isLandscape, hideHe
           style={{
             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.3rem',
             width: '100%', marginTop: '0.4rem', padding: '0.4rem',
+            minHeight: 'var(--touch-min)',
             background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)',
-            borderRadius: 6, color: 'var(--text-muted)', fontSize: '0.7rem',
+            borderRadius: 6, color: 'var(--text-muted)', fontSize: '0.8rem',
             fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-base)',
           }}
         >
-          {showAll ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+          {showAll ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
           {showAll ? 'Show top 5' : `Show all ${players.length}`}
         </button>
       )}
@@ -634,18 +678,112 @@ const BatterRow = ({ player, idx, compact = false }) => {
       display: 'flex', alignItems: 'center', gap: compact ? '0.3rem' : '0.5rem',
       padding: compact ? '0.25rem 0.4rem' : '0.4rem 0.6rem', borderRadius: 6,
       background: idx % 2 === 0 ? 'rgba(0,0,0,0.15)' : 'rgba(0,0,0,0.08)',
-      fontSize: compact ? '0.65rem' : undefined,
+      fontSize: compact ? '0.75rem' : undefined,
     }}>
-      <span style={{ width: compact ? 16 : 20, fontSize: compact ? '0.6rem' : 'var(--text-xs)', color: 'var(--text-muted)', textAlign: 'right' }}>{idx + 1}</span>
+      <span style={{ width: compact ? 16 : 20, fontSize: compact ? '0.72rem' : 'var(--text-xs)', color: 'var(--text-muted)', textAlign: 'right' }}>{idx + 1}</span>
       <div style={{ flex: 1, minWidth: compact ? 60 : 80 }}>
         <PlayerName name={name} number={number} size="sm" />
       </div>
-      <div style={{ display: 'flex', gap: compact ? '0.35rem' : '0.75rem', fontSize: compact ? '0.6rem' : 'var(--text-xs)', color: 'var(--text-muted)' }}>
+      <div style={{ display: 'flex', gap: compact ? '0.35rem' : '0.75rem', fontSize: compact ? '0.72rem' : 'var(--text-xs)', color: 'var(--text-muted)' }}>
         <span>{b.ab ?? b.pa ?? '-'} AB</span>
         <span>{b.h ?? '-'} H</span>
         <span>{b.r ?? '-'} R</span>
         {!compact && <span>{b.rbi ?? '-'} RBI</span>}
         {!compact && <span>{b.bb ?? '-'} BB</span>}
+      </div>
+    </div>
+  );
+};
+
+// ─── Collapsible Section ──────────────────────────────────────────────────────
+//
+// Accordion used to keep the live panel to roughly one phone screen. Only the
+// section a coach is actually reading stays expanded; everything else folds to
+// a 44px header row. Written as a real <button> rather than a <summary> so the
+// header can carry the chevron and stay keyboard- and screen-reader-correct.
+const CollapsibleSection = ({ label, defaultOpen = false, children }) => {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div style={{
+      border: '1px solid rgba(255,255,255,0.08)',
+      borderRadius: 10,
+      background: 'rgba(255,255,255,0.02)',
+      overflow: 'hidden',
+    }}>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        aria-expanded={open}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+          // Full-width, thumb-height header: the whole row is the target.
+          minHeight: 'var(--touch-min)', padding: '0 12px',
+          background: 'none', border: 'none', cursor: 'pointer',
+          color: 'rgba(255,255,255,0.75)', fontFamily: 'var(--font-base)',
+          fontSize: '0.72rem', fontWeight: 800, letterSpacing: '1px',
+          textTransform: 'uppercase', textAlign: 'left',
+        }}
+      >
+        <span style={{ flex: 1, minWidth: 0 }}>{label}</span>
+        {open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+      </button>
+      {open && (
+        <div style={{ padding: '0 12px 12px' }}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ─── Batter Card (live at-bat / on-deck) ──────────────────────────────────────
+//
+// Compact sibling of BatterScoutCard for the live panel's two-up row. Accepts
+// both payload shapes the API produces: Sharks batters arrive as
+// `{name, number, batting:{avg,…}}`, opponent batters as flat scouting records
+// `{name, number, avg, danger, …}`.
+const BatterCard = ({ player, label, isOnDeck = false, isSharksBatting = false }) => {
+  if (!player) return null;
+  const b = player.batting || player;
+  const name = player.name || player.player || 'Unknown';
+  const number = player.number;
+  const accent = isOnDeck ? '#82CBC3' : '#ff4444';
+  const danger = player.danger;
+
+  return (
+    <div style={{
+      flex: 1, minWidth: 0,
+      background: 'rgba(0,0,0,0.35)',
+      border: `2px solid ${isOnDeck ? 'rgba(130,203,195,0.4)' : 'rgba(255,68,68,0.45)'}`,
+      borderRadius: 10, padding: '0.5rem 0.6rem',
+      display: 'flex', flexDirection: 'column', gap: 4,
+    }}>
+      <span style={{
+        fontSize: '0.7rem', fontWeight: 900, letterSpacing: '1.5px',
+        textTransform: 'uppercase', color: accent,
+      }}>{label}</span>
+      <span style={{
+        fontSize: 'clamp(0.95rem, 4vw, 1.15rem)', fontWeight: 800,
+        color: '#fff', lineHeight: 1.15,
+        // Long names wrap instead of forcing the two-up row wider than the
+        // phone screen.
+        overflowWrap: 'anywhere',
+      }}>
+        {name}
+        {number != null && String(number).trim() !== '' && (
+          <span style={{ color: '#82CBC3', marginLeft: 6 }}>#{number}</span>
+        )}
+      </span>
+      <div style={{
+        display: 'flex', flexWrap: 'wrap', gap: '0.5rem',
+        fontSize: '0.68rem', color: 'rgba(255,255,255,0.55)',
+        fontVariantNumeric: 'tabular-nums',
+      }}>
+        <span>AVG <strong style={{ color: '#fff' }}>{fmtStat(b.avg)}</strong></span>
+        {isSharksBatting
+          ? <span>H <strong style={{ color: '#fff' }}>{b.h ?? '-'}</strong></span>
+          : <span>OBP <strong style={{ color: '#fff' }}>{fmtStat(b.obp)}</strong></span>}
+        {danger != null && <DangerBadge danger={danger} />}
       </div>
     </div>
   );
@@ -685,7 +823,7 @@ const LiveScoreboardPanel = ({ data, isMobile, isLandscape, fetchScoreboard, las
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <LivePulse />
-        <span className={`home-away-pill ${isHome ? 'home-away-pill--home' : 'home-away-pill--away'}`} style={{ fontSize: '0.55rem' }}>
+        <span className={`home-away-pill ${isHome ? 'home-away-pill--home' : 'home-away-pill--away'}`} style={{ fontSize: '0.7rem' }}>
           {isHome ? <Home size={9} /> : <Plane size={9} />}
           {isHome ? 'HOME' : 'AWAY'}
         </span>
@@ -697,21 +835,22 @@ const LiveScoreboardPanel = ({ data, isMobile, isLandscape, fetchScoreboard, las
             <a
               href={`https://web.gc.com/teams/${team?.gc_team_id || 'LFdMZvC8bLpr'}/${team?.gc_season_slug || team?.season || '2026-fall-sharks'}/schedule/${data.gc_game_id}/plays`}
               target="_blank" rel="noopener noreferrer"
-              style={{ display: 'flex', alignItems: 'center', gap: 3, background: 'rgba(4,101,104,0.2)', color: '#82CBC3', border: '1px solid rgba(4,101,104,0.3)', padding: '4px 10px', borderRadius: 6, fontSize: '0.65rem', fontWeight: 600, textDecoration: 'none' }}
-            ><ExternalLink size={10} /> GC</a>
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, background: 'rgba(4,101,104,0.2)', color: '#82CBC3', border: '1px solid rgba(4,101,104,0.3)', padding: '0 12px', minHeight: 'var(--touch-min)', borderRadius: 6, fontSize: '0.78rem', fontWeight: 600, textDecoration: 'none' }}
+            ><ExternalLink size={13} /> GC</a>
           )}
           <button
             type="button" onClick={fetchScoreboard}
-            style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 6, color: 'rgba(255,255,255,0.4)', cursor: 'pointer', padding: '4px 8px', display: 'flex', alignItems: 'center' }}
+            style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 6, color: 'rgba(255,255,255,0.55)', cursor: 'pointer', padding: '0 12px', minHeight: 'var(--touch-min)', minWidth: 'var(--touch-min)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             title="Refresh"
-          ><RefreshCw size={13} /></button>
+            aria-label="Refresh scoreboard"
+          ><RefreshCw size={16} /></button>
         </div>
       </div>
 
       {/* Score row */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1 }}>
-          <span style={{ fontSize: '0.58rem', fontWeight: 900, color: 'rgba(130,203,195,0.7)', letterSpacing: '2px', textTransform: 'uppercase', marginBottom: 2 }}>Sharks</span>
+          <span style={{ fontSize: '0.72rem', fontWeight: 900, color: 'rgba(130,203,195,0.7)', letterSpacing: '2px', textTransform: 'uppercase', marginBottom: 2 }}>Sharks</span>
           <span style={{ fontSize: 'clamp(3.5rem,16vw,6rem)', fontWeight: 900, color: '#82CBC3', lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
             {data.sharks_score ?? '-'}
           </span>
@@ -730,7 +869,10 @@ const LiveScoreboardPanel = ({ data, isMobile, isLandscape, fetchScoreboard, las
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1 }}>
-          <span style={{ fontSize: '0.58rem', fontWeight: 900, color: 'rgba(255,255,255,0.35)', letterSpacing: '2px', textTransform: 'uppercase', marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 100 }}>
+          {/* Opponent names in this league run long ("Pacific Coast Riptide").
+              A hard 100px clip truncated nearly all of them on a phone; let
+              the label wrap onto a second line instead. */}
+          <span style={{ fontSize: '0.75rem', fontWeight: 900, color: 'rgba(255,255,255,0.45)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 2, textAlign: 'center', overflowWrap: 'anywhere', maxWidth: '100%' }}>
             {data.opponent || 'Opp'}
           </span>
           <span style={{ fontSize: 'clamp(3.5rem,16vw,6rem)', fontWeight: 900, color: 'rgba(255,255,255,0.8)', lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
@@ -744,7 +886,7 @@ const LiveScoreboardPanel = ({ data, isMobile, isLandscape, fetchScoreboard, las
 
       {/* AT BAT / ON DECK */}
       {(atBatPlayer || onDeckPlayer) && (
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {atBatPlayer && (
             <BatterCard player={atBatPlayer} label="At Bat" isOnDeck={false} isSharksBatting={atBatIsShark} />
           )}
@@ -766,8 +908,12 @@ const LiveScoreboardPanel = ({ data, isMobile, isLandscape, fetchScoreboard, las
       {/* Linescore */}
       {data.linescore?.length > 0 && (
         <CollapsibleSection label="Linescore">
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.62rem', textAlign: 'center' }}>
+          {/* `width: 100%` used to defeat the scroller: the table squeezed
+              itself into the viewport instead of overflowing, so a 9-inning
+              line rendered at ~10px and never became scrollable. `max-content`
+              lets it take its natural width and actually scroll. */}
+          <div className="scroll-x">
+            <table style={{ width: 'max-content', minWidth: '100%', borderCollapse: 'collapse', fontSize: '0.72rem', textAlign: 'center' }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
                   <th style={{ padding: '3px 6px', textAlign: 'left', color: 'rgba(255,255,255,0.35)' }}>Team</th>
@@ -810,13 +956,13 @@ const LiveScoreboardPanel = ({ data, isMobile, isLandscape, fetchScoreboard, las
           <div style={isLandscape ? { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 } : {}}>
             {data.sharks_batting?.length > 0 && (
               <div>
-                <div style={{ fontSize: '0.58rem', fontWeight: 800, color: '#82CBC3', marginBottom: 4, letterSpacing: '1px', textTransform: 'uppercase' }}>Sharks Batting</div>
+                <div style={{ fontSize: '0.72rem', fontWeight: 800, color: '#82CBC3', marginBottom: 4, letterSpacing: '1px', textTransform: 'uppercase' }}>Sharks Batting</div>
                 {data.sharks_batting.map((p, i) => <BatterRow key={`s-${i}`} player={p} idx={i} compact={true} />)}
               </div>
             )}
             {data.opponent_batting?.length > 0 && (
               <div style={isLandscape ? {} : { marginTop: 8 }}>
-                <div style={{ fontSize: '0.58rem', fontWeight: 800, color: 'rgba(255,255,255,0.35)', marginBottom: 4, letterSpacing: '1px', textTransform: 'uppercase' }}>{data.opponent || 'Opponent'} Batting</div>
+                <div style={{ fontSize: '0.72rem', fontWeight: 800, color: 'rgba(255,255,255,0.35)', marginBottom: 4, letterSpacing: '1px', textTransform: 'uppercase' }}>{data.opponent || 'Opponent'} Batting</div>
                 {data.opponent_batting.map((p, i) => <BatterRow key={`o-${i}`} player={p} idx={i} compact={true} />)}
               </div>
             )}
@@ -825,7 +971,7 @@ const LiveScoreboardPanel = ({ data, isMobile, isLandscape, fetchScoreboard, las
       )}
 
       {lastUpdated && (
-        <div style={{ fontSize: '0.52rem', color: 'rgba(255,255,255,0.18)', textAlign: 'center' }}>
+        <div style={{ fontSize: '0.68rem', color: 'rgba(255,255,255,0.18)', textAlign: 'center' }}>
           <RefreshCw size={9} style={{ verticalAlign: 'middle', marginRight: 4 }} />
           Updated {lastUpdated.toLocaleTimeString()} · Auto-refreshing every 15s
         </div>
@@ -879,8 +1025,34 @@ const Scoreboard = ({ isMobile = false, isLandscape = false, team, schedule }) =
 
   useEffect(() => {
     const interval = data?.status === 'live' ? POLL_INTERVAL_LIVE : POLL_INTERVAL_IDLE;
-    timerRef.current = setInterval(fetchScoreboard, interval);
-    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+
+    // Pause polling whenever the page is hidden. On a phone at the field this
+    // loop was refetching every 15s forever — through screen-lock, through
+    // tab-switches — burning battery and cellular data for a screen nobody is
+    // looking at. Resume immediately on return so the coach sees fresh state
+    // the moment the phone comes back out of a pocket.
+    const start = () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+      timerRef.current = setInterval(fetchScoreboard, interval);
+    };
+    const stop = () => {
+      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+    };
+    const onVisibility = () => {
+      if (document.hidden) {
+        stop();
+      } else {
+        fetchScoreboard();
+        start();
+      }
+    };
+
+    if (!document.hidden) start();
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      stop();
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
   }, [data?.status, fetchScoreboard]);
 
   if (loading) return <div className="loader"></div>;
@@ -891,7 +1063,7 @@ const Scoreboard = ({ isMobile = false, isLandscape = false, team, schedule }) =
         <p style={{ color: 'var(--danger)' }}>{error}</p>
         <button
           type="button" onClick={fetchScoreboard}
-          style={{ marginTop: '1rem', background: 'var(--primary-glow)', color: 'var(--primary-color)', border: '1px solid rgba(4,101,104,0.27)', padding: '0.5rem 1rem', borderRadius: 8, cursor: 'pointer', fontWeight: 600 }}
+          style={{ marginTop: '1rem', background: 'var(--primary-glow)', color: 'var(--primary-color)', border: '1px solid rgba(4,101,104,0.27)', padding: '0.5rem 1.25rem', minHeight: 'var(--touch-min)', borderRadius: 8, cursor: 'pointer', fontWeight: 600, fontSize: 'var(--text-sm)', fontFamily: 'inherit' }}
         >Retry</button>
       </div>
     );
@@ -1047,13 +1219,15 @@ const Scoreboard = ({ isMobile = false, isLandscape = false, team, schedule }) =
           <button
             onClick={fetchScoreboard}
             style={{
-              display: 'flex', alignItems: 'center', gap: '0.3rem',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.3rem',
               background: 'transparent', border: 'none', color: 'var(--text-muted)',
-              cursor: 'pointer', fontSize: 'var(--text-xs)', padding: '0.25rem',
+              cursor: 'pointer', fontSize: 'var(--text-xs)',
+              minHeight: 'var(--touch-min)', minWidth: 'var(--touch-min)',
             }}
             title="Refresh scoreboard"
+            aria-label="Refresh scoreboard"
           >
-            <RefreshCw size={14} />
+            <RefreshCw size={18} />
           </button>
         </div>
       </div>
@@ -1067,12 +1241,16 @@ const Scoreboard = ({ isMobile = false, isLandscape = false, team, schedule }) =
             vs. <strong style={{ color: 'var(--text-main)' }}>{data.opponent || 'Opponent'}</strong>
           </span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '2rem', marginBottom: '1.5rem' }}>
-          <ScoreBox label="Sharks" score={data.sharks_score} isUs={true} />
-          <Trophy size={24} color="var(--primary-color)" />
-          <ScoreBox label={data.opponent || 'Opponent'} score={data.opponent_score} isUs={false} />
-        </div>
+        {/* One score block, not two. This panel used to render the score twice
+            over — a plain row immediately followed by the win/loss-tinted row
+            below — which on a phone pushed the linescore and box score a full
+            screen further down for no added information. The tinted block is
+            the one kept: it also carries the inning marker and honours
+            bright-light mode. It needs `display: flex` to lay its three
+            children out side by side; without it they stacked vertically. */}
         <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          gap: 'clamp(0.5rem, 4vw, 2rem)', flexWrap: 'wrap',
           textAlign: 'center', padding: '0.75rem', borderRadius: 8, marginBottom: '1rem',
           background: sharksWinning ? 'rgba(46,160,67,0.1)' : tied ? 'rgba(255,220,120,0.1)' : 'rgba(218,54,51,0.1)',
           border: `1px solid ${sharksWinning ? 'rgba(46,160,67,0.3)' : tied ? 'rgba(255,220,120,0.3)' : 'rgba(218,54,51,0.3)'}`,
@@ -1112,8 +1290,8 @@ const Scoreboard = ({ isMobile = false, isLandscape = false, team, schedule }) =
           />
         </div>
         {data.linescore?.length > 0 && (
-          <div style={{ overflowX: 'auto', marginBottom: '1rem' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--text-xs)', textAlign: 'center' }}>
+          <div className="scroll-x" style={{ marginBottom: '1rem' }}>
+            <table style={{ width: 'max-content', minWidth: '100%', borderCollapse: 'collapse', fontSize: 'var(--text-sm)', textAlign: 'center' }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--surface-border)' }}>
                   <th style={{ padding: '0.4rem 0.6rem', textAlign: 'left', color: 'var(--text-muted)' }}>Team</th>

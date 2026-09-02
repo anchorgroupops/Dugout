@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Calendar, ChevronDown, ChevronUp, Home, Plane, Clock } from 'lucide-react';
 import { getTodayEST, formatDateMMDDYYYY } from '../utils/formatDate';
-import { TipBadge, PlayerName } from './StatTooltip';
+import { TipBadge, PlayerName, TipIcon } from './StatTooltip';
 
 // ─── Normalisation helpers ───────────────────────────────────────────────────
 // GC-scraped rows are flat { name, pa, ab, h, ... }
@@ -41,7 +41,15 @@ const fmtPct = (v) => {
 };
 
 // ─── Player row components ────────────────────────────────────────────────────
-const PlayerBattingRow = ({ player }) => {
+// The name column used to be a hard 120px on every device. On a 360px phone that
+// left ~124px for up to 17 stat badges, so the badge block collapsed to a
+// one-badge-per-line ribbon. On mobile the name instead claims a full-width row
+// of its own (`flex: 1 1 100%`) and the badges wrap beneath it across the whole
+// card. Desktop keeps the aligned 120px gutter.
+const nameColStyle = (isMobile) =>
+  isMobile ? { minWidth: 0, flex: '1 1 100%' } : { minWidth: '120px' };
+
+const PlayerBattingRow = ({ player, isMobile = false }) => {
   const b = normBatting(player);
   const name = player.name || player.player;
   const number = player.number || player.jersey;
@@ -52,7 +60,7 @@ const PlayerBattingRow = ({ player }) => {
       padding: '0.5rem 0.75rem', borderRadius: '6px',
       background: 'rgba(0,0,0,0.15)', flexWrap: 'wrap'
     }}>
-      <div style={{ minWidth: '120px' }}>
+      <div style={nameColStyle(isMobile)}>
         <PlayerName name={name} number={number} size="sm" />
         {pos && <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginLeft: '0.4rem' }}>({pos})</span>}
       </div>
@@ -81,7 +89,7 @@ const PlayerBattingRow = ({ player }) => {
   );
 };
 
-const PlayerAdvBattingRow = ({ player }) => {
+const PlayerAdvBattingRow = ({ player, isMobile = false }) => {
   const b = normAdvBatting(player);
   if (!b) return null;
   const name = player.name || player.player;
@@ -92,7 +100,7 @@ const PlayerAdvBattingRow = ({ player }) => {
       padding: '0.5rem 0.75rem', borderRadius: '6px',
       background: 'rgba(0,0,0,0.15)', flexWrap: 'wrap'
     }}>
-      <div style={{ minWidth: '120px' }}>
+      <div style={nameColStyle(isMobile)}>
         <PlayerName name={name} number={number} size="sm" />
       </div>
       <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
@@ -114,7 +122,7 @@ const PlayerAdvBattingRow = ({ player }) => {
   );
 };
 
-const PlayerPitchingRow = ({ player }) => {
+const PlayerPitchingRow = ({ player, isMobile = false }) => {
   const name = player.name || player.player;
   const number = player.number || player.jersey;
   return (
@@ -123,7 +131,7 @@ const PlayerPitchingRow = ({ player }) => {
       padding: '0.5rem 0.75rem', borderRadius: '6px',
       background: 'rgba(0,0,0,0.15)', flexWrap: 'wrap'
     }}>
-      <div style={{ minWidth: '120px' }}>
+      <div style={nameColStyle(isMobile)}>
         <PlayerName name={name} number={number} size="sm" />
       </div>
       <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
@@ -149,7 +157,7 @@ const PlayerPitchingRow = ({ player }) => {
   );
 };
 
-const PlayerFieldingRow = ({ player }) => {
+const PlayerFieldingRow = ({ player, isMobile = false }) => {
   const name = player.name || player.player;
   const number = player.number || player.jersey;
   return (
@@ -158,7 +166,7 @@ const PlayerFieldingRow = ({ player }) => {
       padding: '0.5rem 0.75rem', borderRadius: '6px',
       background: 'rgba(0,0,0,0.15)', flexWrap: 'wrap'
     }}>
-      <div style={{ minWidth: '120px' }}>
+      <div style={nameColStyle(isMobile)}>
         <PlayerName name={name} number={number} size="sm" />
       </div>
       <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
@@ -173,7 +181,7 @@ const PlayerFieldingRow = ({ player }) => {
   );
 };
 
-const PlayerAdvPitchingRow = ({ player }) => {
+const PlayerAdvPitchingRow = ({ player, isMobile = false }) => {
   const name = player.name || player.player;
   const number = player.number || player.jersey;
   return (
@@ -182,7 +190,7 @@ const PlayerAdvPitchingRow = ({ player }) => {
       padding: '0.5rem 0.75rem', borderRadius: '6px',
       background: 'rgba(0,0,0,0.15)', flexWrap: 'wrap'
     }}>
-      <div style={{ minWidth: '120px' }}>
+      <div style={nameColStyle(isMobile)}>
         <PlayerName name={name} number={number} size="sm" />
       </div>
       <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
@@ -202,7 +210,7 @@ const PlayerAdvPitchingRow = ({ player }) => {
   );
 };
 
-const PlayerCatchingRow = ({ player }) => {
+const PlayerCatchingRow = ({ player, isMobile = false }) => {
   const name = player.name || player.player;
   const number = player.number || player.jersey;
   return (
@@ -211,7 +219,7 @@ const PlayerCatchingRow = ({ player }) => {
       padding: '0.5rem 0.75rem', borderRadius: '6px',
       background: 'rgba(0,0,0,0.15)', flexWrap: 'wrap'
     }}>
-      <div style={{ minWidth: '120px' }}>
+      <div style={nameColStyle(isMobile)}>
         <PlayerName name={name} number={number} size="sm" />
       </div>
       <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
@@ -227,7 +235,7 @@ const PlayerCatchingRow = ({ player }) => {
   );
 };
 
-const PlayerOppBattingRow = ({ player }) => {
+const PlayerOppBattingRow = ({ player, isMobile = false }) => {
   const b = normBatting(player);
   const name = player.name || player.player;
   const number = player.number || player.jersey;
@@ -238,7 +246,7 @@ const PlayerOppBattingRow = ({ player }) => {
       background: 'rgba(248, 113, 113, 0.05)', flexWrap: 'wrap',
       border: '1px solid rgba(248, 113, 113, 0.1)'
     }}>
-      <div style={{ minWidth: '120px' }}>
+      <div style={nameColStyle(isMobile)}>
         <PlayerName name={name} number={number} size="sm" />
       </div>
       <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
@@ -279,20 +287,24 @@ const ResultBadge = ({ result, hasStats, isPast }) => {
       const tip = hasStats
         ? 'Stats are present but no final W/L was entered in GameChanger'
         : 'Game completed; GameChanger has not synced the result yet';
+      // A phone never fires `title`, so the reason a score is missing was
+      // unreadable on the primary device. TipIcon makes it tap-to-explain and
+      // stops the tap from also toggling the game card underneath.
       return (
-        <span
-          className="result-badge"
-          title={tip}
-          style={{
-            background: hasStats ? 'rgba(255,255,255,0.05)' : 'rgba(240,180,41,0.10)',
-            color: hasStats ? 'var(--text-muted)' : '#f0b429',
-            border: hasStats
-              ? '1px solid rgba(255,255,255,0.15)'
-              : '1px solid rgba(240,180,41,0.35)',
-          }}
-        >
-          {label}
-        </span>
+        <TipIcon text={tip}>
+          <span
+            className="result-badge"
+            style={{
+              background: hasStats ? 'rgba(255,255,255,0.05)' : 'rgba(240,180,41,0.10)',
+              color: hasStats ? 'var(--text-muted)' : '#f0b429',
+              border: hasStats
+                ? '1px solid rgba(255,255,255,0.15)'
+                : '1px solid rgba(240,180,41,0.35)',
+            }}
+          >
+            {label}
+          </span>
+        </TipIcon>
       );
     }
     return null;
@@ -304,28 +316,34 @@ const ResultBadge = ({ result, hasStats, isPast }) => {
 };
 
 // ─── Tab bar ──────────────────────────────────────────────────────────────────
+// Up to 8 tab pills. Wrapped, they stacked into a 4-row block on a phone and
+// each pill was only ~23px tall — well under a thumb. `scroll-x` turns the bar
+// into one swipeable row (body is overflow-x:hidden, so the scroller has to be
+// declared here) and every pill gets a 44px hit area.
 const TabBar = ({ tabs, active, onChange }) => (
-  <div style={{
-    display: 'flex', gap: '0.25rem', flexWrap: 'wrap',
+  <div className="scroll-x scroll-x--snap" style={{
     marginBottom: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.08)',
     paddingBottom: '0.5rem'
   }}>
-    {tabs.map(t => (
-      <button key={t.id} onClick={() => onChange(t.id)} style={{
-        padding: '0.25rem 0.75rem', borderRadius: '4px', border: 'none',
-        cursor: 'pointer', fontSize: 'var(--text-xs)', fontWeight: active === t.id ? '700' : '500',
-        background: active === t.id ? 'rgba(4,101,104,0.35)' : 'rgba(255,255,255,0.06)',
-        color: active === t.id ? 'var(--primary-color)' : 'var(--text-muted)',
-        transition: 'all 0.15s',
-      }}>
-        {t.label}{t.count != null ? ` (${t.count})` : ''}
-      </button>
-    ))}
+    <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'nowrap', width: 'max-content' }}>
+      {tabs.map(t => (
+        <button key={t.id} onClick={() => onChange(t.id)} style={{
+          padding: '0.25rem 0.75rem', borderRadius: '4px', border: 'none',
+          cursor: 'pointer', fontSize: 'var(--text-xs)', fontWeight: active === t.id ? '700' : '500',
+          background: active === t.id ? 'rgba(4,101,104,0.35)' : 'rgba(255,255,255,0.06)',
+          color: active === t.id ? 'var(--primary-color)' : 'var(--text-muted)',
+          transition: 'all 0.15s',
+          minHeight: 'var(--touch-min)', whiteSpace: 'nowrap', flexShrink: 0,
+        }}>
+          {t.label}{t.count != null ? ` (${t.count})` : ''}
+        </button>
+      ))}
+    </div>
   </div>
 );
 
 // ─── Expanded detail panel ────────────────────────────────────────────────────
-const GameDetailPanel = ({ gameDetail, source }) => {
+const GameDetailPanel = ({ gameDetail, source, isMobile = false }) => {
   const [tab, setTab] = useState('batting');
 
   const batting        = gameDetail.sharks_batting           || [];
@@ -366,14 +384,14 @@ const GameDetailPanel = ({ gameDetail, source }) => {
       {tabs.length > 1 && <TabBar tabs={tabs} active={activeTab} onChange={setTab} />}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-        {activeTab === 'batting'      && batting.map((p, i)     => <PlayerBattingRow key={i} player={p} />)}
-        {activeTab === 'adv_batting'  && advBatting.map((p, i)  => <PlayerAdvBattingRow key={i} player={p} />)}
-        {activeTab === 'pitching'     && pitching.map((p, i)    => <PlayerPitchingRow key={i} player={p} />)}
-        {activeTab === 'adv_pitching' && advPitching.map((p, i) => <PlayerAdvPitchingRow key={i} player={p} />)}
-        {activeTab === 'fielding'     && fielding.map((p, i)    => <PlayerFieldingRow key={i} player={p} />)}
-        {activeTab === 'catching'     && catching.map((p, i)    => <PlayerCatchingRow key={i} player={p} />)}
-        {activeTab === 'opp_batting'  && oppBatting.map((p, i)  => <PlayerOppBattingRow key={i} player={p} />)}
-        {activeTab === 'opp_pitching' && oppPitching.map((p, i) => <PlayerPitchingRow key={i} player={p} />)}
+        {activeTab === 'batting'      && batting.map((p, i)     => <PlayerBattingRow key={i} player={p} isMobile={isMobile} />)}
+        {activeTab === 'adv_batting'  && advBatting.map((p, i)  => <PlayerAdvBattingRow key={i} player={p} isMobile={isMobile} />)}
+        {activeTab === 'pitching'     && pitching.map((p, i)    => <PlayerPitchingRow key={i} player={p} isMobile={isMobile} />)}
+        {activeTab === 'adv_pitching' && advPitching.map((p, i) => <PlayerAdvPitchingRow key={i} player={p} isMobile={isMobile} />)}
+        {activeTab === 'fielding'     && fielding.map((p, i)    => <PlayerFieldingRow key={i} player={p} isMobile={isMobile} />)}
+        {activeTab === 'catching'     && catching.map((p, i)    => <PlayerCatchingRow key={i} player={p} isMobile={isMobile} />)}
+        {activeTab === 'opp_batting'  && oppBatting.map((p, i)  => <PlayerOppBattingRow key={i} player={p} isMobile={isMobile} />)}
+        {activeTab === 'opp_pitching' && oppPitching.map((p, i) => <PlayerPitchingRow key={i} player={p} isMobile={isMobile} />)}
       </div>
 
       {source && (
@@ -412,7 +430,11 @@ const GameCard = ({ game, onExpand, isExpanded, gameDetail, isMobile = false, is
     }
   }
 
-  const canExpand = !isMobile && (game.sharks_totals || game.source === 'gc_full_scraper_v2');
+  // Per-game stat detail is the whole point of this tab, and it used to be
+  // desktop-only — a phone could never open a game. The detail panel now
+  // reflows for narrow screens (full-width name rows, swipeable tab bar), so
+  // there is no reason left to gate it on viewport.
+  const canExpand = Boolean(game.sharks_totals || game.source === 'gc_full_scraper_v2');
 
   const cardTint = isWin
     ? 'rgba(35, 134, 54, 0.06)'
@@ -441,8 +463,10 @@ const GameCard = ({ game, onExpand, isExpanded, gameDetail, isMobile = false, is
       onClick={canExpand ? onExpand : undefined}
     >
       {/* Header row */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem' }}>
-        <div style={{ flex: 1 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem', marginBottom: '0.75rem' }}>
+        {/* minWidth:0 lets a long opponent name shrink instead of shoving the
+            chevron off the right edge of a 360px screen. */}
+        <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem', flexWrap: 'wrap' }}>
             <span className={`home-away-pill ${isHome ? 'home-away-pill--home' : 'home-away-pill--away'}`}>
               {isHome ? <Home size={10} /> : <Plane size={10} />}
@@ -451,8 +475,10 @@ const GameCard = ({ game, onExpand, isExpanded, gameDetail, isMobile = false, is
             <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>{dateStr}</span>
             <ResultBadge result={game.result} hasStats={!!game.sharks_totals} isPast={isPast} />
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem' }}>
-            <h3 style={{ fontSize: isMobile ? 'var(--text-base)' : '1.1rem', margin: 0 }}>vs. {opponent}</h3>
+          {/* Wraps so a long team name drops the score onto its own line
+              instead of overflowing; `anywhere` breaks unspaced names. */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem 1rem', flexWrap: 'wrap' }}>
+            <h3 style={{ fontSize: isMobile ? 'var(--text-base)' : '1.1rem', margin: 0, minWidth: 0, overflowWrap: 'anywhere' }}>vs. {opponent}</h3>
             {sharksScore != null && (
               <span style={{
                 fontSize: isMobile ? '1.5rem' : '1.75rem',
@@ -465,7 +491,11 @@ const GameCard = ({ game, onExpand, isExpanded, gameDetail, isMobile = false, is
             )}
           </div>
         </div>
-        {canExpand && (isExpanded ? <ChevronUp size={18} color="var(--text-muted)" /> : <ChevronDown size={18} color="var(--text-muted)" />)}
+        {canExpand && (
+          <span className="touch-target" style={{ display: 'inline-flex', flexShrink: 0, alignItems: 'center' }}>
+            {isExpanded ? <ChevronUp size={18} color="var(--text-muted)" /> : <ChevronDown size={18} color="var(--text-muted)" />}
+          </span>
+        )}
       </div>
 
       {/* Summary stat badges */}
@@ -484,12 +514,21 @@ const GameCard = ({ game, onExpand, isExpanded, gameDetail, isMobile = false, is
       )}
 
       {/* Expanded detail */}
-      {!isMobile && isExpanded && gameDetail && (
+      {isExpanded && (
         <div style={{ marginTop: '1rem', borderTop: '1px solid var(--surface-border)', paddingTop: '1rem' }}>
-          <GameDetailPanel
-            gameDetail={gameDetail}
-            source={game.pdf_file || game.source || null}
-          />
+          {gameDetail ? (
+            <GameDetailPanel
+              gameDetail={gameDetail}
+              source={game.pdf_file || game.source || null}
+              isMobile={isMobile}
+            />
+          ) : (
+            // The detail is fetched on expand. Without this, a tap on a phone
+            // looked like nothing happened until the request came back.
+            <div style={{ color: 'var(--text-muted)', fontSize: 'var(--text-sm)', fontStyle: 'italic' }}>
+              Loading game detail{'…'}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -509,12 +548,14 @@ const ScheduleRow = ({ game }) => {
       background: isNext ? 'rgba(4, 101, 104, 0.08)' : 'rgba(0,0,0,0.15)',
       border: isNext ? '1px solid rgba(4, 101, 104, 0.2)' : '1px solid transparent',
     }}>
-      <span style={{ minWidth: '110px', fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>{dateStr}</span>
+      {/* 110px reserved more than MM/DD/YYYY needs and pushed the opponent
+          name off a 360px row. Just wide enough for the date, never shrinking. */}
+      <span style={{ minWidth: '76px', flexShrink: 0, whiteSpace: 'nowrap', fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>{dateStr}</span>
       <span className={`home-away-pill ${isHome ? 'home-away-pill--home' : 'home-away-pill--away'}`}>
         {isHome ? <Home size={9} /> : <Plane size={9} />}
         {isHome ? 'HOME' : 'AWAY'}
       </span>
-      <span style={{ flex: 1, fontWeight: isNext ? '700' : '500', fontSize: 'var(--text-sm)' }}>
+      <span style={{ flex: '1 1 8rem', minWidth: 0, overflowWrap: 'anywhere', fontWeight: isNext ? '700' : '500', fontSize: 'var(--text-sm)' }}>
         {isNext && (
           <span style={{ color: 'var(--primary-color)', marginRight: '0.4rem', fontSize: 'var(--text-xs)', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
             NEXT &#9654;

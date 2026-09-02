@@ -4,7 +4,14 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/sharks-logo-round.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- viewport-fit=cover is required for env(safe-area-inset-*) to report
+         non-zero values on notched iPhones. Paired with the safe-area padding
+         on .navbar / .bottom-nav / main in index.css, plus the
+         black-translucent status bar style below, this lets the dashboard
+         paint edge-to-edge without hiding controls under the notch or the
+         home indicator. maximum-scale / user-scalable are deliberately NOT
+         set: pinch-zoom must stay available (WCAG 1.4.4). -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>The Sharks | PCLL Softball Dashboard — Fall 2026</title>
     <meta name="description" content="Game-day dashboard for The Sharks, Palm Coast Little League softball. Lineup optimizer, SWOT analysis, opponent scouting, and practice generator." />
     <link rel="canonical" href="https://dugout.joelycannoli.com/" />
@@ -25,7 +32,12 @@
     <link rel="apple-touch-icon" href="/pwa-192x192.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/pwa-192x192.png" />
     <link rel="apple-touch-icon" sizes="152x152" href="/pwa-192x192.png" />
-    <style>html,body{background:#060d1c;background:radial-gradient(circle at 12% -8%,#17264b 0%,#0a1328 42%,#050a16 100%) fixed;color:#eaf5fb;margin:0;min-height:100vh}</style>
+    <!-- Critical first-paint styles. The gradient sits on a fixed
+         pseudo-element rather than using `background-attachment: fixed`, which
+         iOS Safari re-rasterises on every scroll frame and which visibly jumps
+         as the URL bar collapses. index.css defines the same layer, so the two
+         agree and there is no flash between first paint and hydration. -->
+    <style>html,body{background:#060d1c;color:#eaf5fb;margin:0;min-height:100vh;min-height:100dvh;overflow-x:hidden;-webkit-text-size-adjust:100%;text-size-adjust:100%}body::before{content:'';position:fixed;inset:0;z-index:-1;background:#060d1c;background:radial-gradient(circle at 12% -8%,#17264b 0%,#0a1328 42%,#050a16 100%);pointer-events:none}</style>
     <link rel="preload" href="/registerSW.js" as="script" />
     <script type="application/ld+json">
     {"@context":"https://schema.org","@type":"WebApplication","name":"The Sharks PCLL Softball Dashboard","description":"Game-day coaching dashboard for The Sharks, Palm Coast Little League 12U Girls Softball. Lineup optimizer, SWOT analysis, opponent scouting, and practice generator.","url":"https://dugout.joelycannoli.com/","applicationCategory":"SportsApplication","operatingSystem":"Web","inLanguage":"en","author":{"@type":"Organization","name":"The Sharks PCLL Softball Coaching Staff"},"datePublished":"2026-02-01","dateModified":"2026-04-26"}

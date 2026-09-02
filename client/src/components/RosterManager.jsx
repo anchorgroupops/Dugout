@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useId } from 'react';
 import { Settings2, UserPlus, Check, X, Search, ChevronDown } from 'lucide-react';
 import { apiRequest } from '../utils/apiClient';
 import { PlayerName } from './StatTooltip';
@@ -62,12 +62,27 @@ const ToggleRow = ({ player, available, onToggle, updating, isMobile = false }) 
 const PlayerCombobox = ({ players, onSelect, placeholder }) => {
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
+  // A phone never fires hover, so the "which row am I on" highlight has to be
+  // real state driven by pointer-press and keyboard focus rather than the old
+  // onMouseEnter/onMouseLeave background swap, which was invisible on touch.
+  const [pressedKey, setPressedKey] = useState(null);
+  const [focusedKey, setFocusedKey] = useState(null);
   const ref = useRef(null);
+  const listRef = useRef(null);
+  const listId = useId();
 
   useEffect(() => {
+    // `pointerdown`, not `mousedown`: iOS Safari only synthesises mouse events
+    // over elements it considers clickable, so tapping inert page chrome left
+    // this dropdown stuck open. Escape gives keyboard users the same exit.
     const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
+    const onKeyDown = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('pointerdown', handler);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handler);
+      document.removeEventListener('keydown', onKeyDown);
+    };
   }, []);
 
   const filtered = useMemo(() => {
@@ -87,52 +102,107 @@ const PlayerCombobox = ({ players, onSelect, placeholder }) => {
         border: open ? '1px solid var(--primary-color)' : '1px solid var(--surface-border)',
         background: 'rgba(0,0,0,0.3)', transition: 'border-color 0.2s ease'
       }}>
-        <Search size={14} color="var(--text-muted)" />
+        <Search size={14} color="var(--text-muted)" style={{ flexShrink: 0 }} />
         <input
           type="text"
           value={query}
           onChange={e => { setQuery(e.target.value); setOpen(true); }}
           onFocus={() => setOpen(true)}
+          onKeyDown={e => {
+            // Escape closes; ArrowDown hands focus to the list so the dropdown
+            // is operable without a pointer at all.
+            if (e.key === 'Escape') { setOpen(false); return; }
+            if (e.key === 'ArrowDown') {
+              e.preventDefault();
+              setOpen(true);
+              listRef.current?.querySelector('[role="option"]')?.focus();
+            }
+          }}
           placeholder={placeholder || 'Search PCLL players...'}
+          role="combobox"
+          aria-expanded={open}
+          aria-controls={listId}
+          aria-autocomplete="list"
+          // Phone keyboard hints: a search key instead of return, and none of
+          // the autocorrect/autocapitalise mangling of surnames mid-query.
+          inputMode="search"
+          autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="none"
+          enterKeyHint="search"
           style={{
-            flex: 1, background: 'transparent', border: 'none', outline: 'none',
+            flex: 1, minWidth: 0, background: 'transparent', border: 'none', outline: 'none',
             color: 'var(--text-main)', fontSize: '0.9rem', fontFamily: 'inherit'
           }}
         />
         <ChevronDown size={14} color="var(--text-muted)" style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
       </div>
       {open && (
-        <div style={{
-          position: 'absolute', top: '100%', left: 0, right: 0, marginTop: '4px',
-          background: '#1a2333', border: '1px solid var(--surface-border)',
-          borderRadius: '8px', maxHeight: '240px', overflowY: 'auto', zIndex: 50,
-          boxShadow: '0 8px 24px rgba(0,0,0,0.5)'
-        }}>
+        <div
+          ref={listRef}
+          id={listId}
+          role="listbox"
+          aria-label="PCLL players"
+          style={{
+            position: 'absolute', top: '100%', left: 0, right: 0, marginTop: '4px',
+            background: '#1a2333', border: '1px solid var(--surface-border)',
+            borderRadius: '8px', maxHeight: '240px', overflowY: 'auto', zIndex: 50,
+            // This list scrolls inside a page that also scrolls. Without
+            // `overscrollBehavior: contain` a flick past the end drags the page
+            // (and can dismiss the whole panel); `-webkit-overflow-scrolling`
+            // keeps momentum scrolling on older iOS.
+            overscrollBehavior: 'contain',
+            WebkitOverflowScrolling: 'touch',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.5)'
+          }}
+        >
           {filtered.length === 0 ? (
             <div style={{ padding: '0.75rem 1rem', color: 'var(--text-muted)', fontSize: '0.85rem', fontStyle: 'italic' }}>
               {players.length === 0 ? 'No league data scraped yet. Use manual entry below.' : 'No players match your search.'}
             </div>
           ) : (
-            filtered.map((p, i) => (
-              <div
-                key={`${p.gc_team_id}-${p.number}-${p.last}-${i}`}
-                onClick={() => { onSelect(p); setQuery(''); setOpen(false); }}
-                style={{
-                  padding: '0.6rem 1rem', cursor: 'pointer',
-                  borderBottom: i < filtered.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none',
-                  transition: 'background 0.15s ease'
-                }}
-                onMouseEnter={e => e.currentTarget.style.background = 'rgba(4, 101, 104, 0.11)'}
-                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-              >
-                <div style={{ fontWeight: '600', fontSize: '0.9rem' }}>
-                  {p.first} {p.last} <span style={{ color: 'var(--primary-color)' }}>#{p.number}</span>
-                </div>
-                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                  {p.team_name}
-                </div>
-              </div>
-            ))
+            filtered.map((p, i) => {
+              const optKey = `${p.gc_team_id}-${p.number}-${p.last}-${i}`;
+              const isActive = pressedKey === optKey || focusedKey === optKey;
+              return (
+                // A real <button> (not a bare div) so the row is tab-reachable,
+                // fires on Enter/Space, and clears the 44px minimum target.
+                <button
+                  key={optKey}
+                  type="button"
+                  role="option"
+                  aria-selected={isActive}
+                  onClick={() => { onSelect(p); setQuery(''); setOpen(false); setPressedKey(null); }}
+                  onPointerDown={() => setPressedKey(optKey)}
+                  onPointerUp={() => setPressedKey(null)}
+                  onPointerCancel={() => setPressedKey(null)}
+                  onPointerLeave={() => setPressedKey(null)}
+                  onFocus={() => setFocusedKey(optKey)}
+                  onBlur={() => setFocusedKey(null)}
+                  style={{
+                    display: 'block', width: '100%', textAlign: 'left',
+                    padding: '0.6rem 1rem', cursor: 'pointer',
+                    minHeight: 'var(--touch-min)',
+                    border: 'none',
+                    borderBottom: i < filtered.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none',
+                    background: isActive ? 'rgba(4, 101, 104, 0.22)' : 'transparent',
+                    color: 'var(--text-main)', fontFamily: 'inherit',
+                    outline: focusedKey === optKey ? '2px solid var(--primary-color)' : 'none',
+                    outlineOffset: '-2px',
+                    transition: 'background 0.15s ease',
+                    touchAction: 'manipulation',
+                    WebkitTapHighlightColor: 'transparent',
+                  }}
+                >
+                  <div style={{ fontWeight: '600', fontSize: '0.9rem' }}>
+                    {p.first} {p.last} <span style={{ color: 'var(--primary-color)' }}>#{p.number}</span>
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                    {p.team_name}
+                  </div>
+                </button>
+              );
+            })
           )}
         </div>
       )}
@@ -419,10 +489,14 @@ const RosterManager = ({
                 <button
                   onClick={() => setManualMode(true)}
                   style={{
-                    marginTop: '0.5rem', background: 'none', border: 'none',
+                    marginTop: '0.25rem', background: 'none', border: 'none',
                     color: 'var(--text-muted)', fontSize: 'var(--text-sm)', cursor: 'pointer',
-                    textDecoration: 'underline', padding: '0.25rem 0',
-                    minHeight: 'var(--touch-min)',
+                    textDecoration: 'underline',
+                    // `minHeight` alone left the hit area the width of the text
+                    // with zero side padding; the negative margin keeps the
+                    // label optically flush with the field above it.
+                    padding: '0.5rem 0.75rem', marginLeft: '-0.75rem',
+                    minHeight: 'var(--touch-min)', textAlign: 'left',
                   }}
                 >
                   Or enter player details manually
@@ -439,7 +513,9 @@ const RosterManager = ({
                   style={{
                     background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)',
                     color: 'var(--text-main)', fontSize: 'var(--text-sm)', cursor: 'pointer',
-                    borderRadius: '6px', padding: '0.4rem 0.9rem',
+                    borderRadius: '6px', padding: '0.5rem 1rem',
+                    // Was ~28px tall — below the 44px thumb minimum.
+                    minHeight: 'var(--touch-min)',
                   }}
                 >
                   Enter manually
@@ -454,13 +530,22 @@ const RosterManager = ({
                   <div style={{
                     padding: '0.6rem 0.75rem', borderRadius: '6px',
                     background: 'rgba(4, 101, 104, 0.08)', border: '1px solid rgba(4, 101, 104, 0.2)',
-                    fontSize: '0.85rem', color: 'var(--primary-color)', fontWeight: '600'
+                    fontSize: '0.85rem', color: 'var(--primary-color)', fontWeight: '600',
+                    overflowWrap: 'anywhere',
                   }}>
                     Selected: {borrowForm.first} {borrowForm.last} #{borrowForm.number}
+                    {/* `touch-target` puts a 44px transparent hit area behind
+                        this ~13px text without disturbing the inline layout. */}
                     <button
                       type="button"
+                      className="touch-target"
                       onClick={() => setBorrowForm({ first: '', last: '', number: '', gc_team_id: '' })}
-                      style={{ marginLeft: '0.75rem', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '0.8rem' }}
+                      style={{
+                        marginLeft: '0.5rem', background: 'none', border: 'none',
+                        color: 'var(--text-muted)', cursor: 'pointer', fontSize: '0.8rem',
+                        padding: '0.25rem 0.5rem', minHeight: 'var(--touch-min)',
+                        textDecoration: 'underline',
+                      }}
                     >
                       (clear)
                     </button>
@@ -469,13 +554,16 @@ const RosterManager = ({
 
                 {manualMode && (
                   <>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                    {/* Two columns become ~90-140px fields on a 360px phone —
+                        stack them instead. */}
+                    <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '0.75rem' }}>
                       <div>
                         <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.3rem' }}>First Name *</label>
                         <input
                           type="text" value={borrowForm.first}
                           onChange={e => setBorrowForm(p => ({ ...p, first: e.target.value }))}
                           placeholder="e.g. Alexa" required
+                          autoComplete="given-name" autoCapitalize="words"
                           style={{ width: '100%', padding: '0.5rem 0.75rem', borderRadius: '6px', border: '1px solid var(--surface-border)', background: 'rgba(0,0,0,0.3)', color: 'var(--text-main)', fontSize: '0.9rem', boxSizing: 'border-box' }}
                         />
                       </div>
@@ -485,26 +573,33 @@ const RosterManager = ({
                           type="text" value={borrowForm.last}
                           onChange={e => setBorrowForm(p => ({ ...p, last: e.target.value }))}
                           placeholder="e.g. Smith"
+                          autoComplete="family-name" autoCapitalize="words"
                           style={{ width: '100%', padding: '0.5rem 0.75rem', borderRadius: '6px', border: '1px solid var(--surface-border)', background: 'rgba(0,0,0,0.3)', color: 'var(--text-main)', fontSize: '0.9rem', boxSizing: 'border-box' }}
                         />
                       </div>
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '0.75rem' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 2fr', gap: '0.75rem' }}>
                       <div>
                         <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.3rem' }}>Jersey #</label>
+                        {/* Numeric pad, but kept type=text so the value stays a
+                            free-form string (leading zeros, "00"). */}
                         <input
                           type="text" value={borrowForm.number}
                           onChange={e => setBorrowForm(p => ({ ...p, number: e.target.value }))}
                           placeholder="e.g. 42"
+                          inputMode="numeric" pattern="[0-9]*" autoComplete="off"
                           style={{ width: '100%', padding: '0.5rem 0.75rem', borderRadius: '6px', border: '1px solid var(--surface-border)', background: 'rgba(0,0,0,0.3)', color: 'var(--text-main)', fontSize: '0.9rem', boxSizing: 'border-box' }}
                         />
                       </div>
                       <div>
                         <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.3rem' }}>GC Team ID (optional)</label>
+                        {/* An opaque case-sensitive ID — autocapitalise and
+                            autocorrect would silently corrupt it. */}
                         <input
                           type="text" value={borrowForm.gc_team_id}
                           onChange={e => setBorrowForm(p => ({ ...p, gc_team_id: e.target.value }))}
                           placeholder="e.g. AbCdEfGhIjKl"
+                          autoCapitalize="none" autoCorrect="off" spellCheck={false} autoComplete="off"
                           style={{ width: '100%', padding: '0.5rem 0.75rem', borderRadius: '6px', border: '1px solid var(--surface-border)', background: 'rgba(0,0,0,0.3)', color: 'var(--text-main)', fontSize: '0.9rem', boxSizing: 'border-box' }}
                         />
                       </div>
@@ -512,7 +607,9 @@ const RosterManager = ({
                   </>
                 )}
 
-                <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+                {/* Wraps so the success/error message drops below the button
+                    instead of running off a 360px screen. */}
+                <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
                   <button
                     type="submit"
                     disabled={borrowStatus === 'adding' || !borrowForm.first.trim()}

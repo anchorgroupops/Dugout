@@ -54,8 +54,17 @@
   /* Touch target minimum */
   --touch-min: 44px;
 
-  /* Bottom nav height */
+  /* Bottom nav height. --bottom-nav-height is the *visual* bar height;
+     --bottom-nav-space is what layout must reserve, i.e. the bar plus the
+     iOS home-indicator inset. Always reserve space with --bottom-nav-space,
+     never with --bottom-nav-height, or content ends up under the nav on a
+     notched iPhone. */
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
   --bottom-nav-height: 64px;
+  --bottom-nav-space: calc(var(--bottom-nav-height) + var(--safe-bottom));
 }
 
 * {
@@ -64,15 +73,47 @@
   padding: 0;
 }
 
+html {
+  /* Stop iOS/Android from inflating text in rotated or narrow layouts, which
+     silently breaks every carefully-sized stat row on this dashboard. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
 body {
   font-family: var(--font-base);
-  background: var(--bg-gradient);
   background-color: var(--bg-color);
-  background-attachment: fixed;
   color: var(--text-main);
   line-height: 1.5;
   min-height: 100vh;
+  /* dvh tracks the collapsing browser chrome on mobile Safari/Chrome so the
+     background never leaves a gap when the URL bar retracts. */
+  min-height: 100dvh;
   -webkit-font-smoothing: antialiased;
+  /* A single stray wide child used to give the whole dashboard a horizontal
+     scrollbar on phones. Clip it at the root; wide content opts back in via
+     .scroll-x / overflow-x:auto on its own container. */
+  overflow-x: hidden;
+  /* Kill the rubber-band scroll chaining that makes the whole page bounce
+     when a nested list hits its end mid-game. */
+  overscroll-behavior-y: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* The page gradient used to be `background-attachment: fixed` on <body>.
+   iOS Safari does not composite that correctly — it re-rasterises the whole
+   gradient on every scroll frame, which is the single biggest source of scroll
+   jank on a phone, and it visibly jumps as the URL bar collapses. Painting the
+   same gradient onto one fixed, promoted layer behind the app gives an
+   identical look that the compositor can leave alone. */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: var(--bg-gradient);
+  background-color: var(--bg-color);
+  pointer-events: none;
 }
 
 h1, h2, h3, h4, h5, h6 {
@@ -92,11 +133,17 @@ h1, h2, h3, h4, h5, h6 {
   overflow: hidden;
 }
 
-.glass-panel:hover {
-  background: var(--surface-hover);
-  border-color: rgba(130, 203, 195, 0.4);
-  transform: translateY(-2px);
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.25), 0 0 12px rgba(130, 203, 195, 0.15);
+/* Hover lift is a pointer-device affordance. On a touchscreen `:hover` sticks
+   after a tap, so a tapped card stays raised and glowing until you tap
+   somewhere else — it reads as a selection state that is not real. Gate every
+   hover-only flourish behind a real pointer. */
+@media (hover: hover) and (pointer: fine) {
+  .glass-panel:hover {
+    background: var(--surface-hover);
+    border-color: rgba(130, 203, 195, 0.4);
+    transform: translateY(-2px);
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.25), 0 0 12px rgba(130, 203, 195, 0.15);
+  }
 }
 
 /* App Layout */
@@ -104,7 +151,15 @@ h1, h2, h3, h4, h5, h6 {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
+  min-height: 100dvh;
   overflow-x: hidden;
+}
+
+/* Long unbroken tokens — an opponent name, a bundled asset URL in an error
+   message, a pasted song URL — must never force the page wider than the
+   phone. Break them rather than overflow. */
+h1, h2, h3, h4, h5, h6, p, li, td, th, dd, dt, figcaption {
+  overflow-wrap: anywhere;
 }
 
 main {
@@ -113,6 +168,10 @@ main {
   max-width: 1400px;
   margin: 0 auto;
   width: 100%;
+  /* min-width:0 lets grid/flex descendants actually shrink instead of forcing
+     the page wider than the viewport — the root cause of most horizontal
+     scroll on phones. */
+  min-width: 0;
 }
 
 /* Navigation */
@@ -122,6 +181,11 @@ main {
   align-items: center;
   flex-wrap: wrap;
   padding: 1rem 2rem;
+  /* Clear the notch / status bar. viewport-fit=cover in index.html puts the
+     page under it, so the bar has to pay the inset back. */
+  padding-top: calc(1rem + var(--safe-top));
+  padding-left: calc(2rem + var(--safe-left));
+  padding-right: calc(2rem + var(--safe-right));
   background: rgba(8, 14, 30, 0.92);
   backdrop-filter: blur(16px);
   border-bottom: 1px solid var(--surface-border);
@@ -177,9 +241,11 @@ main {
   min-height: var(--touch-min);
 }
 
-.nav-btn:hover {
-  color: var(--text-main);
-  background: rgba(4, 101, 104, 0.08);
+@media (hover: hover) and (pointer: fine) {
+  .nav-btn:hover {
+    color: var(--text-main);
+    background: rgba(4, 101, 104, 0.08);
+  }
 }
 
 .nav-btn.active {
@@ -207,8 +273,10 @@ main {
   box-shadow: 0 0 0 2px rgba(4, 101, 104, 0.1);
   transition: box-shadow var(--transition-fast);
 }
-.logo-avatar:hover {
-  box-shadow: 0 0 0 2px rgba(4, 101, 104, 0.18);
+@media (hover: hover) and (pointer: fine) {
+  .logo-avatar:hover {
+    box-shadow: 0 0 0 2px rgba(4, 101, 104, 0.18);
+  }
 }
 
 /* Animations */
@@ -316,8 +384,10 @@ main {
   justify-content: center;
 }
 
-.voice-btn:hover {
-  background: linear-gradient(135deg, rgba(130, 203, 195, 0.32), rgba(4, 101, 104, 0.15));
+@media (hover: hover) and (pointer: fine) {
+  .voice-btn:hover {
+    background: linear-gradient(135deg, rgba(130, 203, 195, 0.32), rgba(4, 101, 104, 0.15));
+  }
 }
 
 .voice-btn:disabled {
@@ -348,9 +418,11 @@ main {
   justify-content: center;
 }
 
-.sync-btn:hover {
-  background: linear-gradient(135deg, rgba(130, 203, 195, 0.25), rgba(4, 101, 104, 0.3));
-  border-color: var(--primary-color);
+@media (hover: hover) and (pointer: fine) {
+  .sync-btn:hover {
+    background: linear-gradient(135deg, rgba(130, 203, 195, 0.25), rgba(4, 101, 104, 0.3));
+    border-color: var(--primary-color);
+  }
 }
 
 .sync-btn:disabled {
@@ -360,8 +432,160 @@ main {
 
 button,
 input,
-select {
+select,
+textarea {
   touch-action: manipulation;
+}
+
+/* ==========================================================================
+   TOUCH-DEVICE BASELINE
+   Everything in this block keys off `pointer: coarse` rather than a width
+   breakpoint. A rotated iPhone 15 Pro Max reports 932px wide, so width-based
+   queries miss it entirely — but it is still a thumb-driven screen.
+   ========================================================================== */
+
+@media (pointer: coarse) {
+  /* iOS focus-zoom guard. Mobile Safari magnifies the viewport whenever a
+     focused control computes under 16px, and it does NOT zoom back out on
+     blur — you end up panning a zoomed dashboard one-handed between innings.
+     Every text control here sat between 12.8px and 13.6px.
+     `!important` is deliberate: the component rules that set those sizes
+     (.announcer-form-group input, .announcer-song-input, .announcer-modal
+     input, the wizard selects) all out-specify a bare element selector. */
+  input:not([type='checkbox']):not([type='radio']):not([type='range']),
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+
+  /* Give every text control a thumb-sized hit area. Deliberately NOT setting
+     `appearance: none` here: several of these controls carry an inline
+     `background` shorthand, which would wipe out any custom dropdown arrow we
+     drew and leave a select with no affordance at all. The native chrome these
+     controls already render against their custom background is fine — the real
+     defects were the font size and the hit area, and those are what this
+     block fixes. */
+  input:not([type='checkbox']):not([type='radio']):not([type='range']),
+  select,
+  textarea {
+    min-height: var(--touch-min);
+  }
+
+  textarea {
+    min-height: calc(var(--touch-min) * 2);
+  }
+
+  /* Checkboxes are the availability toggles on Roster and Lineup — the most
+     tapped control in the app on game day. 20px is a miss-magnet. */
+  input[type='checkbox'] {
+    width: 26px;
+    height: 26px;
+  }
+
+  input[type='checkbox']:checked::after {
+    font-size: 17px;
+  }
+
+  /* Any icon-only button gets a real 44px target regardless of its visual
+     size, using a transparent ::after overlay so the *layout* stays compact.
+     This is how a 22px trash icon becomes tappable without redesigning the
+     row it sits in. */
+  .touch-target {
+    position: relative;
+  }
+
+  .touch-target::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    min-width: var(--touch-min);
+    min-height: var(--touch-min);
+    width: 100%;
+    height: 100%;
+  }
+
+  /* Named small controls that exist today, expanded in place. */
+  .announcer-song-delete,
+  .announcer-modal-close,
+  .announcer-mini-play,
+  .mobile-action-btn {
+    position: relative;
+  }
+
+  .announcer-song-delete::after,
+  .announcer-modal-close::after,
+  .announcer-mini-play::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: var(--touch-min);
+    height: var(--touch-min);
+  }
+
+  /* Sticky hover is dealt with properly at the source: every `:hover` rule in
+     this stylesheet is wrapped in `@media (hover: hover) and (pointer: fine)`,
+     so touch devices never enter a hover skin they cannot leave. What a phone
+     needs instead is a press state, below. */
+
+  /* Keep a real, immediate press state so taps still feel answered. */
+  .nav-btn:active,
+  .voice-btn:active,
+  .sync-btn:active,
+  .announcer-btn:active,
+  .bottom-nav-item:active,
+  .announcer-player-header:active {
+    filter: brightness(1.25);
+  }
+}
+
+/* Respect the OS "reduce motion" switch. The sync spinner, milestone pulse,
+   live dot and slide-up sheets are all decorative; on a phone they also cost
+   battery. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ── Horizontal-scroll container ──
+   body is `overflow-x: hidden`, so any genuinely wide content (a linescore,
+   a stat table) must declare its own scroll region. This class gives it one
+   with momentum scrolling, contained overscroll and a hidden scrollbar, plus
+   a right-edge fade that tells the user there is more to swipe to. */
+.scroll-x {
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  max-width: 100%;
+}
+
+.scroll-x::-webkit-scrollbar {
+  height: 4px;
+}
+
+.scroll-x::-webkit-scrollbar-thumb {
+  background: rgba(130, 203, 195, 0.3);
+  border-radius: 2px;
+}
+
+/* Snap variant for card carousels so a swipe lands on a card, not between. */
+.scroll-x--snap {
+  scroll-snap-type: x proximity;
+}
+
+.scroll-x--snap > * {
+  scroll-snap-align: start;
 }
 
 /* ─── Utility Classes ─── */
@@ -395,6 +619,23 @@ select {
   flex: 1;
   min-width: 48px;
   cursor: help;
+  /* Badges are now tap-to-explain buttons. Keep them from stealing a
+     double-tap-zoom and from flashing the platform tap highlight. */
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  border: 1px solid transparent;
+}
+
+.stat-badge--open {
+  border-color: var(--primary-color);
+  background: var(--primary-glow);
+}
+
+.stat-badge:focus-visible,
+.stat-tip:focus-visible,
+.tip-icon:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 2px;
 }
 
 .stat-badge__label {
@@ -402,18 +643,101 @@ select {
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.5px;
+  /* The label carries the small-sample chip; keep them on one line. */
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
 }
 
 .stat-badge__value {
   font-size: var(--text-base);
   font-weight: bold;
   color: var(--text-main);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Small-sample chip. Previously 0.55em inside a 12px label, which rendered at
+   about 6.6px — invisible on a phone. Pinned to an absolute size instead so it
+   stays legible wherever the badge is used. */
+.stat-badge__sm {
+  display: inline-block;
+  margin-left: 3px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: rgba(168, 116, 33, 0.25);
+  color: var(--warning, #facc15);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  vertical-align: middle;
+  line-height: 1.5;
 }
 
 /* Tooltip helper for stat abbreviations */
 .stat-tip {
   cursor: help;
   border-bottom: 1px dotted var(--text-muted);
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.stat-tip--open {
+  border-bottom-color: var(--primary-color);
+  color: var(--primary-color);
+}
+
+/* Icon/glyph whose meaning would otherwise be title-only. */
+.tip-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: help;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  position: relative;
+}
+
+/* Small glyphs (14px strength icons, 8px availability dots) need a real hit
+   area without changing the layout around them. */
+@media (pointer: coarse) {
+  .tip-icon::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: var(--touch-min);
+    height: var(--touch-min);
+  }
+}
+
+.tip-icon--open {
+  color: var(--primary-color);
+}
+
+/* ── The tooltip bubble itself ──
+   Portalled to document.body so it is never clipped by the `overflow: hidden`
+   on .glass-panel or #root, and placed above every fixed layer including the
+   bottom nav (z-index 200) and the more-menu (195). */
+.stat-tip-pop {
+  position: fixed;
+  z-index: 400;
+  display: block;
+  padding: 0.55rem 0.75rem;
+  border-radius: 10px;
+  background: rgba(10, 18, 36, 0.98);
+  border: 1px solid var(--primary-color);
+  color: var(--text-main);
+  font-family: var(--font-base);
+  font-size: 0.85rem;
+  font-weight: 500;
+  line-height: 1.4;
+  text-transform: none;
+  letter-spacing: normal;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+  overflow-wrap: anywhere;
+  animation: fadeIn 0.12s ease-out;
 }
 
 /* Dark checkbox styling (unchecked = dark interior) */
@@ -737,10 +1061,18 @@ input[type="checkbox"]:checked::after {
   pointer-events: none;
 }
 
-.sync-milestone.active .sync-milestone-label,
-.sync-milestone:hover .sync-milestone-label {
+/* The active milestone always shows its label — that is the only way a phone
+   user can tell which sync stage is running, since they cannot hover. */
+.sync-milestone.active .sync-milestone-label {
   opacity: 1;
   color: var(--primary-color);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .sync-milestone:hover .sync-milestone-label {
+    opacity: 1;
+    color: var(--primary-color);
+  }
 }
 
 .sync-progress-pct {
@@ -802,7 +1134,11 @@ input[type="checkbox"]:checked::after {
 @media (max-width: 768px) {
   main {
     padding: var(--space-lg);
-    padding-bottom: calc(var(--bottom-nav-height) + var(--space-xl));
+    /* Reserve the bar *and* the home-indicator inset, else the last card in
+       every tab sits permanently under the nav on a notched iPhone. */
+    padding-bottom: calc(var(--bottom-nav-space) + var(--space-xl));
+    padding-left: calc(var(--space-lg) + var(--safe-left));
+    padding-right: calc(var(--space-lg) + var(--safe-right));
   }
 
   .glass-panel {
@@ -828,11 +1164,31 @@ input[type="checkbox"]:checked::after {
 
   .navbar {
     padding: 0.625rem 1rem;
+    padding-top: calc(0.625rem + var(--safe-top));
+    padding-left: calc(1rem + var(--safe-left));
+    padding-right: calc(1rem + var(--safe-right));
   }
 
   .brand {
     font-size: 1.125rem;
     gap: 0.5rem;
+    /* The tab name can be long ("Announcer") next to the logo, dot and
+       OFFLINE tag. Let it shrink and ellipsis instead of shoving the refresh
+       and voice buttons off the right edge. */
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .mobile-header-left {
+    min-width: 0;
+    flex: 1 1 auto;
+    overflow: hidden;
+  }
+
+  .mobile-header-actions {
+    flex-shrink: 0;
   }
 
   .logo-avatar {
@@ -874,8 +1230,13 @@ input[type="checkbox"]:checked::after {
     -webkit-backdrop-filter: blur(20px);
     border-top: 1px solid var(--surface-border);
     padding: 0.25rem 0;
-    padding-bottom: env(safe-area-inset-bottom, 0px);
-    height: var(--bottom-nav-height);
+    /* box-sizing is border-box, so the safe-area padding was being carved OUT
+       of the 64px height — on a notched iPhone that squeezed the icons and
+       labels into ~26px. Grow the bar by the inset instead. */
+    padding-bottom: var(--safe-bottom);
+    padding-left: var(--safe-left);
+    padding-right: var(--safe-right);
+    height: var(--bottom-nav-space);
     box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.4);
   }
 
@@ -892,13 +1253,25 @@ input[type="checkbox"]:checked::after {
     border: none;
     color: var(--text-muted);
     font-family: var(--font-base);
-    font-size: 0.625rem;
+    /* 10px was below the legibility floor for a screen read at arm's length in
+       daylight. 11px still fits "Announcer" in a fifth of a 360px bar. */
+    font-size: 0.6875rem;
     font-weight: 600;
-    letter-spacing: 0.3px;
+    letter-spacing: 0.2px;
     cursor: pointer;
     transition: color var(--transition-fast);
     -webkit-tap-highlight-color: transparent;
     position: relative;
+    /* Labels must not wrap or spill into the neighbouring tab. */
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .bottom-nav-item > span {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .bottom-nav-item.active {
@@ -927,7 +1300,7 @@ input[type="checkbox"]:checked::after {
   .more-menu-overlay {
     display: block;
     position: fixed;
-    bottom: var(--bottom-nav-height);
+    bottom: var(--bottom-nav-space);
     left: 0;
     right: 0;
     top: 0;
@@ -939,7 +1312,7 @@ input[type="checkbox"]:checked::after {
   .more-menu {
     display: block;
     position: fixed;
-    bottom: var(--bottom-nav-height);
+    bottom: var(--bottom-nav-space);
     left: 0;
     right: 0;
     z-index: 195;
@@ -949,7 +1322,16 @@ input[type="checkbox"]:checked::after {
     border-top: 1px solid var(--surface-border);
     border-radius: 16px 16px 0 0;
     padding: 0.75rem 0;
+    padding-left: var(--safe-left);
+    padding-right: var(--safe-right);
     animation: slideUp 0.2s ease-out;
+    /* Seven items at 44px each overflow a short phone in landscape. Cap the
+       sheet at 70% of the viewport and let it scroll rather than pushing the
+       first entries off the top of the screen where they can't be reached. */
+    max-height: 70dvh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
   }
 
   .more-menu-item {
@@ -988,6 +1370,22 @@ input[type="checkbox"]:checked::after {
     font-size: var(--text-xs);
     padding: 0.5rem 0.875rem;
     min-height: var(--touch-min);
+    /* The 130px floor from the desktop rule forced these two pills onto their
+       own lines. Let them shrink and share a row. */
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  /* Banners and the sync sheet must never be the thing that widens the page. */
+  .stale-banner,
+  .sync-progress-wrap {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .stale-banner span {
+    min-width: 0;
+    overflow-wrap: anywhere;
   }
 }
 
@@ -1030,11 +1428,18 @@ input[type="checkbox"]:checked::after {
 
   main {
     padding: var(--space-sm) var(--space-lg);
-    padding-bottom: calc(var(--bottom-nav-height) + var(--space-sm));
+    padding-bottom: calc(var(--bottom-nav-space) + var(--space-sm));
+    /* A phone held sideways puts the notch on the left or right edge, so the
+       horizontal insets are the ones that matter here. */
+    padding-left: calc(var(--space-lg) + var(--safe-left));
+    padding-right: calc(var(--space-lg) + var(--safe-right));
   }
 
   .navbar {
     padding: 0.35rem 1rem;
+    padding-top: calc(0.35rem + var(--safe-top));
+    padding-left: calc(1rem + var(--safe-left));
+    padding-right: calc(1rem + var(--safe-right));
   }
 
   .brand {
@@ -1075,9 +1480,11 @@ input[type="checkbox"]:checked::after {
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
     border-top: 1px solid var(--surface-border);
-    height: var(--bottom-nav-height);
+    height: var(--bottom-nav-space);
     padding: 0.15rem 0;
-    padding-bottom: env(safe-area-inset-bottom, 0px);
+    padding-bottom: var(--safe-bottom);
+    padding-left: var(--safe-left);
+    padding-right: var(--safe-right);
     justify-content: space-around;
     align-items: stretch;
   }
@@ -1125,7 +1532,7 @@ input[type="checkbox"]:checked::after {
   .more-menu-overlay {
     display: block;
     position: fixed;
-    bottom: var(--bottom-nav-height);
+    bottom: var(--bottom-nav-space);
     left: 0;
     right: 0;
     top: 0;
@@ -1134,19 +1541,22 @@ input[type="checkbox"]:checked::after {
 
   .more-menu {
     display: block;
-    bottom: var(--bottom-nav-height);
+    bottom: var(--bottom-nav-space);
     padding: 0.5rem 0;
+    padding-left: var(--safe-left);
+    padding-right: var(--safe-right);
+    /* Landscape leaves very little height; the sheet must scroll. */
+    max-height: calc(100dvh - var(--bottom-nav-space) - 8px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
   }
 
   .more-menu-item {
+    /* 36px was below the comfortable touch floor and these entries are the
+       only route to half the tabs. Keep them thumb-sized even in landscape. */
     padding: 0.5rem 1rem;
-    min-height: 36px;
+    min-height: 40px;
     font-size: var(--text-xs);
-  }
-
-  .more-menu-overlay {
-    display: block;
-    bottom: var(--bottom-nav-height);
   }
 
   /* Compact player avatars in landscape */
@@ -1361,15 +1771,22 @@ input[type="checkbox"]:checked::after {
   border-bottom-color: var(--primary-color);
 }
 
-.announcer-wizard-tab:hover:not(.active) {
-  background: var(--primary-glow);
-  color: var(--text-main);
+@media (hover: hover) and (pointer: fine) {
+  .announcer-wizard-tab:hover:not(.active) {
+    background: var(--primary-glow);
+    color: var(--text-main);
+  }
 }
 
 .announcer-wizard-body {
   padding: var(--space-md);
-  max-height: 400px;
+  /* A hard 400px ignored the viewport: on a phone the header plus tabs plus
+     400px overflowed the screen. Cap against the actual viewport height so the
+     modal always fits, and never let it get uselessly short. */
+  max-height: min(400px, max(180px, 55dvh));
   overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .announcer-wizard-search-form {
@@ -1564,8 +1981,10 @@ input[type="checkbox"]:checked::after {
   border-color: var(--primary-color);
 }
 
-.announcer-btn-primary:hover:not(:disabled) {
-  filter: brightness(1.1);
+@media (hover: hover) and (pointer: fine) {
+  .announcer-btn-primary:hover:not(:disabled) {
+    filter: brightness(1.1);
+  }
 }
 
 .announcer-btn-secondary {
@@ -1573,8 +1992,10 @@ input[type="checkbox"]:checked::after {
   color: var(--text-main);
 }
 
-.announcer-btn-secondary:hover:not(:disabled) {
-  background: var(--surface-hover);
+@media (hover: hover) and (pointer: fine) {
+  .announcer-btn-secondary:hover:not(:disabled) {
+    background: var(--surface-hover);
+  }
 }
 
 .announcer-btn-accent {
@@ -1583,8 +2004,10 @@ input[type="checkbox"]:checked::after {
   border-color: rgba(130, 203, 195, 0.3);
 }
 
-.announcer-btn-accent:hover:not(:disabled) {
-  background: rgba(130, 203, 195, 0.25);
+@media (hover: hover) and (pointer: fine) {
+  .announcer-btn-accent:hover:not(:disabled) {
+    background: rgba(130, 203, 195, 0.25);
+  }
 }
 
 /* Status LED */
@@ -1617,8 +2040,10 @@ input[type="checkbox"]:checked::after {
   text-align: left;
 }
 
-.announcer-player-header:hover {
-  background: var(--surface-hover);
+@media (hover: hover) and (pointer: fine) {
+  .announcer-player-header:hover {
+    background: var(--surface-hover);
+  }
 }
 
 .announcer-player-info {
@@ -1651,8 +2076,10 @@ input[type="checkbox"]:checked::after {
   padding: 0.2rem;
 }
 
-.announcer-mini-play:hover {
-  color: var(--text-main);
+@media (hover: hover) and (pointer: fine) {
+  .announcer-mini-play:hover {
+    color: var(--text-main);
+  }
 }
 
 /* Player Details (Expanded) */
@@ -1789,9 +2216,11 @@ input[type="checkbox"]:checked::after {
   transition: color var(--transition-fast), background var(--transition-fast);
 }
 
-.announcer-song-delete:hover {
-  color: var(--danger);
-  background: rgba(179, 74, 57, 0.14);
+@media (hover: hover) and (pointer: fine) {
+  .announcer-song-delete:hover {
+    color: var(--danger);
+    background: rgba(179, 74, 57, 0.14);
+  }
 }
 
 .announcer-song-add {
@@ -1873,9 +2302,11 @@ input[type="checkbox"]:checked::after {
   white-space: nowrap;
 }
 
-.announcer-quality-btn:hover {
-  background: var(--surface-hover, rgba(255,255,255,0.06));
-  color: var(--text-primary);
+@media (hover: hover) and (pointer: fine) {
+  .announcer-quality-btn:hover {
+    background: var(--surface-hover, rgba(255,255,255,0.06));
+    color: var(--text-primary);
+  }
 }
 
 .announcer-quality-btn.active {
@@ -1897,9 +2328,22 @@ input[type="checkbox"]:checked::after {
   background: rgba(0, 0, 0, 0.6);
   z-index: 150;
   display: flex;
-  align-items: center;
+  /* `align-items: center` alone clipped a tall modal at BOTH ends on a short
+     phone, which put the Cancel button permanently out of reach. Centring the
+     content with `auto` margins instead keeps it centred when it fits and lets
+     it scroll from the top when it does not. */
+  align-items: flex-start;
   justify-content: center;
   padding: var(--space-md);
+  padding-top: calc(var(--space-md) + var(--safe-top));
+  padding-bottom: calc(var(--space-md) + var(--safe-bottom));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.announcer-modal-overlay > * {
+  margin: auto;
 }
 
 body:has(.announcer-modal-overlay) .navbar {
@@ -1939,8 +2383,10 @@ body:has(.announcer-modal-overlay) .navbar {
   transition: color 0.15s;
 }
 
-.announcer-modal-close:hover {
-  color: var(--text-main);
+@media (hover: hover) and (pointer: fine) {
+  .announcer-modal-close:hover {
+    color: var(--text-main);
+  }
 }
 
 .announcer-modal h3 {
@@ -2051,8 +2497,10 @@ body:has(.announcer-modal-overlay) .navbar {
   color: var(--text-main);
 }
 
-.announcer-btn-round:hover:not(:disabled) {
-  background: var(--surface-hover);
+@media (hover: hover) and (pointer: fine) {
+  .announcer-btn-round:hover:not(:disabled) {
+    background: var(--surface-hover);
+  }
 }
 
 .announcer-btn-play {
@@ -2066,9 +2514,11 @@ body:has(.announcer-modal-overlay) .navbar {
   border-color: var(--primary-color);
 }
 
-.announcer-btn-play:hover:not(:disabled) {
-  filter: brightness(1.15);
-  transform: scale(1.05);
+@media (hover: hover) and (pointer: fine) {
+  .announcer-btn-play:hover:not(:disabled) {
+    filter: brightness(1.15);
+    transform: scale(1.05);
+  }
 }
 
 .announcer-btn-play.active {
@@ -2087,7 +2537,9 @@ body:has(.announcer-modal-overlay) .navbar {
   }
 
   .announcer-np-card {
-    padding: 1.5rem 2rem;
+    /* 3rem of horizontal padding on each side left almost nothing for the
+       player name on a 360px screen. Scale it with the viewport instead. */
+    padding: 1.5rem clamp(0.75rem, 5vw, 2rem);
   }
 
   .announcer-np-jersey {
@@ -2097,6 +2549,45 @@ body:has(.announcer-modal-overlay) .navbar {
   .announcer-np-name {
     font-size: 1.2rem;
   }
+
+  /* Transport controls: keep the row from overflowing while staying large
+     enough to hit mid-game. */
+  .announcer-np-controls {
+    gap: var(--space-md);
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .announcer-header,
+  .announcer-header-actions,
+  .announcer-np-header {
+    flex-wrap: wrap;
+  }
+
+  /* The label field was pinned at 100px next to a flexible URL input plus two
+     buttons — four controls on one unwrappable row. Let it share the space. */
+  .announcer-song-label-input {
+    flex: 1 1 90px;
+    min-width: 0;
+  }
+
+  .announcer-song-add,
+  .announcer-wizard-search-form {
+    flex-wrap: wrap;
+  }
+}
+
+/* These three custom properties were never defined anywhere in the stylesheet,
+   so the declarations using them were invalid at computed-value time and the
+   quality toggle silently fell back to inherited colours. Point them at the
+   real design tokens. */
+.announcer-quality-btn {
+  color: var(--text-muted);
+}
+
+.announcer-quality-btn.active {
+  background: var(--primary-color);
+  color: var(--bg-color);
 }
 
 /* ─── Accessibility helpers ─── */

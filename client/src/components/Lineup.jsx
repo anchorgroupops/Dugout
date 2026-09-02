@@ -2,16 +2,27 @@ import React, { useState } from 'react';
 import { Settings, ShieldCheck, RefreshCw, Clock, Home, Plane } from 'lucide-react';
 import { getTodayEST, formatDateMMDDYYYY } from '../utils/formatDate';
 import { apiRequest } from '../utils/apiClient';
-import { TipBadge, PlayerName } from './StatTooltip';
+import { Tip, TipBadge, TipIcon, PlayerName } from './StatTooltip';
 import RosterManager from './RosterManager';
 
+// Was an 8x8px colour-only dot whose only label was a `title`: unreadable on a
+// phone (no hover) and indistinguishable for a red/green colour-blind coach.
+// TipIcon supplies the tap-to-explain popover, the accessible name and a 44px
+// hit area on coarse pointers; the ✓ / ✕ glyph carries the meaning without
+// depending on hue at all.
 const AvailBadge = ({ available }) => (
-  <span style={{
-    width: '8px', height: '8px', borderRadius: '50%', flexShrink: 0,
-    background: available ? 'var(--success)' : 'var(--danger)',
-    boxShadow: available ? '0 0 4px var(--success)' : '0 0 4px var(--danger)',
-    display: 'inline-block'
-  }} title={available ? 'Available' : 'Unavailable'} />
+  <TipIcon
+    text={available ? 'Available tonight' : 'Unavailable tonight'}
+    style={{
+      width: '18px', height: '18px', borderRadius: '50%', flexShrink: 0,
+      background: available ? 'rgba(63, 185, 80, 0.16)' : 'rgba(218, 54, 51, 0.16)',
+      border: `1px solid ${available ? 'var(--success)' : 'var(--danger)'}`,
+      color: available ? 'var(--success)' : 'var(--danger)',
+      fontSize: '11px', fontWeight: 800, lineHeight: 1,
+    }}
+  >
+    {available ? '✓' : '✕'}
+  </TipIcon>
 );
 
 const slotLabel = (slot) => {
@@ -126,7 +137,13 @@ const Lineup = ({
         style={{ padding: isLandscape ? 'var(--space-sm)' : isMobile ? 'var(--space-lg)' : '2rem' }}
       >
         <div style={{ display: 'flex', gap: '0.55rem', alignItems: 'center', flexWrap: 'wrap', width: '100%', marginBottom: isMobile ? '0.85rem' : '1rem' }}>
-          <div style={{ display: 'flex', gap: '0.4rem', background: 'var(--surface-base)', padding: '0.22rem', borderRadius: '8px', border: '1px solid var(--surface-border)', width: isMobile ? '100%' : 'auto', overflowX: 'auto' }}>
+          {/* Bare `overflowX: auto` gave no hint that "Developmental" was
+              off-screen. `.scroll-x` adds momentum scrolling plus a visible
+              thin scrollbar, and `--snap` lands a swipe on a whole pill. */}
+          <div
+            className="scroll-x scroll-x--snap"
+            style={{ display: 'flex', gap: '0.4rem', background: 'var(--surface-base)', padding: '0.22rem', borderRadius: '8px', border: '1px solid var(--surface-border)', width: isMobile ? '100%' : 'auto' }}
+          >
             {strategies.map(s => (
               <button
                 key={s.id}
@@ -137,7 +154,9 @@ const Lineup = ({
                   border: 'none', padding: isMobile ? '0.5rem 0.625rem' : '0.5rem 1rem', borderRadius: '6px',
                   cursor: 'pointer', fontWeight: strategy === s.id ? '600' : '400',
                   transition: 'all var(--transition-fast)', fontSize: isMobile ? 'var(--text-xs)' : 'var(--text-sm)',
-                  whiteSpace: 'nowrap', minHeight: 'var(--touch-min)',
+                  // Without this the pills compress instead of scrolling, which
+                  // is what made the affordance invisible in the first place.
+                  whiteSpace: 'nowrap', minHeight: 'var(--touch-min)', flexShrink: 0,
                 }}
               >
                 {s.label}
@@ -232,56 +251,79 @@ const Lineup = ({
                 opacity: avail ? 1 : 0.65,
                 gap: isMobile ? '0.5rem' : '0.75rem', flexWrap: 'wrap'
               }}>
-                <div style={{ width: isMobile ? '22px' : '28px', fontWeight: 'bold', color: 'var(--text-muted)', fontSize: 'var(--text-sm)' }}>{idx + 1}.</div>
+                <div style={{ width: isMobile ? '20px' : '28px', flexShrink: 0, fontWeight: 'bold', color: 'var(--text-muted)', fontSize: 'var(--text-sm)' }}>{idx + 1}.</div>
 
-                {/* Name first, then number */}
-                <div style={{ flex: 1, minWidth: isMobile ? '100px' : '120px', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                {/* Identity block. The old `minWidth: 100px` floor plus a
+                    non-shrinking role pill meant ~236px of hard minimums before
+                    the stats even started, so every row broke into 2-3 ragged
+                    lines at 360px. `minWidth: 0` lets a long name shrink/wrap
+                    inside its own block instead of shoving the row apart. */}
+                <div style={{ flex: '1 1 auto', minWidth: isMobile ? 0 : '120px', display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
                   <PlayerName name={name} number={player.number} size={isMobile ? 'sm' : 'md'} />
                   <AvailBadge available={avail} />
+                  {/* 12px text in 1px of vertical padding is a ~14px chip —
+                      unreadable in sunlight. Bumped to 13px with real padding. */}
                   {!player.core && (
                     <span style={{
                       background: 'rgba(63, 143, 136, 0.18)', color: 'var(--accent-sub)',
-                      padding: '1px 6px', borderRadius: '4px', fontSize: 'var(--text-xs)',
+                      padding: '3px 8px', borderRadius: '5px', fontSize: '13px', lineHeight: 1.2,
                       fontWeight: 'bold', letterSpacing: '1px', border: '1px solid rgba(63, 143, 136, 0.28)'
                     }}>SUB</span>
                   )}
                   {roleLabel && (
                     <span style={{
-                      fontSize: 'var(--text-xs)', fontWeight: '600',
+                      fontSize: '13px', fontWeight: '600', lineHeight: 1.2,
                       color: 'rgba(255,220,120,0.85)',
                       background: 'rgba(255,220,120,0.08)',
                       border: '1px solid rgba(255,220,120,0.18)',
-                      padding: '1px 6px', borderRadius: '4px', letterSpacing: '0.3px'
+                      padding: '3px 8px', borderRadius: '5px', letterSpacing: '0.3px'
                     }}>{roleLabel}</span>
                   )}
                 </div>
 
-                {hasStats ? (
-                  isMobile ? (
-                    <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
-                      AVG {fmtStat(player.avg)} &middot; OPS {fmtStat(player.ops)}
-                    </span>
-                  ) : (
-                    <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                {/* Stats + role pill share one line. The mobile branch used to
+                    DROP OBP/SLG/PA rather than show them, so phone users simply
+                    lost data; on a phone they now ride a `.scroll-x` line
+                    (tap-to-explain TipBadge/Tip intact) that is guaranteed to
+                    stay a single row instead of re-wrapping the whole card. */}
+                <div
+                  className={isMobile ? 'scroll-x' : undefined}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: '4px',
+                    flexWrap: isMobile ? 'nowrap' : 'wrap',
+                    flex: isMobile ? '1 1 100%' : '0 1 auto',
+                    minWidth: 0,
+                    paddingBottom: isMobile ? '2px' : 0,
+                  }}
+                >
+                  {hasStats ? (
+                    <>
                       <TipBadge label="AVG" value={fmtStat(player.avg)} />
                       <TipBadge label="OBP" value={fmtStat(player.obp)} />
                       <TipBadge label="SLG" value={fmtStat(player.slg)} />
-                      <span style={{ fontSize: 'var(--text-xs)', color: 'rgba(255,255,255,0.25)', padding: '1px 4px' }}>
-                        {player.pa} PA
-                      </span>
-                    </div>
-                  )
-                ) : (
-                  <span style={{ fontSize: 'var(--text-xs)', color: 'rgba(255,255,255,0.2)', fontStyle: 'italic' }}>No stats yet</span>
-                )}
+                      <Tip label="PA">
+                        <span style={{ fontSize: 'var(--text-xs)', color: 'rgba(255,255,255,0.45)', padding: '1px 4px', whiteSpace: 'nowrap' }}>
+                          {player.pa} PA
+                        </span>
+                      </Tip>
+                    </>
+                  ) : (
+                    <span style={{ fontSize: 'var(--text-xs)', color: 'rgba(255,255,255,0.35)', fontStyle: 'italic', whiteSpace: 'nowrap' }}>No stats yet</span>
+                  )}
 
-                <div style={{
-                  background: 'var(--surface-hover)', padding: '0.25rem 0.65rem',
-                  borderRadius: '12px', fontSize: 'var(--text-xs)',
-                  color: 'var(--text-muted)',
-                  minWidth: isMobile ? '80px' : '100px', textAlign: 'center', flexShrink: 0
-                }}>
-                  {player.role || 'Depth'}
+                  {/* The pill was `minWidth: 80px` + `flexShrink: 0`, so it
+                      never yielded and pushed the stats onto their own line.
+                      On a phone it now shrinks and truncates instead. */}
+                  <div style={{
+                    background: 'var(--surface-hover)', padding: '0.25rem 0.65rem',
+                    borderRadius: '12px', fontSize: 'var(--text-xs)',
+                    color: 'var(--text-muted)',
+                    minWidth: isMobile ? 0 : '100px', textAlign: 'center',
+                    flexShrink: isMobile ? 1 : 0,
+                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                  }}>
+                    {player.role || 'Depth'}
+                  </div>
                 </div>
               </div>
             );

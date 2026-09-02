@@ -124,7 +124,16 @@ export default defineConfig(({ mode }) => ({
         theme_color: '#046568',
         background_color: '#060d1c',
         display: 'standalone',
-        orientation: 'portrait',
+        display_override: ['standalone', 'minimal-ui'],
+        // Was 'portrait', which locked the installed PWA upright and made the
+        // whole landscape-mobile layout (the `orientation: landscape` block in
+        // index.css and every `isLandscape` prop) unreachable once the app was
+        // added to a home screen. 'any' lets a coach turn the phone sideways
+        // for the two-column box score.
+        orientation: 'any',
+        // A stable id keeps the installed app identified across start_url
+        // changes rather than installing a second copy.
+        id: '/',
         scope: '/',
         start_url: '/',
         icons: [
