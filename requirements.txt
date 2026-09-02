@@ -19,7 +19,7 @@ pinecone>=9.1.0,<10
 
 # FastAPI (used by modal_app.py)
 fastapi[standard]>=0.141.1,<1
-uvicorn>=0.52.1,<1
+uvicorn>=0.52.4,<1
 
 # Utilities
 python-dotenv>=1.2.3,<2
