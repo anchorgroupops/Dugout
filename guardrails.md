@@ -71,6 +71,11 @@ cp -r /tmp/skills-tmp/skills/* ~/.gemini/antigravity/skills/
 
 ---
 
+## SIGN-009: Autopull Login Succeeds but Reports "not authenticated" at /teams
+**Symptom:** Daily "Dugout autopull failure" email: `Still on login/2FA page or not authenticated after credential submission (url=https://web.gc.com/teams, login_form=False, 2fa_form=False)`. Credentials were accepted (GC landed on `/teams`); the auth breaker then opens for 24 h, so it repeats once a day.
+**Fix:** Never detect GC auth by matching the text "Sign In" in any button/link — the logged-in `/teams` page can contain such text, and the SPA renders the anonymous header until its session request resolves. `tools/autopull/session_manager.is_authenticated` must use GC's anonymous-only controls (`[data-testid='desktop-sign-in-button'], [data-testid='mobile-sign-in-button']`, same as `gc_scraper._get_auth_state`) plus the `jwt` cookie as positive proof, and `wait_until_authenticated` must poll after submission rather than checking once.
+**Ref:** autopull run #146, session 2026-09-02
+
 ## Adding a New SIGN
 
 When a new failure pattern is confirmed (not hypothetical):

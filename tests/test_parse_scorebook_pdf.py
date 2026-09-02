@@ -826,12 +826,22 @@ class TestRun:
             "opponent_batting": [],
         }
         monkeypatch.setattr(psb, "parse_pdf", lambda p: fake_game)
-        # Use the real known_game_results.json which has "2026-02-19" with score "13-20"
+        # config/known_game_results.json holds the CURRENT season and is
+        # reset every season (Spring 2026 was archived in #178), so don't
+        # depend on it: feed the Spring 2026-02-19 result (L, 13-20) directly.
+        known_data = {"results": [{"date": "2026-02-19", "result": "L", "score": "13-20"}]}
+        orig_json_load = _json.load
+        call_count = [0]
+        def fake_json_load(f):
+            call_count[0] += 1
+            if call_count[0] == 1:  # first call is for known_game_results.json
+                return known_data
+            return orig_json_load(f)
+        monkeypatch.setattr(psb.json, "load", fake_json_load)
         results = psb.run(scorebooks_dir=scorebooks, games_dir=games)
         assert len(results) == 1
-        # Result from real file: "L" with score "13-20"
         assert results[0].get("result") == "L"
-        assert results[0].get("score") is not None
+        assert results[0].get("score") == {"sharks": 13, "opponent": 20}
 
     def test_score_raw_used_when_non_numeric(self, tmp_path, monkeypatch):
         """Lines 323-324: score that can't be split as ints → score_raw."""
