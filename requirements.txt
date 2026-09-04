@@ -33,7 +33,7 @@ google-auth-oauthlib>=1.4.0,<2
 google-auth-httplib2>=0.4.2,<1
 
 # GC CSV autopull — LLM-adaptive locator fallback
-anthropic>=1.0.0,<2
+anthropic>=1.2.0,<2
 
 # Multi-team registry
 PyYAML>=6.0.3,<7
