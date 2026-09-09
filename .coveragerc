@@ -14,7 +14,6 @@ omit =
     tools/relogin.py
     tools/save_session.py
     tools/generate_auth_json.py
-    tools/runtime_ops.py
     tools/verify_links.py
     # Device / mobile scrapers
     tools/frida*.py
