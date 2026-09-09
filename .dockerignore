@@ -4,7 +4,6 @@
 *.env
 APIs.csv
 APIs\ -\ Sheet1\ (6).csv
-bootstrap-secrets.ps1
 setup_ai_hive.ps1
 
 # Runtime-mounted volumes — not baked into image
@@ -64,5 +63,4 @@ progress.md
 gemini.md
 task_plan.md
 README.md
-smoke-all.ps1
 nginx_full.conf
