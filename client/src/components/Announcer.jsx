@@ -436,33 +436,32 @@ export default function Announcer({ lineups }) {
   // ── batting order: GC game → optimiser lineup → active roster ──
   const active = useMemo(() => roster.filter(p => p.is_active && !p.is_ghost), [roster]);
   const former = useMemo(() => roster.filter(p => p.is_ghost || p.is_active === false), [roster]);
-  const battingOrder = useMemo(() => {
+  const { battingOrder, lineupSource } = useMemo(() => {
     const byRef = (p) => active.find(r =>
       (p.id && r.id === p.id) ||
       (p.number && String(r.number) === String(p.number)) ||
       `${r.first} ${r.last}`.toLowerCase() === `${p.first || ''} ${p.last || ''}`.toLowerCase().trim(),
     ) || null;
+    const withRest = (ordered) => {
+      const seen = new Set(ordered.map(p => p.id));
+      return [...ordered, ...active.filter(p => !seen.has(p.id))];
+    };
     if (gcLineup?.players?.length) {
       const ordered = gcLineup.players.map(byRef).filter(Boolean);
-      if (ordered.length) {
-        const seen = new Set(ordered.map(p => p.id));
-        return [...ordered, ...active.filter(p => !seen.has(p.id))];
-      }
+      if (ordered.length) return { battingOrder: withRest(ordered), lineupSource: gcLineup.source_label || 'GameChanger lineup' };
     }
     if (lineups) {
-      const key = lineups.recommended_strategy || 'balanced';
-      const lineup = lineups[key] || lineups.balanced;
+      // lineups.json: { balanced: { lineup: [...] }, ... } — the array is under
+      // `lineup`, not the strategy key itself.
+      const strategy = lineups[lineups.recommended_strategy || 'balanced'] || lineups.balanced;
+      const lineup = Array.isArray(strategy) ? strategy : strategy?.lineup;
       if (Array.isArray(lineup) && lineup.length) {
         const ordered = [...lineup].sort((a, b) => (a.slot || 0) - (b.slot || 0)).map(byRef).filter(Boolean);
-        if (ordered.length) {
-          const seen = new Set(ordered.map(p => p.id));
-          return [...ordered, ...active.filter(p => !seen.has(p.id))];
-        }
+        if (ordered.length) return { battingOrder: withRest(ordered), lineupSource: 'Optimiser lineup' };
       }
     }
-    return active;
+    return { battingOrder: active, lineupSource: 'Roster order' };
   }, [active, gcLineup, lineups]);
-  const lineupSource = gcLineup?.players?.length ? (gcLineup.source_label || 'GameChanger lineup') : (lineups ? 'Optimiser lineup' : 'Roster order');
 
   const currentIdx = Math.max(0, battingOrder.findIndex(p => p.id === currentId));
   const current = battingOrder[currentIdx] || null;
