@@ -445,18 +445,6 @@ textarea {
    ========================================================================== */
 
 @media (pointer: coarse) {
-  /* iOS focus-zoom guard. Mobile Safari magnifies the viewport whenever a
-     focused control computes under 16px, and it does NOT zoom back out on
-     blur — you end up panning a zoomed dashboard one-handed between innings.
-     Every text control here sat between 12.8px and 13.6px.
-     `!important` is deliberate: the component rules that set those sizes
-     (.announcer-form-group input, .announcer-song-input, .announcer-modal
-     input, the wizard selects) all out-specify a bare element selector. */
-  input:not([type='checkbox']):not([type='radio']):not([type='range']),
-  select,
-  textarea {
-    font-size: 16px !important;
-  }
 
   /* Give every text control a thumb-sized hit area. Deliberately NOT setting
      `appearance: none` here: several of these controls carry an inline
@@ -504,41 +492,6 @@ textarea {
     min-height: var(--touch-min);
     width: 100%;
     height: 100%;
-  }
-
-  /* Named small controls that exist today, expanded in place. */
-  .announcer-song-delete,
-  .announcer-modal-close,
-  .announcer-mini-play,
-  .mobile-action-btn {
-    position: relative;
-  }
-
-  .announcer-song-delete::after,
-  .announcer-modal-close::after,
-  .announcer-mini-play::after {
-    content: '';
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    width: var(--touch-min);
-    height: var(--touch-min);
-  }
-
-  /* Sticky hover is dealt with properly at the source: every `:hover` rule in
-     this stylesheet is wrapped in `@media (hover: hover) and (pointer: fine)`,
-     so touch devices never enter a hover skin they cannot leave. What a phone
-     needs instead is a press state, below. */
-
-  /* Keep a real, immediate press state so taps still feel answered. */
-  .nav-btn:active,
-  .voice-btn:active,
-  .sync-btn:active,
-  .announcer-btn:active,
-  .bottom-nav-item:active,
-  .announcer-player-header:active {
-    filter: brightness(1.25);
   }
 }
 
@@ -1731,165 +1684,6 @@ input[type="checkbox"]:checked::after {
   line-height: 1;
 }
 
-/* Song start-time badge (shown on song items with known optimal_start_ms) */
-.announcer-song-start-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 1px 5px;
-  border-radius: 4px;
-  background: rgba(130, 203, 195, 0.14);
-  border: 1px solid rgba(130, 203, 195, 0.28);
-  color: var(--primary-color);
-  font-size: 0.65rem;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  flex-shrink: 0;
-}
-
-/* Music Wizard modal */
-.announcer-wizard-tabs {
-  display: flex;
-  border-bottom: 1px solid var(--surface-border);
-}
-
-.announcer-wizard-tab {
-  flex: 1;
-  padding: var(--space-sm) var(--space-md);
-  background: none;
-  border: none;
-  color: var(--text-muted);
-  font-size: 0.82rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: color var(--transition-fast), background var(--transition-fast);
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
-}
-
-.announcer-wizard-tab.active {
-  color: var(--primary-color);
-  border-bottom-color: var(--primary-color);
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .announcer-wizard-tab:hover:not(.active) {
-    background: var(--primary-glow);
-    color: var(--text-main);
-  }
-}
-
-.announcer-wizard-body {
-  padding: var(--space-md);
-  /* A hard 400px ignored the viewport: on a phone the header plus tabs plus
-     400px overflowed the screen. Cap against the actual viewport height so the
-     modal always fits, and never let it get uselessly short. */
-  max-height: min(400px, max(180px, 55dvh));
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  -webkit-overflow-scrolling: touch;
-}
-
-.announcer-wizard-search-form {
-  display: flex;
-  gap: var(--space-sm);
-  margin-bottom: var(--space-md);
-}
-
-.announcer-wizard-results {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.announcer-wizard-result-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-sm);
-  padding: 6px 8px;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.announcer-wizard-result-info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.announcer-wizard-result-title {
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: var(--text-main);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.announcer-wizard-result-artist {
-  font-size: 0.75rem;
-  color: var(--text-muted);
-}
-
-.announcer-wizard-result-meta {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-}
-
-.announcer-wizard-energy {
-  font-size: 0.7rem;
-  font-weight: 700;
-  color: var(--text-muted);
-  font-variant-numeric: tabular-nums;
-}
-
-.announcer-wizard-player-section {
-  margin-bottom: var(--space-md);
-}
-
-.announcer-wizard-player-name {
-  font-size: 0.8rem;
-  font-weight: 700;
-  color: var(--primary-color);
-  margin-bottom: 4px;
-}
-
-.announcer-wizard-player-selector {
-  display: flex;
-  align-items: center;
-  gap: var(--space-xs);
-  margin-bottom: var(--space-sm);
-  font-size: 0.8rem;
-  color: var(--text-muted);
-}
-
-.announcer-wizard-player-selector select {
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid var(--surface-border);
-  border-radius: 6px;
-  padding: 0.3rem 0.6rem;
-  color: var(--text-main);
-  font-family: var(--font-base);
-  font-size: 0.8rem;
-  flex: 1;
-}
-
-.announcer-wizard-player-selector select:focus {
-  outline: none;
-  border-color: var(--primary-color);
-}
-
-.announcer-wizard-spotify-connect {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  padding: var(--space-md) var(--space-lg);
-}
-
 /* Lineup source badge */
 .announcer-lineup-source {
   display: inline-flex;
@@ -1914,25 +1708,6 @@ input[type="checkbox"]:checked::after {
   border-color: rgba(34, 197, 94, 0.3);
 }
 
-/* Stats Bar */
-.announcer-stats-bar {
-  padding: var(--space-sm) var(--space-md);
-}
-
-.announcer-stats-counts {
-  display: flex;
-  gap: var(--space-md);
-  margin-bottom: var(--space-xs);
-  font-size: 0.85rem;
-  font-weight: 600;
-}
-
-.announcer-stat-item {
-  display: flex;
-  align-items: center;
-  gap: 0.3rem;
-}
-
 .announcer-progress-track {
   height: 6px;
   background: rgba(255, 255, 255, 0.08);
@@ -1945,13 +1720,6 @@ input[type="checkbox"]:checked::after {
   background: var(--primary-color);
   border-radius: 3px;
   transition: width 0.5s ease;
-}
-
-/* Toolbar */
-.announcer-toolbar {
-  display: flex;
-  gap: var(--space-xs);
-  flex-wrap: wrap;
 }
 
 /* Buttons */
@@ -2019,76 +1787,11 @@ input[type="checkbox"]:checked::after {
   flex-shrink: 0;
 }
 
-/* Player Cards */
-.announcer-player-card {
-  padding: 0;
-  overflow: hidden;
-}
-
-.announcer-player-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  width: 100%;
-  padding: 0.75rem 1rem;
-  background: none;
-  border: none;
-  color: var(--text-main);
-  cursor: pointer;
-  font-family: var(--font-base);
-  font-size: 0.9rem;
-  text-align: left;
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .announcer-player-header:hover {
-    background: var(--surface-hover);
-  }
-}
-
-.announcer-player-info {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-}
-
 .announcer-jersey {
   font-weight: 800;
   color: var(--primary-color);
   font-size: 1rem;
   min-width: 2.5rem;
-}
-
-.announcer-player-name {
-  font-weight: 600;
-}
-
-.announcer-player-actions-mini {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  color: var(--text-muted);
-}
-
-.announcer-mini-play {
-  color: var(--primary-color);
-  cursor: pointer;
-  padding: 0.2rem;
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .announcer-mini-play:hover {
-    color: var(--text-main);
-  }
-}
-
-/* Player Details (Expanded) */
-.announcer-player-details {
-  padding: 0 1rem 1rem;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-sm);
-  border-top: 1px solid var(--surface-border);
 }
 
 .announcer-form-group {
@@ -2128,129 +1831,6 @@ input[type="checkbox"]:checked::after {
   gap: var(--space-sm);
 }
 
-/* Song Pool */
-.announcer-song-pool {
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-  padding-top: var(--space-sm);
-  margin-top: var(--space-xs);
-}
-
-.announcer-song-pool-header {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  font-size: 0.72rem;
-  font-weight: 600;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  margin-bottom: var(--space-xs);
-}
-
-.announcer-song-count {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 16px;
-  height: 16px;
-  padding: 0 4px;
-  border-radius: 99px;
-  background: var(--primary-glow);
-  color: var(--primary-color);
-  font-size: 0.65rem;
-  font-weight: 700;
-}
-
-.announcer-song-empty {
-  font-size: 0.75rem;
-  color: var(--text-muted);
-  padding: 3px 0 var(--space-xs);
-}
-
-.announcer-song-list {
-  list-style: none;
-  margin: 0 0 var(--space-xs);
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.announcer-song-item {
-  display: flex;
-  align-items: center;
-  gap: var(--space-xs);
-  padding: 4px 6px;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.03);
-  font-size: 0.78rem;
-}
-
-.announcer-song-label {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--text-main);
-}
-
-.announcer-song-plays {
-  font-size: 0.65rem;
-  color: var(--text-muted);
-  flex-shrink: 0;
-}
-
-.announcer-song-delete {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border: none;
-  background: none;
-  color: var(--text-muted);
-  cursor: pointer;
-  border-radius: 4px;
-  flex-shrink: 0;
-  padding: 0;
-  transition: color var(--transition-fast), background var(--transition-fast);
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .announcer-song-delete:hover {
-    color: var(--danger);
-    background: rgba(179, 74, 57, 0.14);
-  }
-}
-
-.announcer-song-add {
-  display: flex;
-  gap: var(--space-xs);
-  align-items: center;
-}
-
-.announcer-song-input {
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid var(--surface-border);
-  border-radius: 6px;
-  padding: 0.35rem 0.55rem;
-  color: var(--text-main);
-  font-family: var(--font-base);
-  font-size: 0.8rem;
-  transition: border-color var(--transition-fast);
-  min-width: 0;
-  flex: 1;
-}
-
-.announcer-song-input:focus {
-  outline: none;
-  border-color: var(--primary-color);
-}
-
-.announcer-song-label-input {
-  flex: 0 0 100px;
-}
-
 .announcer-preview-text {
   display: flex;
   align-items: center;
@@ -2272,46 +1852,6 @@ input[type="checkbox"]:checked::after {
   padding: 0.4rem 0.65rem;
   background: rgba(179, 74, 57, 0.1);
   border-radius: 6px;
-}
-
-.announcer-card-actions {
-  display: flex;
-  gap: var(--space-xs);
-  flex-wrap: wrap;
-  align-items: center;
-  padding-top: var(--space-xs);
-}
-
-.announcer-quality-toggle {
-  display: inline-flex;
-  border: 1px solid var(--surface-border);
-  border-radius: 8px;
-  overflow: hidden;
-}
-
-.announcer-quality-btn {
-  padding: 0.5rem 0.75rem;
-  font-family: var(--font-base);
-  font-size: 0.75rem;
-  font-weight: 600;
-  cursor: pointer;
-  background: transparent;
-  color: var(--text-secondary);
-  border: none;
-  transition: all var(--transition-fast);
-  white-space: nowrap;
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .announcer-quality-btn:hover {
-    background: var(--surface-hover, rgba(255,255,255,0.06));
-    color: var(--text-primary);
-  }
-}
-
-.announcer-quality-btn.active {
-  background: var(--accent-blue, #3b82f6);
-  color: #fff;
 }
 
 /* Roster List */
@@ -2431,62 +1971,6 @@ body:has(.announcer-modal-overlay) .navbar {
   align-items: center;
 }
 
-.announcer-np-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  width: 100%;
-}
-
-.announcer-np-position {
-  font-size: 0.85rem;
-  color: var(--text-muted);
-  font-weight: 600;
-}
-
-.announcer-np-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 2rem 3rem;
-  text-align: center;
-  gap: var(--space-sm);
-  width: 100%;
-  max-width: 360px;
-}
-
-.announcer-np-jersey {
-  font-size: 3.5rem;
-  font-weight: 800;
-  color: var(--primary-color);
-  line-height: 1;
-  font-family: var(--font-heading);
-}
-
-.announcer-np-name {
-  font-size: 1.5rem;
-  font-weight: 700;
-  color: var(--text-main);
-}
-
-.announcer-np-timeline {
-  width: 100%;
-  max-width: 360px;
-}
-
-.announcer-np-time {
-  text-align: center;
-  font-size: 0.75rem;
-  color: var(--text-muted);
-  margin-top: 0.3rem;
-}
-
-.announcer-np-controls {
-  display: flex;
-  align-items: center;
-  gap: var(--space-lg);
-}
-
 .announcer-btn-round {
   width: 48px;
   height: 48px;
@@ -2535,59 +2019,6 @@ body:has(.announcer-modal-overlay) .navbar {
   .announcer-form-row .announcer-form-group {
     width: 100% !important;
   }
-
-  .announcer-np-card {
-    /* 3rem of horizontal padding on each side left almost nothing for the
-       player name on a 360px screen. Scale it with the viewport instead. */
-    padding: 1.5rem clamp(0.75rem, 5vw, 2rem);
-  }
-
-  .announcer-np-jersey {
-    font-size: 2.5rem;
-  }
-
-  .announcer-np-name {
-    font-size: 1.2rem;
-  }
-
-  /* Transport controls: keep the row from overflowing while staying large
-     enough to hit mid-game. */
-  .announcer-np-controls {
-    gap: var(--space-md);
-    flex-wrap: wrap;
-    justify-content: center;
-  }
-
-  .announcer-header,
-  .announcer-header-actions,
-  .announcer-np-header {
-    flex-wrap: wrap;
-  }
-
-  /* The label field was pinned at 100px next to a flexible URL input plus two
-     buttons — four controls on one unwrappable row. Let it share the space. */
-  .announcer-song-label-input {
-    flex: 1 1 90px;
-    min-width: 0;
-  }
-
-  .announcer-song-add,
-  .announcer-wizard-search-form {
-    flex-wrap: wrap;
-  }
-}
-
-/* These three custom properties were never defined anywhere in the stylesheet,
-   so the declarations using them were invalid at computed-value time and the
-   quality toggle silently fell back to inherited colours. Point them at the
-   real design tokens. */
-.announcer-quality-btn {
-  color: var(--text-muted);
-}
-
-.announcer-quality-btn.active {
-  background: var(--primary-color);
-  color: var(--bg-color);
 }
 
 /* ─── Accessibility helpers ─── */
@@ -2618,3 +2049,88 @@ body:has(.announcer-modal-overlay) .navbar {
   font-weight: 700;
   z-index: 9999;
 }
+
+/* ── Announcer — one-screen Ballpark-DJ layout ─────────────────────────── */
+.announcer-page { padding-bottom: 190px; }
+.announcer-summary {
+  display: flex; align-items: center; gap: var(--space-sm); flex-wrap: wrap;
+  font-size: var(--text-sm); color: var(--text-muted);
+}
+.announcer-summary .announcer-btn { margin-left: auto; min-height: var(--touch-min); }
+.announcer-notice { background: rgba(130, 203, 195, 0.10); border-color: rgba(130, 203, 195, 0.35); color: var(--primary-color); }
+.announcer-hint { font-size: var(--text-sm); color: var(--text-muted); margin: 0 0 var(--space-sm); }
+
+.announcer-lineup-row {
+  display: flex; align-items: center; gap: var(--space-sm);
+  padding: 0.55rem 0.6rem 0.55rem 0.75rem;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+.announcer-lineup-row--current { border-color: var(--primary-color); background: var(--surface-hover); }
+.announcer-lineup-main {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--space-sm);
+  background: none; border: none; padding: 0; color: inherit; text-align: left; cursor: pointer;
+  min-height: var(--touch-min);
+}
+.announcer-lineup-slot {
+  width: 1.4rem; text-align: center; font-size: var(--text-xs); font-weight: 700; color: var(--text-muted);
+}
+.announcer-lineup-name { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
+.announcer-lineup-first {
+  font-family: var(--font-heading); font-size: 1.05rem; line-height: 1.15;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.announcer-lineup-sub { display: inline-flex; align-items: center; gap: 0.35rem; font-size: var(--text-xs); color: var(--text-muted); }
+.announcer-row-play {
+  width: 52px; height: 52px; border-radius: 50%; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--primary-color); color: var(--bg-color); border: none; cursor: pointer;
+  box-shadow: 0 4px 14px var(--primary-glow);
+  transition: transform var(--transition-fast), opacity var(--transition-fast);
+}
+.announcer-row-play:active { transform: scale(0.94); }
+.announcer-row-play:disabled { opacity: 0.25; box-shadow: none; cursor: default; }
+.announcer-row-play--active { background: var(--danger); color: #fff; }
+
+.announcer-former-section { margin-top: var(--space-sm); display: flex; flex-direction: column; gap: var(--space-xs); }
+.announcer-former-toggle { width: 100%; justify-content: space-between; font-size: 0.8rem; opacity: 0.7; min-height: var(--touch-min); }
+.announcer-remove-btn { margin-top: var(--space-md); width: 100%; justify-content: center; opacity: 0.7; font-size: var(--text-xs); }
+
+.announcer-dj-bar {
+  position: fixed; left: var(--space-sm); right: var(--space-sm);
+  bottom: calc(var(--bottom-nav-space) + var(--space-sm));
+  z-index: 40; padding: 0.7rem 0.85rem; display: flex; flex-direction: column; gap: 0.5rem;
+  border-color: var(--primary-color); box-shadow: 0 -6px 30px rgba(0, 0, 0, 0.45);
+}
+@media (min-width: 900px) { .announcer-dj-bar { left: auto; right: var(--space-lg); width: 480px; bottom: var(--space-lg); } }
+.announcer-dj-top { display: flex; align-items: center; justify-content: space-between; gap: var(--space-sm); }
+.announcer-dj-title { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
+.announcer-dj-label { font-size: 0.65rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-muted); }
+.announcer-dj-name { font-family: var(--font-heading); font-size: 1.15rem; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.announcer-dj-ondeck { font-size: var(--text-xs); color: var(--text-muted); }
+.announcer-dj-controls { display: flex; align-items: center; gap: 0.5rem; flex-shrink: 0; }
+.announcer-dj-controls .announcer-btn-play { width: 60px; height: 60px; }
+.announcer-dj-controls .announcer-btn-round { width: 44px; height: 44px; border: 1px solid var(--surface-border); }
+.announcer-dj-controls .announcer-btn-round:disabled { opacity: 0.3; }
+.announcer-dj-situation { display: flex; align-items: center; gap: 0.4rem; }
+.announcer-base-btn {
+  min-height: 36px; padding: 0 0.6rem; border-radius: 8px; font-size: var(--text-xs); font-weight: 700;
+  background: rgba(255, 255, 255, 0.06); color: var(--text-muted); border: 1px solid var(--surface-border); cursor: pointer;
+}
+.announcer-base-btn--on { background: rgba(240, 180, 41, 0.18); color: #f0b429; border-color: rgba(240, 180, 41, 0.5); }
+.announcer-halo-trigger { margin-left: auto; min-height: 36px; }
+.announcer-halo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+.announcer-halo-btn { flex-direction: column; height: auto; min-height: var(--touch-min); padding: 0.5rem; text-align: center; }
+.announcer-halo-btn small { opacity: 0.75; font-size: 0.7rem; }
+
+.announcer-voice-row {
+  display: flex; align-items: center; gap: var(--space-sm); padding: 0.55rem 0;
+  border-bottom: 1px solid var(--surface-border);
+}
+.announcer-voice-row:last-child { border-bottom: none; }
+.announcer-voice-row--active strong { color: var(--primary-color); }
+.announcer-voice-row .announcer-btn-round { width: 44px; height: 44px; border: 1px solid var(--surface-border); flex-shrink: 0; }
+.announcer-voice-text { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.announcer-voice-text span { font-size: var(--text-xs); color: var(--text-muted); }
+.announcer-voice-current { display: inline-flex; align-items: center; gap: 0.25rem; font-size: var(--text-xs); color: var(--primary-color); font-weight: 700; }
+.announcer-form-group small { font-size: 0.7rem; color: var(--text-muted); }
+.announcer-form-group select { min-height: var(--touch-min); }

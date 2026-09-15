@@ -16,6 +16,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# ffmpeg: the announcer's Stadium Wrap (compand + low shelf + reverb) runs through it.
+# Without it every render on the Pi silently fell back to raw, unprocessed TTS.
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
 # Bootstrap tooling: pip<26.1/setuptools<83 have known CVEs (path-traversal /
 # arbitrary-write on install, MANIFEST.in exclusion bypass) — upgrade first.
 RUN pip install --no-cache-dir --upgrade "pip>=26.2" "setuptools>=83"

@@ -1,14 +1,15 @@
-"""Announcer TTS Engine — dual-provider voice synthesis for walk-up announcements.
+"""Announcer TTS Engine — voice synthesis for walk-up announcements.
 
-Providers:
-  1. Replicate Qwen3-TTS (clone mode) — primary if REPLICATE_API_TOKEN is set
-  2. ElevenLabs — fallback using existing integration
-  3. Mock — silent placeholder when no API keys configured (dev/testing)
+Providers, in priority order (see _build_provider_chain):
+  LocalVLLM → Replicate (only with a voice reference) → ElevenLabs → EdgeTTS →
+  Kokoro → Google Cloud → Mock.  In production ElevenLabs is the one that runs.
 
 Data stored in data/sharks/announcer/:
-  - roster.json       — player announcer metadata
-  - voice_profiles.json — reference voice configs
-  - clips/{player_id}/{timestamp}.mp3 — rendered audio
+  - roster.json          — player announcer metadata
+  - voice_selection.json — which VOICE_PROFILES entry is the team default
+  - voice_samples/       — cached per-voice sample lines for the picker
+  - clips/{player_id}/{timestamp}.mp3   — rendered audio (Stadium Wrap applied)
+  - archive/{player_id}/{timestamp}.flac — lossless masters, best-quality only
 """
 from __future__ import annotations
 
@@ -17,6 +18,7 @@ import json
 import logging
 import os
 import struct
+import threading
 import time
 import wave
 from abc import ABC, abstractmethod
@@ -33,7 +35,76 @@ ANNOUNCER_DIR = DATA_DIR / "sharks" / "announcer"
 CLIPS_DIR = ANNOUNCER_DIR / "clips"
 ARCHIVE_DIR = ANNOUNCER_DIR / "archive"
 ROSTER_FILE = ANNOUNCER_DIR / "roster.json"
-VOICE_PROFILES_FILE = ANNOUNCER_DIR / "voice_profiles.json"
+
+class _RosterLock:
+    """Re-entrant lock over roster.json that holds across threads AND processes.
+
+    A thread lock alone is not enough: the Pi runs gunicorn with 2 workers, so
+    a coach tapping Render on two players can land each request in a different
+    process.  The OS file lock (flock / msvcrt) is what actually serialises them;
+    the RLock makes it re-entrant, since update_player() calls load_announcer_roster()
+    while already holding the lock.  Both release automatically if the process dies.
+    """
+
+    def __init__(self) -> None:
+        self._thread_lock = threading.RLock()
+        self._depth = 0
+        self._fh = None
+
+    def __enter__(self):
+        self._thread_lock.acquire()
+        if self._depth == 0:
+            self._fh = self._acquire_file_lock()
+        self._depth += 1
+        return self
+
+    def __exit__(self, *exc):
+        self._depth -= 1
+        if self._depth == 0 and self._fh is not None:
+            self._release_file_lock(self._fh)
+            self._fh = None
+        self._thread_lock.release()
+
+    @staticmethod
+    def _acquire_file_lock():
+        lock_path = ROSTER_FILE.with_suffix(".lock")
+        try:
+            lock_path.parent.mkdir(parents=True, exist_ok=True)
+            fh = open(lock_path, "a+")
+        except OSError as e:
+            # Read-only filesystem — fall back to the thread lock only.
+            logging.warning("[Announcer] roster lock file unavailable (%s); thread-lock only", e)
+            return None
+        try:
+            if os.name == "nt":
+                import msvcrt
+                fh.seek(0)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        except OSError as e:
+            logging.warning("[Announcer] roster file lock failed (%s); thread-lock only", e)
+            fh.close()
+            return None
+        return fh
+
+    @staticmethod
+    def _release_file_lock(fh) -> None:
+        try:
+            if os.name == "nt":
+                import msvcrt
+                fh.seek(0)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+        finally:
+            fh.close()
+
+
+# Serialises roster.json read-modify-write across concurrent renders.
+_ROSTER_LOCK = _RosterLock()
 
 # Reuse the phonetic map from sync_daemon at runtime (imported lazily to avoid circular imports)
 _PHONETIC_MAP = None
@@ -175,6 +246,15 @@ class TTSProvider(ABC):
     def available(self) -> bool:
         """Fast availability check (no synthesis). Override for key/package checks."""
         return True
+
+    @property
+    def max_concurrency(self) -> int:
+        """How many renders this provider tolerates in parallel.
+
+        Batch callers clamp their worker count to this.  Local providers have no
+        meaningful limit; hosted ones do, and exceeding it returns 429.
+        """
+        return 8
 
 
 class LocalVLLMTTS(TTSProvider):
@@ -322,12 +402,28 @@ class Replicate06bTTS(ReplicateTTS):
         return "replicate_qwen3_tts_0.6b"
 
 
+# Deep, resonant male voice used for the stadium announcer.  "Brian" is a premade
+# ElevenLabs voice, so it works on the free tier — library/professional voices
+# return HTTP 402 without a paid plan.  Measured median F0 137 Hz (vs 167 Hz for
+# "Adam"), the deepest premade option on the account.
+# The previous default, EXAVITQu4vr4xnSDxMaL, is "Sarah" — a young female voice.
+ANNOUNCER_ELEVENLABS_VOICE_ID = "nPczCjzI2devNBz1zQrb"
+
+
 class ElevenLabsTTS(TTSProvider):
     """ElevenLabs TTS — reuses existing integration pattern."""
+
+    # Free and starter plans allow 2 requests in parallel; more returns 429.
+    _MAX_CONCURRENCY = int(os.getenv("ELEVENLABS_MAX_CONCURRENCY", "2"))
+    _MAX_ATTEMPTS = 4
 
     @property
     def name(self) -> str:
         return "elevenlabs"
+
+    @property
+    def max_concurrency(self) -> int:
+        return max(1, self._MAX_CONCURRENCY)
 
     def synthesize(self, text: str, voice_config: dict) -> bytes:
         api_key = _resolve_secret("ELEVENLABS_API_KEY")
@@ -335,9 +431,12 @@ class ElevenLabsTTS(TTSProvider):
             voice_config.get("elevenlabs_voice_id", "")
             or _resolve_secret("ELEVENLABS_VOICE_ID")
             or os.getenv("ELEVENLABS_DEFAULT_VOICE_ID", "").strip()
-            or "EXAVITQu4vr4xnSDxMaL"  # default fallback
+            or ANNOUNCER_ELEVENLABS_VOICE_ID
         )
-        model_id = os.getenv("ELEVENLABS_MODEL_ID", "eleven_turbo_v2_5")
+        model_id = (
+            voice_config.get("model_id")
+            or os.getenv("ELEVENLABS_MODEL_ID", "eleven_multilingual_v2")
+        )
 
         if not api_key:
             raise RuntimeError("ELEVENLABS_API_KEY not set")
@@ -346,10 +445,13 @@ class ElevenLabsTTS(TTSProvider):
         payload = {
             "text": text,
             "model_id": model_id,
-            "voice_settings": {
-                "stability": 0.20,
-                "similarity_boost": 0.90,
-                "style": 0.70,
+            # Announcer delivery: low-ish stability + high style gives the dramatic
+            # swing the Halo-style read needs.  0.20 was low enough that repeat
+            # renders of the same player drifted in character; 0.30 holds.
+            "voice_settings": voice_config.get("voice_settings") or {
+                "stability": 0.30,
+                "similarity_boost": 0.85,
+                "style": 0.75,
                 "use_speaker_boost": True,
             },
         }
@@ -358,10 +460,19 @@ class ElevenLabsTTS(TTSProvider):
             "Content-Type": "application/json",
             "xi-api-key": api_key,
         }
-        resp = requests.post(url, json=payload, headers=headers, timeout=60)
-        if resp.status_code != 200:
-            raise RuntimeError(f"ElevenLabs returned {resp.status_code}: {resp.text[:300]}")
-        return resp.content
+        # Retry the transient failures — a rate-limit or a 5xx mid-batch used to
+        # abandon that player with no clip at all.
+        for attempt in range(1, self._MAX_ATTEMPTS + 1):
+            resp = requests.post(url, json=payload, headers=headers, timeout=60)
+            if resp.status_code == 200:
+                return resp.content
+            if resp.status_code not in (429, 500, 502, 503, 504) or attempt == self._MAX_ATTEMPTS:
+                raise RuntimeError(f"ElevenLabs returned {resp.status_code}: {resp.text[:300]}")
+            delay = float(resp.headers.get("retry-after") or 2 ** attempt)
+            logging.warning("[Announcer] ElevenLabs %s (attempt %d/%d) — retrying in %.1fs",
+                            resp.status_code, attempt, self._MAX_ATTEMPTS, delay)
+            time.sleep(delay)
+        raise RuntimeError("ElevenLabs: exhausted retries")  # pragma: no cover
 
 
 class EdgeTTSProvider(TTSProvider):
@@ -580,8 +691,13 @@ def _has_replicate_voice_ref() -> bool:
 
 
 # Ordered provider registry — probed top-to-bottom at render time.
-# Best Quality chain (Mac/cloud):  LocalVLLM → Replicate3B → EdgeTTS → Kokoro → GoogleCloud → ElevenLabs → Mock
-# Quick chain (Pi-side):           LocalVLLM → Replicate0.6B → EdgeTTS → Kokoro → GoogleCloud → ElevenLabs → Mock
+# Best Quality chain (Mac/cloud):  LocalVLLM → Replicate3B → ElevenLabs → EdgeTTS → Kokoro → GoogleCloud → Mock
+# Quick chain (Pi-side):           LocalVLLM → Replicate0.6B → ElevenLabs → EdgeTTS → Kokoro → GoogleCloud → Mock
+#
+# ElevenLabs sits above EdgeTTS because it is the only key-free-of-Replicate path
+# that actually delivers the stadium-announcer read.  EdgeTTS/Kokoro/GoogleCloud
+# accept no style steering, so they produce a flat neutral narration — fine as a
+# fallback, wrong as the default.
 
 def _build_provider_chain(quick: bool = False) -> list[TTSProvider]:
     chain: list[TTSProvider] = []
@@ -589,11 +705,11 @@ def _build_provider_chain(quick: bool = False) -> list[TTSProvider]:
         chain.append(LocalVLLMTTS())
     if _has_replicate_voice_ref():
         chain.append(Replicate06bTTS() if quick else ReplicateTTS())
+    if _resolve_secret("ELEVENLABS_API_KEY"):
+        chain.append(ElevenLabsTTS())
     chain.append(EdgeTTSProvider())
     chain.append(KokoroTTSProvider())
     chain.append(GoogleCloudTTSProvider())
-    if _resolve_secret("ELEVENLABS_API_KEY"):
-        chain.append(ElevenLabsTTS())
     chain.append(MockTTS())
     return chain
 
@@ -627,7 +743,7 @@ def get_tts_provider() -> TTSProvider:
     """Return the best available TTS provider for Best Quality renders.
 
     Walks the provider chain in priority order and returns the first available one.
-    Priority: LocalVLLM → Replicate 3B → EdgeTTS → Kokoro → GoogleCloud → ElevenLabs → Mock
+    Priority: LocalVLLM → Replicate 3B → ElevenLabs → EdgeTTS → Kokoro → GoogleCloud → Mock
     """
     for provider in _build_provider_chain(quick=False):
         if provider.available():
@@ -639,7 +755,7 @@ def get_tts_provider() -> TTSProvider:
 def get_quick_tts_provider() -> TTSProvider:
     """Return provider for Quick Render (Pi-side, speed-optimised).
 
-    Priority: LocalVLLM → Replicate 0.6B → EdgeTTS → Kokoro → GoogleCloud → ElevenLabs → Mock
+    Priority: LocalVLLM → Replicate 0.6B → ElevenLabs → EdgeTTS → Kokoro → GoogleCloud → Mock
     """
     for provider in _build_provider_chain(quick=True):
         if provider.available():
@@ -695,50 +811,147 @@ def check_provider_health() -> dict:
 # Voice Profiles
 # ---------------------------------------------------------------------------
 
-DEFAULT_VOICE_PROFILE = {
-    "id": "default-steitzer",
-    "name": "Jeff Steitzer (Stadium Announcer)",
-    "reference_audio_url": os.getenv("ANNOUNCER_VOICE_REF_URL", ""),
-    "reference_transcript": os.getenv("ANNOUNCER_VOICE_REF_TEXT", "Now batting, number seven, Sophia!"),
-    "description": "Classic booming stadium announcer voice",
-    "is_default": True,
-}
+# All premade ElevenLabs voices.  The account is on the free tier, where designed
+# voices (HTTP 403) and cloning (402) are unavailable — and cloning the real Halo
+# actor would be off the table regardless.  "Halo Announcer" is the closest
+# legitimate match to that delivery: the deepest premade voice, the model/settings
+# with the widest measured pitch swing (182 Hz range on multilingual_v2 vs 67 on
+# v3), a two-semitone drop in the stadium chain, and the scripted cadence.
+VOICE_PROFILES: list[dict] = [
+    {
+        "id": "halo", "name": "Halo Announcer",
+        "tagline": "Deep, booming, larger than life — the default",
+        "elevenlabs_voice_id": "nPczCjzI2devNBz1zQrb", "model_id": "eleven_multilingual_v2",
+        "voice_settings": {"stability": 0.30, "similarity_boost": 0.85, "style": 0.75, "use_speaker_boost": True},
+        "pitch_semitones": -2.0,
+    },
+    {
+        "id": "brian", "name": "Brian",
+        "tagline": "Deep and resonant, straight read",
+        "elevenlabs_voice_id": "nPczCjzI2devNBz1zQrb", "model_id": "eleven_multilingual_v2",
+        "voice_settings": {"stability": 0.45, "similarity_boost": 0.85, "style": 0.45, "use_speaker_boost": True},
+        "pitch_semitones": 0.0,
+    },
+    {
+        "id": "callum", "name": "Callum",
+        "tagline": "Gravel and grit",
+        "elevenlabs_voice_id": "N2lVS1w4EtoT3dr4eOWO", "model_id": "eleven_multilingual_v2",
+        "voice_settings": {"stability": 0.35, "similarity_boost": 0.85, "style": 0.65, "use_speaker_boost": True},
+        "pitch_semitones": 0.0,
+    },
+    {
+        "id": "george", "name": "George",
+        "tagline": "Warm storyteller",
+        "elevenlabs_voice_id": "JBFqnCBsd6RMkjVDRZzb", "model_id": "eleven_multilingual_v2",
+        "voice_settings": {"stability": 0.40, "similarity_boost": 0.85, "style": 0.55, "use_speaker_boost": True},
+        "pitch_semitones": 0.0,
+    },
+    {
+        "id": "adam", "name": "Adam",
+        "tagline": "Classic PA announcer",
+        "elevenlabs_voice_id": "pNInz6obpgDQGcFmaJgB", "model_id": "eleven_multilingual_v2",
+        "voice_settings": {"stability": 0.40, "similarity_boost": 0.85, "style": 0.60, "use_speaker_boost": True},
+        "pitch_semitones": 0.0,
+    },
+]
+
+VOICE_SELECTION_FILE = ANNOUNCER_DIR / "voice_selection.json"
+VOICE_SAMPLES_DIR = ANNOUNCER_DIR / "voice_samples"
+VOICE_SAMPLE_TEXT = (
+    "[breath] Now batting for your Sharks... [pause:0.4s] "
+    "NUMBEEEER seven... [pause:0.3s] your leadoff hitter!"
+)
+
+
+def get_voice_profile(profile_id: str | None) -> dict | None:
+    for p in VOICE_PROFILES:
+        if p["id"] == profile_id:
+            return p
+    return None
+
+
+def get_default_voice_profile_id() -> str:
+    sel = _read_json(VOICE_SELECTION_FILE, default=None)
+    pid = sel.get("default_profile_id") if isinstance(sel, dict) else None
+    return pid if get_voice_profile(pid) else VOICE_PROFILES[0]["id"]
 
 
 def load_voice_profiles() -> list[dict]:
-    profiles = _read_json(VOICE_PROFILES_FILE, default=None)
-    if isinstance(profiles, list) and profiles:
-        return profiles
-    return [DEFAULT_VOICE_PROFILE]
+    default_id = get_default_voice_profile_id()
+    return [{**p, "is_default": p["id"] == default_id} for p in VOICE_PROFILES]
 
 
 def get_default_voice_profile() -> dict:
-    for p in load_voice_profiles():
-        if p.get("is_default"):
-            return p
-    return DEFAULT_VOICE_PROFILE
+    return get_voice_profile(get_default_voice_profile_id()) or VOICE_PROFILES[0]
+
+
+def set_default_voice_profile(profile_id: str) -> dict:
+    profile = get_voice_profile(profile_id)
+    if not profile:
+        raise ValueError(f"Unknown voice profile: {profile_id}")
+    _ensure_dirs()
+    _atomic_write_json(VOICE_SELECTION_FILE, {"default_profile_id": profile_id})
+    return profile
+
+
+def resolve_voice_profile(player: dict) -> dict:
+    """Per-player override if set, else the team default."""
+    return get_voice_profile(player.get("voice_profile_id")) or get_default_voice_profile()
+
+
+def render_voice_sample(profile_id: str) -> Path:
+    """Render (once) a short sample line in the given voice, through the full
+    stadium chain so it sounds like a real clip.  Cached on disk."""
+    profile = get_voice_profile(profile_id)
+    if not profile:
+        raise ValueError(f"Unknown voice profile: {profile_id}")
+    VOICE_SAMPLES_DIR.mkdir(parents=True, exist_ok=True)
+    out = VOICE_SAMPLES_DIR / f"{profile_id}.mp3"
+    if out.exists() and out.stat().st_size > 1000:
+        return out
+    provider = get_tts_provider()
+    text = VOICE_SAMPLE_TEXT if isinstance(provider, EdgeTTSProvider) else _strip_markup_tags(VOICE_SAMPLE_TEXT)
+    audio = provider.synthesize(text, profile)
+    try:
+        archive_and_transcode(audio, f"sample-{profile_id}", archive=False,
+                              pitch_semitones=float(profile.get("pitch_semitones") or 0.0),
+                              out_mp3=out)
+    except Exception as e:
+        logging.warning("[Announcer] sample wrap failed (%s) — saving raw", e)
+        out.write_bytes(audio)
+    return out
 
 
 # ---------------------------------------------------------------------------
 # Announcer Roster
 # ---------------------------------------------------------------------------
 
+_ONES = ("zero", "one", "two", "three", "four", "five", "six", "seven",
+         "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen",
+         "fifteen", "sixteen", "seventeen", "eighteen", "nineteen")
+_TENS = ("", "", "twenty", "thirty", "forty", "fifty",
+         "sixty", "seventy", "eighty", "ninety")
+
+
 def _number_to_word(num: str) -> str:
-    """Convert jersey number string to spoken word for announcements."""
-    words = {
-        "0": "zero", "1": "one", "2": "two", "3": "three", "4": "four",
-        "5": "five", "6": "six", "7": "seven", "8": "eight", "9": "nine",
-        "10": "ten", "11": "eleven", "12": "twelve", "13": "thirteen",
-        "14": "fourteen", "15": "fifteen", "16": "sixteen", "17": "seventeen",
-        "18": "eighteen", "19": "nineteen", "20": "twenty",
-        "21": "twenty-one", "22": "twenty-two", "23": "twenty-three",
-        "24": "twenty-four", "25": "twenty-five", "26": "twenty-six",
-        "27": "twenty-seven", "28": "twenty-eight", "29": "twenty-nine",
-        "30": "thirty", "31": "thirty-one", "32": "thirty-two",
-        "33": "thirty-three", "34": "thirty-four", "35": "thirty-five",
-        "99": "ninety-nine", "00": "double-zero",
-    }
-    return words.get(str(num).strip(), str(num))
+    """Convert a jersey number to the words an announcer would say.
+
+    Jersey numbers run 0-99, and "00" is a distinct jersey from "0", so the
+    leading-zero form is spoken as "double-zero".  Anything that is not a
+    plain number (blank, "TBD") is returned unchanged for the caller to handle.
+    """
+    raw = str(num).strip()
+    if not raw.isdigit():
+        return raw
+    if raw == "00":
+        return "double-zero"
+    n = int(raw)
+    if n >= 100:
+        return raw
+    if n < 20:
+        return _ONES[n]
+    tens, ones = divmod(n, 10)
+    return _TENS[tens] if ones == 0 else f"{_TENS[tens]}-{_ONES[ones]}"
 
 
 _HALO_SCRIPTS: dict[str, str] = {
@@ -750,6 +963,9 @@ _HALO_SCRIPTS: dict[str, str] = {
     "grand_slam":    "Grand. Slam. QUEEN!",
     "cycle":         "PERFECTION! She hit for the cycle!",
 }
+
+# Ballpark DJ reads "Now batting for the Savannah Seadogs..."; same idea here.
+ANNOUNCER_TEAM_PHRASE = os.getenv("ANNOUNCER_TEAM_PHRASE", "").strip() or "your Sharks"
 
 STEITZER_VOICE_INSTRUCTION = (
     "Speak like Jeff Steitzer, the iconic Halo video game announcer. "
@@ -792,17 +1008,17 @@ def build_situational_announcement(player: dict, game_context: dict | None = Non
     elif high_stakes:
         urgency = "with the game on the line" if trailing else "with the bases loaded"
         script = (
-            f"[breath] NOW BATTING... [pause:0.5s] {urgency}... "
+            f"[breath] NOW BATTING for {ANNOUNCER_TEAM_PHRASE}... [pause:0.5s] {urgency}... "
             f"[pause:0.4s] NUMBEEEER {num_word}... [pause:0.3s] {name}!"
         )
     elif bases_loaded:
         script = (
             f"[breath] Bases loaded... [pause:0.4s] "
-            f"NOW batting... [pause:0.3s] NUMBEEEER {num_word}... [pause:0.3s] {name}!"
+            f"NOW batting for {ANNOUNCER_TEAM_PHRASE}... [pause:0.3s] NUMBEEEER {num_word}... [pause:0.3s] {name}!"
         )
     else:
         script = (
-            f"[breath] Now batting... [pause:0.4s] "
+            f"[breath] Now batting for {ANNOUNCER_TEAM_PHRASE}... [pause:0.4s] "
             f"NUMBEEEER {num_word}... [pause:0.3s] {name}!"
         )
 
@@ -871,8 +1087,46 @@ def _bootstrap_roster_from_team() -> list[dict]:
     return announcer_roster
 
 
+def reconcile_roster_with_team(roster: list[dict]) -> tuple[list[dict], bool]:
+    """Fold current team.json membership into an existing announcer roster.
+
+    Returns (roster, changed).  Players on the team but missing from the roster
+    are appended as pending; players no longer on the team are deactivated
+    rather than deleted, so their phonetic hints, walk-up song and rendered
+    clips survive if they come back.  Everything else is left alone — this must
+    never clobber a hand-edited phonetic_hint or a rendered clip URL.
+    """
+    team_roster = _bootstrap_roster_from_team()
+    if not team_roster:
+        return roster, False          # no team data — leave the roster untouched
+
+    team_ids = {p["id"] for p in team_roster}
+    existing = {p.get("id") for p in roster}
+    changed = False
+
+    for player in team_roster:
+        if player["id"] not in existing:
+            roster.append(player)
+            changed = True
+            logging.info("[Announcer] Added new player to roster: %s", player["id"])
+
+    for player in roster:
+        on_team = player.get("id") in team_ids
+        if player.get("is_active", True) != on_team:
+            player["is_active"] = on_team
+            changed = True
+            logging.info("[Announcer] %s player %s",
+                         "Reactivated" if on_team else "Deactivated", player.get("id"))
+
+    return roster, changed
+
+
 def load_announcer_roster() -> list[dict]:
-    """Load announcer roster, bootstrapping from team.json if needed."""
+    """Load the announcer roster, reconciling it against current team.json.
+
+    The roster used to be bootstrapped once and never revisited, so a mid-season
+    signing never got an announcement and players who left kept theirs.
+    """
     try:
         _ensure_dirs()
     except OSError as e:
@@ -880,6 +1134,17 @@ def load_announcer_roster() -> list[dict]:
 
     roster = _read_json(ROSTER_FILE, default=None)
     if isinstance(roster, list) and roster:
+        roster, changed = reconcile_roster_with_team(roster)
+        if changed:
+            # Re-read under the lock so this write can't clobber a status update
+            # that another worker landed between our read and now.
+            with _ROSTER_LOCK:
+                fresh = _read_json(ROSTER_FILE, default=None)
+                roster, _ = reconcile_roster_with_team(fresh if isinstance(fresh, list) else roster)
+                try:
+                    _atomic_write_json(ROSTER_FILE, roster)
+                except OSError as e:
+                    logging.warning("[Announcer] Could not persist reconciled roster: %s", e)
         return roster
 
     # Bootstrap from team data
@@ -906,12 +1171,20 @@ def get_player_by_id(player_id: str) -> dict | None:
 
 
 def update_player(player_id: str, updates: dict) -> dict | None:
-    roster = load_announcer_roster()
-    for i, p in enumerate(roster):
-        if p.get("id") == player_id:
-            roster[i].update(updates)
-            save_announcer_roster(roster)
-            return roster[i]
+    """Apply updates to one player and persist the roster.
+
+    Holds _ROSTER_LOCK across the read-modify-write: prerender runs renders on a
+    thread pool (--concurrency 2-4), and without the lock two threads finishing
+    together would each write back a roster built before the other's update,
+    silently dropping one player's status and clip URL.
+    """
+    with _ROSTER_LOCK:
+        roster = load_announcer_roster()
+        for i, p in enumerate(roster):
+            if p.get("id") == player_id:
+                roster[i].update(updates)
+                save_announcer_roster(roster)
+                return roster[i]
     return None
 
 
@@ -919,15 +1192,17 @@ def update_player(player_id: str, updates: dict) -> dict | None:
 # Render Operations
 # ---------------------------------------------------------------------------
 
-def archive_and_transcode(audio_bytes: bytes, player_id: str) -> tuple[Path, Path]:
-    """Save a lossless FLAC master and 192kbps MP3 proxy from raw audio bytes.
+def archive_and_transcode(audio_bytes: bytes, player_id: str,
+                          archive: bool = True, pitch_semitones: float = 0.0,
+                          out_mp3: Path | None = None) -> tuple[Path | None, Path]:
+    """Run the Stadium Wrap and write the MP3; optionally keep a FLAC master.
 
     FFmpeg Stadium Wrap chain (Best Quality):
       compand      → broadcast hard compression (attack 10ms, decay 200ms)
       equalizer    → +4dB low shelf at 150 Hz (Steitzer sub-bass boom)
       extrastereo  → m=2.5 stereo widening (fills the stadium)
 
-    Returns (flac_path, mp3_path). Raises RuntimeError if FFmpeg is not in PATH.
+    Returns (flac_path or None, mp3_path). Raises RuntimeError if FFmpeg is not in PATH.
     """
     import subprocess
     import tempfile
@@ -935,13 +1210,18 @@ def archive_and_transcode(audio_bytes: bytes, player_id: str) -> tuple[Path, Pat
     ts = datetime.now(ET).strftime("%Y%m%d_%H%M%S")
     safe_id = _sanitize_player_id(player_id)
 
-    archive_player_dir = ARCHIVE_DIR / safe_id
-    archive_player_dir.mkdir(parents=True, exist_ok=True)
-    clips_player_dir = CLIPS_DIR / safe_id
-    clips_player_dir.mkdir(parents=True, exist_ok=True)
+    if out_mp3 is not None:
+        mp3_path = out_mp3
+    else:
+        clips_player_dir = CLIPS_DIR / safe_id
+        clips_player_dir.mkdir(parents=True, exist_ok=True)
+        mp3_path = clips_player_dir / f"{ts}.mp3"
 
-    flac_path = archive_player_dir / f"{ts}.flac"
-    mp3_path = clips_player_dir / f"{ts}.mp3"
+    flac_path: Path | None = None
+    if archive:
+        archive_player_dir = ARCHIVE_DIR / safe_id
+        archive_player_dir.mkdir(parents=True, exist_ok=True)
+        flac_path = archive_player_dir / f"{ts}.flac"
 
     # Detect input format from magic bytes
     is_mp3 = audio_bytes[:3] == b"ID3" or (len(audio_bytes) >= 2 and audio_bytes[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"))
@@ -952,33 +1232,48 @@ def archive_and_transcode(audio_bytes: bytes, player_id: str) -> tuple[Path, Pat
         tmp_path = Path(tmp.name)
 
     try:
-        # Pass 1 — encode to 24-bit/48kHz FLAC archive master
-        result = subprocess.run(
-            ["ffmpeg", "-y", "-i", str(tmp_path),
-             "-ar", "48000", "-c:a", "flac", "-sample_fmt", "s32",
-             str(flac_path)],
-            capture_output=True, timeout=60,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"FFmpeg FLAC encode failed: {result.stderr.decode(errors='replace')[:300]}"
+        # Pass 1 (best only) — encode to 24-bit/48kHz FLAC archive master
+        if archive:
+            result = subprocess.run(
+                ["ffmpeg", "-y", "-i", str(tmp_path),
+                 "-ar", "48000", "-c:a", "flac", "-sample_fmt", "s32",
+                 str(flac_path)],
+                capture_output=True, timeout=60,
             )
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f"FFmpeg FLAC encode failed: {result.stderr.decode(errors='replace')[:300]}"
+                )
+        wrap_input = flac_path if archive else tmp_path
 
         # Pass 2 — Stadium Wrap filter chain → 192kbps MP3
         # Splits signal: dry path + reverb path, mixed 80/20
+        # NOTE: two syntax errors used to live in this graph and made every
+        # "best" render fall through to the raw-bytes path below:
+        #   - `equalizer=...:t=l` — `t` is an alias for `width_type`, whose legal
+        #     values are h/q/o/s/k.  There is no `l`, and `equalizer` is a peaking
+        #     filter anyway; a low shelf is the `bass` filter.
+        #   - `amix=...:weights=0.8:0.2` — `weights` takes one space-separated
+        #     string, so the `:0.2` was parsed as a second option name.
+        # Pitch drop (Halo profile): resample trick, then restore tempo.  Core
+        # filters only — rubberband is not in the Pi's ffmpeg build.
+        pitch = ""
+        if pitch_semitones:
+            ratio = 2 ** (pitch_semitones / 12.0)
+            pitch = f"aresample=48000,asetrate={int(48000 * ratio)},aresample=48000,atempo={1 / ratio:.4f},"
         filtergraph = (
-            "[0:a]"
+            "[0:a]" + pitch +
             "compand=attacks=0.01:decays=0.2"
             ":points=-80/-80|-45/-30|-27/-20|0/-13:gain=6,"
-            "equalizer=f=150:t=l:width_type=o:width=2:g=4"
+            "bass=f=150:width_type=o:width=2:g=4"
             "[processed];"
             "[processed]asplit=2[dry][wet];"
             "[wet]aecho=0.8:1.0:50|75|100:0.4|0.3|0.2[rev];"
-            "[dry][rev]amix=inputs=2:weights=0.8:0.2,"
+            "[dry][rev]amix=inputs=2:weights=0.8 0.2,"
             "extrastereo=m=2.5[out]"
         )
         result = subprocess.run(
-            ["ffmpeg", "-y", "-i", str(flac_path),
+            ["ffmpeg", "-y", "-i", str(wrap_input),
              "-filter_complex", filtergraph,
              "-map", "[out]",
              "-ar", "48000", "-ac", "2",
@@ -997,8 +1292,10 @@ def archive_and_transcode(audio_bytes: bytes, player_id: str) -> tuple[Path, Pat
             pass
 
     logging.info(
-        "[Announcer] archive_and_transcode: %s → FLAC %dkB + MP3 %dkB",
-        player_id, flac_path.stat().st_size // 1024, mp3_path.stat().st_size // 1024,
+        "[Announcer] archive_and_transcode: %s → %s MP3 %dkB",
+        player_id,
+        f"FLAC {flac_path.stat().st_size // 1024}kB +" if flac_path else "(no archive)",
+        mp3_path.stat().st_size // 1024,
     )
     return flac_path, mp3_path
 
@@ -1014,7 +1311,7 @@ def render_player_audio(player_id: str, game_context: dict | None = None,
 
     try:
         provider = get_quick_tts_provider() if quality == "quick" else get_tts_provider()
-        voice = get_default_voice_profile()
+        voice = resolve_voice_profile(player)
         raw_text = build_announcement_text(player, game_context)
         # EdgeTTS handles SSML natively; all others receive stripped plain text.
         # This prevents [breath] / [pause:Xs] from being spoken literally.
@@ -1024,26 +1321,19 @@ def render_player_audio(player_id: str, game_context: dict | None = None,
         if len(audio_bytes) > MAX_TTS_OUTPUT_BYTES:
             raise RuntimeError(f"TTS output too large ({len(audio_bytes)} bytes, max {MAX_TTS_OUTPUT_BYTES})")
 
-        # Best quality: archive FLAC master + Stadium Wrap → MP3
-        if quality == "best":
-            try:
-                _, mp3_path = archive_and_transcode(audio_bytes, player_id)
-                safe_id = _sanitize_player_id(player_id)
-                clip_url = f"/announcer-clips/{safe_id}/{mp3_path.name}"
-            except Exception as e:
-                # FFmpeg not available (e.g., dev environment) — fall back to raw MP3
-                logging.warning("[Announcer] archive_and_transcode failed (%s) — saving raw bytes", e)
-                ts = datetime.now(ET).strftime("%Y%m%d_%H%M%S")
-                safe_id = _sanitize_player_id(player_id)
-                player_clip_dir = CLIPS_DIR / safe_id
-                player_clip_dir.mkdir(parents=True, exist_ok=True)
-                clip_path = player_clip_dir / f"{ts}.mp3"
-                clip_path.write_bytes(audio_bytes)
-                clip_url = f"/announcer-clips/{safe_id}/{ts}.mp3"
-        else:
-            # Quick render — save raw MP3 directly, no archiving
+        # Stadium Wrap on every render; the FLAC archive master is best-only.
+        # Quick used to skip the wrap entirely — and on the Pi, quick is the
+        # only path a coach's Render button can take, so live clips were flat.
+        safe_id = _sanitize_player_id(player_id)
+        try:
+            _, mp3_path = archive_and_transcode(
+                audio_bytes, player_id, archive=(quality == "best"),
+                pitch_semitones=float(voice.get("pitch_semitones") or 0.0))
+            clip_url = f"/announcer-clips/{safe_id}/{mp3_path.name}"
+        except Exception as e:
+            # FFmpeg not available (e.g., dev environment) — fall back to raw MP3
+            logging.warning("[Announcer] archive_and_transcode failed (%s) — saving raw bytes", e)
             ts = datetime.now(ET).strftime("%Y%m%d_%H%M%S")
-            safe_id = _sanitize_player_id(player_id)
             player_clip_dir = CLIPS_DIR / safe_id
             player_clip_dir.mkdir(parents=True, exist_ok=True)
             clip_path = player_clip_dir / f"{ts}.mp3"
@@ -1055,6 +1345,7 @@ def render_player_audio(player_id: str, game_context: dict | None = None,
             "announcer_audio_url": clip_url,
             "rendered_at": datetime.now(ET).isoformat(),
             "render_quality": quality,
+            "voice_rendered": voice["id"],
             "error_message": "",
         })
         logging.info("[Announcer] Rendered %s via %s (%d bytes, quality=%s)",

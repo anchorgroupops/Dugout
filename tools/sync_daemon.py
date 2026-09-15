@@ -3977,21 +3977,34 @@ def _tts_stat(v) -> str:
 
 # Phonetic pronunciation map for names the TTS engine mispronounces.
 # Key: substring to find (case-insensitive), Value: phonetic replacement.
+# Keys must match the spelling GameChanger actually exports, or the substring
+# match never fires.  "Deliliah" sat here for a season while the roster said
+# "Delilah", so the fix was silently dead.
 _PHONETIC_MAP = {
-    "VanDeusen": "Van Doo-sen",
-    "Hourahan": "Hour-a-han",
+    # --- Fall 2026 roster ---
+    "VanDeusen": "van-DOO-sen",
+    "Hourahan": "HOUR-uh-han",
+    "Gomez": "GOH-mez",
+    "McKinney": "muh-KIN-ee",
+    "Delilah": "Duh-LYE-luh",
+    "Raelynne": "RAY-lin",
+    "Cotter": "COT-ter",
+    "Paisley": "PAYZ-lee",
+    "Moawad": "moh-AH-wad",
+    "Sophia": "so-FEE-uh",
+    "Victoria": "vik-TOR-ee-uh",
+    "Leila": "LAY-luh",
+    "Ember": "EM-ber",
+    "Lexi": "LEX-ee",
+    "Ruby": "ROO-bee",
+    # --- Spring 2026 players, kept so archived clips still read correctly ---
     "Moros": "Morr-ohs",
-    "Gomez": "Go-mez",
     "Santiago": "Sahn-tee-ah-go",
-    "McKinney": "Mick-Kinney",
     "Sephina": "Seh-fee-nah",
     "Maylani": "May-lah-nee",
     "Mikayla": "Mih-Kay-lah",
     "Juliette": "Julie-ett",
-    "Deliliah": "Duh-LYE-luh",
-    "Ember": "Em-ber",
-    "Lexi": "LEX-ee",
-    "Ruby": "ROO-bee",
+    # --- Leagues and opponents ---
     "NWVLL": "North West Volusia Little League",
     "PCLL": "Palm Coast Little League",
     "Stihlers": "Steelers",
@@ -4791,7 +4804,11 @@ def handle_announcer_render(player_id):
         return jsonify({"error": "player_not_found"}), 404
 
     req_data = request.get_json(silent=True) or {}
-    game_context = req_data.get("game_context") or dict(_LIVE_GAME_STATE)
+    # Only a situational render (the Halo achievement path) sends game_context.
+    # A plain Render from the roster tab must produce the standard walk-up —
+    # this used to substitute whatever live state was left in memory, so a
+    # clip rendered the day after a game could open "with the bases loaded".
+    game_context = req_data.get("game_context") or None
     requested_quality = str(req_data.get("quality") or "best")
     if requested_quality not in ("quick", "best"):
         requested_quality = "best"
@@ -4805,9 +4822,12 @@ def handle_announcer_render(player_id):
         return jsonify({"status": "queued", "quality": "best", "job_id": job["id"],
                         "player_id": player_id}), 202
 
-    # Mac offline or quick explicitly requested — render on Pi
+    # Mac offline or quick explicitly requested — render on Pi.
+    # Only flag a draft (and queue a re-render) if a worker has ever checked in;
+    # no worker has ever run in prod, so this used to add one orphan job to
+    # render_queue per Render tap, forever.
     effective_quality = "quick"
-    draft = requested_quality == "best"  # was best but Mac unavailable
+    draft = requested_quality == "best" and adb.get_heartbeat_info() is not None
 
     def _bg_render():
         try:
@@ -4864,6 +4884,12 @@ def handle_announcer_phonetics(player_id):
     intro_ts = data.get("intro_timestamp")
 
     updates = {"phonetic_hint": phonetic, "tts_instruction": instruction, "status": "pending"}
+    if "voice_profile_id" in data:
+        from announcer_engine import get_voice_profile
+        vp = str(data.get("voice_profile_id") or "").strip()[:32]
+        if vp and not get_voice_profile(vp):
+            return jsonify({"error": "unknown_voice_profile"}), 400
+        updates["voice_profile_id"] = vp
     if walkup_url:
         parsed_url = urlparse(walkup_url)
         if parsed_url.scheme not in ('http', 'https', ''):
@@ -4879,7 +4905,8 @@ def handle_announcer_phonetics(player_id):
     if not updated:
         return jsonify({"error": "player_not_found"}), 404
 
-    preview = build_announcement_text(updated, game_context=dict(_LIVE_GAME_STATE))
+    # Preview the standard walk-up — the coach is checking how the name reads.
+    preview = build_announcement_text(updated, game_context=None)
     return jsonify({"status": "ok", "player": updated, "announcement_preview": preview})
 
 
@@ -4974,13 +5001,63 @@ def handle_announcer_clip(player_id):
 
 @app.route('/api/announcer/voice-profiles', methods=['GET'])
 def handle_announcer_voice_profiles():
-    """List available voice profiles."""
+    """List available voice profiles and which one is the team default."""
     try:
-        from announcer_engine import load_voice_profiles
-        return jsonify({"profiles": load_voice_profiles()})
+        from announcer_engine import load_voice_profiles, get_default_voice_profile_id
+        return jsonify({"profiles": load_voice_profiles(),
+                        "default_id": get_default_voice_profile_id()})
     except Exception as e:
         logging.error("[Announcer] voice profiles error: %s", e)
         return jsonify({"error": "voice_profiles_failed"}), 500
+
+
+_VOICE_PROFILE_ID_RE = re.compile(r"^[a-z0-9_-]{1,32}$")
+
+
+@app.route('/api/announcer/voice-profiles/default', methods=['POST'])
+def handle_announcer_voice_profile_default():
+    """Set the team's announcer voice.  Players without a per-player override
+    are marked pending so Render All picks them up; their old clip stays
+    playable until the new one lands."""
+    blocked = _guard_mutating_request()
+    if blocked:
+        return blocked
+    data = request.get_json(silent=True) or {}
+    profile_id = str(data.get("profile_id") or "").strip()
+    if not _VOICE_PROFILE_ID_RE.match(profile_id):
+        return jsonify({"error": "invalid_profile_id"}), 400
+    from announcer_engine import (set_default_voice_profile, load_announcer_roster,
+                                  save_announcer_roster, _ROSTER_LOCK)
+    try:
+        set_default_voice_profile(profile_id)
+    except ValueError:
+        return jsonify({"error": "unknown_profile"}), 404
+    marked = 0
+    with _ROSTER_LOCK:
+        roster = load_announcer_roster()
+        for p in roster:
+            if p.get("is_active") and not p.get("voice_profile_id") and p.get("status") == "ready":
+                p["status"] = "pending"
+                marked += 1
+        save_announcer_roster(roster)
+    return jsonify({"status": "ok", "default_id": profile_id, "marked_pending": marked})
+
+
+@app.route('/api/announcer/voice-sample/<profile_id>', methods=['GET'])
+def handle_announcer_voice_sample(profile_id):
+    """Short sample line in the given voice, rendered once and cached."""
+    if not _VOICE_PROFILE_ID_RE.match(profile_id or ""):
+        return jsonify({"error": "invalid_profile_id"}), 400
+    try:
+        from announcer_engine import render_voice_sample
+        path = render_voice_sample(profile_id)
+    except ValueError:
+        return jsonify({"error": "unknown_profile"}), 404
+    except Exception as e:
+        logging.error("[Announcer] voice sample failed for %s: %s", profile_id, e)
+        return jsonify({"error": "sample_failed"}), 503
+    return Response(path.read_bytes(), mimetype="audio/mpeg",
+                    headers={"Cache-Control": "public, max-age=86400"})
 
 
 # ---------------------------------------------------------------------------

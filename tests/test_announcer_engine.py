@@ -229,8 +229,11 @@ class TestGetTtsProvider:
         monkeypatch.delenv("REPLICATE_API_TOKEN", raising=False)
         monkeypatch.delenv("ELEVENLABS_API_KEY", raising=False)
         monkeypatch.delenv("ANNOUNCER_VOICE_REF_URL", raising=False)
+        # Pin availability: edge-tts is an optional install, and the point of this
+        # test is chain order, not whether the package is present on this machine.
+        monkeypatch.setattr(EdgeTTSProvider, "available", lambda self: True)
         provider = get_tts_provider()
-        # EdgeTTS is always in the chain and available without credentials
+        # EdgeTTS is the first credential-free provider in the chain
         assert isinstance(provider, EdgeTTSProvider)
 
     def test_quick_returns_mock_when_no_env_vars(self, monkeypatch):
@@ -238,8 +241,11 @@ class TestGetTtsProvider:
         monkeypatch.delenv("REPLICATE_API_TOKEN", raising=False)
         monkeypatch.delenv("ELEVENLABS_API_KEY", raising=False)
         monkeypatch.delenv("ANNOUNCER_VOICE_REF_URL", raising=False)
+        # Pin availability: edge-tts is an optional install, and the point of this
+        # test is chain order, not whether the package is present on this machine.
+        monkeypatch.setattr(EdgeTTSProvider, "available", lambda self: True)
         provider = get_quick_tts_provider()
-        # EdgeTTS is always in the chain and available without credentials
+        # EdgeTTS is the first credential-free provider in the chain
         assert isinstance(provider, EdgeTTSProvider)
 
 
@@ -376,53 +382,115 @@ class TestBuildAnnouncementText:
 # load_voice_profiles / get_default_voice_profile
 # ---------------------------------------------------------------------------
 
-class TestLoadVoiceProfiles:
-    def test_returns_list_when_no_file(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(ae_mod, "VOICE_PROFILES_FILE", tmp_path / "vp.json")
-        result = load_voice_profiles()
-        assert isinstance(result, list)
-        assert len(result) >= 1
+class TestVoiceProfiles:
+    """Profiles are a fixed list in code; only the team default is persisted."""
 
-    def test_returns_default_when_file_empty(self, tmp_path, monkeypatch):
-        vp_file = tmp_path / "vp.json"
-        vp_file.write_text("[]")
-        monkeypatch.setattr(ae_mod, "VOICE_PROFILES_FILE", vp_file)
-        result = load_voice_profiles()
-        assert isinstance(result, list)
+    def test_halo_is_the_default_when_nothing_selected(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(ae_mod, "VOICE_SELECTION_FILE", tmp_path / "sel.json")
+        assert get_default_voice_profile()["id"] == "halo"
+        profiles = load_voice_profiles()
+        assert [p["id"] for p in profiles if p["is_default"]] == ["halo"]
+        assert len(profiles) >= 4
 
-    def test_returns_profiles_from_file(self, tmp_path, monkeypatch):
-        profiles = [{"name": "Custom", "is_default": True}]
-        vp_file = tmp_path / "vp.json"
-        vp_file.write_text(json.dumps(profiles))
-        monkeypatch.setattr(ae_mod, "VOICE_PROFILES_FILE", vp_file)
-        result = load_voice_profiles()
-        assert result[0]["name"] == "Custom"
+    def test_halo_profile_drops_pitch_and_uses_deep_voice(self):
+        halo = ae_mod.get_voice_profile("halo")
+        assert halo["pitch_semitones"] < 0
+        assert halo["elevenlabs_voice_id"] == ae_mod.ANNOUNCER_ELEVENLABS_VOICE_ID
+        assert halo["voice_settings"]["style"] >= 0.7
+
+    def test_set_default_persists_and_reloads(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(ae_mod, "VOICE_SELECTION_FILE", tmp_path / "sel.json")
+        monkeypatch.setattr(ae_mod, "_ensure_dirs", lambda: None)
+        ae_mod.set_default_voice_profile("callum")
+        assert ae_mod.get_default_voice_profile_id() == "callum"
+        assert get_default_voice_profile()["id"] == "callum"
+
+    def test_set_default_rejects_unknown(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(ae_mod, "VOICE_SELECTION_FILE", tmp_path / "sel.json")
+        with pytest.raises(ValueError):
+            ae_mod.set_default_voice_profile("nope")
+
+    def test_corrupt_selection_falls_back_to_halo(self, tmp_path, monkeypatch):
+        sel = tmp_path / "sel.json"
+        sel.write_text('{"default_profile_id": "deleted-voice"}', encoding="utf-8")
+        monkeypatch.setattr(ae_mod, "VOICE_SELECTION_FILE", sel)
+        assert ae_mod.get_default_voice_profile_id() == "halo"
+
+    def test_player_override_beats_team_default(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(ae_mod, "VOICE_SELECTION_FILE", tmp_path / "sel.json")
+        assert ae_mod.resolve_voice_profile({"voice_profile_id": "george"})["id"] == "george"
+        assert ae_mod.resolve_voice_profile({"voice_profile_id": ""})["id"] == "halo"
+        assert ae_mod.resolve_voice_profile({"voice_profile_id": "bogus"})["id"] == "halo"
 
 
-class TestGetDefaultVoiceProfile:
-    def test_returns_dict(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(ae_mod, "VOICE_PROFILES_FILE", tmp_path / "vp.json")
-        result = get_default_voice_profile()
-        assert isinstance(result, dict)
+class TestElevenLabsUsesProfile:
+    def test_model_and_settings_come_from_profile(self, monkeypatch):
+        captured = {}
 
-    def test_returns_profile_marked_default(self, tmp_path, monkeypatch):
-        profiles = [
-            {"name": "NonDefault", "is_default": False},
-            {"name": "TheDefault", "is_default": True},
-        ]
-        vp_file = tmp_path / "vp.json"
-        vp_file.write_text(json.dumps(profiles))
-        monkeypatch.setattr(ae_mod, "VOICE_PROFILES_FILE", vp_file)
-        result = get_default_voice_profile()
-        assert result["name"] == "TheDefault"
+        class _Resp:
+            status_code = 200
+            content = b"audio"
+            headers = {}
 
-    def test_fallback_when_no_default_marked(self, tmp_path, monkeypatch):
-        profiles = [{"name": "NoDefault", "is_default": False}]
-        vp_file = tmp_path / "vp.json"
-        vp_file.write_text(json.dumps(profiles))
-        monkeypatch.setattr(ae_mod, "VOICE_PROFILES_FILE", vp_file)
-        result = get_default_voice_profile()
-        assert isinstance(result, dict)
+        def _post(url, json=None, headers=None, timeout=None):
+            captured["url"] = url
+            captured["json"] = json
+            return _Resp()
+
+        monkeypatch.setattr(ae_mod.requests, "post", _post)
+        monkeypatch.setenv("ELEVENLABS_API_KEY", "el_fake")
+        monkeypatch.delenv("ELEVENLABS_VOICE_ID", raising=False)
+        monkeypatch.delenv("ELEVENLABS_DEFAULT_VOICE_ID", raising=False)
+        monkeypatch.setitem(sys.modules, "sync_daemon", None)
+        profile = ae_mod.get_voice_profile("callum")
+        ae_mod.ElevenLabsTTS().synthesize("hello", profile)
+        assert profile["elevenlabs_voice_id"] in captured["url"]
+        assert captured["json"]["model_id"] == profile["model_id"]
+        assert captured["json"]["voice_settings"] == profile["voice_settings"]
+
+
+class TestPitchDropInStadiumChain:
+    def test_negative_semitones_add_resample_stage(self, tmp_path, monkeypatch):
+        import shutil, subprocess
+        if not shutil.which("ffmpeg"):
+            pytest.skip("ffmpeg not installed")
+        monkeypatch.setattr(ae_mod, "CLIPS_DIR", tmp_path / "clips")
+        src = tmp_path / "in.wav"
+        subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi",
+                        "-i", "sine=frequency=200:duration=1", str(src)], check=True)
+        out = tmp_path / "shifted.mp3"
+        _, mp3 = ae_mod.archive_and_transcode(src.read_bytes(), "p1", archive=False,
+                                              pitch_semitones=-2.0, out_mp3=out)
+        assert mp3 == out and out.stat().st_size > 0
+        # Duration must survive the tempo correction (within codec padding).
+        dur = float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                                    "-of", "csv=p=0", str(out)], capture_output=True, text=True).stdout)
+        assert 0.85 < dur < 1.35
+
+
+class TestRenderVoiceSample:
+    def test_renders_once_then_serves_cache(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(ae_mod, "VOICE_SAMPLES_DIR", tmp_path / "samples")
+        calls = []
+
+        class _P(ae_mod.TTSProvider):
+            name = "fake"
+            def synthesize(self, text, voice_config):
+                calls.append((text, voice_config["id"]))
+                return b"x" * 2000
+
+        monkeypatch.setattr(ae_mod, "get_tts_provider", lambda: _P())
+        monkeypatch.setattr(ae_mod, "archive_and_transcode",
+                            lambda audio, pid, **kw: (None, kw["out_mp3"].write_bytes(audio) and kw["out_mp3"]))
+        p1 = ae_mod.render_voice_sample("george")
+        p2 = ae_mod.render_voice_sample("george")
+        assert p1 == p2 and p1.exists()
+        assert len(calls) == 1 and calls[0][1] == "george"
+        assert "[pause" not in calls[0][0]           # markup stripped for non-Edge providers
+
+    def test_unknown_profile_raises(self):
+        with pytest.raises(ValueError):
+            ae_mod.render_voice_sample("nope")
 
 
 # ---------------------------------------------------------------------------
@@ -981,13 +1049,13 @@ class TestGetTtsProviderBranches:
         assert isinstance(ae_mod.get_tts_provider(), ae_mod.ReplicateTTS)
 
     def test_returns_elevenlabs_when_only_el_key(self, monkeypatch):
-        """With only ELEVENLABS_API_KEY set, EdgeTTS wins (it's earlier in chain and credential-free)."""
+        """With ELEVENLABS_API_KEY set, ElevenLabs wins — it outranks the style-less free providers."""
         monkeypatch.delenv("LOCAL_TTS_URL", raising=False)
         monkeypatch.delenv("REPLICATE_API_TOKEN", raising=False)
         monkeypatch.delenv("ANNOUNCER_VOICE_REF_URL", raising=False)
         monkeypatch.setenv("ELEVENLABS_API_KEY", "el_fakekey")
         monkeypatch.setitem(sys.modules, "sync_daemon", None)
-        assert isinstance(ae_mod.get_tts_provider(), ae_mod.EdgeTTSProvider)
+        assert isinstance(ae_mod.get_tts_provider(), ae_mod.ElevenLabsTTS)
 
 
 class TestGetQuickTtsProviderBranches:
@@ -1004,13 +1072,13 @@ class TestGetQuickTtsProviderBranches:
         assert isinstance(ae_mod.get_quick_tts_provider(), ae_mod.Replicate06bTTS)
 
     def test_returns_elevenlabs_when_only_el_key(self, monkeypatch):
-        """With only ELEVENLABS_API_KEY set, EdgeTTS wins (it's earlier in chain and credential-free)."""
+        """With ELEVENLABS_API_KEY set, ElevenLabs wins — it outranks the style-less free providers."""
         monkeypatch.delenv("LOCAL_TTS_URL", raising=False)
         monkeypatch.delenv("REPLICATE_API_TOKEN", raising=False)
         monkeypatch.delenv("ANNOUNCER_VOICE_REF_URL", raising=False)
         monkeypatch.setenv("ELEVENLABS_API_KEY", "el_fakekey")
         monkeypatch.setitem(sys.modules, "sync_daemon", None)
-        assert isinstance(ae_mod.get_quick_tts_provider(), ae_mod.EdgeTTSProvider)
+        assert isinstance(ae_mod.get_quick_tts_provider(), ae_mod.ElevenLabsTTS)
 
 
 # ---------------------------------------------------------------------------
@@ -1431,3 +1499,180 @@ class TestGetRosterStats:
         roster_file.write_text(json.dumps(roster))
         result = ae_mod.get_roster_stats()
         assert result["total"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Council 2026-09-15 — regressions for the Fall 2026 announcer hardening
+# ---------------------------------------------------------------------------
+
+class TestAnnouncerVoiceDefault:
+    def test_default_voice_is_not_the_female_premade(self):
+        """EXAVITQu4vr4xnSDxMaL is ElevenLabs "Sarah" — wrong for a stadium announcer."""
+        assert ae_mod.ANNOUNCER_ELEVENLABS_VOICE_ID != "EXAVITQu4vr4xnSDxMaL"
+
+    def test_elevenlabs_outranks_style_less_providers(self, monkeypatch):
+        monkeypatch.delenv("LOCAL_TTS_URL", raising=False)
+        monkeypatch.delenv("REPLICATE_API_TOKEN", raising=False)
+        monkeypatch.delenv("ANNOUNCER_VOICE_REF_URL", raising=False)
+        monkeypatch.setenv("ELEVENLABS_API_KEY", "el_fakekey")
+        monkeypatch.setitem(sys.modules, "sync_daemon", None)
+        chain = [p.name for p in ae_mod._build_provider_chain()]
+        assert chain.index("elevenlabs") < chain.index("edge_tts")
+
+
+class TestNumberToWord:
+    @pytest.mark.parametrize("raw,spoken", [
+        ("0", "zero"), ("00", "double-zero"), ("7", "seven"), ("13", "thirteen"),
+        ("15", "fifteen"), ("18", "eighteen"), ("25", "twenty-five"),
+        ("31", "thirty-one"), ("67", "sixty-seven"), ("99", "ninety-nine"),
+        ("20", "twenty"), ("40", "forty"),
+    ])
+    def test_every_live_jersey_number_is_spoken(self, raw, spoken):
+        assert ae_mod._number_to_word(raw) == spoken
+
+    @pytest.mark.parametrize("raw", ["", "TBD", "100"])
+    def test_non_jersey_input_passes_through(self, raw):
+        assert ae_mod._number_to_word(raw) == raw
+
+
+class TestStadiumWrapFiltergraph:
+    def test_filtergraph_is_accepted_by_ffmpeg(self, tmp_path):
+        """The graph used to carry two syntax errors, so every best-quality
+        render silently fell back to unprocessed bytes."""
+        import shutil, subprocess
+        if not shutil.which("ffmpeg"):
+            pytest.skip("ffmpeg not installed")
+        src = tmp_path / "in.wav"
+        subprocess.run(
+            ["ffmpeg", "-y", "-v", "error", "-f", "lavfi",
+             "-i", "sine=frequency=200:duration=1", str(src)], check=True)
+        flac, mp3 = ae_mod.archive_and_transcode(src.read_bytes(), "test-player")
+        assert flac.exists() and mp3.exists()
+        assert mp3.stat().st_size > 0
+
+
+class TestReconcileRosterWithTeam:
+    def test_adds_new_players_and_deactivates_departed(self, monkeypatch):
+        team = [
+            {"id": "1-new-player", "first": "New", "last": "Player", "number": "1",
+             "phonetic_hint": "", "tts_instruction": "", "walkup_song_url": "",
+             "intro_timestamp": 5.0, "announcer_audio_url": "", "status": "pending",
+             "is_active": True, "rendered_at": "", "error_message": ""},
+        ]
+        monkeypatch.setattr(ae_mod, "_bootstrap_roster_from_team", lambda: team)
+        existing = [{"id": "9-old-player", "is_active": True, "status": "ready",
+                     "phonetic_hint": "OLD-ee", "announcer_audio_url": "/clip.mp3"}]
+        roster, changed = ae_mod.reconcile_roster_with_team(existing)
+        assert changed
+        by_id = {p["id"]: p for p in roster}
+        assert by_id["1-new-player"]["is_active"] is True
+        assert by_id["9-old-player"]["is_active"] is False
+        # departed players keep their work — deactivated, never deleted
+        assert by_id["9-old-player"]["phonetic_hint"] == "OLD-ee"
+        assert by_id["9-old-player"]["announcer_audio_url"] == "/clip.mp3"
+
+    def test_no_team_data_leaves_roster_untouched(self, monkeypatch):
+        monkeypatch.setattr(ae_mod, "_bootstrap_roster_from_team", lambda: [])
+        existing = [{"id": "9-old-player", "is_active": True}]
+        roster, changed = ae_mod.reconcile_roster_with_team(existing)
+        assert changed is False
+        assert roster == existing
+
+
+class TestConcurrentRosterUpdates:
+    def test_parallel_updates_do_not_lose_writes(self, tmp_path, monkeypatch):
+        """Unlocked read-modify-write dropped statuses under --concurrency 2-4."""
+        from concurrent.futures import ThreadPoolExecutor
+        roster_file = tmp_path / "roster.json"
+        players = [{"id": f"p{i}", "is_active": True, "status": "pending"} for i in range(10)]
+        roster_file.write_text(json.dumps(players), encoding="utf-8")
+        monkeypatch.setattr(ae_mod, "ROSTER_FILE", roster_file)
+        monkeypatch.setattr(ae_mod, "_bootstrap_roster_from_team", lambda: [])
+        monkeypatch.setattr(ae_mod, "_ensure_dirs", lambda: None)
+
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            list(pool.map(lambda p: ae_mod.update_player(p["id"], {"status": "ready"}), players))
+
+        final = json.loads(roster_file.read_text(encoding="utf-8"))
+        assert [p["status"] for p in final] == ["ready"] * 10
+
+
+# ---------------------------------------------------------------------------
+# Second pass 2026-09-15 — web render path (gunicorn, 2 workers)
+# ---------------------------------------------------------------------------
+
+class TestRosterLockCrossProcess:
+    def test_lock_is_reentrant(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(ae_mod, "ROSTER_FILE", tmp_path / "roster.json")
+        with ae_mod._ROSTER_LOCK:
+            with ae_mod._ROSTER_LOCK:
+                pass  # must not deadlock
+
+    def test_lock_blocks_a_second_process(self, tmp_path, monkeypatch):
+        """A thread lock alone let two gunicorn workers clobber roster.json."""
+        import subprocess, time
+        roster = tmp_path / "roster.json"
+        sentinel = tmp_path / "held"
+        monkeypatch.setattr(ae_mod, "ROSTER_FILE", roster)
+        repo = str(Path(ae_mod.__file__).resolve().parents[1])
+        child = subprocess.Popen([sys.executable, "-c", (
+            "import sys, time, pathlib\n"
+            f"sys.path.insert(0, {repo!r})\n"
+            "import tools.announcer_engine as ae\n"
+            f"ae.ROSTER_FILE = pathlib.Path({str(roster)!r})\n"
+            "with ae._ROSTER_LOCK:\n"
+            f"    pathlib.Path({str(sentinel)!r}).write_text('held')\n"
+            "    time.sleep(1.5)\n"
+        )])
+        try:
+            deadline = time.monotonic() + 10
+            while not sentinel.exists():
+                assert time.monotonic() < deadline, "child never took the lock"
+                time.sleep(0.05)
+            t0 = time.monotonic()
+            with ae_mod._ROSTER_LOCK:
+                waited = time.monotonic() - t0
+        finally:
+            child.wait(timeout=10)
+        assert waited >= 0.8, f"parent acquired the lock after only {waited:.2f}s — not held across processes"
+
+
+class TestQuickRenderGetsStadiumWrap:
+    def _setup(self, tmp_path, monkeypatch):
+        roster = tmp_path / "roster.json"
+        roster.write_text(json.dumps([{"id": "p1", "first": "A", "last": "B", "number": "1",
+                                       "is_active": True, "status": "pending"}]), encoding="utf-8")
+        monkeypatch.setattr(ae_mod, "ROSTER_FILE", roster)
+        monkeypatch.setattr(ae_mod, "CLIPS_DIR", tmp_path / "clips")
+        monkeypatch.setattr(ae_mod, "_bootstrap_roster_from_team", lambda: [])
+        monkeypatch.setattr(ae_mod, "_ensure_dirs", lambda: None)
+        monkeypatch.setattr(ae_mod, "get_quick_tts_provider", lambda: MockTTS())
+        monkeypatch.setattr(ae_mod, "get_tts_provider", lambda: MockTTS())
+        wrap = MagicMock(return_value=(None, tmp_path / "clips" / "p1" / "x.mp3"))
+        monkeypatch.setattr(ae_mod, "archive_and_transcode", wrap)
+        return wrap
+
+    def test_quick_wraps_without_archive(self, tmp_path, monkeypatch):
+        wrap = self._setup(tmp_path, monkeypatch)
+        ae_mod.render_player_audio("p1", quality="quick")
+        wrap.assert_called_once()
+        assert wrap.call_args.kwargs["archive"] is False
+
+    def test_best_wraps_with_archive(self, tmp_path, monkeypatch):
+        wrap = self._setup(tmp_path, monkeypatch)
+        ae_mod.render_player_audio("p1", quality="best")
+        assert wrap.call_args.kwargs["archive"] is True
+
+    def test_archive_false_writes_no_flac(self, tmp_path, monkeypatch):
+        import shutil, subprocess
+        if not shutil.which("ffmpeg"):
+            pytest.skip("ffmpeg not installed")
+        monkeypatch.setattr(ae_mod, "CLIPS_DIR", tmp_path / "clips")
+        monkeypatch.setattr(ae_mod, "ARCHIVE_DIR", tmp_path / "archive")
+        src = tmp_path / "in.wav"
+        subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi",
+                        "-i", "sine=frequency=200:duration=1", str(src)], check=True)
+        flac, mp3 = ae_mod.archive_and_transcode(src.read_bytes(), "p1", archive=False)
+        assert flac is None
+        assert mp3.exists() and mp3.stat().st_size > 0
+        assert not (tmp_path / "archive").exists()
