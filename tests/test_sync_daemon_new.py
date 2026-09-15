@@ -10995,3 +10995,104 @@ class TestAnnouncerAutoRepairLoop:
         except (KeyboardInterrupt, StopIteration):
             pass
         # Should complete without crash even though inner operation failed
+
+
+# ---------------------------------------------------------------------------
+# Second pass 2026-09-15 — render routing on the Pi
+# ---------------------------------------------------------------------------
+
+class TestRenderRoutingSecondPass:
+    _ORIGIN = "https://test.render.com"
+
+    def _post(self, client, path, body, monkeypatch, adb):
+        monkeypatch.setattr(sd, "WRITE_ORIGINS", [self._ORIGIN])
+        monkeypatch.setattr(sd, "_announcer_db", lambda: adb)
+        sd._MUTATE_RATE_BUCKETS.clear()
+        return client.post(path, json=body, content_type="application/json",
+                           headers={"Origin": self._ORIGIN})
+
+    @staticmethod
+    def _wait_for(mock, seconds=3.0):
+        deadline = _time_mod.monotonic() + seconds
+        while not mock.called and _time_mod.monotonic() < deadline:
+            _time_mod.sleep(0.02)
+        return mock.called
+
+    def test_plain_render_does_not_inherit_live_game_state(self, flask_app, monkeypatch, tmp_path):
+        """A roster-tab Render used to bake whatever was left in _LIVE_GAME_STATE
+        into the standard walk-up (e.g. 'with the bases loaded' the next day)."""
+        fake = _make_fake_announcer_engine(tmp_path)
+        monkeypatch.setitem(sys.modules, "announcer_engine", fake)
+        orig = sd._LIVE_GAME_STATE.copy()
+        sd._LIVE_GAME_STATE.update({"bases": [True, True, True], "outs": 2})
+        try:
+            adb = MagicMock()
+            adb.is_worker_alive = MagicMock(return_value=False)
+            adb.get_heartbeat_info = MagicMock(return_value=None)
+            with flask_app.test_client() as client:
+                resp = self._post(client, "/api/announcer/render/07-jane-doe",
+                                  {"quality": "quick"}, monkeypatch, adb)
+            assert resp.status_code == 202
+            assert self._wait_for(fake.render_player_audio)
+            assert fake.render_player_audio.call_args.kwargs["game_context"] is None
+        finally:
+            sd._LIVE_GAME_STATE.clear()
+            sd._LIVE_GAME_STATE.update(orig)
+
+    def test_explicit_game_context_still_honoured(self, flask_app, monkeypatch, tmp_path):
+        fake = _make_fake_announcer_engine(tmp_path)
+        monkeypatch.setitem(sys.modules, "announcer_engine", fake)
+        adb = MagicMock()
+        adb.is_worker_alive = MagicMock(return_value=False)
+        adb.get_heartbeat_info = MagicMock(return_value=None)
+        ctx = {"achievement": "grand_slam"}
+        with flask_app.test_client() as client:
+            self._post(client, "/api/announcer/render/07-jane-doe",
+                       {"quality": "quick", "game_context": ctx}, monkeypatch, adb)
+        assert self._wait_for(fake.render_player_audio)
+        assert fake.render_player_audio.call_args.kwargs["game_context"] == ctx
+
+    def test_no_worker_ever_means_no_phantom_draft_job(self, flask_app, monkeypatch, tmp_path):
+        """No Mac worker has ever run in prod; every 'best' tap used to enqueue
+        an orphan job in render_queue."""
+        fake = _make_fake_announcer_engine(tmp_path)
+        monkeypatch.setitem(sys.modules, "announcer_engine", fake)
+        adb = MagicMock()
+        adb.is_worker_alive = MagicMock(return_value=False)
+        adb.get_heartbeat_info = MagicMock(return_value=None)
+        with flask_app.test_client() as client:
+            resp = self._post(client, "/api/announcer/render/07-jane-doe",
+                              {"quality": "best"}, monkeypatch, adb)
+        data = resp.get_json()
+        assert data["quality"] == "quick"
+        assert data["draft_quality"] is False
+        assert self._wait_for(fake.render_player_audio)
+        adb.enqueue_render.assert_not_called()
+
+    def test_worker_seen_before_still_queues_draft(self, flask_app, monkeypatch, tmp_path):
+        fake = _make_fake_announcer_engine(tmp_path)
+        monkeypatch.setitem(sys.modules, "announcer_engine", fake)
+        adb = MagicMock()
+        adb.is_worker_alive = MagicMock(return_value=False)
+        adb.get_heartbeat_info = MagicMock(return_value={"worker_id": "mac", "last_seen_at": "2026-09-01T00:00:00+00:00"})
+        adb.enqueue_render = MagicMock(return_value={"id": "job-9"})
+        with flask_app.test_client() as client:
+            resp = self._post(client, "/api/announcer/render/07-jane-doe",
+                              {"quality": "best"}, monkeypatch, adb)
+        assert resp.get_json()["draft_quality"] is True
+        assert self._wait_for(adb.enqueue_render)
+
+    def test_phonetics_preview_is_the_standard_walkup(self, flask_app, monkeypatch, tmp_path):
+        fake = _make_fake_announcer_engine(tmp_path)
+        monkeypatch.setitem(sys.modules, "announcer_engine", fake)
+        orig = sd._LIVE_GAME_STATE.copy()
+        sd._LIVE_GAME_STATE.update({"bases": [True, True, True], "outs": 2})
+        try:
+            with flask_app.test_client() as client:
+                resp = self._post(client, "/api/announcer/phonetics/07-jane-doe",
+                                  {"phonetic_hint": "jay-n"}, monkeypatch, MagicMock())
+            assert resp.status_code == 200
+            assert fake.build_announcement_text.call_args.kwargs["game_context"] is None
+        finally:
+            sd._LIVE_GAME_STATE.clear()
+            sd._LIVE_GAME_STATE.update(orig)

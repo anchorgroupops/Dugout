@@ -4804,7 +4804,11 @@ def handle_announcer_render(player_id):
         return jsonify({"error": "player_not_found"}), 404
 
     req_data = request.get_json(silent=True) or {}
-    game_context = req_data.get("game_context") or dict(_LIVE_GAME_STATE)
+    # Only a situational render (the Halo achievement path) sends game_context.
+    # A plain Render from the roster tab must produce the standard walk-up —
+    # this used to substitute whatever live state was left in memory, so a
+    # clip rendered the day after a game could open "with the bases loaded".
+    game_context = req_data.get("game_context") or None
     requested_quality = str(req_data.get("quality") or "best")
     if requested_quality not in ("quick", "best"):
         requested_quality = "best"
@@ -4818,9 +4822,12 @@ def handle_announcer_render(player_id):
         return jsonify({"status": "queued", "quality": "best", "job_id": job["id"],
                         "player_id": player_id}), 202
 
-    # Mac offline or quick explicitly requested — render on Pi
+    # Mac offline or quick explicitly requested — render on Pi.
+    # Only flag a draft (and queue a re-render) if a worker has ever checked in;
+    # no worker has ever run in prod, so this used to add one orphan job to
+    # render_queue per Render tap, forever.
     effective_quality = "quick"
-    draft = requested_quality == "best"  # was best but Mac unavailable
+    draft = requested_quality == "best" and adb.get_heartbeat_info() is not None
 
     def _bg_render():
         try:
@@ -4892,7 +4899,8 @@ def handle_announcer_phonetics(player_id):
     if not updated:
         return jsonify({"error": "player_not_found"}), 404
 
-    preview = build_announcement_text(updated, game_context=dict(_LIVE_GAME_STATE))
+    # Preview the standard walk-up — the coach is checking how the name reads.
+    preview = build_announcement_text(updated, game_context=None)
     return jsonify({"status": "ok", "player": updated, "announcement_preview": preview})
 
 

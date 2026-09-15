@@ -36,8 +36,75 @@ ARCHIVE_DIR = ANNOUNCER_DIR / "archive"
 ROSTER_FILE = ANNOUNCER_DIR / "roster.json"
 VOICE_PROFILES_FILE = ANNOUNCER_DIR / "voice_profiles.json"
 
+class _RosterLock:
+    """Re-entrant lock over roster.json that holds across threads AND processes.
+
+    A thread lock alone is not enough: the Pi runs gunicorn with 2 workers, so
+    a coach tapping Render on two players can land each request in a different
+    process.  The OS file lock (flock / msvcrt) is what actually serialises them;
+    the RLock makes it re-entrant, since update_player() calls load_announcer_roster()
+    while already holding the lock.  Both release automatically if the process dies.
+    """
+
+    def __init__(self) -> None:
+        self._thread_lock = threading.RLock()
+        self._depth = 0
+        self._fh = None
+
+    def __enter__(self):
+        self._thread_lock.acquire()
+        if self._depth == 0:
+            self._fh = self._acquire_file_lock()
+        self._depth += 1
+        return self
+
+    def __exit__(self, *exc):
+        self._depth -= 1
+        if self._depth == 0 and self._fh is not None:
+            self._release_file_lock(self._fh)
+            self._fh = None
+        self._thread_lock.release()
+
+    @staticmethod
+    def _acquire_file_lock():
+        lock_path = ROSTER_FILE.with_suffix(".lock")
+        try:
+            lock_path.parent.mkdir(parents=True, exist_ok=True)
+            fh = open(lock_path, "a+")
+        except OSError as e:
+            # Read-only filesystem — fall back to the thread lock only.
+            logging.warning("[Announcer] roster lock file unavailable (%s); thread-lock only", e)
+            return None
+        try:
+            if os.name == "nt":
+                import msvcrt
+                fh.seek(0)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        except OSError as e:
+            logging.warning("[Announcer] roster file lock failed (%s); thread-lock only", e)
+            fh.close()
+            return None
+        return fh
+
+    @staticmethod
+    def _release_file_lock(fh) -> None:
+        try:
+            if os.name == "nt":
+                import msvcrt
+                fh.seek(0)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+        finally:
+            fh.close()
+
+
 # Serialises roster.json read-modify-write across concurrent renders.
-_ROSTER_LOCK = threading.RLock()
+_ROSTER_LOCK = _RosterLock()
 
 # Reuse the phonetic map from sync_daemon at runtime (imported lazily to avoid circular imports)
 _PHONETIC_MAP = None
@@ -976,10 +1043,15 @@ def load_announcer_roster() -> list[dict]:
     if isinstance(roster, list) and roster:
         roster, changed = reconcile_roster_with_team(roster)
         if changed:
-            try:
-                _atomic_write_json(ROSTER_FILE, roster)
-            except OSError as e:
-                logging.warning("[Announcer] Could not persist reconciled roster: %s", e)
+            # Re-read under the lock so this write can't clobber a status update
+            # that another worker landed between our read and now.
+            with _ROSTER_LOCK:
+                fresh = _read_json(ROSTER_FILE, default=None)
+                roster, _ = reconcile_roster_with_team(fresh if isinstance(fresh, list) else roster)
+                try:
+                    _atomic_write_json(ROSTER_FILE, roster)
+                except OSError as e:
+                    logging.warning("[Announcer] Could not persist reconciled roster: %s", e)
         return roster
 
     # Bootstrap from team data
@@ -1027,15 +1099,16 @@ def update_player(player_id: str, updates: dict) -> dict | None:
 # Render Operations
 # ---------------------------------------------------------------------------
 
-def archive_and_transcode(audio_bytes: bytes, player_id: str) -> tuple[Path, Path]:
-    """Save a lossless FLAC master and 192kbps MP3 proxy from raw audio bytes.
+def archive_and_transcode(audio_bytes: bytes, player_id: str,
+                          archive: bool = True) -> tuple[Path | None, Path]:
+    """Run the Stadium Wrap and write the MP3; optionally keep a FLAC master.
 
     FFmpeg Stadium Wrap chain (Best Quality):
       compand      → broadcast hard compression (attack 10ms, decay 200ms)
       equalizer    → +4dB low shelf at 150 Hz (Steitzer sub-bass boom)
       extrastereo  → m=2.5 stereo widening (fills the stadium)
 
-    Returns (flac_path, mp3_path). Raises RuntimeError if FFmpeg is not in PATH.
+    Returns (flac_path or None, mp3_path). Raises RuntimeError if FFmpeg is not in PATH.
     """
     import subprocess
     import tempfile
@@ -1043,13 +1116,15 @@ def archive_and_transcode(audio_bytes: bytes, player_id: str) -> tuple[Path, Pat
     ts = datetime.now(ET).strftime("%Y%m%d_%H%M%S")
     safe_id = _sanitize_player_id(player_id)
 
-    archive_player_dir = ARCHIVE_DIR / safe_id
-    archive_player_dir.mkdir(parents=True, exist_ok=True)
     clips_player_dir = CLIPS_DIR / safe_id
     clips_player_dir.mkdir(parents=True, exist_ok=True)
-
-    flac_path = archive_player_dir / f"{ts}.flac"
     mp3_path = clips_player_dir / f"{ts}.mp3"
+
+    flac_path: Path | None = None
+    if archive:
+        archive_player_dir = ARCHIVE_DIR / safe_id
+        archive_player_dir.mkdir(parents=True, exist_ok=True)
+        flac_path = archive_player_dir / f"{ts}.flac"
 
     # Detect input format from magic bytes
     is_mp3 = audio_bytes[:3] == b"ID3" or (len(audio_bytes) >= 2 and audio_bytes[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"))
@@ -1060,17 +1135,19 @@ def archive_and_transcode(audio_bytes: bytes, player_id: str) -> tuple[Path, Pat
         tmp_path = Path(tmp.name)
 
     try:
-        # Pass 1 — encode to 24-bit/48kHz FLAC archive master
-        result = subprocess.run(
-            ["ffmpeg", "-y", "-i", str(tmp_path),
-             "-ar", "48000", "-c:a", "flac", "-sample_fmt", "s32",
-             str(flac_path)],
-            capture_output=True, timeout=60,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"FFmpeg FLAC encode failed: {result.stderr.decode(errors='replace')[:300]}"
+        # Pass 1 (best only) — encode to 24-bit/48kHz FLAC archive master
+        if archive:
+            result = subprocess.run(
+                ["ffmpeg", "-y", "-i", str(tmp_path),
+                 "-ar", "48000", "-c:a", "flac", "-sample_fmt", "s32",
+                 str(flac_path)],
+                capture_output=True, timeout=60,
             )
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f"FFmpeg FLAC encode failed: {result.stderr.decode(errors='replace')[:300]}"
+                )
+        wrap_input = flac_path if archive else tmp_path
 
         # Pass 2 — Stadium Wrap filter chain → 192kbps MP3
         # Splits signal: dry path + reverb path, mixed 80/20
@@ -1093,7 +1170,7 @@ def archive_and_transcode(audio_bytes: bytes, player_id: str) -> tuple[Path, Pat
             "extrastereo=m=2.5[out]"
         )
         result = subprocess.run(
-            ["ffmpeg", "-y", "-i", str(flac_path),
+            ["ffmpeg", "-y", "-i", str(wrap_input),
              "-filter_complex", filtergraph,
              "-map", "[out]",
              "-ar", "48000", "-ac", "2",
@@ -1112,8 +1189,10 @@ def archive_and_transcode(audio_bytes: bytes, player_id: str) -> tuple[Path, Pat
             pass
 
     logging.info(
-        "[Announcer] archive_and_transcode: %s → FLAC %dkB + MP3 %dkB",
-        player_id, flac_path.stat().st_size // 1024, mp3_path.stat().st_size // 1024,
+        "[Announcer] archive_and_transcode: %s → %s MP3 %dkB",
+        player_id,
+        f"FLAC {flac_path.stat().st_size // 1024}kB +" if flac_path else "(no archive)",
+        mp3_path.stat().st_size // 1024,
     )
     return flac_path, mp3_path
 
@@ -1139,26 +1218,18 @@ def render_player_audio(player_id: str, game_context: dict | None = None,
         if len(audio_bytes) > MAX_TTS_OUTPUT_BYTES:
             raise RuntimeError(f"TTS output too large ({len(audio_bytes)} bytes, max {MAX_TTS_OUTPUT_BYTES})")
 
-        # Best quality: archive FLAC master + Stadium Wrap → MP3
-        if quality == "best":
-            try:
-                _, mp3_path = archive_and_transcode(audio_bytes, player_id)
-                safe_id = _sanitize_player_id(player_id)
-                clip_url = f"/announcer-clips/{safe_id}/{mp3_path.name}"
-            except Exception as e:
-                # FFmpeg not available (e.g., dev environment) — fall back to raw MP3
-                logging.warning("[Announcer] archive_and_transcode failed (%s) — saving raw bytes", e)
-                ts = datetime.now(ET).strftime("%Y%m%d_%H%M%S")
-                safe_id = _sanitize_player_id(player_id)
-                player_clip_dir = CLIPS_DIR / safe_id
-                player_clip_dir.mkdir(parents=True, exist_ok=True)
-                clip_path = player_clip_dir / f"{ts}.mp3"
-                clip_path.write_bytes(audio_bytes)
-                clip_url = f"/announcer-clips/{safe_id}/{ts}.mp3"
-        else:
-            # Quick render — save raw MP3 directly, no archiving
+        # Stadium Wrap on every render; the FLAC archive master is best-only.
+        # Quick used to skip the wrap entirely — and on the Pi, quick is the
+        # only path a coach's Render button can take, so live clips were flat.
+        safe_id = _sanitize_player_id(player_id)
+        try:
+            _, mp3_path = archive_and_transcode(audio_bytes, player_id,
+                                                archive=(quality == "best"))
+            clip_url = f"/announcer-clips/{safe_id}/{mp3_path.name}"
+        except Exception as e:
+            # FFmpeg not available (e.g., dev environment) — fall back to raw MP3
+            logging.warning("[Announcer] archive_and_transcode failed (%s) — saving raw bytes", e)
             ts = datetime.now(ET).strftime("%Y%m%d_%H%M%S")
-            safe_id = _sanitize_player_id(player_id)
             player_clip_dir = CLIPS_DIR / safe_id
             player_clip_dir.mkdir(parents=True, exist_ok=True)
             clip_path = player_clip_dir / f"{ts}.mp3"

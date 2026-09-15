@@ -1533,3 +1533,84 @@ class TestConcurrentRosterUpdates:
 
         final = json.loads(roster_file.read_text(encoding="utf-8"))
         assert [p["status"] for p in final] == ["ready"] * 10
+
+
+# ---------------------------------------------------------------------------
+# Second pass 2026-09-15 — web render path (gunicorn, 2 workers)
+# ---------------------------------------------------------------------------
+
+class TestRosterLockCrossProcess:
+    def test_lock_is_reentrant(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(ae_mod, "ROSTER_FILE", tmp_path / "roster.json")
+        with ae_mod._ROSTER_LOCK:
+            with ae_mod._ROSTER_LOCK:
+                pass  # must not deadlock
+
+    def test_lock_blocks_a_second_process(self, tmp_path, monkeypatch):
+        """A thread lock alone let two gunicorn workers clobber roster.json."""
+        import subprocess, time
+        roster = tmp_path / "roster.json"
+        sentinel = tmp_path / "held"
+        monkeypatch.setattr(ae_mod, "ROSTER_FILE", roster)
+        repo = str(Path(ae_mod.__file__).resolve().parents[1])
+        child = subprocess.Popen([sys.executable, "-c", (
+            "import sys, time, pathlib\n"
+            f"sys.path.insert(0, {repo!r})\n"
+            "import tools.announcer_engine as ae\n"
+            f"ae.ROSTER_FILE = pathlib.Path({str(roster)!r})\n"
+            "with ae._ROSTER_LOCK:\n"
+            f"    pathlib.Path({str(sentinel)!r}).write_text('held')\n"
+            "    time.sleep(1.5)\n"
+        )])
+        try:
+            deadline = time.monotonic() + 10
+            while not sentinel.exists():
+                assert time.monotonic() < deadline, "child never took the lock"
+                time.sleep(0.05)
+            t0 = time.monotonic()
+            with ae_mod._ROSTER_LOCK:
+                waited = time.monotonic() - t0
+        finally:
+            child.wait(timeout=10)
+        assert waited >= 0.8, f"parent acquired the lock after only {waited:.2f}s — not held across processes"
+
+
+class TestQuickRenderGetsStadiumWrap:
+    def _setup(self, tmp_path, monkeypatch):
+        roster = tmp_path / "roster.json"
+        roster.write_text(json.dumps([{"id": "p1", "first": "A", "last": "B", "number": "1",
+                                       "is_active": True, "status": "pending"}]), encoding="utf-8")
+        monkeypatch.setattr(ae_mod, "ROSTER_FILE", roster)
+        monkeypatch.setattr(ae_mod, "CLIPS_DIR", tmp_path / "clips")
+        monkeypatch.setattr(ae_mod, "_bootstrap_roster_from_team", lambda: [])
+        monkeypatch.setattr(ae_mod, "_ensure_dirs", lambda: None)
+        monkeypatch.setattr(ae_mod, "get_quick_tts_provider", lambda: MockTTS())
+        monkeypatch.setattr(ae_mod, "get_tts_provider", lambda: MockTTS())
+        wrap = MagicMock(return_value=(None, tmp_path / "clips" / "p1" / "x.mp3"))
+        monkeypatch.setattr(ae_mod, "archive_and_transcode", wrap)
+        return wrap
+
+    def test_quick_wraps_without_archive(self, tmp_path, monkeypatch):
+        wrap = self._setup(tmp_path, monkeypatch)
+        ae_mod.render_player_audio("p1", quality="quick")
+        wrap.assert_called_once()
+        assert wrap.call_args.kwargs["archive"] is False
+
+    def test_best_wraps_with_archive(self, tmp_path, monkeypatch):
+        wrap = self._setup(tmp_path, monkeypatch)
+        ae_mod.render_player_audio("p1", quality="best")
+        assert wrap.call_args.kwargs["archive"] is True
+
+    def test_archive_false_writes_no_flac(self, tmp_path, monkeypatch):
+        import shutil, subprocess
+        if not shutil.which("ffmpeg"):
+            pytest.skip("ffmpeg not installed")
+        monkeypatch.setattr(ae_mod, "CLIPS_DIR", tmp_path / "clips")
+        monkeypatch.setattr(ae_mod, "ARCHIVE_DIR", tmp_path / "archive")
+        src = tmp_path / "in.wav"
+        subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi",
+                        "-i", "sine=frequency=200:duration=1", str(src)], check=True)
+        flac, mp3 = ae_mod.archive_and_transcode(src.read_bytes(), "p1", archive=False)
+        assert flac is None
+        assert mp3.exists() and mp3.stat().st_size > 0
+        assert not (tmp_path / "archive").exists()
