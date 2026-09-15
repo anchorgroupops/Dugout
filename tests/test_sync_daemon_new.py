@@ -1055,6 +1055,9 @@ class TestHandleSchedule:
     def test_no_file_returns_empty_lists(self, flask_app, monkeypatch, tmp_path):
         monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
         monkeypatch.setattr(sd, "CONFIG_DIR", tmp_path)
+        # No manual file now falls back to GameChanger's public API; keep the
+        # test offline (on CI the real call returned the Sharks' season).
+        monkeypatch.setattr(sd, "_fetch_gc_games", lambda *a, **kw: [])
         with flask_app.test_client() as client:
             resp = client.get("/api/schedule")
         assert resp.status_code == 200

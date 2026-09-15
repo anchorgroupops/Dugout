@@ -61,7 +61,7 @@ function useEscapeToClose(onClose) {
 
 function StatusLed({ status }) {
   const color = { ready: 'var(--success)', rendering: 'var(--warning)', error: 'var(--danger)' }[status] || 'rgba(255,255,255,0.25)';
-  const label = { ready: 'Ready', rendering: 'Rendering', error: 'Error', pending: 'Not rendered' }[status] || status;
+  const label = { ready: 'Ready', rendering: 'Rendering', error: 'Error', pending: 'Needs render' }[status] || status;
   return <span className="announcer-status-led" style={{ background: color }} title={label} aria-label={label} />;
 }
 
@@ -78,7 +78,10 @@ function LineupRow({ player, slot, isCurrent, isPlaying, onPlay, onOpen }) {
           <span className="announcer-lineup-first">{player.first} <strong>{player.last}</strong></span>
           <span className="announcer-lineup-sub">
             <StatusLed status={player.status} />
-            {player.status === 'rendering' ? 'Rendering…' : player.status === 'error' ? 'Render failed' : hasClip ? 'Announcer ready' : 'Tap to set up'}
+            {player.status === 'rendering' ? 'Rendering…'
+              : player.status === 'error' ? 'Render failed'
+              : hasClip && player.status === 'pending' ? 'Ready · new voice available'
+              : hasClip ? 'Announcer ready' : 'Tap to set up'}
             {hasSong && <span> · <Volume2 size={11} style={{ verticalAlign: '-2px' }} /> walk-up</span>}
           </span>
         </span>
