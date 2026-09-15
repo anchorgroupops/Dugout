@@ -3977,21 +3977,34 @@ def _tts_stat(v) -> str:
 
 # Phonetic pronunciation map for names the TTS engine mispronounces.
 # Key: substring to find (case-insensitive), Value: phonetic replacement.
+# Keys must match the spelling GameChanger actually exports, or the substring
+# match never fires.  "Deliliah" sat here for a season while the roster said
+# "Delilah", so the fix was silently dead.
 _PHONETIC_MAP = {
-    "VanDeusen": "Van Doo-sen",
-    "Hourahan": "Hour-a-han",
+    # --- Fall 2026 roster ---
+    "VanDeusen": "van-DOO-sen",
+    "Hourahan": "HOUR-uh-han",
+    "Gomez": "GOH-mez",
+    "McKinney": "muh-KIN-ee",
+    "Delilah": "Duh-LYE-luh",
+    "Raelynne": "RAY-lin",
+    "Cotter": "COT-ter",
+    "Paisley": "PAYZ-lee",
+    "Moawad": "moh-AH-wad",
+    "Sophia": "so-FEE-uh",
+    "Victoria": "vik-TOR-ee-uh",
+    "Leila": "LAY-luh",
+    "Ember": "EM-ber",
+    "Lexi": "LEX-ee",
+    "Ruby": "ROO-bee",
+    # --- Spring 2026 players, kept so archived clips still read correctly ---
     "Moros": "Morr-ohs",
-    "Gomez": "Go-mez",
     "Santiago": "Sahn-tee-ah-go",
-    "McKinney": "Mick-Kinney",
     "Sephina": "Seh-fee-nah",
     "Maylani": "May-lah-nee",
     "Mikayla": "Mih-Kay-lah",
     "Juliette": "Julie-ett",
-    "Deliliah": "Duh-LYE-luh",
-    "Ember": "Em-ber",
-    "Lexi": "LEX-ee",
-    "Ruby": "ROO-bee",
+    # --- Leagues and opponents ---
     "NWVLL": "North West Volusia Little League",
     "PCLL": "Palm Coast Little League",
     "Stihlers": "Steelers",

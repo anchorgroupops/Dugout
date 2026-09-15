@@ -135,12 +135,21 @@ def main():
         log.info("Use --all to re-render everyone.")
         return
 
+    # Clamp to what the selected provider tolerates in parallel. ElevenLabs' free
+    # tier allows 2; asking for 4 used to fail 8 of 10 players outright with 429.
+    from announcer_engine import get_quick_tts_provider, get_tts_provider
+    provider = get_quick_tts_provider() if args.quality == "quick" else get_tts_provider()
+    concurrency = max(1, min(args.concurrency, provider.max_concurrency))
+    if concurrency < args.concurrency:
+        log.warning("Concurrency clamped %d -> %d (%s allows %d in parallel)",
+                    args.concurrency, concurrency, provider.name, provider.max_concurrency)
+
     log.info("Rendering %d player(s)...", len(targets))
     t0 = time.monotonic()
     results = []
 
-    if args.concurrency > 1:
-        with ThreadPoolExecutor(max_workers=args.concurrency) as pool:
+    if concurrency > 1:
+        with ThreadPoolExecutor(max_workers=concurrency) as pool:
             futures = {pool.submit(_render_one, p, args.quality, args.dry_run): p for p in targets}
             for future in as_completed(futures):
                 results.append(future.result())

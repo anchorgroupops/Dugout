@@ -229,8 +229,11 @@ class TestGetTtsProvider:
         monkeypatch.delenv("REPLICATE_API_TOKEN", raising=False)
         monkeypatch.delenv("ELEVENLABS_API_KEY", raising=False)
         monkeypatch.delenv("ANNOUNCER_VOICE_REF_URL", raising=False)
+        # Pin availability: edge-tts is an optional install, and the point of this
+        # test is chain order, not whether the package is present on this machine.
+        monkeypatch.setattr(EdgeTTSProvider, "available", lambda self: True)
         provider = get_tts_provider()
-        # EdgeTTS is always in the chain and available without credentials
+        # EdgeTTS is the first credential-free provider in the chain
         assert isinstance(provider, EdgeTTSProvider)
 
     def test_quick_returns_mock_when_no_env_vars(self, monkeypatch):
@@ -238,8 +241,11 @@ class TestGetTtsProvider:
         monkeypatch.delenv("REPLICATE_API_TOKEN", raising=False)
         monkeypatch.delenv("ELEVENLABS_API_KEY", raising=False)
         monkeypatch.delenv("ANNOUNCER_VOICE_REF_URL", raising=False)
+        # Pin availability: edge-tts is an optional install, and the point of this
+        # test is chain order, not whether the package is present on this machine.
+        monkeypatch.setattr(EdgeTTSProvider, "available", lambda self: True)
         provider = get_quick_tts_provider()
-        # EdgeTTS is always in the chain and available without credentials
+        # EdgeTTS is the first credential-free provider in the chain
         assert isinstance(provider, EdgeTTSProvider)
 
 
@@ -981,13 +987,13 @@ class TestGetTtsProviderBranches:
         assert isinstance(ae_mod.get_tts_provider(), ae_mod.ReplicateTTS)
 
     def test_returns_elevenlabs_when_only_el_key(self, monkeypatch):
-        """With only ELEVENLABS_API_KEY set, EdgeTTS wins (it's earlier in chain and credential-free)."""
+        """With ELEVENLABS_API_KEY set, ElevenLabs wins — it outranks the style-less free providers."""
         monkeypatch.delenv("LOCAL_TTS_URL", raising=False)
         monkeypatch.delenv("REPLICATE_API_TOKEN", raising=False)
         monkeypatch.delenv("ANNOUNCER_VOICE_REF_URL", raising=False)
         monkeypatch.setenv("ELEVENLABS_API_KEY", "el_fakekey")
         monkeypatch.setitem(sys.modules, "sync_daemon", None)
-        assert isinstance(ae_mod.get_tts_provider(), ae_mod.EdgeTTSProvider)
+        assert isinstance(ae_mod.get_tts_provider(), ae_mod.ElevenLabsTTS)
 
 
 class TestGetQuickTtsProviderBranches:
@@ -1004,13 +1010,13 @@ class TestGetQuickTtsProviderBranches:
         assert isinstance(ae_mod.get_quick_tts_provider(), ae_mod.Replicate06bTTS)
 
     def test_returns_elevenlabs_when_only_el_key(self, monkeypatch):
-        """With only ELEVENLABS_API_KEY set, EdgeTTS wins (it's earlier in chain and credential-free)."""
+        """With ELEVENLABS_API_KEY set, ElevenLabs wins — it outranks the style-less free providers."""
         monkeypatch.delenv("LOCAL_TTS_URL", raising=False)
         monkeypatch.delenv("REPLICATE_API_TOKEN", raising=False)
         monkeypatch.delenv("ANNOUNCER_VOICE_REF_URL", raising=False)
         monkeypatch.setenv("ELEVENLABS_API_KEY", "el_fakekey")
         monkeypatch.setitem(sys.modules, "sync_daemon", None)
-        assert isinstance(ae_mod.get_quick_tts_provider(), ae_mod.EdgeTTSProvider)
+        assert isinstance(ae_mod.get_quick_tts_provider(), ae_mod.ElevenLabsTTS)
 
 
 # ---------------------------------------------------------------------------
@@ -1431,3 +1437,99 @@ class TestGetRosterStats:
         roster_file.write_text(json.dumps(roster))
         result = ae_mod.get_roster_stats()
         assert result["total"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Council 2026-09-15 — regressions for the Fall 2026 announcer hardening
+# ---------------------------------------------------------------------------
+
+class TestAnnouncerVoiceDefault:
+    def test_default_voice_is_not_the_female_premade(self):
+        """EXAVITQu4vr4xnSDxMaL is ElevenLabs "Sarah" — wrong for a stadium announcer."""
+        assert ae_mod.ANNOUNCER_ELEVENLABS_VOICE_ID != "EXAVITQu4vr4xnSDxMaL"
+
+    def test_elevenlabs_outranks_style_less_providers(self, monkeypatch):
+        monkeypatch.delenv("LOCAL_TTS_URL", raising=False)
+        monkeypatch.delenv("REPLICATE_API_TOKEN", raising=False)
+        monkeypatch.delenv("ANNOUNCER_VOICE_REF_URL", raising=False)
+        monkeypatch.setenv("ELEVENLABS_API_KEY", "el_fakekey")
+        monkeypatch.setitem(sys.modules, "sync_daemon", None)
+        chain = [p.name for p in ae_mod._build_provider_chain()]
+        assert chain.index("elevenlabs") < chain.index("edge_tts")
+
+
+class TestNumberToWord:
+    @pytest.mark.parametrize("raw,spoken", [
+        ("0", "zero"), ("00", "double-zero"), ("7", "seven"), ("13", "thirteen"),
+        ("15", "fifteen"), ("18", "eighteen"), ("25", "twenty-five"),
+        ("31", "thirty-one"), ("67", "sixty-seven"), ("99", "ninety-nine"),
+        ("20", "twenty"), ("40", "forty"),
+    ])
+    def test_every_live_jersey_number_is_spoken(self, raw, spoken):
+        assert ae_mod._number_to_word(raw) == spoken
+
+    @pytest.mark.parametrize("raw", ["", "TBD", "100"])
+    def test_non_jersey_input_passes_through(self, raw):
+        assert ae_mod._number_to_word(raw) == raw
+
+
+class TestStadiumWrapFiltergraph:
+    def test_filtergraph_is_accepted_by_ffmpeg(self, tmp_path):
+        """The graph used to carry two syntax errors, so every best-quality
+        render silently fell back to unprocessed bytes."""
+        import shutil, subprocess
+        if not shutil.which("ffmpeg"):
+            pytest.skip("ffmpeg not installed")
+        src = tmp_path / "in.wav"
+        subprocess.run(
+            ["ffmpeg", "-y", "-v", "error", "-f", "lavfi",
+             "-i", "sine=frequency=200:duration=1", str(src)], check=True)
+        flac, mp3 = ae_mod.archive_and_transcode(src.read_bytes(), "test-player")
+        assert flac.exists() and mp3.exists()
+        assert mp3.stat().st_size > 0
+
+
+class TestReconcileRosterWithTeam:
+    def test_adds_new_players_and_deactivates_departed(self, monkeypatch):
+        team = [
+            {"id": "1-new-player", "first": "New", "last": "Player", "number": "1",
+             "phonetic_hint": "", "tts_instruction": "", "walkup_song_url": "",
+             "intro_timestamp": 5.0, "announcer_audio_url": "", "status": "pending",
+             "is_active": True, "rendered_at": "", "error_message": ""},
+        ]
+        monkeypatch.setattr(ae_mod, "_bootstrap_roster_from_team", lambda: team)
+        existing = [{"id": "9-old-player", "is_active": True, "status": "ready",
+                     "phonetic_hint": "OLD-ee", "announcer_audio_url": "/clip.mp3"}]
+        roster, changed = ae_mod.reconcile_roster_with_team(existing)
+        assert changed
+        by_id = {p["id"]: p for p in roster}
+        assert by_id["1-new-player"]["is_active"] is True
+        assert by_id["9-old-player"]["is_active"] is False
+        # departed players keep their work — deactivated, never deleted
+        assert by_id["9-old-player"]["phonetic_hint"] == "OLD-ee"
+        assert by_id["9-old-player"]["announcer_audio_url"] == "/clip.mp3"
+
+    def test_no_team_data_leaves_roster_untouched(self, monkeypatch):
+        monkeypatch.setattr(ae_mod, "_bootstrap_roster_from_team", lambda: [])
+        existing = [{"id": "9-old-player", "is_active": True}]
+        roster, changed = ae_mod.reconcile_roster_with_team(existing)
+        assert changed is False
+        assert roster == existing
+
+
+class TestConcurrentRosterUpdates:
+    def test_parallel_updates_do_not_lose_writes(self, tmp_path, monkeypatch):
+        """Unlocked read-modify-write dropped statuses under --concurrency 2-4."""
+        from concurrent.futures import ThreadPoolExecutor
+        roster_file = tmp_path / "roster.json"
+        players = [{"id": f"p{i}", "is_active": True, "status": "pending"} for i in range(10)]
+        roster_file.write_text(json.dumps(players), encoding="utf-8")
+        monkeypatch.setattr(ae_mod, "ROSTER_FILE", roster_file)
+        monkeypatch.setattr(ae_mod, "_bootstrap_roster_from_team", lambda: [])
+        monkeypatch.setattr(ae_mod, "_ensure_dirs", lambda: None)
+
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            list(pool.map(lambda p: ae_mod.update_player(p["id"], {"status": "ready"}), players))
+
+        final = json.loads(roster_file.read_text(encoding="utf-8"))
+        assert [p["status"] for p in final] == ["ready"] * 10

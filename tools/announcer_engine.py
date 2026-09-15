@@ -17,6 +17,7 @@ import json
 import logging
 import os
 import struct
+import threading
 import time
 import wave
 from abc import ABC, abstractmethod
@@ -34,6 +35,9 @@ CLIPS_DIR = ANNOUNCER_DIR / "clips"
 ARCHIVE_DIR = ANNOUNCER_DIR / "archive"
 ROSTER_FILE = ANNOUNCER_DIR / "roster.json"
 VOICE_PROFILES_FILE = ANNOUNCER_DIR / "voice_profiles.json"
+
+# Serialises roster.json read-modify-write across concurrent renders.
+_ROSTER_LOCK = threading.RLock()
 
 # Reuse the phonetic map from sync_daemon at runtime (imported lazily to avoid circular imports)
 _PHONETIC_MAP = None
@@ -175,6 +179,15 @@ class TTSProvider(ABC):
     def available(self) -> bool:
         """Fast availability check (no synthesis). Override for key/package checks."""
         return True
+
+    @property
+    def max_concurrency(self) -> int:
+        """How many renders this provider tolerates in parallel.
+
+        Batch callers clamp their worker count to this.  Local providers have no
+        meaningful limit; hosted ones do, and exceeding it returns 429.
+        """
+        return 8
 
 
 class LocalVLLMTTS(TTSProvider):
@@ -322,12 +335,28 @@ class Replicate06bTTS(ReplicateTTS):
         return "replicate_qwen3_tts_0.6b"
 
 
+# Deep, resonant male voice used for the stadium announcer.  "Brian" is a premade
+# ElevenLabs voice, so it works on the free tier — library/professional voices
+# return HTTP 402 without a paid plan.  Measured median F0 137 Hz (vs 167 Hz for
+# "Adam"), the deepest premade option on the account.
+# The previous default, EXAVITQu4vr4xnSDxMaL, is "Sarah" — a young female voice.
+ANNOUNCER_ELEVENLABS_VOICE_ID = "nPczCjzI2devNBz1zQrb"
+
+
 class ElevenLabsTTS(TTSProvider):
     """ElevenLabs TTS — reuses existing integration pattern."""
+
+    # Free and starter plans allow 2 requests in parallel; more returns 429.
+    _MAX_CONCURRENCY = int(os.getenv("ELEVENLABS_MAX_CONCURRENCY", "2"))
+    _MAX_ATTEMPTS = 4
 
     @property
     def name(self) -> str:
         return "elevenlabs"
+
+    @property
+    def max_concurrency(self) -> int:
+        return max(1, self._MAX_CONCURRENCY)
 
     def synthesize(self, text: str, voice_config: dict) -> bytes:
         api_key = _resolve_secret("ELEVENLABS_API_KEY")
@@ -335,9 +364,9 @@ class ElevenLabsTTS(TTSProvider):
             voice_config.get("elevenlabs_voice_id", "")
             or _resolve_secret("ELEVENLABS_VOICE_ID")
             or os.getenv("ELEVENLABS_DEFAULT_VOICE_ID", "").strip()
-            or "EXAVITQu4vr4xnSDxMaL"  # default fallback
+            or ANNOUNCER_ELEVENLABS_VOICE_ID
         )
-        model_id = os.getenv("ELEVENLABS_MODEL_ID", "eleven_turbo_v2_5")
+        model_id = os.getenv("ELEVENLABS_MODEL_ID", "eleven_multilingual_v2")
 
         if not api_key:
             raise RuntimeError("ELEVENLABS_API_KEY not set")
@@ -346,10 +375,13 @@ class ElevenLabsTTS(TTSProvider):
         payload = {
             "text": text,
             "model_id": model_id,
+            # Announcer delivery: low-ish stability + high style gives the dramatic
+            # swing the Halo-style read needs.  0.20 was low enough that repeat
+            # renders of the same player drifted in character; 0.30 holds.
             "voice_settings": {
-                "stability": 0.20,
-                "similarity_boost": 0.90,
-                "style": 0.70,
+                "stability": 0.30,
+                "similarity_boost": 0.85,
+                "style": 0.75,
                 "use_speaker_boost": True,
             },
         }
@@ -358,10 +390,19 @@ class ElevenLabsTTS(TTSProvider):
             "Content-Type": "application/json",
             "xi-api-key": api_key,
         }
-        resp = requests.post(url, json=payload, headers=headers, timeout=60)
-        if resp.status_code != 200:
-            raise RuntimeError(f"ElevenLabs returned {resp.status_code}: {resp.text[:300]}")
-        return resp.content
+        # Retry the transient failures — a rate-limit or a 5xx mid-batch used to
+        # abandon that player with no clip at all.
+        for attempt in range(1, self._MAX_ATTEMPTS + 1):
+            resp = requests.post(url, json=payload, headers=headers, timeout=60)
+            if resp.status_code == 200:
+                return resp.content
+            if resp.status_code not in (429, 500, 502, 503, 504) or attempt == self._MAX_ATTEMPTS:
+                raise RuntimeError(f"ElevenLabs returned {resp.status_code}: {resp.text[:300]}")
+            delay = float(resp.headers.get("retry-after") or 2 ** attempt)
+            logging.warning("[Announcer] ElevenLabs %s (attempt %d/%d) — retrying in %.1fs",
+                            resp.status_code, attempt, self._MAX_ATTEMPTS, delay)
+            time.sleep(delay)
+        raise RuntimeError("ElevenLabs: exhausted retries")  # pragma: no cover
 
 
 class EdgeTTSProvider(TTSProvider):
@@ -580,8 +621,13 @@ def _has_replicate_voice_ref() -> bool:
 
 
 # Ordered provider registry — probed top-to-bottom at render time.
-# Best Quality chain (Mac/cloud):  LocalVLLM → Replicate3B → EdgeTTS → Kokoro → GoogleCloud → ElevenLabs → Mock
-# Quick chain (Pi-side):           LocalVLLM → Replicate0.6B → EdgeTTS → Kokoro → GoogleCloud → ElevenLabs → Mock
+# Best Quality chain (Mac/cloud):  LocalVLLM → Replicate3B → ElevenLabs → EdgeTTS → Kokoro → GoogleCloud → Mock
+# Quick chain (Pi-side):           LocalVLLM → Replicate0.6B → ElevenLabs → EdgeTTS → Kokoro → GoogleCloud → Mock
+#
+# ElevenLabs sits above EdgeTTS because it is the only key-free-of-Replicate path
+# that actually delivers the stadium-announcer read.  EdgeTTS/Kokoro/GoogleCloud
+# accept no style steering, so they produce a flat neutral narration — fine as a
+# fallback, wrong as the default.
 
 def _build_provider_chain(quick: bool = False) -> list[TTSProvider]:
     chain: list[TTSProvider] = []
@@ -589,11 +635,11 @@ def _build_provider_chain(quick: bool = False) -> list[TTSProvider]:
         chain.append(LocalVLLMTTS())
     if _has_replicate_voice_ref():
         chain.append(Replicate06bTTS() if quick else ReplicateTTS())
+    if _resolve_secret("ELEVENLABS_API_KEY"):
+        chain.append(ElevenLabsTTS())
     chain.append(EdgeTTSProvider())
     chain.append(KokoroTTSProvider())
     chain.append(GoogleCloudTTSProvider())
-    if _resolve_secret("ELEVENLABS_API_KEY"):
-        chain.append(ElevenLabsTTS())
     chain.append(MockTTS())
     return chain
 
@@ -627,7 +673,7 @@ def get_tts_provider() -> TTSProvider:
     """Return the best available TTS provider for Best Quality renders.
 
     Walks the provider chain in priority order and returns the first available one.
-    Priority: LocalVLLM → Replicate 3B → EdgeTTS → Kokoro → GoogleCloud → ElevenLabs → Mock
+    Priority: LocalVLLM → Replicate 3B → ElevenLabs → EdgeTTS → Kokoro → GoogleCloud → Mock
     """
     for provider in _build_provider_chain(quick=False):
         if provider.available():
@@ -639,7 +685,7 @@ def get_tts_provider() -> TTSProvider:
 def get_quick_tts_provider() -> TTSProvider:
     """Return provider for Quick Render (Pi-side, speed-optimised).
 
-    Priority: LocalVLLM → Replicate 0.6B → EdgeTTS → Kokoro → GoogleCloud → ElevenLabs → Mock
+    Priority: LocalVLLM → Replicate 0.6B → ElevenLabs → EdgeTTS → Kokoro → GoogleCloud → Mock
     """
     for provider in _build_provider_chain(quick=True):
         if provider.available():
@@ -723,22 +769,32 @@ def get_default_voice_profile() -> dict:
 # Announcer Roster
 # ---------------------------------------------------------------------------
 
+_ONES = ("zero", "one", "two", "three", "four", "five", "six", "seven",
+         "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen",
+         "fifteen", "sixteen", "seventeen", "eighteen", "nineteen")
+_TENS = ("", "", "twenty", "thirty", "forty", "fifty",
+         "sixty", "seventy", "eighty", "ninety")
+
+
 def _number_to_word(num: str) -> str:
-    """Convert jersey number string to spoken word for announcements."""
-    words = {
-        "0": "zero", "1": "one", "2": "two", "3": "three", "4": "four",
-        "5": "five", "6": "six", "7": "seven", "8": "eight", "9": "nine",
-        "10": "ten", "11": "eleven", "12": "twelve", "13": "thirteen",
-        "14": "fourteen", "15": "fifteen", "16": "sixteen", "17": "seventeen",
-        "18": "eighteen", "19": "nineteen", "20": "twenty",
-        "21": "twenty-one", "22": "twenty-two", "23": "twenty-three",
-        "24": "twenty-four", "25": "twenty-five", "26": "twenty-six",
-        "27": "twenty-seven", "28": "twenty-eight", "29": "twenty-nine",
-        "30": "thirty", "31": "thirty-one", "32": "thirty-two",
-        "33": "thirty-three", "34": "thirty-four", "35": "thirty-five",
-        "99": "ninety-nine", "00": "double-zero",
-    }
-    return words.get(str(num).strip(), str(num))
+    """Convert a jersey number to the words an announcer would say.
+
+    Jersey numbers run 0-99, and "00" is a distinct jersey from "0", so the
+    leading-zero form is spoken as "double-zero".  Anything that is not a
+    plain number (blank, "TBD") is returned unchanged for the caller to handle.
+    """
+    raw = str(num).strip()
+    if not raw.isdigit():
+        return raw
+    if raw == "00":
+        return "double-zero"
+    n = int(raw)
+    if n >= 100:
+        return raw
+    if n < 20:
+        return _ONES[n]
+    tens, ones = divmod(n, 10)
+    return _TENS[tens] if ones == 0 else f"{_TENS[tens]}-{_ONES[ones]}"
 
 
 _HALO_SCRIPTS: dict[str, str] = {
@@ -871,8 +927,46 @@ def _bootstrap_roster_from_team() -> list[dict]:
     return announcer_roster
 
 
+def reconcile_roster_with_team(roster: list[dict]) -> tuple[list[dict], bool]:
+    """Fold current team.json membership into an existing announcer roster.
+
+    Returns (roster, changed).  Players on the team but missing from the roster
+    are appended as pending; players no longer on the team are deactivated
+    rather than deleted, so their phonetic hints, walk-up song and rendered
+    clips survive if they come back.  Everything else is left alone — this must
+    never clobber a hand-edited phonetic_hint or a rendered clip URL.
+    """
+    team_roster = _bootstrap_roster_from_team()
+    if not team_roster:
+        return roster, False          # no team data — leave the roster untouched
+
+    team_ids = {p["id"] for p in team_roster}
+    existing = {p.get("id") for p in roster}
+    changed = False
+
+    for player in team_roster:
+        if player["id"] not in existing:
+            roster.append(player)
+            changed = True
+            logging.info("[Announcer] Added new player to roster: %s", player["id"])
+
+    for player in roster:
+        on_team = player.get("id") in team_ids
+        if player.get("is_active", True) != on_team:
+            player["is_active"] = on_team
+            changed = True
+            logging.info("[Announcer] %s player %s",
+                         "Reactivated" if on_team else "Deactivated", player.get("id"))
+
+    return roster, changed
+
+
 def load_announcer_roster() -> list[dict]:
-    """Load announcer roster, bootstrapping from team.json if needed."""
+    """Load the announcer roster, reconciling it against current team.json.
+
+    The roster used to be bootstrapped once and never revisited, so a mid-season
+    signing never got an announcement and players who left kept theirs.
+    """
     try:
         _ensure_dirs()
     except OSError as e:
@@ -880,6 +974,12 @@ def load_announcer_roster() -> list[dict]:
 
     roster = _read_json(ROSTER_FILE, default=None)
     if isinstance(roster, list) and roster:
+        roster, changed = reconcile_roster_with_team(roster)
+        if changed:
+            try:
+                _atomic_write_json(ROSTER_FILE, roster)
+            except OSError as e:
+                logging.warning("[Announcer] Could not persist reconciled roster: %s", e)
         return roster
 
     # Bootstrap from team data
@@ -906,12 +1006,20 @@ def get_player_by_id(player_id: str) -> dict | None:
 
 
 def update_player(player_id: str, updates: dict) -> dict | None:
-    roster = load_announcer_roster()
-    for i, p in enumerate(roster):
-        if p.get("id") == player_id:
-            roster[i].update(updates)
-            save_announcer_roster(roster)
-            return roster[i]
+    """Apply updates to one player and persist the roster.
+
+    Holds _ROSTER_LOCK across the read-modify-write: prerender runs renders on a
+    thread pool (--concurrency 2-4), and without the lock two threads finishing
+    together would each write back a roster built before the other's update,
+    silently dropping one player's status and clip URL.
+    """
+    with _ROSTER_LOCK:
+        roster = load_announcer_roster()
+        for i, p in enumerate(roster):
+            if p.get("id") == player_id:
+                roster[i].update(updates)
+                save_announcer_roster(roster)
+                return roster[i]
     return None
 
 
@@ -966,15 +1074,22 @@ def archive_and_transcode(audio_bytes: bytes, player_id: str) -> tuple[Path, Pat
 
         # Pass 2 — Stadium Wrap filter chain → 192kbps MP3
         # Splits signal: dry path + reverb path, mixed 80/20
+        # NOTE: two syntax errors used to live in this graph and made every
+        # "best" render fall through to the raw-bytes path below:
+        #   - `equalizer=...:t=l` — `t` is an alias for `width_type`, whose legal
+        #     values are h/q/o/s/k.  There is no `l`, and `equalizer` is a peaking
+        #     filter anyway; a low shelf is the `bass` filter.
+        #   - `amix=...:weights=0.8:0.2` — `weights` takes one space-separated
+        #     string, so the `:0.2` was parsed as a second option name.
         filtergraph = (
             "[0:a]"
             "compand=attacks=0.01:decays=0.2"
             ":points=-80/-80|-45/-30|-27/-20|0/-13:gain=6,"
-            "equalizer=f=150:t=l:width_type=o:width=2:g=4"
+            "bass=f=150:width_type=o:width=2:g=4"
             "[processed];"
             "[processed]asplit=2[dry][wet];"
             "[wet]aecho=0.8:1.0:50|75|100:0.4|0.3|0.2[rev];"
-            "[dry][rev]amix=inputs=2:weights=0.8:0.2,"
+            "[dry][rev]amix=inputs=2:weights=0.8 0.2,"
             "extrastereo=m=2.5[out]"
         )
         result = subprocess.run(
