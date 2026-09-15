@@ -545,11 +545,7 @@ function App() {
           isLandscape={isLandscape}
         />
       );
-      case 'announcer': return (
-        // Announcer was the only tab not told what size screen it is on, even
-        // though it is the most control-dense one in the app.
-        <Announcer lineups={data.lineups} isMobile={isMobile} isLandscape={isLandscape} />
-      );
+      case 'announcer': return <Announcer lineups={data.lineups} />;
       case 'evals': return (
         <Evals team={data.team} isMobile={isMobile} isLandscape={isLandscape} />
       );
