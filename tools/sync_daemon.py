@@ -2214,6 +2214,50 @@ def handle_game_detail(game_id):
     return jsonify(data)
 
 
+def _fetch_gc_games(team_id: str | None = None) -> list:
+    """Games list from GameChanger's public team API; [] on any failure.
+
+    Shared by /api/scoreboard and the /api/schedule fallback so every tab
+    agrees on what the next game is.
+    """
+    team_id = team_id or _resolve_critical_env("GC_TEAM_ID", "NuGgx6WvP7TO")
+    try:
+        resp = requests.get(
+            f"https://api.team-manager.gc.com/public/teams/{team_id}/games",
+            timeout=10,
+        )
+        if resp.ok:
+            body = resp.json()
+            return body if isinstance(body, list) else []
+    except Exception as e:
+        logging.warning(f"[GC games] fetch failed: {e}")
+    return []
+
+
+def _schedule_from_gc_games(games: list, today_str: str) -> dict:
+    """Shape GC's public games list like schedule_manual.json."""
+    upcoming: list = []
+    past: list = []
+    for g in games:
+        try:
+            dt = datetime.fromisoformat(str(g.get("start_ts", "")).replace("Z", "+00:00")).astimezone(ET)
+        except Exception:
+            continue
+        entry = {
+            "date": dt.date().isoformat(),
+            "time": f"{dt.hour % 12 or 12}:{dt.minute:02d} {dt.strftime('%p')}",
+            "opponent": (g.get("opponent_team") or {}).get("name") or "TBD",
+            "home_away": g.get("home_away", ""),
+            "is_game": True,
+            "gc_game_id": str(g.get("id", "")),
+            "source": "gamechanger",
+        }
+        (upcoming if entry["date"] >= today_str else past).append(entry)
+    upcoming.sort(key=lambda e: e["date"])
+    past.sort(key=lambda e: e["date"], reverse=True)
+    return {"upcoming": upcoming, "past": past}
+
+
 def _pick_scoreboard_target(games: list, now: "datetime", today_str: str):
     """Pick the game to show on the scoreboard.
 
@@ -2262,16 +2306,7 @@ def handle_scoreboard():
     today_str = now.strftime("%Y-%m-%d")
 
     # 1. Fetch games list from GC public API
-    games = []
-    try:
-        resp = requests.get(
-            f"{gc_api_base}/public/teams/{team_id}/games",
-            timeout=10,
-        )
-        if resp.ok:
-            games = resp.json() if isinstance(resp.json(), list) else []
-    except Exception as e:
-        logging.warning(f"[Scoreboard] GC API fetch failed: {e}")
+    games = _fetch_gc_games(team_id)
 
     # 2. Find in-progress game first, then today's game
     target_game = _pick_scoreboard_target(games, now, today_str)
@@ -4239,9 +4274,13 @@ def handle_schedule():
     Pi never needs a manual edit when schedule_manual.json lags reality.
     """
     schedule_file = SHARKS_DIR / "schedule_manual.json"
-    if not schedule_file.exists():
-        return jsonify({"upcoming": [], "past": []})
-    data = _read_json_file(schedule_file, default={"upcoming": [], "past": []}) or {"upcoming": [], "past": []}
+    data = _read_json_file(schedule_file, default=None) if schedule_file.exists() else None
+    today_str = datetime.now(ET).strftime("%Y-%m-%d")
+    if not data or not (data.get("upcoming") or data.get("past")):
+        # No manual schedule on this box. Derive it from GameChanger — the
+        # same source /api/scoreboard uses — so Scout, Practice and Lineups
+        # stop saying "no upcoming game" while Live shows tonight's.
+        data = _schedule_from_gc_games(_fetch_gc_games(), today_str)
 
     # Load authoritative known results (tracked in git)
     known_by_date: dict = {}

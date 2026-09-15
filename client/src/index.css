@@ -1958,6 +1958,7 @@ body:has(.announcer-modal-overlay) .navbar {
 
 .announcer-form-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-xs);
   justify-content: flex-end;
   padding-top: var(--space-xs);
@@ -2101,11 +2102,16 @@ body:has(.announcer-modal-overlay) .navbar {
   z-index: 40; padding: 0.7rem 0.85rem; display: flex; flex-direction: column; gap: 0.5rem;
   border-color: var(--primary-color); box-shadow: 0 -6px 30px rgba(0, 0, 0, 0.45);
 }
-@media (min-width: 900px) { .announcer-dj-bar { left: auto; right: var(--space-lg); width: 480px; bottom: var(--space-lg); } }
+@media (min-width: 900px) {
+  .announcer-dj-bar { left: auto; right: var(--space-lg); width: 480px; bottom: var(--space-lg); }
+  /* The fixed bar sits over the right edge of the list on desktop; keep the
+     row Play buttons clear of it. */
+  .announcer-roster-list { margin-right: calc(480px + var(--space-lg) * 2); }
+}
 .announcer-dj-top { display: flex; align-items: center; justify-content: space-between; gap: var(--space-sm); }
 .announcer-dj-title { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
 .announcer-dj-label { font-size: 0.65rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-muted); }
-.announcer-dj-name { font-family: var(--font-heading); font-size: 1.15rem; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.announcer-dj-name { font-family: var(--font-heading); font-size: 1.15rem; font-weight: 700; line-height: 1.15; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
 .announcer-dj-ondeck { font-size: var(--text-xs); color: var(--text-muted); }
 .announcer-dj-controls { display: flex; align-items: center; gap: 0.5rem; flex-shrink: 0; }
 .announcer-dj-controls .announcer-btn-play { width: 60px; height: 60px; }

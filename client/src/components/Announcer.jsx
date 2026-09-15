@@ -130,7 +130,7 @@ function PlayerSheet({ player, profiles, defaultVoiceId, onClose, onSave, onRend
     try {
       await onSave(player.id, payload());
       await onRender(player.id);
-      setMsg('Rendering — takes about 10 seconds.');
+      // The parent shows the "Rendering…" notice; this sheet is about to close.
       onClose();
     } catch (e) { setMsg(e.message || 'Render failed'); setBusy(''); }
   };
@@ -353,6 +353,11 @@ export default function Announcer({ lineups }) {
       setRoster(list);
       setStats(data.stats || { total: 0, ready: 0, pending: 0, error: 0 });
       setError('');
+      // Clear our own "Rendering…" notice once nothing is in flight. Halo
+      // failure notices use different wording and are left alone.
+      if (!list.some(p => p.status === 'rendering')) {
+        setNotice(n => (n.startsWith('Rendering ') ? '' : n));
+      }
       return list;
     } catch (apiErr) {
       // Last-good cache nginx serves when the API is down — playback still works.
@@ -510,6 +515,10 @@ export default function Announcer({ lineups }) {
     const body = gameContext ? { quality: 'best', game_context: gameContext } : { quality: 'best' };
     const res = await apiRequest(`/api/announcer/render/${playerId}`, { method: 'POST', headers: ORIGIN_HEADERS(), body: JSON.stringify(body) });
     if (!res.ok) throw new Error('Could not start render');
+    if (!gameContext) {
+      const p = roster.find(r => r.id === playerId);
+      setNotice(`Rendering ${p ? p.first : 'player'} — takes about 10 seconds.`);
+    }
     startPolling(60000);
   };
 

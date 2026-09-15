@@ -219,12 +219,15 @@ function App() {
         console.warn('[Cache] preserving prior values for empty/null fetch result:', staleKeys);
       }
 
-      // Check pipeline health and sync status (non-blocking)
+      // Check pipeline health and sync status (non-blocking). The health
+      // result doubles as the poll loop's success signal.
+      let healthy = false;
       try {
         const [healthRes, syncRes] = await Promise.all([
-          fetch('/api/health').catch(() => null),
+          fetch('/api/health', { cache: 'no-store' }).catch(() => null),
           fetch('/api/sync/status').catch(() => null),
         ]);
+        healthy = Boolean(healthRes?.ok);
         if (healthRes?.ok) {
           const health = await healthRes.json();
           setStaleSources(health.stale_sources || []);
@@ -237,9 +240,11 @@ function App() {
           if (sync.stage && sync.stage !== 'idle') setSyncLoading(true);
         }
       } catch { /* ignore health/sync check failures */ }
+      return healthy;
     } catch (err) {
       console.error("Data fetch error", err);
       setData(prev => ({ ...prev, loading: false, error: err.message, isCached: Boolean(prev.team) }));
+      return false;
     }
   }, [fetchWithRetry]);
 
@@ -256,27 +261,9 @@ function App() {
 
     const loop = async () => {
       if (cancelled) return;
-      let success = false;
-      try {
-        await fetchData();
-        // We reach here even on caught errors inside fetchData (it sets
-        // its own error state). Decide success on whether we currently
-        // have team data — that's the critical signal.
-        success = true;
-      } catch {
-        success = false;
-      }
-      // Use the post-fetch React state hook isn't available here, so we
-      // approximate by reading from localStorage: if team was successfully
-      // refreshed in the last loop the cache will hold a fresh value.
-      // Simpler: just trust fetchData not to throw — it logs but resolves.
-      // Instead read /api/health for an authoritative pulse.
-      try {
-        const h = await fetch('/api/health', { cache: 'no-store' });
-        if (!h.ok) success = false;
-      } catch {
-        success = false;
-      }
+      // fetchData never throws; it resolves to the /api/health pulse it
+      // already fetched, which is the authoritative success signal.
+      const success = await fetchData();
 
       if (success) {
         consecutiveFailures = 0;
@@ -545,11 +532,7 @@ function App() {
           isLandscape={isLandscape}
         />
       );
-      case 'announcer': return (
-        // Announcer was the only tab not told what size screen it is on, even
-        // though it is the most control-dense one in the app.
-        <Announcer lineups={data.lineups} isMobile={isMobile} isLandscape={isLandscape} />
-      );
+      case 'announcer': return <Announcer lineups={data.lineups} />;
       case 'evals': return (
         <Evals team={data.team} isMobile={isMobile} isLandscape={isLandscape} />
       );
