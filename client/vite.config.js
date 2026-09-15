@@ -39,6 +39,8 @@ export default defineConfig(({ mode }) => ({
         // index.html. The page reload in main.jsx will then pull the fresh
         // manifest with the current hashes.
         navigateFallback: '/index.html',
+        // Never answer a navigation to an API/data/clip URL with index.html.
+        navigateFallbackDenylist: [/^\/api\//, /^\/data\//, /^\/announcer-clips\//],
         runtimeCaching: [
           {
             // JS/CSS chunks: NetworkFirst with 3s timeout. If network responds

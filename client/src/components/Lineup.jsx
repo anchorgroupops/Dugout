@@ -320,7 +320,7 @@ const Lineup = ({
                     color: 'var(--text-muted)',
                     minWidth: isMobile ? 0 : '100px', textAlign: 'center',
                     flexShrink: isMobile ? 1 : 0,
-                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                    overflowWrap: 'anywhere',
                   }}>
                     {player.role || 'Depth'}
                   </div>

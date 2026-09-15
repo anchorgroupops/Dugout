@@ -371,7 +371,7 @@ const Evals = ({ team, isMobile = false, isLandscape = false }) => {
         {/* The segment bar wrapped to two rows at 360px and Refresh changed
             line position as `Log (N)` grew. `flexWrap: nowrap` on the outer row
             pins Refresh; the pills get their own snapping scroller instead. */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', flexWrap: 'nowrap' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
           <div
             className="scroll-x scroll-x--snap"
             style={{ display: 'flex', gap: '0.4rem', flexWrap: 'nowrap', flex: '1 1 auto', minWidth: 0, paddingBottom: '2px' }}

@@ -76,8 +76,13 @@ if ('serviceWorker' in navigator) {
   // fetch to fail first. Guarded (module-level flag, not sessionStorage)
   // so a pathological repeated-controllerchange burst can't reload-loop —
   // this only ever needs to fire once per page life.
+  // On a first visit there is no controller yet; the install's own
+  // `clientsClaim` fires controllerchange too, and reloading then made
+  // every fresh load fetch the whole dashboard twice.
+  let hadController = Boolean(navigator.serviceWorker.controller);
   let hasReloadedForController = false;
   navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController) { hadController = true; return; }
     if (hasReloadedForController) return;
     hasReloadedForController = true;
     window.location.reload();
