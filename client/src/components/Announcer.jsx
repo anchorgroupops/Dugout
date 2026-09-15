@@ -1,1772 +1,409 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  Mic, Music, Play, Square, SkipBack, SkipForward,
-  ChevronDown, ChevronUp, RefreshCw, UserPlus, Save,
-  AlertCircle, CheckCircle, Clock, Volume2, Settings2, List,
-  Zap, Target, Activity, Plus, X, Upload, Wand2, Search, Download
+  Mic, Play, Square, SkipBack, SkipForward, RefreshCw, UserPlus,
+  AlertCircle, Volume2, Zap, X, ChevronDown, ChevronUp, Check, Trash2,
 } from 'lucide-react';
-import { playIntro, playClip, stop as stopAudio, preload, cleanup, detectBPM, calcBeatOffset, loadBuffer, setVolume } from '../utils/audioController';
-import { usePrebuffer } from '../utils/usePrebuffer';
+import { playIntro, playClip, stop as stopAudio, preload, cleanup, setVolume } from '../utils/audioController';
 import { apiRequest } from '../utils/apiClient';
-import { TipIcon } from './StatTooltip';
-import WorkerBadge from './WorkerBadge';
 
-// Modal roots are flex-centred in a full-screen overlay with no height cap, so
-// on a phone (and worse, a phone with the software keyboard up) the top AND
-// bottom of a tall modal are clipped with no way to scroll to them — the Halo
-// grid's Cancel button becomes literally unreachable. Every modal root gets
-// this.
+// One screen, Ballpark DJ style: the batting order is a list of big rows, each
+// with its own Play. Tap a row to fix how the name is said, pick a voice, or set
+// the walk-up song. A sticky bar at the bottom shows who is up and carries the
+// game-situation controls and the Halo moments.
+
 const MODAL_SCROLL_STYLE = {
-  maxHeight: '85dvh',
-  overflowY: 'auto',
-  overscrollBehavior: 'contain',
-  WebkitOverflowScrolling: 'touch',
+  maxHeight: '85dvh', overflowY: 'auto', overscrollBehavior: 'contain', WebkitOverflowScrolling: 'touch',
 };
 
-// Tapping the scrim already closes these modals; a phone with a keyboard
-// attached (and every desktop user) expects Escape to do the same. Shared so
-// all three modals behave identically.
+const ORIGIN_HEADERS = () => ({ 'Content-Type': 'application/json', 'Origin': window.location.origin });
+
+// Must match _HALO_SCRIPTS keys in tools/announcer_engine.py
+const HALO_ACHIEVEMENTS = [
+  { key: 'grand_slam',    label: 'Grand Slam',     desc: 'Grand. Slam. QUEEN!' },
+  { key: 'cycle',         label: 'The Cycle',      desc: 'PERFECTION!' },
+  { key: 'triple_rbi',    label: 'Hat Trick',      desc: '3 RBI' },
+  { key: 'quad_rbi',      label: 'Grand Slam Hero', desc: '4 RBI' },
+  { key: '3_strikeouts',  label: 'Strikeout Artist', desc: '3 K' },
+  { key: '4_strikeouts',  label: 'On Fire',        desc: '4 K' },
+  { key: '5_strikeouts',  label: 'Untouchable',    desc: '5 K' },
+];
+
+const DEFAULT_SITUATION = { bases: [false, false, false], outs: 0 };
+
+const ONES = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
+  'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
+const TENS = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
+function numToWord(raw) {
+  const s = String(raw ?? '').trim();
+  if (!/^\d+$/.test(s)) return s;
+  if (s === '00') return 'double-zero';
+  const n = parseInt(s, 10);
+  if (n >= 100) return s;
+  if (n < 20) return ONES[n];
+  const t = Math.floor(n / 10), o = n % 10;
+  return o ? `${TENS[t]}-${ONES[o]}` : TENS[t];
+}
+
+// Mirrors the server's standard walk-up so the sheet can preview while typing.
+function previewLine(player, phonetic) {
+  const name = (phonetic || `${player.first} ${player.last}`).trim();
+  return `Now batting for your Sharks... NUMBEEEER ${numToWord(player.number)}... ${name}!`;
+}
+
 function useEscapeToClose(onClose) {
   useEffect(() => {
-    const onKey = (e) => {
-      if (e.key === 'Escape' || e.key === 'Esc') onClose();
-    };
+    const onKey = (e) => { if (e.key === 'Escape' || e.key === 'Esc') onClose(); };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
 }
 
 function StatusLed({ status }) {
-  const colors = {
-    ready: 'var(--success, #4ade80)',
-    pending: 'var(--warning, #facc15)',
-    rendering: 'var(--warning, #facc15)',
-    error: 'var(--danger, #f87171)',
-  };
-  return (
-    <span
-      className="announcer-status-led"
-      style={{ background: colors[status] || 'var(--text-muted)' }}
-      title={status}
-      aria-label={`Status: ${status}`}
-    />
-  );
+  const color = { ready: 'var(--success)', rendering: 'var(--warning)', error: 'var(--danger)' }[status] || 'rgba(255,255,255,0.25)';
+  const label = { ready: 'Ready', rendering: 'Rendering', error: 'Error', pending: 'Not rendered' }[status] || status;
+  return <span className="announcer-status-led" style={{ background: color }} title={label} aria-label={label} />;
 }
 
-function StatsBar({ stats }) {
-  const total = stats.total || 0;
-  const readyPct = total > 0 ? Math.round((stats.ready / total) * 100) : 0;
+// ── Lineup row ─────────────────────────────────────────────────────────────
+function LineupRow({ player, slot, isCurrent, isPlaying, onPlay, onOpen }) {
+  const hasClip = Boolean(player.announcer_audio_url);
+  const hasSong = Boolean(player.walkup_song_url);
   return (
-    <div className="announcer-stats-bar glass-panel">
-      <div className="announcer-stats-counts">
-        <span className="announcer-stat-item" style={{ color: 'var(--success, #4ade80)' }}>
-          <CheckCircle size={14} /> {stats.ready} Ready
-        </span>
-        <span className="announcer-stat-item" style={{ color: 'var(--warning, #facc15)' }}>
-          <Clock size={14} /> {stats.pending} Pending
-        </span>
-        <span className="announcer-stat-item" style={{ color: 'var(--danger, #f87171)' }}>
-          <AlertCircle size={14} /> {stats.error} Error
-        </span>
-      </div>
-      <div className="announcer-progress-track">
-        <div className="announcer-progress-fill" style={{ width: `${readyPct}%` }} />
-      </div>
-    </div>
-  );
-}
-
-function AddSubModal({ onClose, onAdd }) {
-  const [first, setFirst] = useState('');
-  const [last, setLast] = useState('');
-  const [number, setNumber] = useState('');
-  const [walkupUrl, setWalkupUrl] = useState('');
-  const [loading, setLoading] = useState(false);
-
-  useEscapeToClose(onClose);
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!first.trim()) return;
-    setLoading(true);
-    try {
-      await onAdd({ first: first.trim(), last: last.trim(), number: number.trim(), walkup_song_url: walkupUrl.trim() });
-      onClose();
-    } catch {
-      setLoading(false);
-    }
-  };
-
-  return createPortal(
-    <div className="announcer-modal-overlay" onClick={onClose}>
-      <div className="announcer-modal glass-panel" onClick={e => e.stopPropagation()} style={MODAL_SCROLL_STYLE}>
-        <h3>Add Sub Player</h3>
-        <form onSubmit={handleSubmit}>
-          <div className="announcer-form-row">
-            <input placeholder="First name *" value={first} onChange={e => setFirst(e.target.value)} required maxLength={64} />
-            <input placeholder="Last name" value={last} onChange={e => setLast(e.target.value)} maxLength={64} />
-          </div>
-          <div className="announcer-form-row">
-            <input placeholder="Jersey #" value={number} onChange={e => setNumber(e.target.value)} maxLength={4} style={{ width: '80px' }} />
-            <input placeholder="Walk-up song URL (https://)" value={walkupUrl} onChange={e => setWalkupUrl(e.target.value)} maxLength={500} type="url" pattern="https://.*" />
-          </div>
-          <div className="announcer-form-actions">
-            <button type="button" onClick={onClose} className="announcer-btn announcer-btn-secondary" style={{ minHeight: 'var(--touch-min)' }}>Cancel</button>
-            <button type="submit" disabled={loading || !first.trim()} className="announcer-btn announcer-btn-primary" style={{ minHeight: 'var(--touch-min)' }}>
-              {loading ? <RefreshCw size={14} className="sync-spin" /> : <UserPlus size={14} />}
-              {loading ? 'Adding...' : 'Add Player'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>,
-    document.body
-  );
-}
-
-function PlayerCard({ player, onSavePhonetics, onRender, onRemove }) {
-  const [expanded, setExpanded] = useState(false);
-  const [phonetic, setPhonetic] = useState(player.phonetic_hint || '');
-  const [instruction, setInstruction] = useState(player.tts_instruction || '');
-  const [walkupUrl, setWalkupUrl] = useState(player.walkup_song_url || '');
-  const [introTs, setIntroTs] = useState(player.intro_timestamp ?? 5);
-  const [saving, setSaving] = useState(false);
-  const [rendering, setRendering] = useState(false);
-  const [previewing, setPreviewing] = useState(false);
-  const [bpmResult, setBpmResult] = useState(null);
-  const [bpmLoading, setBpmLoading] = useState(false);
-  const [songs, setSongs] = useState([]);
-  const [songsLoading, setSongsLoading] = useState(false);
-  const [newSongUrl, setNewSongUrl] = useState('');
-  const [newSongLabel, setNewSongLabel] = useState('');
-  const [newSongOptimalStart, setNewSongOptimalStart] = useState(0);
-  const [addingSong, setAddingSong] = useState(false);
-  const [detecting, setDetecting] = useState(false);
-  const [renderQuality, setRenderQuality] = useState('best');
-  const [songSearch, setSongSearch] = useState('');
-  const [searchResults, setSearchResults] = useState([]);
-  const [searching, setSearching] = useState(false);
-  const [downloadingId, setDownloadingId] = useState(null);
-
-  useEffect(() => {
-    if (!expanded) return;
-    let cancelled = false;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setSongsLoading(true);
-    fetch(`/api/announcer/songs/${player.id}`)
-      .then(r => r.ok ? r.json() : null)
-      .then(data => { if (!cancelled && data) setSongs(data.songs || []); })
-      .catch(() => {})
-      .finally(() => { if (!cancelled) setSongsLoading(false); });
-    return () => { cancelled = true; };
-  }, [expanded, player.id]);
-
-  const _spotifyTrackId = (url) => {
-    const m = url.match(/open\.spotify\.com\/track\/([A-Za-z0-9]+)/);
-    return m ? m[1] : null;
-  };
-
-  const handleDetectStart = async () => {
-    const trackId = _spotifyTrackId(newSongUrl);
-    if (!trackId) return;
-    setDetecting(true);
-    try {
-      const { getAudioAnalysis, getToken } = await import('../services/SpotifyService');
-      const token = await getToken();
-      if (!token) return;
-      const analysis = await getAudioAnalysis(trackId);
-      const res = await apiRequest('/api/announcer/optimal-start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ audio_analysis: analysis }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setNewSongOptimalStart(data.optimal_start_ms || 0);
-      }
-    } catch { /* silent — optional feature */ } finally {
-      setDetecting(false);
-    }
-  };
-
-  const handleAddSong = async () => {
-    const url = newSongUrl.trim();
-    if (!url) return;
-    setAddingSong(true);
-    try {
-      const res = await apiRequest(`/api/announcer/songs/${player.id}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          song_url: url,
-          song_label: newSongLabel.trim(),
-          optimal_start_ms: newSongOptimalStart || 0,
-        }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setSongs(data.songs || []);
-        setNewSongUrl('');
-        setNewSongLabel('');
-        setNewSongOptimalStart(0);
-      }
-    } finally {
-      setAddingSong(false);
-    }
-  };
-
-  const handleDeleteSong = async (songId) => {
-    const res = await apiRequest(`/api/announcer/songs/${player.id}/${songId}`, { method: 'DELETE' });
-    if (res.ok) {
-      const data = await res.json();
-      setSongs(data.songs || []);
-    }
-  };
-
-  const handleSongSearch = async () => {
-    const q = songSearch.trim();
-    if (!q) return;
-    setSearching(true);
-    setSearchResults([]);
-    try {
-      const r = await fetch(`/api/announcer/songs/search?q=${encodeURIComponent(q)}`);
-      if (r.ok) {
-        const d = await r.json();
-        setSearchResults(d.results || []);
-      }
-    } catch { /* silent */ } finally {
-      setSearching(false);
-    }
-  };
-
-  const handleDownloadAndAdd = async (result) => {
-    setDownloadingId(result.video_id);
-    try {
-      // Download to Pi local storage
-      const dlRes = await apiRequest('/api/announcer/songs/download', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ video_id: result.video_id, title: result.title }),
-      });
-      if (!dlRes.ok) return;
-      const dlData = await dlRes.json();
-
-      // Auto-add to this player's walk-up pool
-      const addRes = await apiRequest(`/api/announcer/songs/${player.id}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ song_url: dlData.file_url, song_label: result.title }),
-      });
-      if (addRes.ok) {
-        const addData = await addRes.json();
-        setSongs(addData.songs || []);
-        setSearchResults([]);
-        setSongSearch('');
-      }
-    } catch { /* silent */ } finally {
-      setDownloadingId(null);
-    }
-  };
-
-  const numWord = numToWord(player.number);
-  const displayName = phonetic || `${player.first} ${player.last}`;
-  const previewText = `Now batting, number ${numWord}, ${displayName}!`;
-
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      await onSavePhonetics(player.id, { phonetic_hint: phonetic, tts_instruction: instruction, walkup_song_url: walkupUrl, intro_timestamp: introTs });
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleRender = async () => {
-    setRendering(true);
-    try {
-      await onRender(player.id, renderQuality);
-    } finally {
-      setTimeout(() => setRendering(false), 2000);
-    }
-  };
-
-  const handlePreview = async () => {
-    if (previewing) {
-      stopAudio();
-      setPreviewing(false);
-    } else if (player.announcer_audio_url) {
-      setPreviewing(true);
-      try {
-        await playClip(player.announcer_audio_url, () => setPreviewing(false));
-      } catch {
-        setPreviewing(false);
-      }
-    }
-  };
-
-  const handleDetectBPM = async () => {
-    const url = walkupUrl.trim();
-    if (!url) return;
-    setBpmLoading(true);
-    try {
-      const buf = await loadBuffer(url);
-      const result = detectBPM(buf);
-      setBpmResult(result);
-      if (result) {
-        const offset = calcBeatOffset(result.bpm);
-        setIntroTs(offset);
-      }
-    } catch {
-      setBpmResult(null);
-    } finally {
-      setBpmLoading(false);
-    }
-  };
-
-  return (
-    <div className={`announcer-player-card glass-panel ${expanded ? 'expanded' : ''}${player.is_ghost ? ' announcer-ghost-player' : ''}`}
-      style={player.is_ghost ? { borderLeft: '3px solid var(--warning, #facc15)', opacity: 0.75 } : undefined}>
-      {player.is_ghost && (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 12px', background: 'rgba(250,204,21,0.08)', borderBottom: '1px solid rgba(250,204,21,0.2)', fontSize: 'var(--text-xs)', color: 'rgba(250,204,21,0.9)' }}>
-          <span><AlertCircle size={12} style={{ display: 'inline', marginRight: 4 }} />Not on current roster</span>
-          {/* 2px of vertical padding made this an ~18px-tall target. */}
-          <button type="button" onClick={() => onRemove?.(player.id)} style={{ background: 'rgba(250,204,21,0.15)', border: '1px solid rgba(250,204,21,0.3)', borderRadius: 4, color: 'rgba(250,204,21,0.9)', fontSize: 'var(--text-xs)', padding: '2px 10px', cursor: 'pointer', minHeight: 'var(--touch-min)', minWidth: 'var(--touch-min)', flexShrink: 0 }}>
-            Remove
-          </button>
-        </div>
-      )}
-      {/* The mini-play control used to be a role="button" span nested INSIDE the
-          header <button>. Nested interactive elements are invalid HTML and on
-          touch the inner one is unreliable — iOS routinely delivers the tap to
-          the outer button, so "preview" collapsed the card instead of playing.
-          The row is now a plain flex container holding two sibling buttons. */}
-      <div style={{ display: 'flex', alignItems: 'stretch', minWidth: 0 }}>
-        <button
-          className="announcer-player-header"
-          onClick={() => setExpanded(!expanded)}
-          aria-expanded={expanded}
-          style={{ flex: '1 1 auto', width: 'auto', minWidth: 0, minHeight: 'var(--touch-min)' }}
-        >
-          <div className="announcer-player-info" style={{ minWidth: 0 }}>
-            <span className="announcer-jersey">#{player.number || '—'}</span>
-            <span className="announcer-player-name">{player.first} {player.last}</span>
+    <div className={`announcer-lineup-row glass-panel${isCurrent ? ' announcer-lineup-row--current' : ''}`}>
+      <button type="button" className="announcer-lineup-main" onClick={() => onOpen(player)} aria-label={`Edit ${player.first} ${player.last}`}>
+        <span className="announcer-lineup-slot">{slot}</span>
+        <span className="announcer-jersey">#{player.number || '–'}</span>
+        <span className="announcer-lineup-name">
+          <span className="announcer-lineup-first">{player.first} <strong>{player.last}</strong></span>
+          <span className="announcer-lineup-sub">
             <StatusLed status={player.status} />
-          </div>
-          <div className="announcer-player-actions-mini">
-            {expanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
-          </div>
-        </button>
-        {player.status === 'ready' && (
-          <button
-            type="button"
-            className="announcer-mini-play"
-            onClick={handlePreview}
-            aria-label={previewing ? 'Stop preview' : 'Preview clip'}
-            // A real <button> activates on Enter and Space natively, so the
-            // hand-rolled onKeyDown the old <span role="button"> was missing is
-            // no longer needed — adding one here would double-fire on Enter.
-            style={{
-              background: 'transparent', border: 'none', cursor: 'pointer',
-              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-              minWidth: 'var(--touch-min)', minHeight: 'var(--touch-min)',
-              flexShrink: 0, padding: '0 0.75rem 0 0',
-            }}
-          >
-            {previewing ? <Square size={16} /> : <Play size={16} />}
-          </button>
-        )}
-      </div>
-
-      {expanded && (
-        <div className="announcer-player-details">
-          <div className="announcer-form-group">
-            <label>Phonetic Spelling</label>
-            <input
-              value={phonetic}
-              onChange={e => setPhonetic(e.target.value)}
-              placeholder="e.g. Mih-KAY-lah Van-DOO-sen"
-              maxLength={200}
-            />
-          </div>
-          <div className="announcer-form-group">
-            <label>TTS Instruction</label>
-            <textarea
-              value={instruction}
-              onChange={e => setInstruction(e.target.value)}
-              placeholder="e.g. Say with extra energy and enthusiasm"
-              rows={2}
-              maxLength={500}
-            />
-          </div>
-          <div className="announcer-form-row">
-            <div className="announcer-form-group" style={{ flex: 1 }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                Walk-up Song URL
-                {bpmResult && (
-                  <span style={{ fontSize: '0.7rem', background: 'var(--warning, #facc15)', color: '#000', borderRadius: 4, padding: '1px 6px', fontWeight: 700 }}>
-                    ♩ {bpmResult.bpm} BPM
-                  </span>
-                )}
-              </label>
-              <input
-                value={walkupUrl}
-                onChange={e => { setWalkupUrl(e.target.value); setBpmResult(null); }}
-                placeholder="https://example.com/walkup.mp3"
-                maxLength={500}
-                type="url"
-                pattern="https://.*"
-              />
-            </div>
-            <div className="announcer-form-group" style={{ width: '100px' }}>
-              <label>Duck at (s)</label>
-              <input
-                type="number"
-                value={introTs}
-                onChange={e => setIntroTs(parseFloat(e.target.value) || 0)}
-                min={0}
-                max={300}
-                step={0.5}
-              />
-            </div>
-          </div>
-          {walkupUrl.trim() && (
-            <div style={{ marginBottom: '0.5rem' }}>
-              <button
-                type="button"
-                onClick={handleDetectBPM}
-                disabled={bpmLoading}
-                className="announcer-btn announcer-btn-secondary"
-                // 3px of vertical padding rendered a ~24px-tall control.
-                style={{ fontSize: '0.75rem', padding: '3px 10px', minHeight: 'var(--touch-min)' }}
-              >
-                {bpmLoading ? <RefreshCw size={12} className="sync-spin" /> : <Activity size={12} />}
-                {bpmLoading ? 'Analyzing…' : 'Auto-set Duck Point'}
-              </button>
-              {bpmResult === null && !bpmLoading && walkupUrl && (
-                <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginLeft: 8 }}>
-                  Click to detect BPM and auto-fill duck timing
-                </span>
-              )}
-            </div>
-          )}
-
-          <div className="announcer-song-pool">
-            <div className="announcer-song-pool-header">
-              <Music size={13} />
-              Walk-up Pool
-              {songs.length > 0 && (
-                <span className="announcer-song-count">{songs.length}</span>
-              )}
-            </div>
-
-            {songsLoading ? (
-              <div className="announcer-song-empty">
-                <RefreshCw size={11} className="sync-spin" /> Loading…
-              </div>
-            ) : songs.length === 0 ? (
-              <div className="announcer-song-empty">
-                No songs — add URLs below to enable LRU shuffle during games.
-              </div>
-            ) : (
-              <ul className="announcer-song-list">
-                {songs.map(song => (
-                  <li key={song.id} className="announcer-song-item">
-                    {/* The full URL only ever lived in `title`, which a phone
-                        never surfaces. TipIcon makes it tap-to-reveal while
-                        keeping the single-line ellipsis layout. */}
-                    <TipIcon
-                      text={song.song_url}
-                      className="announcer-song-label"
-                      style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'left', minWidth: 0 }}
-                    >
-                      {song.song_label || song.song_url.split('/').pop().split('?')[0] || song.song_url}
-                    </TipIcon>
-                    {song.optimal_start_ms > 0 && (
-                      <span className="announcer-song-start-badge" title="Optimal start point">
-                        {(song.optimal_start_ms / 1000).toFixed(1)}s
-                      </span>
-                    )}
-                    {song.play_count > 0 && (
-                      <span className="announcer-song-plays">×{song.play_count}</span>
-                    )}
-                    <button
-                      className="announcer-song-delete"
-                      onClick={() => handleDeleteSong(song.id)}
-                      aria-label="Remove song"
-                    >
-                      <X size={12} />
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-
-            {/* YouTube search */}
-            {/* Wraps at 360px: a usable search field plus a "Searching…" button
-                will not fit on one line. */}
-            <div style={{ display: 'flex', gap: 6, margin: '8px 0 4px', flexWrap: 'wrap' }}>
-              <input
-                className="announcer-song-input"
-                style={{ flex: '1 1 160px', minWidth: 0 }}
-                value={songSearch}
-                onChange={e => setSongSearch(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && handleSongSearch()}
-                placeholder="Search YouTube for a walk-up song…"
-                maxLength={200}
-              />
-              <button
-                onClick={handleSongSearch}
-                disabled={searching || !songSearch.trim()}
-                className="announcer-btn announcer-btn-secondary"
-                style={{ flexShrink: 0, fontSize: '0.75rem', padding: '4px 10px', minHeight: 'var(--touch-min)' }}
-              >
-                {searching ? <RefreshCw size={12} className="sync-spin" /> : <Search size={12} />}
-                {searching ? 'Searching…' : 'Search'}
-              </button>
-            </div>
-            {searchResults.length > 0 && (
-              <ul style={{ listStyle: 'none', margin: '0 0 8px', padding: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                {searchResults.map(r => {
-                  const mins = r.duration ? Math.floor(r.duration / 60) : 0;
-                  const secs = r.duration ? String(r.duration % 60).padStart(2, '0') : '';
-                  const dur = r.duration ? `${mins}:${secs}` : '';
-                  return (
-                    <li
-                      key={r.video_id}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: 6,
-                        background: 'rgba(255,255,255,0.04)', borderRadius: 6,
-                        padding: '4px 8px', fontSize: 'var(--text-xs)',
-                      }}
-                    >
-                      <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {r.title}
-                      </span>
-                      {dur && (
-                        <span style={{ color: 'var(--text-muted)', flexShrink: 0, fontSize: '0.7rem' }}>{dur}</span>
-                      )}
-                      <button
-                        onClick={() => handleDownloadAndAdd(r)}
-                        disabled={downloadingId === r.video_id}
-                        className="announcer-btn announcer-btn-secondary"
-                        style={{ flexShrink: 0, fontSize: '0.7rem', padding: '3px 8px', minHeight: 'var(--touch-min)' }}
-                        title="Download to Pi and add to pool"
-                      >
-                        {downloadingId === r.video_id
-                          ? <RefreshCw size={11} className="sync-spin" />
-                          : <Download size={11} />}
-                        {downloadingId === r.video_id ? 'Saving…' : 'Add'}
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-
-            {/* Manual URL entry (fallback / paste direct links) */}
-            {/* URL + Label + (Start) + Add cannot share one 360px line. Let the
-                row wrap, and relax the label field's `flex: 0 0 100px` so it
-                can take its own line instead of squeezing the URL field down to
-                a few characters. */}
-            <div className="announcer-song-add" style={{ flexWrap: 'wrap' }}>
-              <input
-                className="announcer-song-input"
-                style={{ flex: '1 1 180px', minWidth: 0 }}
-                value={newSongUrl}
-                onChange={e => { setNewSongUrl(e.target.value); setNewSongOptimalStart(0); }}
-                onKeyDown={e => e.key === 'Enter' && handleAddSong()}
-                placeholder="…or paste a direct audio URL"
-                type="url"
-                maxLength={500}
-              />
-              <input
-                className="announcer-song-input announcer-song-label-input"
-                style={{ flex: '1 1 100px', minWidth: 0 }}
-                value={newSongLabel}
-                onChange={e => setNewSongLabel(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && handleAddSong()}
-                placeholder="Label"
-                maxLength={100}
-              />
-              {_spotifyTrackId(newSongUrl) && (
-                <button
-                  onClick={handleDetectStart}
-                  disabled={detecting}
-                  className="announcer-btn announcer-btn-secondary"
-                  style={{ flexShrink: 0, fontSize: '0.72rem', padding: '4px 8px', minHeight: 'var(--touch-min)', minWidth: 'var(--touch-min)' }}
-                  title="Detect optimal start point via Spotify audio analysis"
-                >
-                  {detecting ? <RefreshCw size={11} className="sync-spin" /> : '⚡'}
-                  {newSongOptimalStart > 0 ? `${(newSongOptimalStart / 1000).toFixed(1)}s` : 'Start'}
-                </button>
-              )}
-              <button
-                onClick={handleAddSong}
-                disabled={addingSong || !newSongUrl.trim()}
-                className="announcer-btn announcer-btn-secondary"
-                style={{ flexShrink: 0, fontSize: '0.75rem', padding: '4px 10px', minHeight: 'var(--touch-min)' }}
-              >
-                {addingSong ? <RefreshCw size={12} className="sync-spin" /> : <Plus size={12} />}
-                Add
-              </button>
-            </div>
-          </div>
-
-          <div className="announcer-preview-text">
-            <Mic size={14} /> <em>{previewText}</em>
-          </div>
-
-          {player.error_message && (
-            <div className="announcer-error-msg">
-              <AlertCircle size={14} /> {player.error_message}
-            </div>
-          )}
-
-          <div className="announcer-card-actions">
-            <button onClick={handleSave} disabled={saving} className="announcer-btn announcer-btn-secondary" style={{ minHeight: 'var(--touch-min)' }}>
-              {saving ? <RefreshCw size={14} className="sync-spin" /> : <Save size={14} />}
-              {saving ? 'Saving...' : 'Save'}
-            </button>
-            {/* The difference between the two modes existed ONLY in `title`, so
-                on a phone the toggle was two unexplained words. The TipIcon
-                carries the explanation as a tap-to-read popover; it sits beside
-                the toggle rather than wrapping the buttons, because TipIcon is
-                itself role="button" and nesting the two would recreate the
-                nested-interactive bug fixed above. */}
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-              <div className="announcer-quality-toggle">
-                <button
-                  type="button"
-                  className={`announcer-quality-btn${renderQuality === 'best' ? ' active' : ''}`}
-                  onClick={() => setRenderQuality('best')}
-                  aria-pressed={renderQuality === 'best'}
-                  title="Best quality — Qwen2.5-TTS-3B (slow)"
-                  style={{ minHeight: 'var(--touch-min)' }}
-                >Best</button>
-                <button
-                  type="button"
-                  className={`announcer-quality-btn${renderQuality === 'quick' ? ' active' : ''}`}
-                  onClick={() => setRenderQuality('quick')}
-                  aria-pressed={renderQuality === 'quick'}
-                  title="Quick render — faster"
-                  style={{ minHeight: 'var(--touch-min)' }}
-                >Quick</button>
-              </div>
-              <TipIcon text="Render quality. Best = Qwen2.5-TTS-3B, the highest-fidelity voice but slow (up to ~2 minutes). Quick = a faster, lower-fidelity render for last-minute subs.">
-                <span aria-hidden="true" style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 700 }}>?</span>
-              </TipIcon>
-            </div>
-            <button onClick={handleRender} disabled={rendering} className="announcer-btn announcer-btn-primary" style={{ minHeight: 'var(--touch-min)' }}>
-              {rendering ? <RefreshCw size={14} className="sync-spin" /> : <Mic size={14} />}
-              {rendering ? 'Rendering...' : 'Re-render'}
-            </button>
-            {player.status === 'ready' && player.announcer_audio_url && (
-              <button onClick={handlePreview} className="announcer-btn announcer-btn-accent" style={{ minHeight: 'var(--touch-min)' }}>
-                {previewing ? <Square size={14} /> : <Volume2 size={14} />}
-                {previewing ? 'Stop' : 'Preview'}
-              </button>
-            )}
-          </div>
-        </div>
-      )}
+            {player.status === 'rendering' ? 'Rendering…' : player.status === 'error' ? 'Render failed' : hasClip ? 'Announcer ready' : 'Tap to set up'}
+            {hasSong && <span> · <Volume2 size={11} style={{ verticalAlign: '-2px' }} /> walk-up</span>}
+          </span>
+        </span>
+      </button>
+      <button
+        type="button"
+        className={`announcer-row-play${isCurrent && isPlaying ? ' announcer-row-play--active' : ''}`}
+        onClick={() => onPlay(player)}
+        disabled={!hasClip && !hasSong}
+        aria-label={isCurrent && isPlaying ? `Stop ${player.first}` : `Play ${player.first}`}
+      >
+        {isCurrent && isPlaying ? <Square size={20} /> : <Play size={22} style={{ marginLeft: 2 }} />}
+      </button>
     </div>
   );
 }
 
-function NowPlayingView({ roster, lineups, onBack }) {
-  const [currentIdx, setCurrentIdx] = useState(0);
-  const [playing, setPlaying] = useState(false);
-  const [progress, setProgress] = useState({ elapsed: 0, duration: 0 });
-  const [gameState, setGameState] = useState(() => {
-    try {
-      const saved = localStorage.getItem('apex_game_state');
-      return saved ? JSON.parse(saved) : DEFAULT_GAME_STATE;
-    } catch { return DEFAULT_GAME_STATE; }
-  });
-  const [showGamePanel, setShowGamePanel] = useState(false);
-  const [showHalo, setShowHalo] = useState(false);
-  const [gcLineup, setGcLineup] = useState(null); // {source, source_label, players}
-
-  // Fetch GC-synced batting order on mount
-  useEffect(() => {
-    let cancelled = false;
-    fetch('/api/announcer/game-lineup')
-      .then(r => r.ok ? r.json() : null)
-      .then(data => { if (data && !cancelled) setGcLineup(data); })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, []);
-
-  // Build batting order: GC game → optimizer lineup → active roster
-  const battingOrder = (() => {
-    // Priority 1: GC game or optimizer lineup from /api/announcer/game-lineup
-    if (gcLineup?.players?.length) {
-      return gcLineup.players
-        .map(p => {
-          // Match against full roster by id, then jersey number, then name
-          return roster.find(r =>
-            (p.id && r.id === p.id) ||
-            String(r.number) === String(p.number) ||
-            `${r.first} ${r.last}`.toLowerCase() === `${p.first} ${p.last}`.toLowerCase()
-          ) || null;
-        })
-        .filter(Boolean);
-    }
-
-    // Priority 2: lineups.json — use recommended_strategy's lineup array (key is 'lineup', not 'order')
-    if (lineups) {
-      const strategy = lineups.recommended_strategy || 'balanced';
-      const entry = lineups[strategy] || lineups.balanced;
-      const lineup = entry?.lineup;
-      if (Array.isArray(lineup) && lineup.length) {
-        return lineup
-          .sort((a, b) => (a.slot || 0) - (b.slot || 0))
-          .map(p => roster.find(r =>
-            String(r.number) === String(p.number) ||
-            `${r.first} ${r.last}`.toLowerCase() === `${p.first} ${p.last}`.toLowerCase()
-          ))
-          .filter(Boolean);
-      }
-    }
-
-    return roster.filter(p => p.is_active);
-  })();
-
-  const current = battingOrder[currentIdx] || null;
-  const progressPct = progress.duration > 0 ? Math.min(100, (progress.elapsed / progress.duration) * 100) : 0;
-
-  // Anticipatory walk-up audio pre-buffering — fetch + decode + SW-cache
-  // the next 3 batters' hooks so taps on "Play" are instant even if the
-  // field's Wi-Fi drops for 30s.
-  usePrebuffer({
-    lineup: battingOrder,
-    currentIndex: currentIdx,
-    lookahead: 3,
-    enabled: battingOrder.length > 0,
-  });
-
-  const pushGameState = useCallback(async (next) => {
-    setGameState(next);
-    localStorage.setItem('apex_game_state', JSON.stringify(next));
-    try {
-      await apiRequest('/api/announcer/game-state', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(next),
-      });
-    } catch { /* non-critical */ }
-  }, []);
-
-  const updateGameField = (field, value) => {
-    pushGameState({ ...gameState, [field]: value });
-  };
-
-  const toggleBase = (idx) => {
-    const bases = [...gameState.bases];
-    bases[idx] = !bases[idx];
-    pushGameState({ ...gameState, bases });
-  };
-
-  // Fetch server game state on mount
-  useEffect(() => {
-    fetch('/api/announcer/game-state')
-      .then(r => r.ok ? r.json() : null)
-      .then(data => { if (data) setGameState({ ...DEFAULT_GAME_STATE, ...data }); })
-      .catch(() => {});
-  }, []);
-
-  // Halo achievement: trigger re-render with achievement context then auto-play
-  const triggerHaloAchievement = useCallback(async (achievementKey) => {
-    if (!current) return;
-    const newState = { ...gameState, achievement: achievementKey };
-    await pushGameState(newState);
-    // Request a fresh render with achievement context
-    try {
-      await apiRequest(`/api/announcer/render/${current.id}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ game_context: newState }),
-      });
-    } catch { /* best-effort */ }
-    // Clear achievement after trigger
-    setTimeout(() => pushGameState({ ...newState, achievement: null }), 2000);
-  }, [current, gameState, pushGameState]);
-
-  const handlePlay = async () => {
-    if (!current) return;
-    if (playing) {
-      stopAudio();
-      setPlaying(false);
-      return;
-    }
-    setPlaying(true);
-    const introTs = current.intro_timestamp ?? 5;
-    try {
-      await playIntro({
-        walkupUrl: current.walkup_song_url || '',
-        clipUrl: current.announcer_audio_url || '',
-        introTimestamp: introTs,
-        autoBPM: introTs === 0,
-        onEnd: () => setPlaying(false),
-        onProgress: (p) => setProgress(p),
-      });
-    } catch {
-      setPlaying(false);
-    }
-  };
-
-  const goPrev = () => {
-    stopAudio();
-    setPlaying(false);
-    setProgress({ elapsed: 0, duration: 0 });
-    setCurrentIdx(i => Math.max(0, i - 1));
-  };
-
-  const goNext = () => {
-    stopAudio();
-    setPlaying(false);
-    setProgress({ elapsed: 0, duration: 0 });
-    setCurrentIdx(i => Math.min(battingOrder.length - 1, i + 1));
-  };
-
-  // Preload next batter's audio
-  useEffect(() => {
-    const next = battingOrder[currentIdx + 1];
-    if (next) {
-      preload([next.walkup_song_url, next.announcer_audio_url].filter(Boolean));
-    }
-  }, [currentIdx, battingOrder]);
-
-  useEffect(() => () => stopAudio(), []);
-
-  if (!battingOrder.length) {
-    return (
-      <div className="announcer-now-playing glass-panel">
-        <p style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
-          No players with rendered audio clips yet. Go to the Roster view and render clips first.
-        </p>
-        <button onClick={onBack} className="announcer-btn announcer-btn-secondary" style={{ margin: '1rem auto', display: 'flex', minHeight: 'var(--touch-min)' }}>
-          <List size={14} /> Back to Roster
-        </button>
-      </div>
-    );
-  }
-
-  const isHighStakes = gameState.bases.every(Boolean) && gameState.outs >= 2;
-
-  return (
-    <div className="announcer-now-playing">
-      {/* Five items (Roster, Achievement, Game State, position, source badge)
-          on one unwrappable line blew straight through 360px. Both the outer
-          row and the inner group now wrap. */}
-      <div className="announcer-np-header" style={{ flexWrap: 'wrap', gap: 8 }}>
-        <button onClick={onBack} className="announcer-btn announcer-btn-secondary" aria-label="Back to roster" style={{ minHeight: 'var(--touch-min)' }}>
-          <List size={16} /> Roster
-        </button>
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end', minWidth: 0 }}>
-          <button
-            onClick={() => setShowHalo(true)}
-            className="announcer-btn announcer-btn-accent"
-            style={{ padding: '4px 10px', fontSize: '0.75rem', minHeight: 'var(--touch-min)' }}
-            aria-label="Halo achievement"
-          >
-            <Zap size={14} /> Achievement
-          </button>
-          <button
-            onClick={() => setShowGamePanel(v => !v)}
-            className={`announcer-btn ${showGamePanel ? 'announcer-btn-primary' : 'announcer-btn-secondary'}`}
-            style={{ padding: '4px 10px', fontSize: '0.75rem', minHeight: 'var(--touch-min)' }}
-            aria-expanded={showGamePanel}
-            aria-label="Toggle game state panel"
-          >
-            <Target size={14} /> Game State
-          </button>
-          <span className="announcer-np-position">{currentIdx + 1} / {battingOrder.length}</span>
-          {gcLineup?.source_label && (
-            // Where the batting order came from (and how to refresh it) was a
-            // `title`-only string, i.e. invisible on the device this screen is
-            // built for. TipIcon makes it tappable.
-            <TipIcon
-              text={gcLineup.source === 'gc_game' ? 'Batting order from GameChanger — re-ingest CSV to refresh' : 'Batting order from lineup optimizer'}
-              className={`announcer-lineup-source${gcLineup.source === 'gc_game' ? ' announcer-lineup-source--gc' : ''}`}
-            >
-              {gcLineup.source === 'gc_game' ? '⚾' : '📊'} {gcLineup.source_label}
-            </TipIcon>
-          )}
-        </div>
-      </div>
-
-      {showGamePanel && (
-        <div className="announcer-np-game-state glass-panel" style={{ padding: '0.75rem', marginBottom: '0.5rem' }}>
-          <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start', flexWrap: 'wrap' }}>
-            {/* Inning */}
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-              <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Inning</span>
-              {/* Game state is edited one-handed between pitches, but every
-                  stepper here was 24px or smaller. The authored width/height
-                  stay so the glyphs keep their proportions; min-width/height do
-                  the real work. */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <button type="button" className="announcer-btn announcer-btn-round" aria-label="Previous inning"
-                  style={{ width: 24, height: 24, fontSize: '1rem', minWidth: 'var(--touch-min)', minHeight: 'var(--touch-min)' }}
-                  onClick={() => updateGameField('inning', Math.max(1, gameState.inning - 1))}>−</button>
-                <span style={{ fontWeight: 800, fontSize: '1.1rem', minWidth: 20, textAlign: 'center' }}>{gameState.inning}</span>
-                <button type="button" className="announcer-btn announcer-btn-round" aria-label="Next inning"
-                  style={{ width: 24, height: 24, fontSize: '1rem', minWidth: 'var(--touch-min)', minHeight: 'var(--touch-min)' }}
-                  onClick={() => updateGameField('inning', Math.min(15, gameState.inning + 1))}>+</button>
-              </div>
-              <div style={{ display: 'flex', gap: 4 }}>
-                {['top', 'bottom'].map(h => (
-                  <button type="button" key={h} onClick={() => updateGameField('half', h)}
-                    aria-label={h === 'top' ? 'Top of the inning' : 'Bottom of the inning'}
-                    aria-pressed={gameState.half === h}
-                    className={`announcer-btn ${gameState.half === h ? 'announcer-btn-primary' : 'announcer-btn-secondary'}`}
-                    style={{ padding: '2px 6px', fontSize: '0.65rem', minWidth: 'var(--touch-min)', minHeight: 'var(--touch-min)', justifyContent: 'center' }}>{h === 'top' ? '▲' : '▼'}</button>
-                ))}
-              </div>
-            </div>
-
-            {/* Outs */}
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-              <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Outs</span>
-              <div style={{ display: 'flex', gap: 4 }}>
-                {[0, 1, 2].map(o => (
-                  <button type="button" key={o} onClick={() => updateGameField('outs', o)}
-                    aria-label={`${o} out${o === 1 ? '' : 's'}`}
-                    aria-pressed={gameState.outs === o}
-                    className={`announcer-btn ${gameState.outs === o ? 'announcer-btn-primary' : 'announcer-btn-secondary'}`}
-                    style={{ width: 28, height: 28, padding: 0, fontWeight: 800, minWidth: 'var(--touch-min)', minHeight: 'var(--touch-min)', justifyContent: 'center' }}>{o}</button>
-                ))}
-              </div>
-            </div>
-
-            {/* Bases */}
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-              <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Bases</span>
-              <BaseDiamond bases={gameState.bases} onToggle={toggleBase} />
-            </div>
-
-            {/* Score */}
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-              <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Score</span>
-              {/* 20px score steppers were the smallest targets on the screen
-                  and the most consequential to mis-tap. */}
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'center' }}>
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: '0.6rem', opacity: 0.7 }}>Us</div>
-                  <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
-                    <button type="button" className="announcer-btn announcer-btn-round" aria-label="Decrease our score"
-                      style={{ width: 20, height: 20, fontSize: '0.75rem', minWidth: 'var(--touch-min)', minHeight: 'var(--touch-min)' }}
-                      onClick={() => updateGameField('score_us', Math.max(0, gameState.score_us - 1))}>−</button>
-                    <span style={{ fontWeight: 800, minWidth: 20, textAlign: 'center' }}>{gameState.score_us}</span>
-                    <button type="button" className="announcer-btn announcer-btn-round" aria-label="Increase our score"
-                      style={{ width: 20, height: 20, fontSize: '0.75rem', minWidth: 'var(--touch-min)', minHeight: 'var(--touch-min)' }}
-                      onClick={() => updateGameField('score_us', gameState.score_us + 1)}>+</button>
-                  </div>
-                </div>
-                <span style={{ opacity: 0.5 }}>–</span>
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: '0.6rem', opacity: 0.7 }}>Them</div>
-                  <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
-                    <button type="button" className="announcer-btn announcer-btn-round" aria-label="Decrease their score"
-                      style={{ width: 20, height: 20, fontSize: '0.75rem', minWidth: 'var(--touch-min)', minHeight: 'var(--touch-min)' }}
-                      onClick={() => updateGameField('score_them', Math.max(0, gameState.score_them - 1))}>−</button>
-                    <span style={{ fontWeight: 800, minWidth: 20, textAlign: 'center' }}>{gameState.score_them}</span>
-                    <button type="button" className="announcer-btn announcer-btn-round" aria-label="Increase their score"
-                      style={{ width: 20, height: 20, fontSize: '0.75rem', minWidth: 'var(--touch-min)', minHeight: 'var(--touch-min)' }}
-                      onClick={() => updateGameField('score_them', gameState.score_them + 1)}>+</button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {isHighStakes && (
-            <div style={{ marginTop: '0.5rem', padding: '4px 8px', background: 'rgba(250,204,21,0.15)', borderRadius: 6, fontSize: '0.75rem', color: 'var(--warning, #facc15)', fontWeight: 700 }}>
-              HIGH STAKES — Script will automatically intensify
-            </div>
-          )}
-        </div>
-      )}
-
-      <div className="announcer-np-card glass-panel">
-        <div className="announcer-np-jersey">#{current?.number || '—'}</div>
-        <div className="announcer-np-name">{current?.first} {current?.last}</div>
-        <StatusLed status={current?.status || 'pending'} />
-      </div>
-
-      <div className="announcer-np-timeline">
-        <div className="announcer-progress-track">
-          <div className="announcer-progress-fill" style={{ width: `${progressPct}%` }} />
-        </div>
-        <div className="announcer-np-time">
-          {Math.floor(progress.elapsed)}s / {Math.floor(progress.duration)}s
-        </div>
-      </div>
-
-      <div className="announcer-np-controls">
-        <button onClick={goPrev} disabled={currentIdx === 0} className="announcer-btn announcer-btn-round" aria-label="Previous batter">
-          <SkipBack size={24} />
-        </button>
-        <button onClick={handlePlay} className={`announcer-btn announcer-btn-play ${playing ? 'active' : ''}`} aria-label={playing ? 'Stop' : 'Play intro'}>
-          {playing ? <Square size={32} /> : <Play size={32} />}
-        </button>
-        <button onClick={goNext} disabled={currentIdx >= battingOrder.length - 1} className="announcer-btn announcer-btn-round" aria-label="Next batter">
-          <SkipForward size={24} />
-        </button>
-      </div>
-
-      {showHalo && (
-        <HaloOverlay
-          onSelect={triggerHaloAchievement}
-          onClose={() => setShowHalo(false)}
-        />
-      )}
-    </div>
-  );
-}
-
-const HALO_ACHIEVEMENTS = [
-  { key: 'triple_rbi',   label: 'Hat Trick',        desc: '3 RBI' },
-  { key: 'quad_rbi',     label: 'Grand Slam Hero',  desc: '4 RBI' },
-  { key: '3_strikeouts', label: 'Strikeout Artist', desc: '3 Ks' },
-  { key: '4_strikeouts', label: 'Ace on Fire',      desc: '4 Ks' },
-  { key: '5_strikeouts', label: 'Untouchable',      desc: '5 Ks' },
-  { key: 'grand_slam',   label: 'Grand Slam Queen', desc: 'Grand Slam' },
-  { key: 'cycle',        label: 'Perfection',       desc: 'Hit for Cycle' },
-];
-
-const DEFAULT_GAME_STATE = {
-  inning: 1, half: 'top', outs: 0,
-  score_us: 0, score_them: 0,
-  bases: [false, false, false],
-  achievement: null,
-};
-
-// Each base used to be an 18x18 rotated <div> carrying an onClick — not
-// focusable, not announced, and a quarter of the area a thumb needs. They are
-// real <button>s now, each with a full 44x44 box.
-//
-// The diamond itself had to grow from 60x60 to 132x132: three 44px targets
-// arranged around a 60px square overlap one another, so a tap aimed at 2nd
-// base would land on 3rd. At 132 the boxes tile edge-to-edge with no overlap.
-// The base name also moved out of `title` (invisible on a phone) into a
-// visible caption under each base.
-const BASE_HIT = 'var(--touch-min)';
-const BASE_LABELS = ['1st base', '2nd base', '3rd base'];
-
-function BaseDiamond({ bases, onToggle }) {
-  // bases = [1B, 2B, 3B]
-  const occupied = 'var(--warning, #facc15)';
-  const empty = 'rgba(255,255,255,0.15)';
-  const baseStyle = (idx) => ({
-    width: 22, height: 22,
-    background: bases[idx] ? occupied : empty,
-    border: '2px solid rgba(255,255,255,0.4)',
-    transform: 'rotate(45deg)',
-    borderRadius: 2,
-    transition: 'background 0.15s',
-  });
-  const hitStyle = {
-    position: 'absolute',
-    width: BASE_HIT, height: BASE_HIT,
-    display: 'flex', flexDirection: 'column',
-    alignItems: 'center', justifyContent: 'center', gap: 2,
-    background: 'transparent', border: 'none', padding: 0,
-    cursor: 'pointer', color: 'var(--text-muted)',
-  };
-  const capStyle = { fontSize: '0.55rem', fontWeight: 700, lineHeight: 1 };
-
-  const baseButton = (idx, caption, position) => (
-    <button
-      type="button"
-      style={{ ...hitStyle, ...position }}
-      onClick={() => onToggle(idx)}
-      aria-pressed={Boolean(bases[idx])}
-      aria-label={`${BASE_LABELS[idx]} — ${bases[idx] ? 'runner on' : 'empty'}`}
-    >
-      <span style={baseStyle(idx)} />
-      <span aria-hidden="true" style={capStyle}>{caption}</span>
-    </button>
-  );
-
-  return (
-    <div style={{ position: 'relative', width: 132, height: 132, flexShrink: 0 }}>
-      {baseButton(1, '2B', { top: 0, left: '50%', transform: 'translateX(-50%)' })}
-      {baseButton(2, '3B', { top: '50%', left: 0, transform: 'translateY(-50%)' })}
-      {baseButton(0, '1B', { top: '50%', right: 0, transform: 'translateY(-50%)' })}
-      {/* Home plate — decorative, never toggled */}
-      <div style={{ position: 'absolute', bottom: 0, left: '50%', transform: 'translateX(-50%)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, color: 'var(--text-muted)' }}>
-        <span style={{ width: 22, height: 22, background: 'rgba(255,255,255,0.3)', border: '2px solid rgba(255,255,255,0.4)', transform: 'rotate(45deg)', borderRadius: 2 }} />
-        <span aria-hidden="true" style={capStyle}>H</span>
-      </div>
-    </div>
-  );
-}
-
-function HaloOverlay({ onSelect, onClose }) {
+// ── Player sheet ───────────────────────────────────────────────────────────
+function PlayerSheet({ player, profiles, defaultVoiceId, onClose, onSave, onRender, onRemove }) {
   useEscapeToClose(onClose);
-  return createPortal(
-    <div className="announcer-modal-overlay" onClick={onClose}>
-      {/* Seven two-line buttons plus Cancel are taller than a phone viewport;
-          without the scroll cap both ends were clipped and Cancel could not be
-          reached at all. */}
-      <div className="announcer-modal glass-panel" onClick={e => e.stopPropagation()} style={{ maxWidth: 340, ...MODAL_SCROLL_STYLE }}>
-        <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Zap size={18} style={{ color: 'var(--warning, #facc15)' }} /> Halo Achievement
-        </h3>
-        <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.75rem' }}>
-          Select an achievement to render a special Steitzer-style call.
-        </p>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
-          {HALO_ACHIEVEMENTS.map(a => (
-            <button
-              type="button"
-              key={a.key}
-              className="announcer-btn announcer-btn-accent"
-              style={{ flexDirection: 'column', padding: '0.5rem', textAlign: 'center', height: 'auto', minHeight: 'var(--touch-min)' }}
-              onClick={() => { onSelect(a.key); onClose(); }}
-            >
-              <span style={{ fontWeight: 700, fontSize: '0.85rem' }}>{a.label}</span>
-              <span style={{ fontSize: '0.7rem', opacity: 0.75 }}>{a.desc}</span>
-            </button>
-          ))}
-        </div>
-        <button type="button" onClick={onClose} className="announcer-btn announcer-btn-secondary" style={{ marginTop: '0.75rem', width: '100%', minHeight: 'var(--touch-min)', justifyContent: 'center' }}>
-          Cancel
-        </button>
-      </div>
-    </div>,
-    document.body
-  );
-}
+  const [phonetic, setPhonetic] = useState(player.phonetic_hint || '');
+  const [voice, setVoice] = useState(player.voice_profile_id || '');
+  const [song, setSong] = useState(player.walkup_song_url || '');
+  const [introTs, setIntroTs] = useState(player.intro_timestamp ?? 5);
+  const [busy, setBusy] = useState('');
+  const [msg, setMsg] = useState('');
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const defaultName = profiles.find(p => p.id === defaultVoiceId)?.name || 'Team voice';
 
-function numToWord(num) {
-  const words = {
-    '0': 'zero', '1': 'one', '2': 'two', '3': 'three', '4': 'four',
-    '5': 'five', '6': 'six', '7': 'seven', '8': 'eight', '9': 'nine',
-    '10': 'ten', '11': 'eleven', '12': 'twelve', '13': 'thirteen',
-    '14': 'fourteen', '15': 'fifteen', '16': 'sixteen', '17': 'seventeen',
-    '18': 'eighteen', '19': 'nineteen', '20': 'twenty',
-    '21': 'twenty-one', '22': 'twenty-two', '23': 'twenty-three',
-    '24': 'twenty-four', '25': 'twenty-five', '00': 'double-zero',
+  const payload = () => ({
+    phonetic_hint: phonetic.trim(),
+    voice_profile_id: voice,
+    walkup_song_url: song.trim(),
+    intro_timestamp: Number(introTs) || 0,
+  });
+
+  const save = async () => {
+    setBusy('save'); setMsg('');
+    try { await onSave(player.id, payload()); setMsg('Saved.'); }
+    catch (e) { setMsg(e.message || 'Save failed'); }
+    finally { setBusy(''); }
   };
-  return words[String(num).trim()] || String(num);
-}
 
-function useWorkerStatus() {
-  const [workerStatus, setWorkerStatus] = useState(null);
-  // Permanently-stopped flag is exposed so the badge can render a manual
-  // "Refresh" button and the consumer can call restart() to resume polling.
-  const [stopped, setStopped] = useState(false);
-  // Increment to force the polling effect to re-run from scratch (used by
-  // the manual refresh button after the permanent stop).
-  const [resetTick, setResetTick] = useState(0);
-
-  useEffect(() => {
-    let cancelled = false;
-    let timeoutId = null;
-    // Backoff per spec: BASE 10s, doubles on each failure, cap at 5 minutes.
-    const BASE_DELAY = 10_000;
-    const MAX_DELAY = 300_000; // 5 min
-    // 429-specific: at minimum 120s before the next attempt, regardless
-    // of what Retry-After says. Spec is explicit on this.
-    const MIN_429_WAIT = 120_000;
-    // Stop polling entirely after this many consecutive failures of any
-    // kind (5xx, 4xx, 429, network). Manual restart() required to resume.
-    const MAX_CONSECUTIVE_FAILURES = 5;
-    // Circuit breaker: failures within this rolling window count toward
-    // the disable-until-reload threshold even if separated by a successful
-    // recovery in between.
-    const CIRCUIT_WINDOW_MS = 60_000;
-    const CIRCUIT_THRESHOLD = 5;
-    const failureTimestamps = [];
-    let failures = 0;
-    let interval = BASE_DELAY;
-    let stoppedPermanently = false;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setStopped(false);
-
-    const computeBackoff = () =>
-      Math.min(BASE_DELAY * Math.pow(2, failures), MAX_DELAY);
-
-    const recordFailure = () => {
-      failures += 1;
-      const now = Date.now();
-      failureTimestamps.push(now);
-      // Drop timestamps outside the rolling window.
-      while (failureTimestamps.length && now - failureTimestamps[0] > CIRCUIT_WINDOW_MS) {
-        failureTimestamps.shift();
-      }
-    };
-
-    const stopPermanent = (reason) => {
-      stoppedPermanently = true;
-      if (!cancelled) {
-        setWorkerStatus({
-          hub_status: 'OFFLINE',
-          primary_worker: { id: 'mac', status: 'OFFLINE', last_heartbeat: null, queue_depth: 0 },
-          failover_worker: { id: 'Pi-5-Edge', status: 'READY' },
-          current_mode: 'OFFLINE',
-          stopped: true,
-          error: reason || 'worker unavailable',
-        });
-        setStopped(true);
-      }
-    };
-
-    const schedule = (ms) => {
-      if (cancelled || stoppedPermanently) return;
-      timeoutId = setTimeout(poll, ms);
-    };
-
-    const poll = async () => {
-      if (cancelled || stoppedPermanently) return;
-
-      // Honor global 429 pause window — skip this tick, retry later.
-      let apiClient = null;
-      try {
-        apiClient = await import('../utils/apiClient');
-        if (apiClient.isPollingPaused()) {
-          // Resume polling shortly after the pause expires.
-          const remaining = Math.max(2_000, apiClient.getPausedUntil() - Date.now() + 1_000);
-          schedule(Math.min(MAX_DELAY, remaining));
-          return;
-        }
-      } catch { /* apiClient unavailable — degrade gracefully */ }
-
-      let nextDelay = interval;
-      try {
-        const res = await fetch('/api/announcer/worker-status');
-        if (res.ok) {
-          if (!cancelled) {
-            try {
-              const data = await res.json();
-              setWorkerStatus(data);
-            } catch { /* ignore parse error, keep prior value */ }
-          }
-          // Only a successful 200 resets the failure counters and cadence.
-          failures = 0;
-          failureTimestamps.length = 0;
-          interval = BASE_DELAY;
-          nextDelay = BASE_DELAY;
-        } else if (res.status === 429) {
-          // 429 is the canary for nginx-level rate limiting. Treat as
-          // "offline" immediately. Honor Retry-After if present, but
-          // never wait less than MIN_429_WAIT (120s) before retrying,
-          // AND pause every other poller globally.
-          recordFailure();
-          let retryAfterMs = MIN_429_WAIT;
-          const ra = res.headers.get('Retry-After');
-          if (ra) {
-            const asInt = parseInt(ra, 10);
-            if (!Number.isNaN(asInt) && asInt > 0) {
-              retryAfterMs = Math.max(MIN_429_WAIT, asInt * 1000);
-            } else {
-              const asDate = Date.parse(ra);
-              if (!Number.isNaN(asDate)) {
-                retryAfterMs = Math.max(MIN_429_WAIT, asDate - Date.now());
-              }
-            }
-          }
-          if (apiClient && typeof apiClient.pausePollingFor === 'function') {
-            apiClient.pausePollingFor(retryAfterMs);
-          }
-          interval = Math.min(MAX_DELAY, retryAfterMs);
-          nextDelay = interval;
-        } else {
-          // Any other non-2xx (4xx, 5xx) — exponential backoff.
-          recordFailure();
-          interval = computeBackoff();
-          nextDelay = interval;
-        }
-      } catch {
-        // Network error — count as failure and back off too.
-        recordFailure();
-        interval = computeBackoff();
-        nextDelay = interval;
-      }
-
-      // Permanent stop checks. Either condition disables polling until
-      // the user calls restart() (badge "Refresh") or reloads the page.
-      if (failures >= MAX_CONSECUTIVE_FAILURES) {
-        stopPermanent('worker unavailable (too many failures)');
-        return;
-      }
-      if (failureTimestamps.length >= CIRCUIT_THRESHOLD) {
-        stopPermanent('circuit breaker open');
-        return;
-      }
-
-      schedule(nextDelay);
-    };
-
-    // Health pre-gate: do not start polling until /api/health returns 200.
-    // Spec: when the backend is already 4xx/5xx-ing, hammering worker-status
-    // is what creates the rate-limit cascade. Re-check health every 30s
-    // until it returns 200, then begin the normal polling loop.
-    const HEALTH_RECHECK_MS = 30_000;
-    const startWhenHealthy = async () => {
-      if (cancelled || stoppedPermanently) return;
-      try {
-        const res = await fetch('/api/health', { cache: 'no-store' });
-        if (res.ok) {
-          poll();
-          return;
-        }
-        // Treat a non-200 health as one strike toward the circuit, so
-        // an unreachable backend at page load doesn't pretend everything
-        // is fine forever.
-        recordFailure();
-        if (failures >= MAX_CONSECUTIVE_FAILURES ||
-            failureTimestamps.length >= CIRCUIT_THRESHOLD) {
-          stopPermanent('backend health check failing');
-          return;
-        }
-      } catch {
-        recordFailure();
-        if (failures >= MAX_CONSECUTIVE_FAILURES ||
-            failureTimestamps.length >= CIRCUIT_THRESHOLD) {
-          stopPermanent('backend unreachable');
-          return;
-        }
-      }
-      timeoutId = setTimeout(startWhenHealthy, HEALTH_RECHECK_MS);
-    };
-    startWhenHealthy();
-
-    return () => {
-      cancelled = true;
-      if (timeoutId) clearTimeout(timeoutId);
-    };
-  }, [resetTick]);
-
-  const restart = useCallback(() => {
-    setStopped(false);
-    setResetTick(t => t + 1);
-  }, []);
-
-  return { workerStatus, stopped, restart };
-}
-
-function WizardModal({ onClose, roster, onAddSong }) {
-  const [query, setQuery] = useState('');
-  const [results, setResults] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [suggestions, setSuggestions] = useState({});
-  const [tab, setTab] = useState('search'); // 'search' | 'roster' | 'spotify'
-  const [spotifyAuthed, setSpotifyAuthed] = useState(false);
-  const [spotifyResults, setSpotifyResults] = useState([]);
-  const [spotifyQuery, setSpotifyQuery] = useState('');
-  const [spotifyLoading, setSpotifyLoading] = useState(false);
-  // Player selector for adding songs from Catalog/Spotify tabs
-  const [selectedPlayerId, setSelectedPlayerId] = useState(() => roster[0]?.id || '');
-  const [addingId, setAddingId] = useState(null); // tracks which row is being added
-
-  useEscapeToClose(onClose);
-
-  useEffect(() => {
-    import('../services/SpotifyService').then(({ isAuthenticated }) => {
-      setSpotifyAuthed(isAuthenticated());
-    });
-  }, []);
-
-  useEffect(() => {
-    if (tab !== 'roster') return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setLoading(true);
-    fetch('/api/announcer/music-wizard')
-      .then(r => r.ok ? r.json() : null)
-      .then(data => { if (data) setSuggestions(data.suggestions || {}); })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [tab]);
-
-  const handleSearch = async (e) => {
-    e.preventDefault();
-    if (!query.trim()) return;
-    setLoading(true);
+  const saveAndRender = async () => {
+    setBusy('render'); setMsg('');
     try {
-      const res = await fetch(`/api/announcer/catalog/search?q=${encodeURIComponent(query)}&limit=20`);
-      if (res.ok) { const data = await res.json(); setResults(data.results || []); }
-    } finally { setLoading(false); }
+      await onSave(player.id, payload());
+      await onRender(player.id);
+      setMsg('Rendering — takes about 10 seconds.');
+      onClose();
+    } catch (e) { setMsg(e.message || 'Render failed'); setBusy(''); }
   };
 
-  const handleSpotifySearch = async (e) => {
-    e.preventDefault();
-    if (!spotifyQuery.trim()) return;
-    setSpotifyLoading(true);
-    try {
-      const { searchTracks } = await import('../services/SpotifyService');
-      const tracks = await searchTracks(spotifyQuery, 15);
-      setSpotifyResults(tracks);
-    } catch { /* token may have expired */ } finally {
-      setSpotifyLoading(false);
-    }
+  const testPlay = () => {
+    if (player.announcer_audio_url) playClip(player.announcer_audio_url);
   };
-
-  const handleSpotifyConnect = async () => {
-    const { startAuth } = await import('../services/SpotifyService');
-    startAuth();
-  };
-
-  const handleAdd = async (rowId, url, label, startMs) => {
-    if (!selectedPlayerId || !url) return;
-    setAddingId(rowId);
-    try {
-      await onAddSong(selectedPlayerId, url, label, startMs || 0);
-    } finally {
-      setAddingId(null);
-    }
-  };
-
-  // Player selector shown in Catalog and Spotify tabs — plain JSX (not a
-  // nested component) so it isn't recreated/remounted on every render.
-  const playerSelector = (
-    <div className="announcer-wizard-player-selector">
-      <label>Add to:</label>
-      <select value={selectedPlayerId} onChange={e => setSelectedPlayerId(e.target.value)}>
-        {roster.map(p => (
-          <option key={p.id} value={p.id}>#{p.number} {p.first} {p.last}</option>
-        ))}
-      </select>
-    </div>
-  );
 
   return createPortal(
     <div className="announcer-modal-overlay" onClick={onClose}>
-      {/* Tabs + player selector + search form + results overflow a phone
-          viewport; cap and scroll the modal itself. */}
-      <div className="announcer-modal glass-panel" onClick={e => e.stopPropagation()} style={{ maxWidth: 520, ...MODAL_SCROLL_STYLE }}>
+      <div className="announcer-modal glass-panel" onClick={e => e.stopPropagation()} style={{ maxWidth: 420, ...MODAL_SCROLL_STYLE }}>
         <div className="announcer-modal-header">
-          <h3><Wand2 size={16} /> Music Wizard</h3>
-          <button className="announcer-modal-close" onClick={onClose}><X size={18} /></button>
-        </div>
-        {/* Tabs computed to ~38px tall from their padding alone. */}
-        <div className="announcer-wizard-tabs">
-          <button type="button" aria-pressed={tab === 'search'} style={{ minHeight: 'var(--touch-min)' }} className={`announcer-wizard-tab${tab === 'search' ? ' active' : ''}`} onClick={() => setTab('search')}>
-            Catalog
-          </button>
-          <button type="button" aria-pressed={tab === 'roster'} style={{ minHeight: 'var(--touch-min)' }} className={`announcer-wizard-tab${tab === 'roster' ? ' active' : ''}`} onClick={() => setTab('roster')}>
-            Roster
-          </button>
-          <button type="button" aria-pressed={tab === 'spotify'} style={{ minHeight: 'var(--touch-min)' }} className={`announcer-wizard-tab${tab === 'spotify' ? ' active' : ''}`} onClick={() => setTab('spotify')}>
-            Spotify
-          </button>
+          <h3 style={{ margin: 0 }}><span className="announcer-jersey">#{player.number}</span> {player.first} {player.last}</h3>
+          <button type="button" className="announcer-modal-close" onClick={onClose} aria-label="Close"><X size={18} /></button>
         </div>
 
-        {tab === 'search' && (
-          <div className="announcer-wizard-body">
-            {playerSelector}
-            <form onSubmit={handleSearch} className="announcer-wizard-search-form">
-              <input
-                className="announcer-song-input"
-                value={query}
-                onChange={e => setQuery(e.target.value)}
-                placeholder="Search title or artist…"
-                autoFocus
-              />
-              <button type="submit" className="announcer-btn announcer-btn-primary" disabled={loading} style={{ minHeight: 'var(--touch-min)' }}>
-                {loading ? <RefreshCw size={13} className="sync-spin" /> : 'Search'}
-              </button>
-            </form>
-            <div className="announcer-wizard-results">
-              {results.map(row => (
-                <div key={row.id} className="announcer-wizard-result-row">
-                  <div className="announcer-wizard-result-info">
-                    <span className="announcer-wizard-result-title">{row.title}</span>
-                    <span className="announcer-wizard-result-artist">{row.artist}</span>
-                  </div>
-                  <div className="announcer-wizard-result-meta">
-                    {row.optimal_start_ms > 0 && (
-                      <span className="announcer-song-start-badge">{(row.optimal_start_ms / 1000).toFixed(1)}s</span>
-                    )}
-                    <span className="announcer-wizard-energy" title="Energy score">{Math.round(row.energy_score * 100)}%</span>
-                    <button
-                      type="button"
-                      className="announcer-btn announcer-btn-secondary"
-                      // 2px of vertical padding rendered a ~20px-tall "Add".
-                      style={{ padding: '2px 8px', fontSize: '0.72rem', minHeight: 'var(--touch-min)', minWidth: 'var(--touch-min)' }}
-                      disabled={addingId === row.id || !selectedPlayerId}
-                      onClick={() => handleAdd(row.id, row.audio_url || row.url, row.title, row.optimal_start_ms)}
-                    >
-                      {addingId === row.id ? <RefreshCw size={11} className="sync-spin" /> : <Plus size={11} />}
-                      Add
-                    </button>
-                  </div>
-                </div>
-              ))}
-              {results.length === 0 && !loading && query && (
-                <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '1rem' }}>No results</p>
-              )}
-            </div>
-          </div>
-        )}
+        <label className="announcer-form-group">
+          <span>Say it as</span>
+          <input
+            value={phonetic}
+            onChange={e => setPhonetic(e.target.value)}
+            placeholder={`${player.first} ${player.last}`}
+            maxLength={200}
+            autoCapitalize="off"
+            autoCorrect="off"
+          />
+          <small>Spell it how it sounds. Capitals get stressed: <em>ROO-bee van-DOO-sen</em></small>
+        </label>
+        <div className="announcer-preview-text">{previewLine(player, phonetic)}</div>
 
-        {tab === 'roster' && (
-          <div className="announcer-wizard-body">
-            {loading && <div className="loader" style={{ margin: '2rem auto' }} />}
-            {roster.map(player => {
-              const pid = player.id;
-              const sugg = suggestions[pid] || [];
-              return (
-                <div key={pid} className="announcer-wizard-player-section">
-                  <div className="announcer-wizard-player-name">
-                    #{player.number} {player.first} {player.last}
-                  </div>
-                  {sugg.length === 0 && !loading && (
-                    <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>No suggestions</p>
-                  )}
-                  {sugg.map((row, i) => {
-                    const rowKey = `${pid}-${i}`;
-                    return (
-                      <div key={i} className="announcer-wizard-result-row">
-                        <div className="announcer-wizard-result-info">
-                          <span className="announcer-wizard-result-title">{row.title}</span>
-                          <span className="announcer-wizard-result-artist">{row.artist}</span>
-                        </div>
-                        <div className="announcer-wizard-result-meta">
-                          {row.optimal_start_ms > 0 && (
-                            <span className="announcer-song-start-badge">{(row.optimal_start_ms / 1000).toFixed(1)}s</span>
-                          )}
-                          <span className="announcer-wizard-energy">{Math.round((row.energy_score || 0) * 100)}%</span>
-                          <button
-                            type="button"
-                            className="announcer-btn announcer-btn-secondary"
-                            style={{ padding: '2px 8px', fontSize: '0.72rem', minHeight: 'var(--touch-min)', minWidth: 'var(--touch-min)' }}
-                            disabled={addingId === rowKey}
-                            onClick={async () => {
-                              setAddingId(rowKey);
-                              try { await onAddSong(pid, row.audio_url || row.url, row.title, row.optimal_start_ms || 0); }
-                              finally { setAddingId(null); }
-                            }}
-                          >
-                            {addingId === rowKey ? <RefreshCw size={11} className="sync-spin" /> : <Plus size={11} />}
-                            Add
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              );
-            })}
-          </div>
-        )}
+        <label className="announcer-form-group">
+          <span>Voice</span>
+          <select value={voice} onChange={e => setVoice(e.target.value)}>
+            <option value="">Team voice ({defaultName})</option>
+            {profiles.map(p => <option key={p.id} value={p.id}>{p.name} — {p.tagline}</option>)}
+          </select>
+        </label>
 
-        {tab === 'spotify' && (
-          <div className="announcer-wizard-body">
-            {!spotifyAuthed ? (
-              <div className="announcer-wizard-spotify-connect">
-                <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '1rem' }}>
-                  Connect Spotify to search 100M+ tracks and auto-detect optimal start points.
-                  30-second previews are free. Full playback requires Spotify Premium.
-                </p>
-                <button type="button" className="announcer-btn announcer-btn-primary" onClick={handleSpotifyConnect} style={{ minHeight: 'var(--touch-min)' }}>
-                  Connect Spotify
-                </button>
-              </div>
-            ) : (
-              <>
-                {playerSelector}
-                <form onSubmit={handleSpotifySearch} className="announcer-wizard-search-form">
-                  <input
-                    className="announcer-song-input"
-                    value={spotifyQuery}
-                    onChange={e => setSpotifyQuery(e.target.value)}
-                    placeholder="Search Spotify…"
-                    autoFocus
-                  />
-                  <button type="submit" className="announcer-btn announcer-btn-primary" disabled={spotifyLoading} style={{ minHeight: 'var(--touch-min)' }}>
-                    {spotifyLoading ? <RefreshCw size={13} className="sync-spin" /> : 'Search'}
-                  </button>
-                </form>
-                <div className="announcer-wizard-results">
-                  {spotifyResults.map(track => (
-                    <div key={track.spotify_id} className="announcer-wizard-result-row" style={{ flexWrap: 'wrap' }}>
-                      <div className="announcer-wizard-result-info" style={{ minWidth: 0 }}>
-                        <span className="announcer-wizard-result-title">{track.title}</span>
-                        <span className="announcer-wizard-result-artist">{track.artist}</span>
-                      </div>
-                      {/* The native player needs a line of its own. The meta row
-                          is flex-shrink:0 in CSS, so give it a definite basis
-                          and let it wrap rather than force the row past 360px —
-                          that basis is also what the audio's width:100%
-                          resolves against. */}
-                      <div className="announcer-wizard-result-meta" style={{ flex: '1 1 220px', flexWrap: 'wrap', justifyContent: 'flex-end', minWidth: 0 }}>
-                        {track.duration_ms && (
-                          <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>
-                            {Math.floor(track.duration_ms / 60000)}:{String(Math.floor((track.duration_ms % 60000) / 1000)).padStart(2, '0')}
-                          </span>
-                        )}
-                        {track.preview_url && (
-                          // iOS Safari ignores a height below its own minimum
-                          // and rendered this 22px scrubber unusable; give the
-                          // control a real 40px row and the full width.
-                          <audio
-                            src={track.preview_url}
-                            controls
-                            style={{ width: '100%', maxWidth: 320, height: 40 }}
-                            preload="none"
-                          />
-                        )}
-                        <button
-                          type="button"
-                          className="announcer-btn announcer-btn-secondary"
-                          style={{ padding: '2px 8px', fontSize: '0.72rem', minHeight: 'var(--touch-min)', minWidth: 'var(--touch-min)' }}
-                          disabled={addingId === track.spotify_id || !selectedPlayerId}
-                          onClick={() => handleAdd(track.spotify_id, track.preview_url, `${track.title} — ${track.artist}`, 0)}
-                        >
-                          {addingId === track.spotify_id ? <RefreshCw size={11} className="sync-spin" /> : <Plus size={11} />}
-                          Add
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                  {spotifyResults.length === 0 && !spotifyLoading && spotifyQuery && (
-                    <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '1rem' }}>No results</p>
-                  )}
-                </div>
-              </>
-            )}
-          </div>
-        )}
+        <label className="announcer-form-group">
+          <span>Walk-up song (link)</span>
+          <input value={song} onChange={e => setSong(e.target.value)} placeholder="https://…mp3" inputMode="url" maxLength={500} />
+        </label>
+        <label className="announcer-form-group">
+          <span>Start the song at (seconds)</span>
+          <input type="number" min="0" max="300" step="0.5" value={introTs} onChange={e => setIntroTs(e.target.value)} />
+        </label>
+
+        {msg && <div className="announcer-error-msg" role="status">{msg}</div>}
+
+        <div className="announcer-form-actions">
+          <button type="button" className="announcer-btn announcer-btn-primary" onClick={saveAndRender} disabled={Boolean(busy)}>
+            {busy === 'render' ? <RefreshCw size={14} className="sync-spin" /> : <Mic size={14} />} Save &amp; render
+          </button>
+          <button type="button" className="announcer-btn announcer-btn-secondary" onClick={save} disabled={Boolean(busy)}>
+            {busy === 'save' ? <RefreshCw size={14} className="sync-spin" /> : <Check size={14} />} Save
+          </button>
+          {player.announcer_audio_url && (
+            <button type="button" className="announcer-btn announcer-btn-accent" onClick={testPlay}><Play size={14} /> Hear it</button>
+          )}
+        </div>
+
+        <button
+          type="button"
+          className="announcer-btn announcer-btn-secondary announcer-remove-btn"
+          onClick={() => { if (confirmRemove) { onRemove(player.id); onClose(); } else setConfirmRemove(true); }}
+        >
+          <Trash2 size={13} /> {confirmRemove ? 'Tap again to remove from announcer' : 'Remove player'}
+        </button>
       </div>
     </div>,
     document.body,
   );
 }
 
+// ── Voice picker ───────────────────────────────────────────────────────────
+function VoicePicker({ profiles, defaultVoiceId, onChoose, onClose }) {
+  useEscapeToClose(onClose);
+  const [playingId, setPlayingId] = useState('');
+  const [choosing, setChoosing] = useState('');
+
+  const sample = (id) => {
+    if (playingId === id) { stopAudio(); setPlayingId(''); return; }
+    setPlayingId(id);
+    playClip(`/api/announcer/voice-sample/${id}`, () => setPlayingId('')).catch(() => setPlayingId(''));
+  };
+
+  const choose = async (id) => {
+    setChoosing(id);
+    try { await onChoose(id); onClose(); } finally { setChoosing(''); }
+  };
+
+  useEffect(() => () => stopAudio(), []);
+
+  return createPortal(
+    <div className="announcer-modal-overlay" onClick={onClose}>
+      <div className="announcer-modal glass-panel" onClick={e => e.stopPropagation()} style={{ maxWidth: 420, ...MODAL_SCROLL_STYLE }}>
+        <div className="announcer-modal-header">
+          <h3 style={{ margin: 0 }}>Announcer voice</h3>
+          <button type="button" className="announcer-modal-close" onClick={onClose} aria-label="Close"><X size={18} /></button>
+        </div>
+        <p className="announcer-hint">Tap ▶ to hear a sample. Choosing a voice re-renders the whole team.</p>
+        {profiles.map(p => {
+          const active = p.id === defaultVoiceId;
+          return (
+            <div key={p.id} className={`announcer-voice-row${active ? ' announcer-voice-row--active' : ''}`}>
+              <button type="button" className="announcer-btn-round" onClick={() => sample(p.id)} aria-label={`Sample ${p.name}`}>
+                {playingId === p.id ? <Square size={16} /> : <Play size={16} style={{ marginLeft: 2 }} />}
+              </button>
+              <div className="announcer-voice-text">
+                <strong>{p.name}</strong>
+                <span>{p.tagline}</span>
+              </div>
+              {active
+                ? <span className="announcer-voice-current"><Check size={14} /> In use</span>
+                : (
+                  <button type="button" className="announcer-btn announcer-btn-accent" onClick={() => choose(p.id)} disabled={Boolean(choosing)}>
+                    {choosing === p.id ? <RefreshCw size={14} className="sync-spin" /> : 'Use'}
+                  </button>
+                )}
+            </div>
+          );
+        })}
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+// ── Add sub ────────────────────────────────────────────────────────────────
+function AddSubModal({ onClose, onAdd }) {
+  useEscapeToClose(onClose);
+  const [first, setFirst] = useState('');
+  const [last, setLast] = useState('');
+  const [number, setNumber] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!first.trim()) { setErr('First name is required'); return; }
+    setBusy(true); setErr('');
+    try { await onAdd({ first: first.trim(), last: last.trim(), number: number.trim() }); onClose(); }
+    catch (ex) { setErr(ex.message || 'Could not add player'); setBusy(false); }
+  };
+  return createPortal(
+    <div className="announcer-modal-overlay" onClick={onClose}>
+      <form className="announcer-modal glass-panel" onClick={e => e.stopPropagation()} onSubmit={submit} style={{ maxWidth: 380, ...MODAL_SCROLL_STYLE }}>
+        <div className="announcer-modal-header">
+          <h3 style={{ margin: 0 }}>Add a sub</h3>
+          <button type="button" className="announcer-modal-close" onClick={onClose} aria-label="Close"><X size={18} /></button>
+        </div>
+        <label className="announcer-form-group"><span>First name</span><input value={first} onChange={e => setFirst(e.target.value)} autoFocus maxLength={64} /></label>
+        <label className="announcer-form-group"><span>Last name</span><input value={last} onChange={e => setLast(e.target.value)} maxLength={64} /></label>
+        <label className="announcer-form-group"><span>Number</span><input value={number} onChange={e => setNumber(e.target.value)} inputMode="numeric" maxLength={4} /></label>
+        {err && <div className="announcer-error-msg">{err}</div>}
+        <div className="announcer-form-actions">
+          <button type="submit" className="announcer-btn announcer-btn-primary" disabled={busy}>{busy ? 'Adding…' : 'Add & render'}</button>
+          <button type="button" className="announcer-btn announcer-btn-secondary" onClick={onClose}>Cancel</button>
+        </div>
+      </form>
+    </div>,
+    document.body,
+  );
+}
+
+// ── Halo moments ───────────────────────────────────────────────────────────
+function HaloOverlay({ player, onSelect, onClose }) {
+  useEscapeToClose(onClose);
+  return createPortal(
+    <div className="announcer-modal-overlay" onClick={onClose}>
+      <div className="announcer-modal glass-panel" onClick={e => e.stopPropagation()} style={{ maxWidth: 360, ...MODAL_SCROLL_STYLE }}>
+        <div className="announcer-modal-header">
+          <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}><Zap size={18} style={{ color: 'var(--warning)' }} /> Halo moment</h3>
+          <button type="button" className="announcer-modal-close" onClick={onClose} aria-label="Close"><X size={18} /></button>
+        </div>
+        <p className="announcer-hint">Renders a special call for <strong>{player.first} {player.last}</strong> and plays it.</p>
+        <div className="announcer-halo-grid">
+          {HALO_ACHIEVEMENTS.map(a => (
+            <button type="button" key={a.key} className="announcer-btn announcer-btn-accent announcer-halo-btn" onClick={() => { onSelect(a.key); onClose(); }}>
+              <span>{a.label}</span><small>{a.desc}</small>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+// ── Main ───────────────────────────────────────────────────────────────────
 export default function Announcer({ lineups }) {
-  const [view, setView] = useState('roster'); // 'roster' | 'nowplaying'
   const [roster, setRoster] = useState([]);
   const [stats, setStats] = useState({ total: 0, ready: 0, pending: 0, error: 0 });
+  const [profiles, setProfiles] = useState([]);
+  const [defaultVoiceId, setDefaultVoiceId] = useState('halo');
+  const [gcLineup, setGcLineup] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [renderAllLoading, setRenderAllLoading] = useState(false);
-  const [showAddSub, setShowAddSub] = useState(false);
-  const [showWizard, setShowWizard] = useState(false);
-  const [csvImporting, setCsvImporting] = useState(false);
-  const csvInputRef = useRef(null);
   const [error, setError] = useState('');
-  const [degradedReason, setDegradedReason] = useState('');
+  const [notice, setNotice] = useState('');
+  const [currentId, setCurrentId] = useState(null);
+  const [playing, setPlaying] = useState(false);
+  const [progress, setProgress] = useState({ elapsed: 0, duration: 0 });
+  const [situation, setSituation] = useState(DEFAULT_SITUATION);
+  const [sheetPlayer, setSheetPlayer] = useState(null);
+  const [showVoices, setShowVoices] = useState(false);
+  const [showAddSub, setShowAddSub] = useState(false);
+  const [showHalo, setShowHalo] = useState(false);
   const [showFormer, setShowFormer] = useState(false);
+  const [renderAllBusy, setRenderAllBusy] = useState(false);
   const pollRef = useRef(null);
-  const renderToRef = useRef(null);
-  const pollStopToRef = useRef(null);
-  const { workerStatus, stopped: workerStopped, restart: restartWorkerPoll } = useWorkerStatus();
+  const pollStopRef = useRef(null);
 
+  // ── data ──
   const fetchRoster = useCallback(async () => {
-    // Fallback chain when /api/announcer/roster is unavailable (502/503/etc):
-    //   1) /data/sharks/announcer_roster.json — last good cache nginx-served
-    //   2) /data/sharks/app_stats.json        — derive minimal player list
-    const buildFromAppStats = (data) => {
-      const batting = Array.isArray(data?.batting) ? data.batting : [];
-      const seen = new Set();
-      return batting.map((row) => {
-        const fullName = String(row?.name || '').trim();
-        if (!fullName) return null;
-        const parts = fullName.split(/\s+/);
-        const first = parts[0] || fullName;
-        const last = parts.slice(1).join(' ') || '';
-        const number = String(row?.number || '').trim();
-        const id = `${number}-${first}-${last}`
-          .toLowerCase()
-          .replace(/[^a-z0-9_-]/g, '-')
-          .replace(/-+/g, '-')
-          .replace(/^-|-$/g, '') || first.toLowerCase();
-        if (seen.has(id)) return null;
-        seen.add(id);
-        return {
-          id, first, last, number,
-          phonetic_hint: '', tts_instruction: '', walkup_song_url: '',
-          intro_timestamp: 5.0, announcer_audio_url: '',
-          status: 'pending', is_active: true, rendered_at: '',
-          error_message: '', is_ghost: false,
-        };
-      }).filter(Boolean);
-    };
-
     try {
       const res = await fetch('/api/announcer/roster');
       if (!res.ok) throw new Error(`${res.status}`);
       const data = await res.json();
       const list = data.roster || [];
-      if (!list.length) throw new Error('empty roster from API');
+      if (!list.length) throw new Error('empty roster');
       setRoster(list);
       setStats(data.stats || { total: 0, ready: 0, pending: 0, error: 0 });
       setError('');
-      setDegradedReason('');
-      return;
+      return list;
     } catch (apiErr) {
-      // Fallback 1: static cache.
+      // Last-good cache nginx serves when the API is down — playback still works.
       try {
         const sRes = await fetch('/data/sharks/announcer_roster.json', { cache: 'no-store' });
-        if (sRes.ok) {
-          const sData = await sRes.json();
-          const list = sData.roster || [];
-          if (list.length) {
-            setRoster(list);
-            setStats(sData.stats || { total: list.length, ready: 0, pending: list.length, error: 0 });
-            setError('');
-            setDegradedReason(`Using cached roster — live generation unavailable (${apiErr.message})`);
-            return;
-          }
+        const sData = sRes.ok ? await sRes.json() : null;
+        if (sData?.roster?.length) {
+          setRoster(sData.roster);
+          setStats(sData.stats || { total: sData.roster.length, ready: 0, pending: 0, error: 0 });
+          setError(`Using cached roster — live rendering unavailable (${apiErr.message})`);
+          return sData.roster;
         }
-      } catch { /* fall through to app_stats */ }
-
-      // Fallback 2: derive from app_stats batting list.
-      try {
-        const aRes = await fetch('/data/sharks/app_stats.json', { cache: 'no-store' });
-        if (aRes.ok) {
-          const aData = await aRes.json();
-          const list = buildFromAppStats(aData);
-          if (list.length) {
-            setRoster(list);
-            setStats({ total: list.length, ready: 0, pending: list.length, error: 0 });
-            setError('');
-            setDegradedReason('Using cached roster — live generation unavailable');
-            return;
-          }
-        }
-      } catch { /* both fallbacks failed */ }
-
+      } catch { /* fall through */ }
       setError(`Failed to load roster: ${apiErr.message}`);
+      return [];
     } finally {
       setLoading(false);
     }
   }, []);
 
+  const fetchProfiles = useCallback(async () => {
+    try {
+      const res = await fetch('/api/announcer/voice-profiles');
+      if (!res.ok) return;
+      const data = await res.json();
+      setProfiles(data.profiles || []);
+      if (data.default_id) setDefaultVoiceId(data.default_id);
+    } catch { /* picker just stays empty */ }
+  }, []);
+
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchRoster();
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
-  }, [fetchRoster]);
+    fetchProfiles();
+    fetch('/api/announcer/game-lineup')
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { if (d) setGcLineup(d); })
+      .catch(() => {});
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+      if (pollStopRef.current) clearTimeout(pollStopRef.current);
+      cleanup();
+    };
+  }, [fetchRoster, fetchProfiles]);
 
-  // ── iOS AudioContext unlock ────────────────────────────────────────────
-  // This screen builds its AudioContext OUTSIDE any user gesture: usePrebuffer
-  // warms the next batters' hooks on mount, and the preload effect does the
-  // same on every index change. On iOS a context created without a gesture is
-  // born `suspended` and stays that way — audioController's own resume() call
-  // inside getContext() is a no-op unless it happens during one — so the very
-  // first tap on Play produces silence.
-  //
-  // Fix: on the first gesture anywhere, touch the controller so getContext()
-  // runs inside that gesture and its resume() actually takes. setVolume(1) is
-  // the only exported function that reaches getContext() without side effects
-  // (1.0 is the GainNode default, so the level is unchanged); the controller
-  // exposes no context/resume of its own and must not be edited here.
-  //
-  // Listeners go on `document`, not the container ref: the modals portal to
-  // document.body and the Now Playing view replaces the container entirely, so
-  // a container-scoped listener would miss the first tap in both cases.
+  // iOS: an AudioContext created outside a user gesture is born suspended, so
+  // the first Play would be silent. Touch the controller on the first gesture.
   useEffect(() => {
     let done = false;
     const opts = { capture: true, passive: true };
     const unlock = () => {
       if (done) return;
       done = true;
-      try { setVolume(1); } catch { /* no Web Audio support — nothing to unlock */ }
+      try { setVolume(1); } catch { /* no Web Audio */ }
       remove();
     };
     function remove() {
@@ -1780,262 +417,280 @@ export default function Announcer({ lineups }) {
     return remove;
   }, []);
 
-  // Poll during render operations
-  const startPolling = useCallback(() => {
-    if (pollRef.current) return;
-    pollRef.current = setInterval(fetchRoster, 3000);
+  // Poll while renders are in flight; stop on our own once things settle.
+  const startPolling = useCallback((maxMs = 120000) => {
+    if (!pollRef.current) pollRef.current = setInterval(fetchRoster, 3000);
+    if (pollStopRef.current) clearTimeout(pollStopRef.current);
+    pollStopRef.current = setTimeout(() => {
+      if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    }, maxMs);
   }, [fetchRoster]);
 
-  const stopPolling = useCallback(() => {
-    if (pollRef.current) {
-      clearInterval(pollRef.current);
-      pollRef.current = null;
+  useEffect(() => {
+    const inFlight = roster.some(p => p.status === 'rendering');
+    if (!inFlight && pollRef.current && !renderAllBusy) {
+      clearInterval(pollRef.current); pollRef.current = null;
     }
-  }, []);
+  }, [roster, renderAllBusy]);
 
-  useEffect(() => () => {
-    stopPolling();
-    cleanup();
-    if (renderToRef.current) clearTimeout(renderToRef.current);
-    if (pollStopToRef.current) clearTimeout(pollStopToRef.current);
-  }, [stopPolling]);
-
-  const handleRenderAll = async () => {
-    setRenderAllLoading(true);
-    startPolling();
-    try {
-      await apiRequest('/api/announcer/render-all', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Origin': window.location.origin },
-        body: '{}',
-      });
-      // Keep polling for updates — don't await completion
-      renderToRef.current = setTimeout(() => {
-        renderToRef.current = null;
-        setRenderAllLoading(false);
-        pollStopToRef.current = setTimeout(stopPolling, 30000);
-      }, 5000);
-    } catch {
-      setRenderAllLoading(false);
-      stopPolling();
+  // ── batting order: GC game → optimiser lineup → active roster ──
+  const active = useMemo(() => roster.filter(p => p.is_active && !p.is_ghost), [roster]);
+  const former = useMemo(() => roster.filter(p => p.is_ghost || p.is_active === false), [roster]);
+  const battingOrder = useMemo(() => {
+    const byRef = (p) => active.find(r =>
+      (p.id && r.id === p.id) ||
+      (p.number && String(r.number) === String(p.number)) ||
+      `${r.first} ${r.last}`.toLowerCase() === `${p.first || ''} ${p.last || ''}`.toLowerCase().trim(),
+    ) || null;
+    if (gcLineup?.players?.length) {
+      const ordered = gcLineup.players.map(byRef).filter(Boolean);
+      if (ordered.length) {
+        const seen = new Set(ordered.map(p => p.id));
+        return [...ordered, ...active.filter(p => !seen.has(p.id))];
+      }
     }
-  };
-
-  const handleRender = async (playerId, quality = 'best') => {
-    startPolling();
-    try {
-      await apiRequest(`/api/announcer/render/${playerId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Origin': window.location.origin },
-        body: JSON.stringify({ quality }),
-      });
-      renderToRef.current = setTimeout(
-        () => { renderToRef.current = null; fetchRoster(); stopPolling(); },
-        quality === 'best' ? 120000 : 15000,
-      );
-    } catch { /* handled by polling */ }
-  };
-
-  const handleSavePhonetics = async (playerId, data) => {
-    const res = await apiRequest(`/api/announcer/phonetics/${playerId}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Origin': window.location.origin },
-      body: JSON.stringify(data),
-    });
-    if (res.ok) {
-      await fetchRoster();
-    }
-  };
-
-  const handleCsvImport = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    e.target.value = '';
-    setCsvImporting(true);
-    try {
-      const form = new FormData();
-      form.append('file', file);
-      const res = await apiRequest('/api/announcer/csv-import', {
-        method: 'POST',
-        headers: { 'Origin': window.location.origin },
-        body: form,
-      });
-      if (res.ok) {
-        const data = await res.json();
-        await fetchRoster();
-        if (data.errors?.length) {
-          setError(`CSV import: ${data.imported} songs added, ${data.skipped} skipped, ${data.errors.length} errors`);
+    if (lineups) {
+      const key = lineups.recommended_strategy || 'balanced';
+      const lineup = lineups[key] || lineups.balanced;
+      if (Array.isArray(lineup) && lineup.length) {
+        const ordered = [...lineup].sort((a, b) => (a.slot || 0) - (b.slot || 0)).map(byRef).filter(Boolean);
+        if (ordered.length) {
+          const seen = new Set(ordered.map(p => p.id));
+          return [...ordered, ...active.filter(p => !seen.has(p.id))];
         }
       }
-    } catch { /* silent — user will see no change */ } finally {
-      setCsvImporting(false);
     }
-  };
+    return active;
+  }, [active, gcLineup, lineups]);
+  const lineupSource = gcLineup?.players?.length ? (gcLineup.source_label || 'GameChanger lineup') : (lineups ? 'Optimiser lineup' : 'Roster order');
 
-  const handleAddSongFromWizard = async (playerId, url, label, startMs) => {
-    const res = await apiRequest(`/api/announcer/songs/${playerId}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Origin': window.location.origin },
-      body: JSON.stringify({ song_url: url, song_label: label, optimal_start_ms: startMs || 0 }),
-    });
-    if (!res.ok) throw new Error('Failed to add song');
-    await fetchRoster();
-  };
+  const currentIdx = Math.max(0, battingOrder.findIndex(p => p.id === currentId));
+  const current = battingOrder[currentIdx] || null;
+  const onDeck = battingOrder[currentIdx + 1] || null;
 
-  const handleAddSub = async (data) => {
-    startPolling();
-    const res = await apiRequest('/api/announcer/add-sub', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Origin': window.location.origin },
-      body: JSON.stringify(data),
-    });
-    if (!res.ok) throw new Error('Failed to add player');
-    await fetchRoster();
-    pollStopToRef.current = setTimeout(stopPolling, 10000);
-  };
+  useEffect(() => {
+    if (onDeck) preload([onDeck.walkup_song_url, onDeck.announcer_audio_url].filter(Boolean));
+  }, [onDeck]);
 
-  const handleRemovePlayer = async (playerId) => {
+  // ── playback ──
+  const stop = useCallback(() => { stopAudio(); setPlaying(false); setProgress({ elapsed: 0, duration: 0 }); }, []);
+
+  const playPlayer = useCallback(async (p) => {
+    if (currentId === p.id && playing) { stop(); return; }
+    setCurrentId(p.id);
+    setPlaying(true);
     try {
-      const res = await apiRequest(`/api/announcer/player/${playerId}`, {
-        method: 'DELETE',
-        headers: { 'Origin': window.location.origin },
+      await playIntro({
+        walkupUrl: p.walkup_song_url || '',
+        clipUrl: p.announcer_audio_url || '',
+        introTimestamp: p.intro_timestamp ?? 5,
+        autoBPM: (p.intro_timestamp ?? 5) === 0,
+        onEnd: () => setPlaying(false),
+        onProgress: setProgress,
       });
-      if (res.ok) await fetchRoster();
-    } catch { /* silent */ }
+    } catch { setPlaying(false); }
+  }, [currentId, playing, stop]);
+
+  const step = (delta) => {
+    stop();
+    const next = battingOrder[Math.min(battingOrder.length - 1, Math.max(0, currentIdx + delta))];
+    if (next) setCurrentId(next.id);
   };
+
+  // ── mutations ──
+  const savePlayer = async (playerId, data) => {
+    const res = await apiRequest(`/api/announcer/phonetics/${playerId}`, { method: 'POST', headers: ORIGIN_HEADERS(), body: JSON.stringify(data) });
+    if (!res.ok) throw new Error('Could not save');
+    await fetchRoster();
+  };
+
+  const renderPlayer = async (playerId, gameContext) => {
+    const body = gameContext ? { quality: 'best', game_context: gameContext } : { quality: 'best' };
+    const res = await apiRequest(`/api/announcer/render/${playerId}`, { method: 'POST', headers: ORIGIN_HEADERS(), body: JSON.stringify(body) });
+    if (!res.ok) throw new Error('Could not start render');
+    startPolling(60000);
+  };
+
+  const renderAll = async () => {
+    setRenderAllBusy(true);
+    setNotice('');
+    try {
+      const res = await apiRequest('/api/announcer/render-all', { method: 'POST', headers: ORIGIN_HEADERS(), body: '{}' });
+      if (!res.ok) throw new Error(`${res.status}`);
+      startPolling(180000);
+      setTimeout(() => setRenderAllBusy(false), 8000);
+    } catch (e) { setNotice(`Render all failed: ${e.message}`); setRenderAllBusy(false); }
+  };
+
+  const chooseVoice = async (profileId) => {
+    const res = await apiRequest('/api/announcer/voice-profiles/default', { method: 'POST', headers: ORIGIN_HEADERS(), body: JSON.stringify({ profile_id: profileId }) });
+    if (!res.ok) throw new Error('Could not set voice');
+    setDefaultVoiceId(profileId);
+    await fetchProfiles();
+    await renderAll();
+    setNotice(`Voice changed to ${profiles.find(p => p.id === profileId)?.name || profileId} — re-rendering the team.`);
+  };
+
+  const addSub = async (data) => {
+    const res = await apiRequest('/api/announcer/add-sub', { method: 'POST', headers: ORIGIN_HEADERS(), body: JSON.stringify(data) });
+    if (!res.ok) throw new Error('Could not add player');
+    await fetchRoster();
+    startPolling(60000);
+  };
+
+  const removePlayer = async (playerId) => {
+    try {
+      const res = await apiRequest(`/api/announcer/player/${playerId}`, { method: 'DELETE', headers: { 'Origin': window.location.origin } });
+      if (res.ok) await fetchRoster();
+    } catch { /* roster unchanged */ }
+  };
+
+  // Situation → server, so situational renders know the bases/outs.
+  const pushSituation = useCallback(async (next) => {
+    setSituation(next);
+    try {
+      await apiRequest('/api/announcer/game-state', { method: 'POST', headers: ORIGIN_HEADERS(), body: JSON.stringify(next) });
+    } catch { /* non-critical */ }
+  }, []);
+
+  // Halo moment: render a one-off call with the achievement, then play it.
+  const fireHalo = async (achievementKey) => {
+    if (!current) return;
+    const ctx = { ...situation, achievement: achievementKey };
+    const since = current.rendered_at || '';
+    setNotice(`Rendering "${HALO_ACHIEVEMENTS.find(a => a.key === achievementKey)?.label}" for ${current.first}…`);
+    try {
+      await renderPlayer(current.id, ctx);
+    } catch (e) { setNotice(e.message); return; }
+    const deadline = Date.now() + 40000;
+    while (Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 1500));
+      const list = await fetchRoster();
+      const fresh = list.find(p => p.id === current.id);
+      if (fresh && fresh.status === 'ready' && fresh.rendered_at && fresh.rendered_at !== since) {
+        setNotice('');
+        playPlayer({ ...fresh, walkup_song_url: '' });
+        return;
+      }
+      if (fresh?.status === 'error') { setNotice(`Render failed: ${fresh.error_message || 'unknown'}`); return; }
+    }
+    setNotice('Render is taking longer than usual — it will appear on the row when done.');
+  };
+
+  const pct = progress.duration > 0 ? Math.min(100, (progress.elapsed / progress.duration) * 100) : 0;
+  const defaultVoice = profiles.find(p => p.id === defaultVoiceId);
+  const pendingCount = active.filter(p => p.status !== 'ready').length;
 
   if (loading) return <div className="loader" />;
 
-  if (view === 'nowplaying') {
-    return (
-      <NowPlayingView
-        roster={roster}
-        lineups={lineups}
-        onBack={() => setView('roster')}
-      />
-    );
-  }
-
   return (
-    <div className="announcer-container">
+    <div className="announcer-container announcer-page">
       <div className="announcer-header">
-        <h2>
-          <Mic size={22} /> The Announcer
-        </h2>
-        {/* Badge + Retry + Now Playing sit beside an h2 on one line; at 360px
-            they have to be free to drop onto a second row. */}
-        <div className="announcer-header-actions" style={{ flexWrap: 'wrap', justifyContent: 'flex-end', minWidth: 0 }}>
-          <WorkerBadge workerStatus={workerStatus} />
-          {workerStopped && (
-            <button
-              type="button"
-              onClick={restartWorkerPoll}
-              title="Worker offline — tap to retry"
-              aria-label="Retry worker connection"
-              className="announcer-btn announcer-btn-secondary"
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: '0.3rem',
-                padding: '0.35rem 0.55rem', fontSize: '0.7rem', fontWeight: '700',
-                minHeight: 'var(--touch-min)',
-              }}
-            >
-              <RefreshCw size={12} /> Retry
-            </button>
-          )}
-          <button onClick={() => setView('nowplaying')} className="announcer-btn announcer-btn-accent" style={{ minHeight: 'var(--touch-min)' }}>
-            <Play size={14} /> Now Playing
+        <h2 style={{ margin: 0 }}><Mic size={22} /> Sharks Announcer</h2>
+        <div className="announcer-header-actions">
+          <button type="button" className="announcer-btn announcer-btn-accent" onClick={() => setShowVoices(true)}>
+            <Volume2 size={14} /> {defaultVoice ? defaultVoice.name : 'Voice'} <ChevronDown size={12} />
+          </button>
+          <button type="button" className="announcer-btn announcer-btn-secondary" onClick={() => setShowAddSub(true)} aria-label="Add sub">
+            <UserPlus size={14} /> Sub
           </button>
         </div>
       </div>
 
       {error && <div className="voice-error"><AlertCircle size={14} /> {error}</div>}
-      {!error && degradedReason && (
-        <div
-          className="voice-error"
-          role="status"
-          style={{
-            background: 'rgba(240,180,41,0.10)',
-            border: '1px solid rgba(240,180,41,0.35)',
-            color: '#f0b429',
-          }}
-        >
-          <AlertCircle size={14} /> {degradedReason}
-        </div>
-      )}
+      {notice && <div className="voice-error announcer-notice" role="status"><AlertCircle size={14} /> {notice}</div>}
 
-      <StatsBar stats={stats} />
-
-      <div className="announcer-toolbar">
-        {/* .announcer-btn's 0.5rem padding lands at ~34px tall — under the 44px
-            floor for the toolbar that gets used on a phone mid-game. */}
-        <button onClick={handleRenderAll} disabled={renderAllLoading} className="announcer-btn announcer-btn-primary" style={{ minHeight: 'var(--touch-min)' }}>
-          {renderAllLoading ? <RefreshCw size={14} className="sync-spin" /> : <Mic size={14} />}
-          {renderAllLoading ? 'Rendering...' : 'Render All'}
-        </button>
-        <button onClick={() => setShowAddSub(true)} className="announcer-btn announcer-btn-secondary" style={{ minHeight: 'var(--touch-min)' }}>
-          <UserPlus size={14} /> Add Sub
-        </button>
-        <button onClick={() => setShowWizard(true)} className="announcer-btn announcer-btn-secondary" title="Music Wizard" style={{ minHeight: 'var(--touch-min)' }}>
-          <Wand2 size={14} /> Wizard
-        </button>
-        {/* This was an upload glyph whose entire meaning lived in `title` — on
-            a phone it read as an unlabelled arrow. Give it visible text. */}
-        <label className={`announcer-btn announcer-btn-secondary${csvImporting ? ' announcer-btn--loading' : ''}`} title="Import songs from CSV" style={{ minHeight: 'var(--touch-min)' }}>
-          <Upload size={14} /> {csvImporting ? 'Importing…' : 'Import CSV'}
-          <input ref={csvInputRef} type="file" accept=".csv" onChange={handleCsvImport} style={{ display: 'none' }} />
-        </label>
-        <button onClick={fetchRoster} className="announcer-btn announcer-btn-secondary" aria-label="Refresh roster" style={{ minHeight: 'var(--touch-min)', minWidth: 'var(--touch-min)', justifyContent: 'center' }}>
-          <RefreshCw size={14} />
-        </button>
+      <div className="announcer-summary">
+        <span>{active.length} players · {stats.ready || active.filter(p => p.status === 'ready').length} ready</span>
+        <span className={`announcer-lineup-source${gcLineup?.players?.length ? ' announcer-lineup-source--gc' : ''}`}>{lineupSource}</span>
+        {pendingCount > 0 && (
+          <button type="button" className="announcer-btn announcer-btn-primary" onClick={renderAll} disabled={renderAllBusy}>
+            {renderAllBusy ? <RefreshCw size={14} className="sync-spin" /> : <Mic size={14} />}
+            {renderAllBusy ? 'Rendering…' : `Render ${pendingCount === active.length ? 'all' : pendingCount}`}
+          </button>
+        )}
       </div>
 
       <div className="announcer-roster-list">
-        {roster.filter(p => !p.is_ghost).map(player => (
-          <PlayerCard
-            key={player.id}
-            player={player}
-            onSavePhonetics={handleSavePhonetics}
-            onRender={handleRender}
-            onPreview={() => {}}
-            onRemove={handleRemovePlayer}
+        {battingOrder.map((p, i) => (
+          <LineupRow
+            key={p.id}
+            player={p}
+            slot={i + 1}
+            isCurrent={current?.id === p.id}
+            isPlaying={playing}
+            onPlay={playPlayer}
+            onOpen={setSheetPlayer}
           />
         ))}
-        {roster.filter(p => !p.is_ghost).length === 0 && !degradedReason && (
+        {battingOrder.length === 0 && (
           <div className="glass-panel" style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
-            No players found. Make sure team data has been synced.
+            No players yet — sync the team or add a sub.
           </div>
         )}
-        {roster.some(p => p.is_ghost) && (
+        {former.length > 0 && (
           <div className="announcer-former-section">
-            <button
-              className="announcer-btn announcer-btn-secondary"
-              style={{ width: '100%', justifyContent: 'space-between', fontSize: '0.8rem', opacity: 0.7, minHeight: 'var(--touch-min)' }}
-              aria-expanded={showFormer}
-              onClick={() => setShowFormer(v => !v)}
-            >
-              <span>Former Players ({roster.filter(p => p.is_ghost).length})</span>
-              {showFormer ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+            <button type="button" className="announcer-btn announcer-btn-secondary announcer-former-toggle" aria-expanded={showFormer} onClick={() => setShowFormer(v => !v)}>
+              <span>Former players ({former.length})</span>{showFormer ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
             </button>
-            {showFormer && roster.filter(p => p.is_ghost).map(player => (
-              <PlayerCard
-                key={player.id}
-                player={player}
-                onSavePhonetics={handleSavePhonetics}
-                onRender={handleRender}
-                onPreview={() => {}}
-                onRemove={handleRemovePlayer}
-              />
+            {showFormer && former.map(p => (
+              <LineupRow key={p.id} player={p} slot="–" isCurrent={false} isPlaying={false} onPlay={playPlayer} onOpen={setSheetPlayer} />
             ))}
           </div>
         )}
       </div>
 
-      {showAddSub && (
-        <AddSubModal onClose={() => setShowAddSub(false)} onAdd={handleAddSub} />
+      {current && (
+        <div className="announcer-dj-bar glass-panel">
+          <div className="announcer-dj-top">
+            <div className="announcer-dj-title">
+              <span className="announcer-dj-label">{playing ? 'Now batting' : 'Up next'}</span>
+              <span className="announcer-dj-name"><span className="announcer-jersey">#{current.number}</span> {current.first} {current.last}</span>
+              {onDeck && <span className="announcer-dj-ondeck">On deck: #{onDeck.number} {onDeck.first}</span>}
+            </div>
+            <div className="announcer-dj-controls">
+              <button type="button" className="announcer-btn-round" onClick={() => step(-1)} disabled={currentIdx === 0} aria-label="Previous batter"><SkipBack size={18} /></button>
+              <button type="button" className="announcer-btn-play" onClick={() => playPlayer(current)} aria-label={playing ? 'Stop' : 'Play'}>
+                {playing ? <Square size={26} /> : <Play size={28} style={{ marginLeft: 3 }} />}
+              </button>
+              <button type="button" className="announcer-btn-round" onClick={() => step(1)} disabled={currentIdx >= battingOrder.length - 1} aria-label="Next batter"><SkipForward size={18} /></button>
+            </div>
+          </div>
+          <div className="announcer-progress-track"><div className="announcer-progress-fill" style={{ width: `${pct}%` }} /></div>
+          <div className="announcer-dj-situation">
+            {['1B', '2B', '3B'].map((b, i) => (
+              <button
+                type="button"
+                key={b}
+                className={`announcer-base-btn${situation.bases[i] ? ' announcer-base-btn--on' : ''}`}
+                aria-pressed={situation.bases[i]}
+                onClick={() => pushSituation({ ...situation, bases: situation.bases.map((v, j) => (j === i ? !v : v)) })}
+              >{b}</button>
+            ))}
+            <button type="button" className="announcer-base-btn" onClick={() => pushSituation({ ...situation, outs: (situation.outs + 1) % 3 })}>
+              {situation.outs} out{situation.outs === 1 ? '' : 's'}
+            </button>
+            <button type="button" className="announcer-btn announcer-btn-accent announcer-halo-trigger" onClick={() => setShowHalo(true)}>
+              <Zap size={14} /> Halo
+            </button>
+          </div>
+        </div>
       )}
-      {showWizard && (
-        <WizardModal onClose={() => setShowWizard(false)} roster={roster} onAddSong={handleAddSongFromWizard} />
+
+      {sheetPlayer && (
+        <PlayerSheet
+          player={roster.find(p => p.id === sheetPlayer.id) || sheetPlayer}
+          profiles={profiles}
+          defaultVoiceId={defaultVoiceId}
+          onClose={() => setSheetPlayer(null)}
+          onSave={savePlayer}
+          onRender={renderPlayer}
+          onRemove={removePlayer}
+        />
       )}
+      {showVoices && <VoicePicker profiles={profiles} defaultVoiceId={defaultVoiceId} onChoose={chooseVoice} onClose={() => setShowVoices(false)} />}
+      {showAddSub && <AddSubModal onClose={() => setShowAddSub(false)} onAdd={addSub} />}
+      {showHalo && current && <HaloOverlay player={current} onSelect={fireHalo} onClose={() => setShowHalo(false)} />}
     </div>
   );
 }

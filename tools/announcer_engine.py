@@ -1,14 +1,15 @@
-"""Announcer TTS Engine — dual-provider voice synthesis for walk-up announcements.
+"""Announcer TTS Engine — voice synthesis for walk-up announcements.
 
-Providers:
-  1. Replicate Qwen3-TTS (clone mode) — primary if REPLICATE_API_TOKEN is set
-  2. ElevenLabs — fallback using existing integration
-  3. Mock — silent placeholder when no API keys configured (dev/testing)
+Providers, in priority order (see _build_provider_chain):
+  LocalVLLM → Replicate (only with a voice reference) → ElevenLabs → EdgeTTS →
+  Kokoro → Google Cloud → Mock.  In production ElevenLabs is the one that runs.
 
 Data stored in data/sharks/announcer/:
-  - roster.json       — player announcer metadata
-  - voice_profiles.json — reference voice configs
-  - clips/{player_id}/{timestamp}.mp3 — rendered audio
+  - roster.json          — player announcer metadata
+  - voice_selection.json — which VOICE_PROFILES entry is the team default
+  - voice_samples/       — cached per-voice sample lines for the picker
+  - clips/{player_id}/{timestamp}.mp3   — rendered audio (Stadium Wrap applied)
+  - archive/{player_id}/{timestamp}.flac — lossless masters, best-quality only
 """
 from __future__ import annotations
 
@@ -34,7 +35,6 @@ ANNOUNCER_DIR = DATA_DIR / "sharks" / "announcer"
 CLIPS_DIR = ANNOUNCER_DIR / "clips"
 ARCHIVE_DIR = ANNOUNCER_DIR / "archive"
 ROSTER_FILE = ANNOUNCER_DIR / "roster.json"
-VOICE_PROFILES_FILE = ANNOUNCER_DIR / "voice_profiles.json"
 
 class _RosterLock:
     """Re-entrant lock over roster.json that holds across threads AND processes.
@@ -433,7 +433,10 @@ class ElevenLabsTTS(TTSProvider):
             or os.getenv("ELEVENLABS_DEFAULT_VOICE_ID", "").strip()
             or ANNOUNCER_ELEVENLABS_VOICE_ID
         )
-        model_id = os.getenv("ELEVENLABS_MODEL_ID", "eleven_multilingual_v2")
+        model_id = (
+            voice_config.get("model_id")
+            or os.getenv("ELEVENLABS_MODEL_ID", "eleven_multilingual_v2")
+        )
 
         if not api_key:
             raise RuntimeError("ELEVENLABS_API_KEY not set")
@@ -445,7 +448,7 @@ class ElevenLabsTTS(TTSProvider):
             # Announcer delivery: low-ish stability + high style gives the dramatic
             # swing the Halo-style read needs.  0.20 was low enough that repeat
             # renders of the same player drifted in character; 0.30 holds.
-            "voice_settings": {
+            "voice_settings": voice_config.get("voice_settings") or {
                 "stability": 0.30,
                 "similarity_boost": 0.85,
                 "style": 0.75,
@@ -808,28 +811,115 @@ def check_provider_health() -> dict:
 # Voice Profiles
 # ---------------------------------------------------------------------------
 
-DEFAULT_VOICE_PROFILE = {
-    "id": "default-steitzer",
-    "name": "Jeff Steitzer (Stadium Announcer)",
-    "reference_audio_url": os.getenv("ANNOUNCER_VOICE_REF_URL", ""),
-    "reference_transcript": os.getenv("ANNOUNCER_VOICE_REF_TEXT", "Now batting, number seven, Sophia!"),
-    "description": "Classic booming stadium announcer voice",
-    "is_default": True,
-}
+# All premade ElevenLabs voices.  The account is on the free tier, where designed
+# voices (HTTP 403) and cloning (402) are unavailable — and cloning the real Halo
+# actor would be off the table regardless.  "Halo Announcer" is the closest
+# legitimate match to that delivery: the deepest premade voice, the model/settings
+# with the widest measured pitch swing (182 Hz range on multilingual_v2 vs 67 on
+# v3), a two-semitone drop in the stadium chain, and the scripted cadence.
+VOICE_PROFILES: list[dict] = [
+    {
+        "id": "halo", "name": "Halo Announcer",
+        "tagline": "Deep, booming, larger than life — the default",
+        "elevenlabs_voice_id": "nPczCjzI2devNBz1zQrb", "model_id": "eleven_multilingual_v2",
+        "voice_settings": {"stability": 0.30, "similarity_boost": 0.85, "style": 0.75, "use_speaker_boost": True},
+        "pitch_semitones": -2.0,
+    },
+    {
+        "id": "brian", "name": "Brian",
+        "tagline": "Deep and resonant, straight read",
+        "elevenlabs_voice_id": "nPczCjzI2devNBz1zQrb", "model_id": "eleven_multilingual_v2",
+        "voice_settings": {"stability": 0.45, "similarity_boost": 0.85, "style": 0.45, "use_speaker_boost": True},
+        "pitch_semitones": 0.0,
+    },
+    {
+        "id": "callum", "name": "Callum",
+        "tagline": "Gravel and grit",
+        "elevenlabs_voice_id": "N2lVS1w4EtoT3dr4eOWO", "model_id": "eleven_multilingual_v2",
+        "voice_settings": {"stability": 0.35, "similarity_boost": 0.85, "style": 0.65, "use_speaker_boost": True},
+        "pitch_semitones": 0.0,
+    },
+    {
+        "id": "george", "name": "George",
+        "tagline": "Warm storyteller",
+        "elevenlabs_voice_id": "JBFqnCBsd6RMkjVDRZzb", "model_id": "eleven_multilingual_v2",
+        "voice_settings": {"stability": 0.40, "similarity_boost": 0.85, "style": 0.55, "use_speaker_boost": True},
+        "pitch_semitones": 0.0,
+    },
+    {
+        "id": "adam", "name": "Adam",
+        "tagline": "Classic PA announcer",
+        "elevenlabs_voice_id": "pNInz6obpgDQGcFmaJgB", "model_id": "eleven_multilingual_v2",
+        "voice_settings": {"stability": 0.40, "similarity_boost": 0.85, "style": 0.60, "use_speaker_boost": True},
+        "pitch_semitones": 0.0,
+    },
+]
+
+VOICE_SELECTION_FILE = ANNOUNCER_DIR / "voice_selection.json"
+VOICE_SAMPLES_DIR = ANNOUNCER_DIR / "voice_samples"
+VOICE_SAMPLE_TEXT = (
+    "[breath] Now batting for your Sharks... [pause:0.4s] "
+    "NUMBEEEER seven... [pause:0.3s] your leadoff hitter!"
+)
+
+
+def get_voice_profile(profile_id: str | None) -> dict | None:
+    for p in VOICE_PROFILES:
+        if p["id"] == profile_id:
+            return p
+    return None
+
+
+def get_default_voice_profile_id() -> str:
+    sel = _read_json(VOICE_SELECTION_FILE, default=None)
+    pid = sel.get("default_profile_id") if isinstance(sel, dict) else None
+    return pid if get_voice_profile(pid) else VOICE_PROFILES[0]["id"]
 
 
 def load_voice_profiles() -> list[dict]:
-    profiles = _read_json(VOICE_PROFILES_FILE, default=None)
-    if isinstance(profiles, list) and profiles:
-        return profiles
-    return [DEFAULT_VOICE_PROFILE]
+    default_id = get_default_voice_profile_id()
+    return [{**p, "is_default": p["id"] == default_id} for p in VOICE_PROFILES]
 
 
 def get_default_voice_profile() -> dict:
-    for p in load_voice_profiles():
-        if p.get("is_default"):
-            return p
-    return DEFAULT_VOICE_PROFILE
+    return get_voice_profile(get_default_voice_profile_id()) or VOICE_PROFILES[0]
+
+
+def set_default_voice_profile(profile_id: str) -> dict:
+    profile = get_voice_profile(profile_id)
+    if not profile:
+        raise ValueError(f"Unknown voice profile: {profile_id}")
+    _ensure_dirs()
+    _atomic_write_json(VOICE_SELECTION_FILE, {"default_profile_id": profile_id})
+    return profile
+
+
+def resolve_voice_profile(player: dict) -> dict:
+    """Per-player override if set, else the team default."""
+    return get_voice_profile(player.get("voice_profile_id")) or get_default_voice_profile()
+
+
+def render_voice_sample(profile_id: str) -> Path:
+    """Render (once) a short sample line in the given voice, through the full
+    stadium chain so it sounds like a real clip.  Cached on disk."""
+    profile = get_voice_profile(profile_id)
+    if not profile:
+        raise ValueError(f"Unknown voice profile: {profile_id}")
+    VOICE_SAMPLES_DIR.mkdir(parents=True, exist_ok=True)
+    out = VOICE_SAMPLES_DIR / f"{profile_id}.mp3"
+    if out.exists() and out.stat().st_size > 1000:
+        return out
+    provider = get_tts_provider()
+    text = VOICE_SAMPLE_TEXT if isinstance(provider, EdgeTTSProvider) else _strip_markup_tags(VOICE_SAMPLE_TEXT)
+    audio = provider.synthesize(text, profile)
+    try:
+        archive_and_transcode(audio, f"sample-{profile_id}", archive=False,
+                              pitch_semitones=float(profile.get("pitch_semitones") or 0.0),
+                              out_mp3=out)
+    except Exception as e:
+        logging.warning("[Announcer] sample wrap failed (%s) — saving raw", e)
+        out.write_bytes(audio)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -874,6 +964,9 @@ _HALO_SCRIPTS: dict[str, str] = {
     "cycle":         "PERFECTION! She hit for the cycle!",
 }
 
+# Ballpark DJ reads "Now batting for the Savannah Seadogs..."; same idea here.
+ANNOUNCER_TEAM_PHRASE = os.getenv("ANNOUNCER_TEAM_PHRASE", "").strip() or "your Sharks"
+
 STEITZER_VOICE_INSTRUCTION = (
     "Speak like Jeff Steitzer, the iconic Halo video game announcer. "
     "Use a deep, booming, dramatic stadium announcer voice with elongated emphasis on key words. "
@@ -915,17 +1008,17 @@ def build_situational_announcement(player: dict, game_context: dict | None = Non
     elif high_stakes:
         urgency = "with the game on the line" if trailing else "with the bases loaded"
         script = (
-            f"[breath] NOW BATTING... [pause:0.5s] {urgency}... "
+            f"[breath] NOW BATTING for {ANNOUNCER_TEAM_PHRASE}... [pause:0.5s] {urgency}... "
             f"[pause:0.4s] NUMBEEEER {num_word}... [pause:0.3s] {name}!"
         )
     elif bases_loaded:
         script = (
             f"[breath] Bases loaded... [pause:0.4s] "
-            f"NOW batting... [pause:0.3s] NUMBEEEER {num_word}... [pause:0.3s] {name}!"
+            f"NOW batting for {ANNOUNCER_TEAM_PHRASE}... [pause:0.3s] NUMBEEEER {num_word}... [pause:0.3s] {name}!"
         )
     else:
         script = (
-            f"[breath] Now batting... [pause:0.4s] "
+            f"[breath] Now batting for {ANNOUNCER_TEAM_PHRASE}... [pause:0.4s] "
             f"NUMBEEEER {num_word}... [pause:0.3s] {name}!"
         )
 
@@ -1100,7 +1193,8 @@ def update_player(player_id: str, updates: dict) -> dict | None:
 # ---------------------------------------------------------------------------
 
 def archive_and_transcode(audio_bytes: bytes, player_id: str,
-                          archive: bool = True) -> tuple[Path | None, Path]:
+                          archive: bool = True, pitch_semitones: float = 0.0,
+                          out_mp3: Path | None = None) -> tuple[Path | None, Path]:
     """Run the Stadium Wrap and write the MP3; optionally keep a FLAC master.
 
     FFmpeg Stadium Wrap chain (Best Quality):
@@ -1116,9 +1210,12 @@ def archive_and_transcode(audio_bytes: bytes, player_id: str,
     ts = datetime.now(ET).strftime("%Y%m%d_%H%M%S")
     safe_id = _sanitize_player_id(player_id)
 
-    clips_player_dir = CLIPS_DIR / safe_id
-    clips_player_dir.mkdir(parents=True, exist_ok=True)
-    mp3_path = clips_player_dir / f"{ts}.mp3"
+    if out_mp3 is not None:
+        mp3_path = out_mp3
+    else:
+        clips_player_dir = CLIPS_DIR / safe_id
+        clips_player_dir.mkdir(parents=True, exist_ok=True)
+        mp3_path = clips_player_dir / f"{ts}.mp3"
 
     flac_path: Path | None = None
     if archive:
@@ -1158,8 +1255,14 @@ def archive_and_transcode(audio_bytes: bytes, player_id: str,
         #     filter anyway; a low shelf is the `bass` filter.
         #   - `amix=...:weights=0.8:0.2` — `weights` takes one space-separated
         #     string, so the `:0.2` was parsed as a second option name.
+        # Pitch drop (Halo profile): resample trick, then restore tempo.  Core
+        # filters only — rubberband is not in the Pi's ffmpeg build.
+        pitch = ""
+        if pitch_semitones:
+            ratio = 2 ** (pitch_semitones / 12.0)
+            pitch = f"aresample=48000,asetrate={int(48000 * ratio)},aresample=48000,atempo={1 / ratio:.4f},"
         filtergraph = (
-            "[0:a]"
+            "[0:a]" + pitch +
             "compand=attacks=0.01:decays=0.2"
             ":points=-80/-80|-45/-30|-27/-20|0/-13:gain=6,"
             "bass=f=150:width_type=o:width=2:g=4"
@@ -1208,7 +1311,7 @@ def render_player_audio(player_id: str, game_context: dict | None = None,
 
     try:
         provider = get_quick_tts_provider() if quality == "quick" else get_tts_provider()
-        voice = get_default_voice_profile()
+        voice = resolve_voice_profile(player)
         raw_text = build_announcement_text(player, game_context)
         # EdgeTTS handles SSML natively; all others receive stripped plain text.
         # This prevents [breath] / [pause:Xs] from being spoken literally.
@@ -1223,8 +1326,9 @@ def render_player_audio(player_id: str, game_context: dict | None = None,
         # only path a coach's Render button can take, so live clips were flat.
         safe_id = _sanitize_player_id(player_id)
         try:
-            _, mp3_path = archive_and_transcode(audio_bytes, player_id,
-                                                archive=(quality == "best"))
+            _, mp3_path = archive_and_transcode(
+                audio_bytes, player_id, archive=(quality == "best"),
+                pitch_semitones=float(voice.get("pitch_semitones") or 0.0))
             clip_url = f"/announcer-clips/{safe_id}/{mp3_path.name}"
         except Exception as e:
             # FFmpeg not available (e.g., dev environment) — fall back to raw MP3
@@ -1241,6 +1345,7 @@ def render_player_audio(player_id: str, game_context: dict | None = None,
             "announcer_audio_url": clip_url,
             "rendered_at": datetime.now(ET).isoformat(),
             "render_quality": quality,
+            "voice_rendered": voice["id"],
             "error_message": "",
         })
         logging.info("[Announcer] Rendered %s via %s (%d bytes, quality=%s)",

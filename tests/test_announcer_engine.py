@@ -382,53 +382,115 @@ class TestBuildAnnouncementText:
 # load_voice_profiles / get_default_voice_profile
 # ---------------------------------------------------------------------------
 
-class TestLoadVoiceProfiles:
-    def test_returns_list_when_no_file(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(ae_mod, "VOICE_PROFILES_FILE", tmp_path / "vp.json")
-        result = load_voice_profiles()
-        assert isinstance(result, list)
-        assert len(result) >= 1
+class TestVoiceProfiles:
+    """Profiles are a fixed list in code; only the team default is persisted."""
 
-    def test_returns_default_when_file_empty(self, tmp_path, monkeypatch):
-        vp_file = tmp_path / "vp.json"
-        vp_file.write_text("[]")
-        monkeypatch.setattr(ae_mod, "VOICE_PROFILES_FILE", vp_file)
-        result = load_voice_profiles()
-        assert isinstance(result, list)
+    def test_halo_is_the_default_when_nothing_selected(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(ae_mod, "VOICE_SELECTION_FILE", tmp_path / "sel.json")
+        assert get_default_voice_profile()["id"] == "halo"
+        profiles = load_voice_profiles()
+        assert [p["id"] for p in profiles if p["is_default"]] == ["halo"]
+        assert len(profiles) >= 4
 
-    def test_returns_profiles_from_file(self, tmp_path, monkeypatch):
-        profiles = [{"name": "Custom", "is_default": True}]
-        vp_file = tmp_path / "vp.json"
-        vp_file.write_text(json.dumps(profiles))
-        monkeypatch.setattr(ae_mod, "VOICE_PROFILES_FILE", vp_file)
-        result = load_voice_profiles()
-        assert result[0]["name"] == "Custom"
+    def test_halo_profile_drops_pitch_and_uses_deep_voice(self):
+        halo = ae_mod.get_voice_profile("halo")
+        assert halo["pitch_semitones"] < 0
+        assert halo["elevenlabs_voice_id"] == ae_mod.ANNOUNCER_ELEVENLABS_VOICE_ID
+        assert halo["voice_settings"]["style"] >= 0.7
+
+    def test_set_default_persists_and_reloads(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(ae_mod, "VOICE_SELECTION_FILE", tmp_path / "sel.json")
+        monkeypatch.setattr(ae_mod, "_ensure_dirs", lambda: None)
+        ae_mod.set_default_voice_profile("callum")
+        assert ae_mod.get_default_voice_profile_id() == "callum"
+        assert get_default_voice_profile()["id"] == "callum"
+
+    def test_set_default_rejects_unknown(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(ae_mod, "VOICE_SELECTION_FILE", tmp_path / "sel.json")
+        with pytest.raises(ValueError):
+            ae_mod.set_default_voice_profile("nope")
+
+    def test_corrupt_selection_falls_back_to_halo(self, tmp_path, monkeypatch):
+        sel = tmp_path / "sel.json"
+        sel.write_text('{"default_profile_id": "deleted-voice"}', encoding="utf-8")
+        monkeypatch.setattr(ae_mod, "VOICE_SELECTION_FILE", sel)
+        assert ae_mod.get_default_voice_profile_id() == "halo"
+
+    def test_player_override_beats_team_default(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(ae_mod, "VOICE_SELECTION_FILE", tmp_path / "sel.json")
+        assert ae_mod.resolve_voice_profile({"voice_profile_id": "george"})["id"] == "george"
+        assert ae_mod.resolve_voice_profile({"voice_profile_id": ""})["id"] == "halo"
+        assert ae_mod.resolve_voice_profile({"voice_profile_id": "bogus"})["id"] == "halo"
 
 
-class TestGetDefaultVoiceProfile:
-    def test_returns_dict(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(ae_mod, "VOICE_PROFILES_FILE", tmp_path / "vp.json")
-        result = get_default_voice_profile()
-        assert isinstance(result, dict)
+class TestElevenLabsUsesProfile:
+    def test_model_and_settings_come_from_profile(self, monkeypatch):
+        captured = {}
 
-    def test_returns_profile_marked_default(self, tmp_path, monkeypatch):
-        profiles = [
-            {"name": "NonDefault", "is_default": False},
-            {"name": "TheDefault", "is_default": True},
-        ]
-        vp_file = tmp_path / "vp.json"
-        vp_file.write_text(json.dumps(profiles))
-        monkeypatch.setattr(ae_mod, "VOICE_PROFILES_FILE", vp_file)
-        result = get_default_voice_profile()
-        assert result["name"] == "TheDefault"
+        class _Resp:
+            status_code = 200
+            content = b"audio"
+            headers = {}
 
-    def test_fallback_when_no_default_marked(self, tmp_path, monkeypatch):
-        profiles = [{"name": "NoDefault", "is_default": False}]
-        vp_file = tmp_path / "vp.json"
-        vp_file.write_text(json.dumps(profiles))
-        monkeypatch.setattr(ae_mod, "VOICE_PROFILES_FILE", vp_file)
-        result = get_default_voice_profile()
-        assert isinstance(result, dict)
+        def _post(url, json=None, headers=None, timeout=None):
+            captured["url"] = url
+            captured["json"] = json
+            return _Resp()
+
+        monkeypatch.setattr(ae_mod.requests, "post", _post)
+        monkeypatch.setenv("ELEVENLABS_API_KEY", "el_fake")
+        monkeypatch.delenv("ELEVENLABS_VOICE_ID", raising=False)
+        monkeypatch.delenv("ELEVENLABS_DEFAULT_VOICE_ID", raising=False)
+        monkeypatch.setitem(sys.modules, "sync_daemon", None)
+        profile = ae_mod.get_voice_profile("callum")
+        ae_mod.ElevenLabsTTS().synthesize("hello", profile)
+        assert profile["elevenlabs_voice_id"] in captured["url"]
+        assert captured["json"]["model_id"] == profile["model_id"]
+        assert captured["json"]["voice_settings"] == profile["voice_settings"]
+
+
+class TestPitchDropInStadiumChain:
+    def test_negative_semitones_add_resample_stage(self, tmp_path, monkeypatch):
+        import shutil, subprocess
+        if not shutil.which("ffmpeg"):
+            pytest.skip("ffmpeg not installed")
+        monkeypatch.setattr(ae_mod, "CLIPS_DIR", tmp_path / "clips")
+        src = tmp_path / "in.wav"
+        subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi",
+                        "-i", "sine=frequency=200:duration=1", str(src)], check=True)
+        out = tmp_path / "shifted.mp3"
+        _, mp3 = ae_mod.archive_and_transcode(src.read_bytes(), "p1", archive=False,
+                                              pitch_semitones=-2.0, out_mp3=out)
+        assert mp3 == out and out.stat().st_size > 0
+        # Duration must survive the tempo correction (within codec padding).
+        dur = float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                                    "-of", "csv=p=0", str(out)], capture_output=True, text=True).stdout)
+        assert 0.85 < dur < 1.35
+
+
+class TestRenderVoiceSample:
+    def test_renders_once_then_serves_cache(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(ae_mod, "VOICE_SAMPLES_DIR", tmp_path / "samples")
+        calls = []
+
+        class _P(ae_mod.TTSProvider):
+            name = "fake"
+            def synthesize(self, text, voice_config):
+                calls.append((text, voice_config["id"]))
+                return b"x" * 2000
+
+        monkeypatch.setattr(ae_mod, "get_tts_provider", lambda: _P())
+        monkeypatch.setattr(ae_mod, "archive_and_transcode",
+                            lambda audio, pid, **kw: (None, kw["out_mp3"].write_bytes(audio) and kw["out_mp3"]))
+        p1 = ae_mod.render_voice_sample("george")
+        p2 = ae_mod.render_voice_sample("george")
+        assert p1 == p2 and p1.exists()
+        assert len(calls) == 1 and calls[0][1] == "george"
+        assert "[pause" not in calls[0][0]           # markup stripped for non-Edge providers
+
+    def test_unknown_profile_raises(self):
+        with pytest.raises(ValueError):
+            ae_mod.render_voice_sample("nope")
 
 
 # ---------------------------------------------------------------------------

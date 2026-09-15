@@ -4884,6 +4884,12 @@ def handle_announcer_phonetics(player_id):
     intro_ts = data.get("intro_timestamp")
 
     updates = {"phonetic_hint": phonetic, "tts_instruction": instruction, "status": "pending"}
+    if "voice_profile_id" in data:
+        from announcer_engine import get_voice_profile
+        vp = str(data.get("voice_profile_id") or "").strip()[:32]
+        if vp and not get_voice_profile(vp):
+            return jsonify({"error": "unknown_voice_profile"}), 400
+        updates["voice_profile_id"] = vp
     if walkup_url:
         parsed_url = urlparse(walkup_url)
         if parsed_url.scheme not in ('http', 'https', ''):
@@ -4995,13 +5001,63 @@ def handle_announcer_clip(player_id):
 
 @app.route('/api/announcer/voice-profiles', methods=['GET'])
 def handle_announcer_voice_profiles():
-    """List available voice profiles."""
+    """List available voice profiles and which one is the team default."""
     try:
-        from announcer_engine import load_voice_profiles
-        return jsonify({"profiles": load_voice_profiles()})
+        from announcer_engine import load_voice_profiles, get_default_voice_profile_id
+        return jsonify({"profiles": load_voice_profiles(),
+                        "default_id": get_default_voice_profile_id()})
     except Exception as e:
         logging.error("[Announcer] voice profiles error: %s", e)
         return jsonify({"error": "voice_profiles_failed"}), 500
+
+
+_VOICE_PROFILE_ID_RE = re.compile(r"^[a-z0-9_-]{1,32}$")
+
+
+@app.route('/api/announcer/voice-profiles/default', methods=['POST'])
+def handle_announcer_voice_profile_default():
+    """Set the team's announcer voice.  Players without a per-player override
+    are marked pending so Render All picks them up; their old clip stays
+    playable until the new one lands."""
+    blocked = _guard_mutating_request()
+    if blocked:
+        return blocked
+    data = request.get_json(silent=True) or {}
+    profile_id = str(data.get("profile_id") or "").strip()
+    if not _VOICE_PROFILE_ID_RE.match(profile_id):
+        return jsonify({"error": "invalid_profile_id"}), 400
+    from announcer_engine import (set_default_voice_profile, load_announcer_roster,
+                                  save_announcer_roster, _ROSTER_LOCK)
+    try:
+        set_default_voice_profile(profile_id)
+    except ValueError:
+        return jsonify({"error": "unknown_profile"}), 404
+    marked = 0
+    with _ROSTER_LOCK:
+        roster = load_announcer_roster()
+        for p in roster:
+            if p.get("is_active") and not p.get("voice_profile_id") and p.get("status") == "ready":
+                p["status"] = "pending"
+                marked += 1
+        save_announcer_roster(roster)
+    return jsonify({"status": "ok", "default_id": profile_id, "marked_pending": marked})
+
+
+@app.route('/api/announcer/voice-sample/<profile_id>', methods=['GET'])
+def handle_announcer_voice_sample(profile_id):
+    """Short sample line in the given voice, rendered once and cached."""
+    if not _VOICE_PROFILE_ID_RE.match(profile_id or ""):
+        return jsonify({"error": "invalid_profile_id"}), 400
+    try:
+        from announcer_engine import render_voice_sample
+        path = render_voice_sample(profile_id)
+    except ValueError:
+        return jsonify({"error": "unknown_profile"}), 404
+    except Exception as e:
+        logging.error("[Announcer] voice sample failed for %s: %s", profile_id, e)
+        return jsonify({"error": "sample_failed"}), 503
+    return Response(path.read_bytes(), mimetype="audio/mpeg",
+                    headers={"Cache-Control": "public, max-age=86400"})
 
 
 # ---------------------------------------------------------------------------

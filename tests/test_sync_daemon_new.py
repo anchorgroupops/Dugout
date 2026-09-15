@@ -4135,6 +4135,13 @@ def _make_fake_announcer_engine(tmp_path=None):
     })
     fake.build_announcement_text = MagicMock(return_value="Now batting, Jane Doe!")
     fake.load_voice_profiles = MagicMock(return_value=[{"id": "v1", "name": "Coach"}])
+    fake.get_default_voice_profile_id = MagicMock(return_value="v1")
+    fake.get_voice_profile = MagicMock(side_effect=lambda pid: {"id": pid} if pid in ("v1", "halo") else None)
+    fake.set_default_voice_profile = MagicMock(side_effect=lambda pid: {"id": pid} if pid in ("v1", "halo") else (_ for _ in ()).throw(ValueError(pid)))
+    fake._ROSTER_LOCK = MagicMock()
+    fake._ROSTER_LOCK.__enter__ = MagicMock(return_value=None)
+    fake._ROSTER_LOCK.__exit__ = MagicMock(return_value=False)
+    fake.render_voice_sample = MagicMock()
     fake._sanitize_player_id = lambda s: s.lower().replace(" ", "-")
     fake.CLIPS_DIR = tmp_path / "clips" if tmp_path else Path("/tmp/clips")
     fake.ARCHIVE_DIR = tmp_path / "archive" if tmp_path else Path("/tmp/archive")
@@ -11096,3 +11103,89 @@ class TestRenderRoutingSecondPass:
         finally:
             sd._LIVE_GAME_STATE.clear()
             sd._LIVE_GAME_STATE.update(orig)
+
+
+# ---------------------------------------------------------------------------
+# Voice picker endpoints (2026-09-15)
+# ---------------------------------------------------------------------------
+
+class TestVoiceProfileEndpoints:
+    _ORIGIN = "https://test.render.com"
+
+    def _post(self, client, path, body, monkeypatch):
+        monkeypatch.setattr(sd, "WRITE_ORIGINS", [self._ORIGIN])
+        sd._MUTATE_RATE_BUCKETS.clear()
+        return client.post(path, json=body, content_type="application/json",
+                           headers={"Origin": self._ORIGIN})
+
+    def test_list_includes_default_id(self, flask_app, monkeypatch, tmp_path):
+        fake = _make_fake_announcer_engine(tmp_path)
+        monkeypatch.setitem(sys.modules, "announcer_engine", fake)
+        with flask_app.test_client() as client:
+            resp = client.get("/api/announcer/voice-profiles")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["default_id"] == "v1"
+        assert data["profiles"][0]["id"] == "v1"
+
+    def test_set_default_marks_unoverridden_ready_players_pending(self, flask_app, monkeypatch, tmp_path):
+        fake = _make_fake_announcer_engine(tmp_path)
+        fake.load_announcer_roster = MagicMock(return_value=[
+            {"id": "a", "is_active": True, "status": "ready", "voice_profile_id": ""},
+            {"id": "b", "is_active": True, "status": "ready", "voice_profile_id": "george"},
+            {"id": "c", "is_active": False, "status": "ready", "voice_profile_id": ""},
+        ])
+        monkeypatch.setitem(sys.modules, "announcer_engine", fake)
+        with flask_app.test_client() as client:
+            resp = self._post(client, "/api/announcer/voice-profiles/default", {"profile_id": "halo"}, monkeypatch)
+        assert resp.status_code == 200
+        assert resp.get_json()["marked_pending"] == 1
+        saved = fake.save_announcer_roster.call_args.args[0]
+        assert [p["status"] for p in saved] == ["pending", "ready", "ready"]
+
+    def test_set_default_unknown_is_404(self, flask_app, monkeypatch, tmp_path):
+        fake = _make_fake_announcer_engine(tmp_path)
+        monkeypatch.setitem(sys.modules, "announcer_engine", fake)
+        with flask_app.test_client() as client:
+            resp = self._post(client, "/api/announcer/voice-profiles/default", {"profile_id": "nope"}, monkeypatch)
+        assert resp.status_code == 404
+
+    def test_set_default_rejects_bad_id_shape(self, flask_app, monkeypatch, tmp_path):
+        fake = _make_fake_announcer_engine(tmp_path)
+        monkeypatch.setitem(sys.modules, "announcer_engine", fake)
+        with flask_app.test_client() as client:
+            resp = self._post(client, "/api/announcer/voice-profiles/default", {"profile_id": "../etc"}, monkeypatch)
+        assert resp.status_code == 400
+
+    def test_sample_streams_audio(self, flask_app, monkeypatch, tmp_path):
+        fake = _make_fake_announcer_engine(tmp_path)
+        mp3 = tmp_path / "halo.mp3"
+        mp3.write_bytes(b"ID3fakeaudio")
+        fake.render_voice_sample = MagicMock(return_value=mp3)
+        monkeypatch.setitem(sys.modules, "announcer_engine", fake)
+        with flask_app.test_client() as client:
+            resp = client.get("/api/announcer/voice-sample/halo")
+        assert resp.status_code == 200
+        assert resp.mimetype == "audio/mpeg"
+        assert resp.data == b"ID3fakeaudio"
+
+    def test_sample_unknown_is_404_and_failure_is_503(self, flask_app, monkeypatch, tmp_path):
+        fake = _make_fake_announcer_engine(tmp_path)
+        fake.render_voice_sample = MagicMock(side_effect=ValueError("nope"))
+        monkeypatch.setitem(sys.modules, "announcer_engine", fake)
+        with flask_app.test_client() as client:
+            assert client.get("/api/announcer/voice-sample/nope").status_code == 404
+            fake.render_voice_sample = MagicMock(side_effect=RuntimeError("tts down"))
+            assert client.get("/api/announcer/voice-sample/halo").status_code == 503
+
+    def test_phonetics_accepts_voice_override_and_rejects_unknown(self, flask_app, monkeypatch, tmp_path):
+        fake = _make_fake_announcer_engine(tmp_path)
+        monkeypatch.setitem(sys.modules, "announcer_engine", fake)
+        with flask_app.test_client() as client:
+            ok = self._post(client, "/api/announcer/phonetics/07-jane-doe",
+                            {"phonetic_hint": "jay-n", "voice_profile_id": "halo"}, monkeypatch)
+            assert ok.status_code == 200
+            assert fake.update_player.call_args.args[1]["voice_profile_id"] == "halo"
+            bad = self._post(client, "/api/announcer/phonetics/07-jane-doe",
+                             {"voice_profile_id": "nope"}, monkeypatch)
+            assert bad.status_code == 400
