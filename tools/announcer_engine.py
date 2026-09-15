@@ -229,6 +229,34 @@ def _tags_to_ssml(text: str, voice_name: str) -> str:
     return f'<speak><voice name="{voice_name}">{inner}</voice></speak>'
 
 
+def _tags_to_elevenlabs(text: str) -> str:
+    """Convert custom markup to the pauses ElevenLabs understands.
+
+    ElevenLabs v2 models honour ``<break time="0.7s" />`` (up to 3 s) but
+    speak anything else in brackets literally, so ``[pause:Xs]`` becomes a
+    break and ``[breath]`` is dropped.  Before this the tags were stripped
+    outright and every beat in the script collapsed to whatever the model
+    read into an ellipsis (~0.3 s) — the dramatic Halo-style gap before the
+    number and the name never made it into the audio.
+    """
+    text = _re.sub(r'\[breath\]', '', text, flags=_re.IGNORECASE)
+    text = _re.sub(
+        r'\[pause:(\d+(?:\.\d+)?)s\]',
+        lambda m: f'<break time="{min(float(m.group(1)), 3.0):.1f}s" />',
+        text,
+    )
+    text = _re.sub(r'\(\s*(?:breath|breathe|inhale|exhale)\s*\)', '', text, flags=_re.IGNORECASE)
+    text = _re.sub(r'\[[^\]]*\]', '', text)          # any other bracket tag
+    text = _re.sub(r'\s{2,}', ' ', text)
+    return text.strip()
+
+
+# Bump when the Stadium Wrap chain or the script timing changes in a way the
+# coach should hear: clips rendered under an older version are flagged for a
+# re-render (see _mark_stale_renders) and voice samples are re-cached.
+STADIUM_WRAP_VERSION = 2
+
+
 # ---------------------------------------------------------------------------
 # TTS Providers
 # ---------------------------------------------------------------------------
@@ -441,7 +469,10 @@ class ElevenLabsTTS(TTSProvider):
         if not api_key:
             raise RuntimeError("ELEVENLABS_API_KEY not set")
 
-        url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+        # Default 128 kbps; ELEVENLABS_OUTPUT_FORMAT=mp3_44100_192 on a Creator+
+        # plan hands the Stadium Wrap a cleaner source (we re-encode anyway).
+        output_format = os.getenv("ELEVENLABS_OUTPUT_FORMAT", "").strip() or "mp3_44100_128"
+        url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}?output_format={output_format}"
         payload = {
             "text": text,
             "model_id": model_id,
@@ -858,9 +889,22 @@ VOICE_PROFILES: list[dict] = [
 VOICE_SELECTION_FILE = ANNOUNCER_DIR / "voice_selection.json"
 VOICE_SAMPLES_DIR = ANNOUNCER_DIR / "voice_samples"
 VOICE_SAMPLE_TEXT = (
-    "[breath] Now batting for your Sharks... [pause:0.4s] "
-    "NUMBEEEER seven... [pause:0.3s] your leadoff hitter!"
+    "[breath] Now batting for your Sharks... [pause:0.7s] "
+    "NUMBEEEER seven... [pause:0.5s] your leadoff hitter!"
 )
+
+
+def text_for_provider(provider: "TTSProvider", raw_text: str) -> str:
+    """Turn the script's [breath]/[pause] markup into what each provider can use.
+
+    Edge TTS builds SSML itself, ElevenLabs takes <break/> tags, everything
+    else gets plain text so the markers are never spoken literally.
+    """
+    if isinstance(provider, EdgeTTSProvider):
+        return raw_text
+    if isinstance(provider, ElevenLabsTTS):
+        return _tags_to_elevenlabs(raw_text)
+    return _strip_markup_tags(raw_text)
 
 
 def get_voice_profile(profile_id: str | None) -> dict | None:
@@ -906,11 +950,13 @@ def render_voice_sample(profile_id: str) -> Path:
     if not profile:
         raise ValueError(f"Unknown voice profile: {profile_id}")
     VOICE_SAMPLES_DIR.mkdir(parents=True, exist_ok=True)
-    out = VOICE_SAMPLES_DIR / f"{profile_id}.mp3"
+    # Versioned name so a chain change re-renders the sample instead of
+    # playing the coach the old sound from the picker.
+    out = VOICE_SAMPLES_DIR / f"{profile_id}.v{STADIUM_WRAP_VERSION}.mp3"
     if out.exists() and out.stat().st_size > 1000:
         return out
     provider = get_tts_provider()
-    text = VOICE_SAMPLE_TEXT if isinstance(provider, EdgeTTSProvider) else _strip_markup_tags(VOICE_SAMPLE_TEXT)
+    text = text_for_provider(provider, VOICE_SAMPLE_TEXT)
     audio = provider.synthesize(text, profile)
     try:
         archive_and_transcode(audio, f"sample-{profile_id}", archive=False,
@@ -1004,22 +1050,22 @@ def build_situational_announcement(player: dict, game_context: dict | None = Non
 
     if achievement and achievement in _HALO_SCRIPTS:
         halo_call = _HALO_SCRIPTS[achievement]
-        script = f"[breath] {halo_call} [pause:0.5s] That's number {num_word}... {name}!"
+        script = f"[breath] {halo_call} [pause:0.6s] That's number {num_word}... [pause:0.4s] {name}!"
     elif high_stakes:
         urgency = "with the game on the line" if trailing else "with the bases loaded"
         script = (
-            f"[breath] NOW BATTING for {ANNOUNCER_TEAM_PHRASE}... [pause:0.5s] {urgency}... "
-            f"[pause:0.4s] NUMBEEEER {num_word}... [pause:0.3s] {name}!"
+            f"[breath] NOW BATTING for {ANNOUNCER_TEAM_PHRASE}... [pause:0.6s] {urgency}... "
+            f"[pause:0.7s] NUMBEEEER {num_word}... [pause:0.5s] {name}!"
         )
     elif bases_loaded:
         script = (
-            f"[breath] Bases loaded... [pause:0.4s] "
-            f"NOW batting for {ANNOUNCER_TEAM_PHRASE}... [pause:0.3s] NUMBEEEER {num_word}... [pause:0.3s] {name}!"
+            f"[breath] Bases loaded... [pause:0.5s] "
+            f"NOW batting for {ANNOUNCER_TEAM_PHRASE}... [pause:0.7s] NUMBEEEER {num_word}... [pause:0.5s] {name}!"
         )
     else:
         script = (
-            f"[breath] Now batting for {ANNOUNCER_TEAM_PHRASE}... [pause:0.4s] "
-            f"NUMBEEEER {num_word}... [pause:0.3s] {name}!"
+            f"[breath] Now batting for {ANNOUNCER_TEAM_PHRASE}... [pause:0.7s] "
+            f"NUMBEEEER {num_word}... [pause:0.5s] {name}!"
         )
 
     if tts_instruction and not achievement:
@@ -1121,6 +1167,24 @@ def reconcile_roster_with_team(roster: list[dict]) -> tuple[list[dict], bool]:
     return roster, changed
 
 
+def _mark_stale_renders(roster: list[dict]) -> bool:
+    """Flag ready clips rendered under an older Stadium Wrap as pending.
+
+    The clip URL is kept so playback keeps working until the re-render lands;
+    the pending status is what surfaces the "Render N" button in the PWA and
+    what render_all_pending() picks up.  Clips with no recorded version are
+    from before versioning existed and count as stale.
+    """
+    changed = False
+    for p in roster:
+        if p.get("status") != "ready" or not p.get("is_active", True):
+            continue
+        if int(p.get("wrap_version") or 0) < STADIUM_WRAP_VERSION:
+            p["status"] = "pending"
+            changed = True
+    return changed
+
+
 def load_announcer_roster() -> list[dict]:
     """Load the announcer roster, reconciling it against current team.json.
 
@@ -1135,12 +1199,14 @@ def load_announcer_roster() -> list[dict]:
     roster = _read_json(ROSTER_FILE, default=None)
     if isinstance(roster, list) and roster:
         roster, changed = reconcile_roster_with_team(roster)
+        changed = _mark_stale_renders(roster) or changed
         if changed:
             # Re-read under the lock so this write can't clobber a status update
             # that another worker landed between our read and now.
             with _ROSTER_LOCK:
                 fresh = _read_json(ROSTER_FILE, default=None)
                 roster, _ = reconcile_roster_with_team(fresh if isinstance(fresh, list) else roster)
+                _mark_stale_renders(roster)
                 try:
                     _atomic_write_json(ROSTER_FILE, roster)
                 except OSError as e:
@@ -1197,10 +1263,15 @@ def archive_and_transcode(audio_bytes: bytes, player_id: str,
                           out_mp3: Path | None = None) -> tuple[Path | None, Path]:
     """Run the Stadium Wrap and write the MP3; optionally keep a FLAC master.
 
-    FFmpeg Stadium Wrap chain (Best Quality):
-      compand      → broadcast hard compression (attack 10ms, decay 200ms)
-      equalizer    → +4dB low shelf at 150 Hz (Steitzer sub-bass boom)
-      extrastereo  → m=2.5 stereo widening (fills the stadium)
+    FFmpeg Stadium Wrap chain (v2, every render):
+      pitch drop   → resample trick + atempo (Halo profile only)
+      highpass     → 60 Hz, drops the sub-rumble the pitch shift adds
+      acompressor  → 3:1 broadcast compression, 5 ms attack so the
+                     consonants still punch
+      bass         → +4 dB low shelf at 150 Hz (Steitzer chest boom)
+      wet path     → lowpass 4 kHz + 140/280/430 ms PA slapback, Haas-widened
+      loudnorm     → -16 LUFS / -1.5 dBTP so every clip comes out the same
+                     level on the dugout speaker
 
     Returns (flac_path or None, mp3_path). Raises RuntimeError if FFmpeg is not in PATH.
     """
@@ -1246,38 +1317,40 @@ def archive_and_transcode(audio_bytes: bytes, player_id: str,
                 )
         wrap_input = flac_path if archive else tmp_path
 
-        # Pass 2 — Stadium Wrap filter chain → 192kbps MP3
-        # Splits signal: dry path + reverb path, mixed 80/20
-        # NOTE: two syntax errors used to live in this graph and made every
-        # "best" render fall through to the raw-bytes path below:
-        #   - `equalizer=...:t=l` — `t` is an alias for `width_type`, whose legal
-        #     values are h/q/o/s/k.  There is no `l`, and `equalizer` is a peaking
-        #     filter anyway; a low shelf is the `bass` filter.
-        #   - `amix=...:weights=0.8:0.2` — `weights` takes one space-separated
-        #     string, so the `:0.2` was parsed as a second option name.
-        # Pitch drop (Halo profile): resample trick, then restore tempo.  Core
-        # filters only — rubberband is not in the Pi's ffmpeg build.
+        # Pass 2 — Stadium Wrap filter chain → 192 kbps MP3.
+        # Measured on the v1 chain's output: loudness range 1.0 LU (the hard
+        # compand flattened every syllable to the same level), a 50/75/100 ms
+        # "reverb" that is a boxy flutter echo rather than a stadium, and
+        # `extrastereo` on a mono TTS source, which is a no-op (L-R is zero)
+        # so the clips were plain mono.  v2 keeps the dynamics (~4 LU), puts
+        # the slapback where a PA's reflections actually sit, widens only the
+        # wet path so the voice stays centred and mono-safe, and normalises to
+        # a fixed loudness.  Core filters only — rubberband is not in the Pi's
+        # ffmpeg build.
         pitch = ""
         if pitch_semitones:
             ratio = 2 ** (pitch_semitones / 12.0)
             pitch = f"aresample=48000,asetrate={int(48000 * ratio)},aresample=48000,atempo={1 / ratio:.4f},"
         filtergraph = (
             "[0:a]" + pitch +
-            "compand=attacks=0.01:decays=0.2"
-            ":points=-80/-80|-45/-30|-27/-20|0/-13:gain=6,"
+            "highpass=f=60,"
+            "acompressor=threshold=-20dB:ratio=3:attack=5:release=120:makeup=3:knee=4,"
             "bass=f=150:width_type=o:width=2:g=4"
             "[processed];"
             "[processed]asplit=2[dry][wet];"
-            "[wet]aecho=0.8:1.0:50|75|100:0.4|0.3|0.2[rev];"
-            "[dry][rev]amix=inputs=2:weights=0.8 0.2,"
-            "extrastereo=m=2.5[out]"
+            "[wet]lowpass=f=4000,"
+            "aecho=1.0:0.9:140|280|430:0.42|0.26|0.14,"
+            "haas=side_gain=0.9:middle_source=mid[rev];"
+            "[dry][rev]amix=inputs=2:weights=0.85 0.15:normalize=0,"
+            "loudnorm=I=-16:TP=-1.5:LRA=9,"
+            "alimiter=limit=0.89:level=0[out]"
         )
         result = subprocess.run(
             ["ffmpeg", "-y", "-i", str(wrap_input),
              "-filter_complex", filtergraph,
              "-map", "[out]",
              "-ar", "48000", "-ac", "2",
-             "-c:a", "libmp3lame", "-q:a", "2",
+             "-c:a", "libmp3lame", "-b:a", "192k",
              str(mp3_path)],
             capture_output=True, timeout=60,
         )
@@ -1313,9 +1386,9 @@ def render_player_audio(player_id: str, game_context: dict | None = None,
         provider = get_quick_tts_provider() if quality == "quick" else get_tts_provider()
         voice = resolve_voice_profile(player)
         raw_text = build_announcement_text(player, game_context)
-        # EdgeTTS handles SSML natively; all others receive stripped plain text.
-        # This prevents [breath] / [pause:Xs] from being spoken literally.
-        text = raw_text if isinstance(provider, EdgeTTSProvider) else _strip_markup_tags(raw_text)
+        # Edge gets SSML, ElevenLabs gets <break/> pauses, the rest plain text —
+        # never let [breath] / [pause:Xs] be spoken literally.
+        text = text_for_provider(provider, raw_text)
         audio_bytes = provider.synthesize(text, voice)
 
         if len(audio_bytes) > MAX_TTS_OUTPUT_BYTES:
@@ -1346,6 +1419,7 @@ def render_player_audio(player_id: str, game_context: dict | None = None,
             "rendered_at": datetime.now(ET).isoformat(),
             "render_quality": quality,
             "voice_rendered": voice["id"],
+            "wrap_version": STADIUM_WRAP_VERSION,
             "error_message": "",
         })
         logging.info("[Announcer] Rendered %s via %s (%d bytes, quality=%s)",

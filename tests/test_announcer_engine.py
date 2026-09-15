@@ -1,6 +1,7 @@
 """Tests for tools/announcer_engine.py — pure logic, security helpers, MockTTS."""
 from __future__ import annotations
 
+import re
 import json
 import os
 import sys
@@ -462,10 +463,12 @@ class TestPitchDropInStadiumChain:
         _, mp3 = ae_mod.archive_and_transcode(src.read_bytes(), "p1", archive=False,
                                               pitch_semitones=-2.0, out_mp3=out)
         assert mp3 == out and out.stat().st_size > 0
-        # Duration must survive the tempo correction (within codec padding).
+        # Duration must survive the tempo correction: 1 s of source plus the
+        # Stadium Wrap's ~0.45 s PA tail and codec padding — never the 1.12 s
+        # stretch an uncorrected asetrate would leave on top of that.
         dur = float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration",
                                     "-of", "csv=p=0", str(out)], capture_output=True, text=True).stdout)
-        assert 0.85 < dur < 1.35
+        assert 1.30 < dur < 1.60
 
 
 class TestRenderVoiceSample:
@@ -1441,7 +1444,7 @@ class TestRenderAllPending:
         """Lines 800-801: no active players → total=0."""
         _setup_render_env(tmp_path, monkeypatch)
         # Mark the player as already ready
-        ae_mod.update_player("7-jane-doe", {"status": "ready"})
+        ae_mod.update_player("7-jane-doe", {"status": "ready", "wrap_version": ae_mod.STADIUM_WRAP_VERSION})
         result = ae_mod.render_all_pending()
         assert result["total"] == 0
         assert result["success"] == 0
@@ -1591,7 +1594,8 @@ class TestConcurrentRosterUpdates:
         monkeypatch.setattr(ae_mod, "_ensure_dirs", lambda: None)
 
         with ThreadPoolExecutor(max_workers=4) as pool:
-            list(pool.map(lambda p: ae_mod.update_player(p["id"], {"status": "ready"}), players))
+            list(pool.map(lambda p: ae_mod.update_player(
+                p["id"], {"status": "ready", "wrap_version": ae_mod.STADIUM_WRAP_VERSION}), players))
 
         final = json.loads(roster_file.read_text(encoding="utf-8"))
         assert [p["status"] for p in final] == ["ready"] * 10
@@ -1676,3 +1680,180 @@ class TestQuickRenderGetsStadiumWrap:
         assert flac is None
         assert mp3.exists() and mp3.stat().st_size > 0
         assert not (tmp_path / "archive").exists()
+
+
+# ---------------------------------------------------------------------------
+# Halo-quality pass: ElevenLabs pauses, Stadium Wrap v2, stale-render marking
+# ---------------------------------------------------------------------------
+
+class TestElevenLabsPauses:
+    def test_pause_tags_become_break_elements(self):
+        out = ae_mod._tags_to_elevenlabs("[breath] Now batting... [pause:0.7s] NUMBEEEER seven... [pause:0.5s] Ember!")
+        assert out == 'Now batting... <break time="0.7s" /> NUMBEEEER seven... <break time="0.5s" /> Ember!'
+
+    def test_breaks_are_capped_at_three_seconds_and_unknown_tags_dropped(self):
+        out = ae_mod._tags_to_elevenlabs("[pause:9s] go [whatever] now")
+        assert out == '<break time="3.0s" /> go now'
+
+    def test_text_for_provider_routes_by_provider(self):
+        raw = "[breath] Now... [pause:0.7s] seven"
+        assert ae_mod.text_for_provider(ae_mod.EdgeTTSProvider(), raw) == raw
+        assert "<break" in ae_mod.text_for_provider(ae_mod.ElevenLabsTTS(), raw)
+        plain = ae_mod.text_for_provider(ae_mod.MockTTS(), raw)
+        assert "[" not in plain and "<" not in plain
+
+    def test_render_sends_breaks_to_elevenlabs(self, tmp_path, monkeypatch):
+        """The walk-up script's beats must reach ElevenLabs as <break/> tags,
+        not be stripped to nothing."""
+        monkeypatch.setattr(ae_mod, "ROSTER_FILE", tmp_path / "roster.json")
+        monkeypatch.setattr(ae_mod, "CLIPS_DIR", tmp_path / "clips")
+        monkeypatch.setattr(ae_mod, "ARCHIVE_DIR", tmp_path / "archive")
+        monkeypatch.setattr(ae_mod, "ANNOUNCER_DIR", tmp_path)
+        monkeypatch.setattr(ae_mod, "_bootstrap_roster_from_team", lambda: [])
+        ae_mod._atomic_write_json(tmp_path / "roster.json", [
+            {"id": "7-ember-h", "first": "Ember", "last": "H", "number": "7",
+             "is_active": True, "status": "pending"},
+        ])
+        captured = {}
+
+        class _EL(ae_mod.ElevenLabsTTS):
+            def synthesize(self, text, voice_config):
+                captured["text"] = text
+                return b"\xff\xfb" + b"\x00" * 100
+
+        monkeypatch.setattr(ae_mod, "get_tts_provider", lambda: _EL())
+        monkeypatch.setattr(ae_mod, "archive_and_transcode",
+                            lambda audio, pid, **kw: (None, (tmp_path / "clips" / pid).mkdir(parents=True, exist_ok=True) or (tmp_path / "clips" / pid / "x.mp3")))
+        (tmp_path / "clips" / "7-ember-h").mkdir(parents=True, exist_ok=True)
+        (tmp_path / "clips" / "7-ember-h" / "x.mp3").write_bytes(b"x")
+        updated = ae_mod.render_player_audio("7-ember-h")
+        assert '<break time="0.7s" />' in captured["text"]
+        assert '<break time="0.5s" />' in captured["text"]
+        assert "[pause" not in captured["text"] and "[breath]" not in captured["text"]
+        assert updated["wrap_version"] == ae_mod.STADIUM_WRAP_VERSION
+
+    def test_output_format_is_requested(self, monkeypatch):
+        monkeypatch.setenv("ELEVENLABS_API_KEY", "el_fake")
+        monkeypatch.setenv("ELEVENLABS_OUTPUT_FORMAT", "mp3_44100_192")
+        captured = {}
+
+        class _Resp:
+            status_code = 200
+            content = b"a"
+            headers = {}
+
+        def _post(url, json=None, headers=None, timeout=None):
+            captured["url"] = url
+            return _Resp()
+
+        monkeypatch.setattr(ae_mod.requests, "post", _post)
+        ae_mod.ElevenLabsTTS().synthesize("hi", {})
+        assert captured["url"].endswith("?output_format=mp3_44100_192")
+
+
+class TestStaleRenderMarking:
+    def _roster(self):
+        return [
+            {"id": "a", "status": "ready", "is_active": True, "announcer_audio_url": "/c/a.mp3"},
+            {"id": "b", "status": "ready", "is_active": True, "wrap_version": ae_mod.STADIUM_WRAP_VERSION},
+            {"id": "c", "status": "ready", "is_active": False},
+            {"id": "d", "status": "error", "is_active": True},
+        ]
+
+    def test_only_active_ready_clips_from_older_chain_go_pending(self):
+        roster = self._roster()
+        assert ae_mod._mark_stale_renders(roster) is True
+        by = {p["id"]: p for p in roster}
+        assert by["a"]["status"] == "pending"
+        assert by["a"]["announcer_audio_url"] == "/c/a.mp3"   # playback keeps working
+        assert by["b"]["status"] == "ready"
+        assert by["c"]["status"] == "ready"
+        assert by["d"]["status"] == "error"
+
+    def test_idempotent_once_current(self):
+        roster = [{"id": "b", "status": "ready", "is_active": True, "wrap_version": ae_mod.STADIUM_WRAP_VERSION}]
+        assert ae_mod._mark_stale_renders(roster) is False
+
+    def test_load_roster_persists_the_flag_and_counts_as_pending(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(ae_mod, "ROSTER_FILE", tmp_path / "roster.json")
+        monkeypatch.setattr(ae_mod, "ANNOUNCER_DIR", tmp_path)
+        monkeypatch.setattr(ae_mod, "CLIPS_DIR", tmp_path / "clips")
+        monkeypatch.setattr(ae_mod, "ARCHIVE_DIR", tmp_path / "archive")
+        monkeypatch.setattr(ae_mod, "_bootstrap_roster_from_team", lambda: [])
+        ae_mod._atomic_write_json(tmp_path / "roster.json", [
+            {"id": "a", "status": "ready", "is_active": True, "announcer_audio_url": "/c/a.mp3"},
+        ])
+        roster = ae_mod.load_announcer_roster()
+        assert roster[0]["status"] == "pending"
+        assert ae_mod._read_json(tmp_path / "roster.json")[0]["status"] == "pending"
+        assert ae_mod.get_roster_stats()["pending"] == 1
+
+    def test_voice_sample_cache_is_versioned(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(ae_mod, "VOICE_SAMPLES_DIR", tmp_path / "samples")
+        (tmp_path / "samples").mkdir()
+        (tmp_path / "samples" / "halo.mp3").write_bytes(b"old" * 1000)   # v1 cache must not be served
+        calls = []
+
+        class _P(ae_mod.TTSProvider):
+            name = "fake"
+            def synthesize(self, text, voice_config):
+                calls.append(text)
+                return b"x" * 2000
+
+        monkeypatch.setattr(ae_mod, "get_tts_provider", lambda: _P())
+        monkeypatch.setattr(ae_mod, "archive_and_transcode",
+                            lambda audio, pid, **kw: (None, kw["out_mp3"].write_bytes(audio) and kw["out_mp3"]))
+        out = ae_mod.render_voice_sample("halo")
+        assert out.name == f"halo.v{ae_mod.STADIUM_WRAP_VERSION}.mp3"
+        assert len(calls) == 1
+
+
+class TestStadiumWrapV2Quality:
+    """Measured contract for the chain: stereo tail, kept dynamics, fixed
+    loudness, 192 kbps.  The v1 chain failed the first three."""
+
+    def _measure(self, mp3):
+        import json, subprocess
+        probe = json.loads(subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=bit_rate:stream=channels",
+             "-of", "json", str(mp3)], capture_output=True, text=True).stdout)
+        log = subprocess.run(
+            ["ffmpeg", "-v", "info", "-i", str(mp3), "-af", "ebur128", "-f", "null", "-"],
+            capture_output=True, text=True).stderr
+        summary = log[log.rfind("Summary"):]
+        lufs = float(re.search(r"I:\s+(-?[\d.]+) LUFS", summary).group(1))
+        lra = float(re.search(r"LRA:\s+([\d.]+) LU", summary).group(1))
+        pcm = subprocess.run(["ffmpeg", "-v", "error", "-i", str(mp3), "-f", "s16le", "-ac", "2", "-"],
+                             capture_output=True).stdout
+        import struct
+        n = len(pcm) // 4
+        side = 0
+        for i in range(0, n * 4, 4 * 50):
+            l, r = struct.unpack_from("<hh", pcm, i)
+            side += abs(l - r)
+        return {"channels": probe["streams"][0]["channels"],
+                "bit_rate": int(probe["format"]["bit_rate"]),
+                "lufs": lufs, "lra": lra, "side": side}
+
+    def test_chain_output_meets_the_contract(self, tmp_path, monkeypatch):
+        import shutil, subprocess
+        if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
+            pytest.skip("ffmpeg not installed")
+        monkeypatch.setattr(ae_mod, "CLIPS_DIR", tmp_path / "clips")
+        monkeypatch.setattr(ae_mod, "ARCHIVE_DIR", tmp_path / "archive")
+        src = tmp_path / "in.wav"
+        # Speech-like source: a voiced tone that alternates loud and quiet in
+        # 3 s blocks (EBU LRA is measured over 3 s windows), so there is
+        # dynamic range for the chain to preserve.
+        subprocess.run(
+            ["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i",
+             "aevalsrc=sin(2*PI*180*t)*(0.12+0.85*mod(floor(t/3)\\,2)):d=12:s=44100",
+             str(src)], check=True)
+        _, mp3 = ae_mod.archive_and_transcode(src.read_bytes(), "contract", archive=False,
+                                              pitch_semitones=-2.0, out_mp3=tmp_path / "out.mp3")
+        m = self._measure(mp3)
+        assert m["channels"] == 2
+        assert m["bit_rate"] >= 180_000, m
+        assert -18.0 <= m["lufs"] <= -14.0, m       # loudnorm target -16 LUFS
+        assert m["lra"] >= 2.5, m                    # dynamics survive (v1: 1.0 LU)
+        assert m["side"] > 0, m                      # a real stereo tail (v1: mono)
