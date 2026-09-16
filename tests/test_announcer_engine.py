@@ -1808,9 +1808,10 @@ class TestStaleRenderMarking:
         assert len(calls) == 1
 
 
-class TestStadiumWrapV2Quality:
+class TestStadiumWrapQuality:
     """Measured contract for the chain: stereo tail, kept dynamics, fixed
-    loudness, 192 kbps.  The v1 chain failed the first three."""
+    loudness, 192 kbps.  v1 failed the first three; v2 failed the stereo one
+    in production (it passed here only because CI had no ffmpeg to run it)."""
 
     def _measure(self, mp3):
         import json, subprocess
@@ -1857,3 +1858,109 @@ class TestStadiumWrapV2Quality:
         assert -18.0 <= m["lufs"] <= -14.0, m       # loudnorm target -16 LUFS
         assert m["lra"] >= 2.5, m                    # dynamics survive (v1: 1.0 LU)
         assert m["side"] > 0, m                      # a real stereo tail (v1: mono)
+
+
+
+# ---------------------------------------------------------------------------
+# v3: no amix in the chain, spoken names, players with no jersey number
+# ---------------------------------------------------------------------------
+
+class TestChainNeverMixesMono:
+    """amix negotiates one channel layout across its inputs, so a mono leg
+    drags the whole mix to mono and silently throws away the stereo built
+    upstream.  That is how v2 shipped mono clips to the Pi."""
+
+    def _filtergraph(self, monkeypatch, tmp_path, **kw):
+        captured = {}
+
+        class _Res:
+            returncode = 0
+            stderr = b""
+
+        def _run(cmd, **kwargs):
+            if "-filter_complex" in cmd:
+                captured["graph"] = cmd[cmd.index("-filter_complex") + 1]
+            out = Path(cmd[-1])
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_bytes(b"x" * 64)
+            return _Res()
+
+        monkeypatch.setattr(ae_mod.subprocess if hasattr(ae_mod, "subprocess") else __import__("subprocess"),
+                            "run", _run, raising=False)
+        import subprocess as _sp
+        monkeypatch.setattr(_sp, "run", _run)
+        monkeypatch.setattr(ae_mod, "CLIPS_DIR", tmp_path / "clips")
+        monkeypatch.setattr(ae_mod, "ARCHIVE_DIR", tmp_path / "archive")
+        ae_mod.archive_and_transcode(b"RIFFfake", "p", archive=False,
+                                     out_mp3=tmp_path / "o.mp3", **kw)
+        return captured["graph"]
+
+    def test_graph_contains_no_amix(self, monkeypatch, tmp_path):
+        graph = self._filtergraph(monkeypatch, tmp_path)
+        assert "amix" not in graph, graph
+
+    def test_graph_joins_two_legs_into_stereo(self, monkeypatch, tmp_path):
+        graph = self._filtergraph(monkeypatch, tmp_path)
+        assert "join=inputs=2:channel_layout=stereo" in graph
+        # The two legs must differ, or join produces two identical channels
+        # and the output is mono in everything but the channel count.
+        left = graph.split("[la]")[1].split("[left]")[0]
+        right = graph.split("[ra]")[1].split("[right]")[0]
+        assert left != right, (left, right)
+
+    def test_pitch_stage_still_applied(self, monkeypatch, tmp_path):
+        graph = self._filtergraph(monkeypatch, tmp_path, pitch_semitones=-2.0)
+        assert "asetrate=" in graph and "atempo=" in graph
+
+
+class TestSpokenName:
+    @pytest.mark.parametrize("first,last,expected", [
+        ("Ava", "W", "Ava"),              # GameChanger privacy abbreviation
+        ("Addy", "A", "Addy"),
+        ("Brielle", "P.", "Brielle"),     # initial with a full stop
+        ("Ember", "Hourahan", "Ember Hourahan"),
+        ("Leila", "VanDeusen", "Leila VanDeusen"),
+        ("Amelia", "", "Amelia"),
+        ("", "Hourahan", "Hourahan"),
+    ])
+    def test_initials_are_dropped_real_surnames_kept(self, first, last, expected):
+        assert ae_mod._spoken_name(first, last) == expected
+
+    def test_phonetic_hint_still_wins(self):
+        player = {"first": "Ava", "last": "W", "number": "28",
+                  "phonetic_hint": "AY-vuh Dubs"}
+        assert "AY-vuh Dubs" in ae_mod.build_announcement_text(player)
+
+
+class TestPlayerWithNoJerseyNumber:
+    """A blank number used to render the word "NUMBEEEER" followed by nothing."""
+
+    def _say(self, player, ctx=None):
+        return ae_mod._tags_to_elevenlabs(ae_mod.build_announcement_text(player, ctx))
+
+    def test_standard_walkup_omits_the_number_call(self):
+        said = self._say({"first": "Amelia", "last": "", "number": ""})
+        assert "NUMBEEEER" not in said
+        assert said.endswith("Amelia!")
+
+    def test_numbered_player_still_gets_the_number_call(self):
+        said = self._say({"first": "Lexi", "last": "McKinney", "number": "99"})
+        assert "NUMBEEEER ninety-nine" in said
+
+    def test_bases_loaded_and_high_stakes_omit_it_too(self):
+        p = {"first": "Amelia", "last": "", "number": ""}
+        loaded = self._say(p, {"bases": [True, True, True], "outs": 1})
+        clutch = self._say(p, {"bases": [True, True, True], "outs": 2})
+        assert "NUMBEEEER" not in loaded and loaded.endswith("Amelia!")
+        assert "NUMBEEEER" not in clutch and clutch.endswith("Amelia!")
+
+    def test_achievement_call_omits_the_number_credit(self):
+        said = self._say({"first": "Amelia", "last": "", "number": ""},
+                         {"achievement": "grand_slam"})
+        assert "number" not in said.lower()
+        assert said.endswith("Amelia!")
+
+    def test_achievement_call_keeps_it_when_numbered(self):
+        said = self._say({"first": "Ruby", "last": "VanDeusen", "number": "67"},
+                         {"achievement": "grand_slam"})
+        assert "number sixty-seven" in said

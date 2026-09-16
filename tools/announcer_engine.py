@@ -254,7 +254,7 @@ def _tags_to_elevenlabs(text: str) -> str:
 # Bump when the Stadium Wrap chain or the script timing changes in a way the
 # coach should hear: clips rendered under an older version are flagged for a
 # re-render (see _mark_stale_renders) and voice samples are re-cached.
-STADIUM_WRAP_VERSION = 2
+STADIUM_WRAP_VERSION = 3
 
 
 # ---------------------------------------------------------------------------
@@ -1021,6 +1021,25 @@ STEITZER_VOICE_INSTRUCTION = (
 )
 
 
+def _spoken_name(first: str, last: str) -> str:
+    """The name the announcer actually says.
+
+    GameChanger abbreviates some surnames to a single letter for privacy
+    ("Ava W", "Addy A", "Arielle M").  A TTS voice reads that letter out as a
+    letter — "Ava double-you" — which is not a name, so a bare initial is
+    dropped and the first name carries the call.  A coach can always override
+    with the per-player "Say it as" hint.
+    """
+    first = (first or "").strip()
+    last = (last or "").strip()
+    if not first:
+        return last
+    # "W", "W." and "W" with stray spacing are all initials, not surnames.
+    if len(last.rstrip(".").strip()) <= 1:
+        return first
+    return f"{first} {last}"
+
+
 def build_situational_announcement(player: dict, game_context: dict | None = None) -> str:
     """Build a game-state-aware TTS script with Halo-style achievements.
 
@@ -1034,9 +1053,12 @@ def build_situational_announcement(player: dict, game_context: dict | None = Non
     phonetic_hint = (player.get("phonetic_hint") or "").strip()
     tts_instruction = (player.get("tts_instruction") or "").strip()
 
-    name = phonetic_hint if phonetic_hint else f"{first} {last}".strip()
+    name = phonetic_hint if phonetic_hint else _spoken_name(first, last)
     name = _apply_phonetics(name)
+    # A player with no jersey number on the roster used to render the word
+    # "NUMBEEEER" followed by nothing at all.  No number means no number call.
     num_word = _number_to_word(number)
+    number_call = f"NUMBEEEER {num_word}... [pause:0.5s] " if num_word else ""
 
     ctx = game_context or {}
     achievement = ctx.get("achievement") or ""
@@ -1050,22 +1072,23 @@ def build_situational_announcement(player: dict, game_context: dict | None = Non
 
     if achievement and achievement in _HALO_SCRIPTS:
         halo_call = _HALO_SCRIPTS[achievement]
-        script = f"[breath] {halo_call} [pause:0.6s] That's number {num_word}... [pause:0.4s] {name}!"
+        credit = f"That's number {num_word}... [pause:0.4s] " if num_word else ""
+        script = f"[breath] {halo_call} [pause:0.6s] {credit}{name}!"
     elif high_stakes:
         urgency = "with the game on the line" if trailing else "with the bases loaded"
         script = (
             f"[breath] NOW BATTING for {ANNOUNCER_TEAM_PHRASE}... [pause:0.6s] {urgency}... "
-            f"[pause:0.7s] NUMBEEEER {num_word}... [pause:0.5s] {name}!"
+            f"[pause:0.7s] {number_call}{name}!"
         )
     elif bases_loaded:
         script = (
             f"[breath] Bases loaded... [pause:0.5s] "
-            f"NOW batting for {ANNOUNCER_TEAM_PHRASE}... [pause:0.7s] NUMBEEEER {num_word}... [pause:0.5s] {name}!"
+            f"NOW batting for {ANNOUNCER_TEAM_PHRASE}... [pause:0.7s] {number_call}{name}!"
         )
     else:
         script = (
             f"[breath] Now batting for {ANNOUNCER_TEAM_PHRASE}... [pause:0.7s] "
-            f"NUMBEEEER {num_word}... [pause:0.5s] {name}!"
+            f"{number_call}{name}!"
         )
 
     if tts_instruction and not achievement:
@@ -1263,13 +1286,14 @@ def archive_and_transcode(audio_bytes: bytes, player_id: str,
                           out_mp3: Path | None = None) -> tuple[Path | None, Path]:
     """Run the Stadium Wrap and write the MP3; optionally keep a FLAC master.
 
-    FFmpeg Stadium Wrap chain (v2, every render):
+    FFmpeg Stadium Wrap chain (v3, every render):
       pitch drop   → resample trick + atempo (Halo profile only)
       highpass     → 60 Hz, drops the sub-rumble the pitch shift adds
       acompressor  → 3:1 broadcast compression, 5 ms attack so the
                      consonants still punch
       bass         → +4 dB low shelf at 150 Hz (Steitzer chest boom)
-      wet path     → lowpass 4 kHz + 140/280/430 ms PA slapback, Haas-widened
+      L / R        → the same voice through two different PA reflection
+                     patterns, joined to stereo
       loudnorm     → -16 LUFS / -1.5 dBTP so every clip comes out the same
                      level on the dugout speaker
 
@@ -1318,15 +1342,22 @@ def archive_and_transcode(audio_bytes: bytes, player_id: str,
         wrap_input = flac_path if archive else tmp_path
 
         # Pass 2 — Stadium Wrap filter chain → 192 kbps MP3.
-        # Measured on the v1 chain's output: loudness range 1.0 LU (the hard
-        # compand flattened every syllable to the same level), a 50/75/100 ms
-        # "reverb" that is a boxy flutter echo rather than a stadium, and
-        # `extrastereo` on a mono TTS source, which is a no-op (L-R is zero)
-        # so the clips were plain mono.  v2 keeps the dynamics (~4 LU), puts
-        # the slapback where a PA's reflections actually sit, widens only the
-        # wet path so the voice stays centred and mono-safe, and normalises to
-        # a fixed loudness.  Core filters only — rubberband is not in the Pi's
-        # ffmpeg build.
+        #
+        # NEVER mix a mono leg into this graph with `amix`.  amix negotiates one
+        # channel layout across its inputs, so a mono input drags the whole mix
+        # down to mono and silently discards any stereo built upstream.  v2 did
+        # exactly that: measured on the deployed clips it came out at
+        # side/mid 0.000 — plain mono — even though the graph itself succeeded.
+        # (On ffmpeg 6.x one particular arrangement happened to survive, which
+        # is why it passed locally and shipped mono to the Pi's ffmpeg 4.4.)
+        #
+        # v3 never mixes.  The voice is split into two legs, each gets its own
+        # PA reflection pattern, and `join` makes them the left and right
+        # channels.  Both legs carry the same dry voice, so a mono dugout
+        # speaker folds down to the voice untouched and only the reflections
+        # partially cancel.  Measured identically on ffmpeg 4.4 and 6.1:
+        # side/mid 0.245, -15.7 LUFS, 4.3 LU.
+        # Core filters only — rubberband is not in the Pi's ffmpeg build.
         pitch = ""
         if pitch_semitones:
             ratio = 2 ** (pitch_semitones / 12.0)
@@ -1337,11 +1368,10 @@ def archive_and_transcode(audio_bytes: bytes, player_id: str,
             "acompressor=threshold=-20dB:ratio=3:attack=5:release=120:makeup=3:knee=4,"
             "bass=f=150:width_type=o:width=2:g=4"
             "[processed];"
-            "[processed]asplit=2[dry][wet];"
-            "[wet]lowpass=f=4000,"
-            "aecho=1.0:0.9:140|280|430:0.42|0.26|0.14,"
-            "haas=side_gain=0.9:middle_source=mid[rev];"
-            "[dry][rev]amix=inputs=2:weights=0.85 0.15:normalize=0,"
+            "[processed]asplit=2[la][ra];"
+            "[la]aecho=1.0:0.20:145|285|435:0.30|0.18|0.10[left];"
+            "[ra]aecho=1.0:0.20:168|312|462:0.28|0.16|0.09[right];"
+            "[left][right]join=inputs=2:channel_layout=stereo,"
             "loudnorm=I=-16:TP=-1.5:LRA=9,"
             "alimiter=limit=0.89:level=0[out]"
         )
