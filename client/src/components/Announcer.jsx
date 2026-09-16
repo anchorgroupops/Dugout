@@ -45,10 +45,22 @@ function numToWord(raw) {
   return o ? `${TENS[t]}-${ONES[o]}` : TENS[t];
 }
 
+// Mirrors tools/announcer_engine._spoken_name. GameChanger abbreviates some
+// surnames to one letter ("Ava W"), and a voice reads that out as a letter,
+// so the first name carries the call unless a coach overrides it.
+function spokenName(first, last) {
+  const f = (first || '').trim();
+  const l = (last || '').trim();
+  if (!f) return l;
+  return l.replace(/\.$/, '').trim().length <= 1 ? f : `${f} ${l}`;
+}
+
 // Mirrors the server's standard walk-up so the sheet can preview while typing.
+// A player with no jersey number gets no number call at all.
 function previewLine(player, phonetic) {
-  const name = (phonetic || `${player.first} ${player.last}`).trim();
-  return `Now batting for your Sharks... NUMBEEEER ${numToWord(player.number)}... ${name}!`;
+  const name = (phonetic || '').trim() || spokenName(player.first, player.last);
+  const num = numToWord(player.number);
+  return `Now batting for your Sharks... ${num ? `NUMBEEEER ${num}... ` : ''}${name}!`;
 }
 
 function useEscapeToClose(onClose) {

@@ -95,3 +95,19 @@ When a new failure pattern is confirmed (not hypothetical):
 **Fix:** Exact command or code change to resolve it.
 **Ref:** Source file or session date
 ```
+
+## SIGN-012: `amix` Silently Collapsed the Announcer's Stereo to Mono on the Pi
+**Symptom:** Announcer clips render and sound processed (loudness and bitrate correct) but are plain mono — `side/mid 0.000`. No error is logged, because the FFmpeg graph succeeds.
+**Fix:** Never feed a mono leg into `amix` in the Stadium Wrap. `amix` negotiates one channel layout across its inputs, so a mono input downmixes the whole mix and discards any stereo built upstream. Build stereo with two separate legs joined instead:
+```
+[processed]asplit=2[la][ra];
+[la]aecho=...:145|285|435:...[left];
+[ra]aecho=...:168|312|462:...[right];
+[left][right]join=inputs=2:channel_layout=stereo,...
+```
+Verify against the Pi's FFmpeg, not the dev box: the Pi image is jammy (FFmpeg 4.4) and one v2 arrangement survived on 4.4 but not 6.x. Measure with:
+```bash
+ffmpeg -v error -i clip.mp3 -ac 2 -f f32le - | python3 -c "import sys,numpy as np;s=np.frombuffer(sys.stdin.buffer.read(),dtype=np.float32).reshape(-1,2);print(np.sqrt(np.mean((s[:,0]-s[:,1])**2)))"
+```
+CI now installs FFmpeg so `TestStadiumWrapQuality` actually runs — it was skipping, which is how the mono chain shipped.
+**Ref:** PR #218 follow-up, session 2026-09-16

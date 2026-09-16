@@ -62,6 +62,12 @@ jobs:
 
       - run: pip install -r requirements-dev.txt
 
+      # The announcer's Stadium Wrap tests measure real ffmpeg output. Without
+      # ffmpeg here they skip, and a chain that renders every clip in mono
+      # shipped to the Pi unnoticed. Keep this step.
+      - name: Install ffmpeg (Stadium Wrap audio tests)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+
       - name: Smoke-test sync_daemon (syntax check)
         run: python -c "import py_compile; py_compile.compile('sync_daemon.py', doraise=True); print('sync_daemon OK')"
         working-directory: tools
