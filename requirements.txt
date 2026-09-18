@@ -28,7 +28,7 @@ tzdata>=2026.3
 
 # GC CSV autopull — Gmail OAuth (2FA code read + notification send)
 google-api-python-client>=2.200.0,<3
-google-auth>=2.57.1,<3
+google-auth>=2.58.0,<3
 google-auth-oauthlib>=1.4.1,<2
 google-auth-httplib2>=0.4.2,<1
 
