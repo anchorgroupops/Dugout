@@ -74,6 +74,7 @@ AUTH_COOKIE_NAME = "jwt"
 # After credential submission GC's SPA lands on /teams and renders the
 # anonymous header until its session request resolves — poll instead of
 # checking once.
+CHROMIUM_LAUNCH_ARGS = ("--disable-blink-features=AutomationControlled",)
 AUTH_SETTLE_POLLS = 30
 AUTH_SETTLE_POLL_MS = 500
 
@@ -218,7 +219,13 @@ class SessionManager:
         Tries reusing stored cookies. On detected login/2FA, does the dance
         and persists a fresh storage_state.
         """
-        browser = playwright_ctx.chromium.launch(headless=headless)
+        # SIGN-012: GC fronts api.team-manager.gc.com with AWS WAF, which
+        # answers 403 {} to every /me/* call from a browser whose
+        # navigator.webdriver is true. Login "succeeds" (/auth returns a
+        # user token) but the SPA then stays on the anonymous /teams view.
+        browser = playwright_ctx.chromium.launch(
+            headless=headless, args=list(CHROMIUM_LAUNCH_ARGS),
+        )
         ctx_kwargs = {"user_agent": DESKTOP_UA}
         if self.auth_file.exists():
             ctx_kwargs["storage_state"] = str(self.auth_file)

@@ -111,3 +111,13 @@ ffmpeg -v error -i clip.mp3 -ac 2 -f f32le - | python3 -c "import sys,numpy as n
 ```
 CI now installs FFmpeg so `TestStadiumWrapQuality` actually runs — it was skipping, which is how the mono chain shipped.
 **Ref:** PR #218 follow-up, session 2026-09-16
+
+## SIGN-012: GC API Answers 403 to Headless Playwright → "not authenticated" at /teams
+**Symptom:** Daily autopull fails `Still on login/2FA page or not authenticated after credential submission (url=https://web.gc.com/teams, … sign_in_controls=2, auth_cookie=False)`. Email, 2FA code and password are all accepted (`POST /auth` returns a user token), but every `GET api.team-manager.gc.com/me/*` returns `403 {}` so the SPA never leaves the anonymous /teams view. The same account works in a real Chrome. Previously misdiagnosed as an account-level block.
+**Fix:** GC's API sits behind AWS WAF bot control, which rejects browsers with `navigator.webdriver === true`. `SessionManager.new_logged_in_page` launches Chromium with `CHROMIUM_LAUNCH_ARGS` (`--disable-blink-features=AutomationControlled`); verified on the Pi 2026-09-23: same credentials, `/me/user` 200, `/teams` renders logged in. Never launch a GC browser without those args, and note GC's token lives in localStorage `eden-auth-tokens`, not a `jwt` cookie — `auth_cookie=False` alone is not evidence of a failed login.
+**Ref:** session 2026-09-23, autopull runs since 2026-08-26
+
+## SIGN-013: Host Autopull Cannot Write ./data After a chown to the Container User
+**Symptom:** `gc-autopull.service` dies in `init_schema` with `sqlite3.OperationalError: attempt to write a readonly database` before ever reaching GC. `./data` and `./logs` are owned by uid/gid 999 (the `sharks` user inside `sharks_api`/`sharks_sync`; shows as `caddy:systemd-journal` on the host) while the timer runs as `joelycannoli` (uid 1000).
+**Fix:** The tree is shared by two uids, so use ACLs rather than chown ping-pong: `sudo setfacl -R -m u:joelycannoli:rwX -m u:999:rwX data logs && sudo setfacl -R -d -m u:joelycannoli:rwX -m u:999:rwX data logs`. The default ACL keeps files created by either side writable by the other. Never `chown -R` `./data` to a single owner.
+**Ref:** ctime 2026-09-15 15:59 on the whole tree; failures 2026-09-16 → 2026-09-23

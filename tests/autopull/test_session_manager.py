@@ -790,3 +790,19 @@ def test_new_logged_in_page_2fa_flow_waits_for_auth_to_settle(tmp_path, monkeypa
     assert refreshed is True
     assert page.wait_for_timeout.call_count == 2
     context.storage_state.assert_called_once()
+
+
+def test_new_logged_in_page_launches_without_automation_flag(tmp_path, monkeypatch):
+    """SIGN-012: GC's API (AWS WAF) answers 403 on every /me/* call when
+    navigator.webdriver is true, so the SPA never leaves the anonymous /teams
+    view. Chromium must be launched with AutomationControlled disabled."""
+    page = FakePage(url="https://web.gc.com/teams")
+    pw_ctx, _ = _make_playwright_ctx(page)
+    monkeypatch.setattr(sm, "is_login_page", lambda p: False)
+    monkeypatch.setattr(sm, "is_2fa_page", lambda p: False)
+
+    mgr = _make_manager(tmp_path)
+    mgr.new_logged_in_page(pw_ctx)
+
+    kwargs = pw_ctx.chromium.launch.call_args[1]
+    assert "--disable-blink-features=AutomationControlled" in kwargs.get("args", [])
