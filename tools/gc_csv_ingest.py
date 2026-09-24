@@ -15,7 +15,9 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import shutil
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -36,6 +38,24 @@ SHARKS_DIR = DATA_DIR / "sharks"  # legacy default; new code uses _team_dir(team
 
 def _team_dir(team: Team) -> Path:
     return DATA_DIR / team.data_slug
+
+
+def _atomic_write_json(path: Path, data) -> None:
+    """Write JSON via temp-file + os.replace so a stale target file's own
+    permissions/ACLs (e.g. left read-only by another writer) can't block us —
+    only the containing directory needs to be writable."""
+    fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f, indent=2)
+        os.chmod(tmp_path, 0o664)
+        os.replace(tmp_path, str(path))
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
 
 # ---------------------------------------------------------------------------
 # CSV column indices (from GC export, 0-indexed, row 1 = column names)
@@ -661,14 +681,12 @@ def main():
 
     # Write team.json
     team_out = team_dir / "team.json"
-    with open(team_out, "w") as f:
-        json.dump(team_json, f, indent=2)
+    _atomic_write_json(team_out, team_json)
     print(f"Wrote {team_out}")
 
     # Write app_stats.json
     app_out = team_dir / "app_stats.json"
-    with open(app_out, "w") as f:
-        json.dump(app_stats, f, indent=2)
+    _atomic_write_json(app_out, app_stats)
     print(f"Wrote {app_out}")
 
     # Copy CSV to season_stats.csv

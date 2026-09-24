@@ -23,6 +23,7 @@ import json
 import os
 import shutil
 import sys
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -49,6 +50,24 @@ except ImportError:
 
 def _team_dir(team: Team) -> Path:
     return _ROOT_DIR / "data" / team.data_slug
+
+
+def _atomic_write_json(path: Path, data) -> None:
+    """Write JSON via temp-file + os.replace so a stale target file's own
+    permissions/ACLs (e.g. left read-only by another writer) can't block us —
+    only the containing directory needs to be writable."""
+    fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f, indent=2)
+        os.chmod(tmp_path, 0o664)
+        os.replace(tmp_path, str(path))
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -110,13 +129,11 @@ def run_pipeline(csv_path: Path, scorebook_path: Path | None, out_path: Path,
         app_stats = build_app_stats_json(roster)
 
         team_out = team_dir / "team.json"
-        with open(team_out, "w") as f:
-            json.dump(team_json, f, indent=2)
+        _atomic_write_json(team_out, team_json)
         print(f"[PIPELINE]   Wrote {team_out} ({len(roster)} players)")
 
         app_out = team_dir / "app_stats.json"
-        with open(app_out, "w") as f:
-            json.dump(app_stats, f, indent=2)
+        _atomic_write_json(app_out, app_stats)
 
         season_out = team_dir / "season_stats.csv"
         shutil.copy2(csv_path, season_out)
