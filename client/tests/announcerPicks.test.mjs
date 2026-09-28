@@ -7,16 +7,16 @@ import {
 const P = (id, first, last, number, extra = {}) => ({ id, first, last, number, status: 'ready', ...extra });
 
 test('a player with no surname and no number keeps her GameChanger slot', () => {
-  // GC sends { first: "Amelia", last: "" }. The old matcher compared
-  // "amelia " (roster side untrimmed) to "amelia" and dropped her to the end.
-  const active = [P('00-ember', 'Ember', 'Hourahan', '00'), P('amelia-', 'Amelia', '', ''), P('11-addy', 'Addy', 'A', '11')];
+  // GC sends { first: "Alaina", last: "" }. The old matcher compared
+  // "alaina " (roster side untrimmed) to "alaina" and dropped her to the end.
+  const active = [P('00-elsie', 'Elsie', 'Hennessy', '00'), P('alaina-', 'Alaina', '', ''), P('11-abby', 'Abby', 'A', '11')];
   const gc = { players: [
-    { first: 'Ember', last: 'Hourahan', number: '00', id: '' },
-    { first: 'Amelia', last: '', number: '', id: '' },
-    { first: 'Addy', last: 'A', number: '11', id: '' },
+    { first: 'Elsie', last: 'Hennessy', number: '00', id: '' },
+    { first: 'Alaina', last: '', number: '', id: '' },
+    { first: 'Abby', last: 'A', number: '11', id: '' },
   ] };
   const { battingOrder } = orderBattingLineup(active, gc, null);
-  assert.deepEqual(battingOrder.map(p => p.id), ['00-ember', 'amelia-', '11-addy']);
+  assert.deepEqual(battingOrder.map(p => p.id), ['00-elsie', 'alaina-', '11-abby']);
 });
 
 test('blank numbers never match each other', () => {
@@ -71,9 +71,9 @@ test('pick mode is spelled out', () => {
 });
 
 test('preview reads as words and skips a missing number', () => {
-  assert.equal(previewLine({ first: 'Ember', last: 'Hourahan', number: '00' }, ''), 'Now batting… number double-zero… Ember Hourahan!');
-  assert.equal(previewLine({ first: 'Amelia', last: '', number: '' }, ''), 'Now batting… Amelia!');
-  assert.equal(previewLine({ first: 'Ava', last: 'W', number: '28' }, 'AH-vuh'), 'Now batting… number twenty-eight… AH-vuh!');
+  assert.equal(previewLine({ first: 'Elsie', last: 'Hennessy', number: '00' }, ''), 'Now batting… number double-zero… Elsie Hennessy!');
+  assert.equal(previewLine({ first: 'Alaina', last: '', number: '' }, ''), 'Now batting… Alaina!');
+  assert.equal(previewLine({ first: 'Aya', last: 'W', number: '28' }, 'AH-vuh'), 'Now batting… number twenty-eight… AH-vuh!');
 });
 
 test('server error codes become instructions', () => {

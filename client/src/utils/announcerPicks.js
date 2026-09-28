@@ -20,7 +20,7 @@ export function numToWord(raw) {
   return o ? `${TENS[t]}-${ONES[o]}` : TENS[t];
 }
 
-// Mirrors tools/announcer_engine._spoken_name: a one-letter surname ("Ava W")
+// Mirrors tools/announcer_engine._spoken_name: a one-letter surname ("Aya W")
 // is dropped so the voice doesn't read out a letter.
 export function spokenName(first, last) {
   const f = (first || '').trim();

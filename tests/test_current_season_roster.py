@@ -27,12 +27,12 @@ FALL_SLUG = "2026-fall-sharks"
 FALL = Team(id="LFdMZvC8bLpr", season_slug=FALL_SLUG, name="The Sharks", data_slug="sharks")
 
 SPRING_ROSTER = [
-    {"first": "Maylani", "last": "Nixon", "number": "1"},
-    {"first": "Lexi", "last": "McKinney", "number": "99"},
+    {"first": "Maribel", "last": "Nolan", "number": "1"},
+    {"first": "Lucy", "last": "McAllister", "number": "99"},
 ]
 FALL_ROSTER = [
-    {"first": "Lexi", "last": "McKinney", "number": "99"},
-    {"first": "Raelynne", "last": "Cotter", "number": "31"},
+    {"first": "Lucy", "last": "McAllister", "number": "99"},
+    {"first": "Rosalind", "last": "Carver", "number": "31"},
 ]
 
 
@@ -118,7 +118,7 @@ class TestLocalCsvFallback:
         monkeypatch.setattr(sd, "GC_SEASON_SLUG_DEFAULT", FALL_SLUG)
         (tmp_path / "Other docs").mkdir()
         fake = types.ModuleType("gc_csv_ingest")
-        fake.parse_gc_csv = MagicMock(return_value=[{"first": "Raelynne", "number": "31"}])
+        fake.parse_gc_csv = MagicMock(return_value=[{"first": "Rosalind", "number": "31"}])
         fake.build_team_json = MagicMock(return_value={"season": FALL_SLUG, "roster": []})
         fake.build_app_stats_json = MagicMock(return_value={})
         monkeypatch.setitem(sys.modules, "gc_csv_ingest", fake)
@@ -207,9 +207,9 @@ class TestAnnouncerCurrentSeason:
 
     def _spring_announcer_roster(self):
         return [
-            {"id": "1-maylani-nixon", "first": "Maylani", "last": "Nixon", "number": "1",
+            {"id": "1-maribel-nolan", "first": "Maribel", "last": "Nolan", "number": "1",
              "status": "ready", "is_active": True, "phonetic_hint": "May-lah-nee"},
-            {"id": "99-lexi-mckinney", "first": "Lexi", "last": "McKinney", "number": "99",
+            {"id": "99-lucy-mcallister", "first": "Lucy", "last": "McAllister", "number": "99",
              "status": "ready", "is_active": True},
         ]
 
@@ -222,10 +222,10 @@ class TestAnnouncerCurrentSeason:
         roster = {p["id"]: p for p in ae_mod.load_announcer_roster()}
 
         active = {pid for pid, p in roster.items() if p.get("is_active", True)}
-        assert active == {"99-lexi-mckinney", "31-raelynne-cotter"}
+        assert active == {"99-lucy-mcallister", "31-rosalind-carver"}
         # Spring player is deactivated, not deleted — hint survives.
-        assert roster["1-maylani-nixon"]["is_active"] is False
-        assert roster["1-maylani-nixon"]["phonetic_hint"] == "May-lah-nee"
+        assert roster["1-maribel-nolan"]["is_active"] is False
+        assert roster["1-maribel-nolan"]["phonetic_hint"] == "May-lah-nee"
 
     def test_old_season_team_data_leaves_roster_alone(self, tmp_path, monkeypatch):
         sharks = self._setup(tmp_path, monkeypatch, self._spring_announcer_roster())
@@ -253,7 +253,7 @@ class TestRosterEndpointSeason:
         assert body["season"] == FALL_SLUG
         assert body["season_current"] is True
         assert body["current_season"] == FALL_SLUG
-        assert [p["first"] for p in body["roster"]] == ["Lexi", "Raelynne"]
+        assert [p["first"] for p in body["roster"]] == ["Lucy", "Rosalind"]
 
     def test_flags_old_season_data(self, tmp_path, monkeypatch):
         _write(tmp_path / "team.json", {"season": "Spring 2026", "roster": SPRING_ROSTER})
