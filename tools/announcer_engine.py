@@ -1393,7 +1393,9 @@ def add_intro(player_id: str, clip_url: str, voice_id: str, draft: bool,
               updates: dict | None = None) -> dict | None:
     """Append a finished walk-up to the player's announcements.
 
-    A full list drops its oldest clip that isn't pinned. announcer_audio_url
+    A studio clip replaces the quick draft it was queued to supersede (same
+    voice, `draft: true`), keeping that entry's id so a pin survives. Otherwise
+    a full list drops its oldest clip that isn't pinned. announcer_audio_url
     still tracks the newest clip for anything that reads a single URL.
     """
     with _ROSTER_LOCK:
@@ -1402,13 +1404,19 @@ def add_intro(player_id: str, clip_url: str, voice_id: str, draft: bool,
             return None
         pinned = player.get("intro_pick") or ""
         intros = list(player.get("intros") or [])
-        intros.append({
+        entry = {
             "id": uuid.uuid4().hex[:8],
             "voice": voice_id,
             "clip_url": clip_url,
             "draft": draft,
             "created_at": datetime.now(ET).isoformat(),
-        })
+        }
+        superseded = None if draft else next(
+            (i for i, x in enumerate(intros) if x.get("draft") and x.get("voice") == voice_id), None)
+        if superseded is None:
+            intros.append(entry)
+        else:
+            intros[superseded] = {**entry, "id": intros[superseded]["id"]}
         while len(intros) > MAX_INTROS:
             oldest = next(i for i, x in enumerate(intros) if x["id"] != pinned)
             intros.pop(oldest)

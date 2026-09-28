@@ -2008,6 +2008,29 @@ class TestIntroLists:
         self._roster(tmp_path, monkeypatch, {"id": "07-jane-doe"})
         assert ae_mod.add_intro("99-nobody", "/c/x.mp3", "halo", draft=False) is None
 
+    def test_studio_clip_replaces_its_quick_draft_and_keeps_pin(self, tmp_path, monkeypatch):
+        # A worker render queued behind a quick draft must supersede it, not
+        # sit beside it as a second "Brian" call.
+        intros = [
+            {"id": "keep", "voice": "halo", "clip_url": "/c/halo.mp3", "draft": False},
+            {"id": "d1", "voice": "brian", "clip_url": "/c/quick.mp3", "draft": True},
+        ]
+        self._roster(tmp_path, monkeypatch, {"id": "07-jane-doe", "intros": intros, "intro_pick": "d1"})
+        p = ae_mod.add_intro("07-jane-doe", "/c/studio.mp3", "brian", draft=False)
+        assert [(i["id"], i["clip_url"], i["draft"]) for i in p["intros"]] == [
+            ("keep", "/c/halo.mp3", False),
+            ("d1", "/c/studio.mp3", False),
+        ]
+        assert p["intro_pick"] == "d1"
+        assert p["announcer_audio_url"] == "/c/studio.mp3"
+
+    def test_studio_clip_for_another_voice_does_not_touch_a_draft(self, tmp_path, monkeypatch):
+        intros = [{"id": "d1", "voice": "brian", "clip_url": "/c/quick.mp3", "draft": True}]
+        self._roster(tmp_path, monkeypatch, {"id": "07-jane-doe", "intros": intros})
+        p = ae_mod.add_intro("07-jane-doe", "/c/halo.mp3", "halo", draft=False)
+        assert [i["id"] for i in p["intros"]] == ["d1", p["intros"][1]["id"]]
+        assert p["intros"][0]["draft"] is True
+
     def test_worker_clip_is_appended_with_its_voice(self, tmp_path, monkeypatch):
         self._roster(tmp_path, monkeypatch, {"id": "07-jane-doe", "announcer_audio_url": "/c/a.mp3"})
         monkeypatch.setattr(ae_mod, "CLIPS_DIR", tmp_path / "clips")
