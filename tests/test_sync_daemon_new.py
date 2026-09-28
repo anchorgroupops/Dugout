@@ -6243,6 +6243,16 @@ class TestHandleAnnouncerRenderComplete:
         fake.save_job_audio.assert_called_once_with(job, b"RIFFWAV")
         adb.set_job_clip.assert_called_once_with("job-001", "/announcer-clips/07-jane-doe/x.mp3")
 
+    def test_accepts_audio_larger_than_json_cap(self, flask_app, monkeypatch, tmp_path):
+        adb = MagicMock()
+        adb.get_job = MagicMock(return_value={"id": "job-001", "player_id": "07-jane-doe"})
+        monkeypatch.setattr(sd, "_announcer_db", lambda: adb)
+        monkeypatch.setitem(sys.modules, "announcer_engine", _make_fake_announcer_engine(tmp_path))
+        import io
+        big = b"x" * (2 * 1024 * 1024)
+        resp = self._post(flask_app, monkeypatch, data={"audio": (io.BytesIO(big), "render.wav")})
+        assert resp.status_code == 200
+
     def test_save_failure_marks_job_failed(self, flask_app, monkeypatch, tmp_path):
         adb = MagicMock()
         adb.get_job = MagicMock(return_value={"id": "job-001", "player_id": "07-jane-doe"})

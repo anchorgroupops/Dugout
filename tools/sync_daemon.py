@@ -216,6 +216,8 @@ ALLOWED_HOSTS = {
     if h.strip()
 }
 MAX_JSON_BODY_BYTES = int(os.getenv("MAX_JSON_BODY_BYTES", "131072"))
+# Worker TTS uploads are raw WAV (~1 MB for a few seconds); announcer_engine caps them at 10 MB.
+MAX_AUDIO_UPLOAD_BYTES = 10 * 1024 * 1024 + 64 * 1024
 MUTATE_RATE_WINDOW_SEC = int(os.getenv("MUTATE_RATE_WINDOW_SEC", "60"))
 MUTATE_RATE_MAX = int(os.getenv("MUTATE_RATE_MAX", "12"))
 _MUTATE_RATE_BUCKETS: dict[str, list[float]] = {}
@@ -1658,9 +1660,13 @@ def _security_before_request():
         logging.warning(f"[Security] Blocked request with disallowed host header: {host}")
         return jsonify({"error": "invalid_host"}), 400
 
+    max_bytes = MAX_JSON_BODY_BYTES
+    if request.path.startswith("/api/announcer/render-complete/"):
+        max_bytes = MAX_AUDIO_UPLOAD_BYTES
+        request.max_content_length = max_bytes
     content_length = request.content_length
-    if content_length is not None and content_length > MAX_JSON_BODY_BYTES:
-        return jsonify({"error": "payload_too_large", "max_bytes": MAX_JSON_BODY_BYTES}), 413
+    if content_length is not None and content_length > max_bytes:
+        return jsonify({"error": "payload_too_large", "max_bytes": max_bytes}), 413
 
     if _is_mutating_api_request():
         limited = _guard_mutating_rate_limit()
