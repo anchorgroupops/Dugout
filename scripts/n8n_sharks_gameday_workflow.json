@@ -26,6 +26,15 @@
         "url": "http://192.168.7.222:3000/api/schedule",
         "options": {
           "timeout": 10000
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Dugout-Token",
+              "value": "={{ $env.DUGOUT_WRITE_TOKEN }}"
+            }
+          ]
         }
       },
       "id": "fetch-schedule",
@@ -83,6 +92,15 @@
         "url": "http://192.168.7.222:3000/api/team",
         "options": {
           "timeout": 10000
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Dugout-Token",
+              "value": "={{ $env.DUGOUT_WRITE_TOKEN }}"
+            }
+          ]
         }
       },
       "id": "fetch-team",
@@ -202,7 +220,8 @@
   },
   "staticData": null,
   "meta": {
-    "templateCredsSetupCompleted": false
+    "templateCredsSetupCompleted": false,
+    "dugoutAuthNote": "Since SIGN-021 the API needs a session or the write token. n8n sends the write token from its own environment: set DUGOUT_WRITE_TOKEN in the n8n container env (same value as the Pi dugout .env)."
   },
   "pinData": {},
   "versionId": "1",
