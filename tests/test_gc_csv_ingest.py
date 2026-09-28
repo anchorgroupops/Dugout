@@ -412,6 +412,69 @@ class TestMergePlayers:
         merged = _merge_players(p1, p2)
         assert merged["pitching"] == {"ip": "3.0", "era": 2.0}
 
+    def test_pitching_stats_summed_when_both_entries_have_pitching(self):
+        # Regression: previously the second entry's pitching stats were
+        # silently dropped whenever both duplicate-number rows had pitching data.
+        p1 = self._player(ab=5, h=1, bb=0, hbp=0, pa=5, singles=1, doubles=0, triples=0, hr=0)
+        p1["pitching"] = {"ip": "4.1", "er": 2, "bb": 1, "h": 3, "so": 6, "baa": 0.222}
+        p2 = self._player(ab=5, h=1, bb=0, hbp=0, pa=5, singles=1, doubles=0, triples=0, hr=0)
+        p2["pitching"] = {"ip": "3.2", "er": 1, "bb": 2, "h": 2, "so": 4}
+        merged = _merge_players(p1, p2)
+        p = merged["pitching"]
+        assert p["baa"] == 0.222
+        # 4.1 (13 outs) + 3.2 (11 outs) = 24 outs = 8.0 innings
+        assert p["ip"] == "8.0"
+        assert p["er"] == 3
+        assert p["bb"] == 3
+        assert p["h"] == 5
+        assert p["so"] == 10
+        assert p["era"] == pytest.approx((3 * 7) / 8.0, abs=0.01)
+        assert p["whip"] == pytest.approx((3 + 5) / 8.0, abs=0.01)
+
+    def test_fielding_stats_summed_when_both_entries_have_fielding(self):
+        p1 = self._player(ab=5, h=1, bb=0, hbp=0, pa=5, singles=1, doubles=0, triples=0, hr=0)
+        p1["fielding"] = {"po": 5, "a": 2, "e": 1, "tc": 8, "dp": 0, "tp": 0}
+        p2 = self._player(ab=5, h=1, bb=0, hbp=0, pa=5, singles=1, doubles=0, triples=0, hr=0)
+        p2["fielding"] = {"po": 3, "a": 1, "e": 0, "tc": 4, "dp": 0, "tp": 0}
+        merged = _merge_players(p1, p2)
+        f = merged["fielding"]
+        assert f["po"] == 8
+        assert f["a"] == 3
+        assert f["e"] == 1
+        assert f["fpct"] == pytest.approx((8 + 3) / 12, abs=1e-3)
+
+    def test_innings_played_summed_when_both_entries_have_innings(self):
+        # Regression: innings_played is never None (parse always fills it with
+        # "0.0" defaults), so it was silently dropped on every merge.
+        p1 = self._player(ab=5, h=1, bb=0, hbp=0, pa=5, singles=1, doubles=0, triples=0, hr=0)
+        p1["innings_played"] = {"total": "4.1", "p": "0.0", "c": "4.1", "first_base": "0.0",
+                                 "second_base": "0.0", "third_base": "0.0", "ss": "0.0",
+                                 "lf": "0.0", "cf": "0.0", "rf": "0.0", "sf": "0.0"}
+        p2 = self._player(ab=5, h=1, bb=0, hbp=0, pa=5, singles=1, doubles=0, triples=0, hr=0)
+        p2["innings_played"] = {"total": "3.2", "p": "0.0", "c": "3.2", "first_base": "0.0",
+                                 "second_base": "0.0", "third_base": "0.0", "ss": "0.0",
+                                 "lf": "0.0", "cf": "0.0", "rf": "0.0", "sf": "0.0"}
+        merged = _merge_players(p1, p2)
+        ip = merged["innings_played"]
+        # 4.1 (13 outs) + 3.2 (11 outs) = 24 outs = 8.0 innings
+        assert ip["total"] == "8.0"
+        assert ip["c"] == "8.0"
+
+    def test_catching_stats_summed_when_both_entries_have_catching(self):
+        p1 = self._player(ab=5, h=1, bb=0, hbp=0, pa=5, singles=1, doubles=0, triples=0, hr=0)
+        p1["catching"] = {"inn": "4.1", "pb": 1, "sb": 2, "cs": 1, "cs_pct": 0.333, "pik": 0, "ci": 0}
+        p2 = self._player(ab=5, h=1, bb=0, hbp=0, pa=5, singles=1, doubles=0, triples=0, hr=0)
+        p2["catching"] = {"inn": "3.2", "pb": 0, "sb": 1, "cs": 1, "cs_pct": 0.5, "pik": 1, "ci": 0}
+        merged = _merge_players(p1, p2)
+        c = merged["catching"]
+        # 4.1 (13 outs) + 3.2 (11 outs) = 24 outs = 8.0 innings
+        assert c["inn"] == "8.0"
+        assert c["pb"] == 1
+        assert c["sb"] == 3
+        assert c["cs"] == 2
+        assert c["pik"] == 1
+        assert c["cs_pct"] == pytest.approx(2 / 5, abs=1e-3)
+
 
 # ---------------------------------------------------------------------------
 # build_app_stats_json — output shape and name abbreviation

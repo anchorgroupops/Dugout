@@ -22,7 +22,7 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from stats_normalizer import safe_float, safe_int
+from stats_normalizer import innings_to_float, safe_float, safe_int
 # Import works whether run as `python tools/gc_csv_ingest.py` (tools/ on path)
 # or as `python -m tools.gc_csv_ingest` (repo root on path).
 try:
@@ -426,14 +426,99 @@ def _merge_players(existing: dict, new: dict) -> dict:
     merged_bat["ci"] = existing["batting"].get("ci")
     merged["batting"] = merged_bat
 
-    # For other sections, keep whichever is non-null / richer
-    for section in ["batting_advanced", "pitching", "pitching_advanced", "fielding", "catching", "innings_played"]:
+    # Pitching: sum counting stats across both entries and recompute rate stats,
+    # rather than silently dropping one entry's innings/strikeouts/etc.
+    e_pitch = existing.get("pitching")
+    n_pitch = new.get("pitching")
+    if e_pitch and n_pitch:
+        merged["pitching"] = _merge_pitching(e_pitch, n_pitch)
+    elif n_pitch and not e_pitch:
+        merged["pitching"] = n_pitch
+    # else keep existing (already in merged via **existing)
+
+    # Fielding: sum counting stats and recompute fielding percentage.
+    e_field = existing.get("fielding")
+    n_field = new.get("fielding")
+    if e_field and n_field:
+        merged["fielding"] = _merge_fielding(e_field, n_field)
+    elif n_field and not e_field:
+        merged["fielding"] = n_field
+
+    # Catching: sum SB-against/CS/PB counting stats and recompute CS%.
+    e_catch = existing.get("catching")
+    n_catch = new.get("catching")
+    if e_catch and n_catch:
+        merged["catching"] = _merge_catching(e_catch, n_catch)
+    elif n_catch and not e_catch:
+        merged["catching"] = n_catch
+
+    # Innings played by position: sum, since both entries always populate this section.
+    e_innings = existing.get("innings_played")
+    n_innings = new.get("innings_played")
+    if e_innings and n_innings:
+        merged["innings_played"] = _merge_innings_played(e_innings, n_innings)
+    elif n_innings and not e_innings:
+        merged["innings_played"] = n_innings
+
+    # For remaining sections, keep whichever is non-null / richer
+    for section in ["batting_advanced", "pitching_advanced"]:
         e_sec = existing.get(section)
         n_sec = new.get(section)
         if n_sec and not e_sec:
             merged[section] = n_sec
         # else keep existing
 
+    return merged
+
+
+def _merge_pitching(existing: dict, new: dict) -> dict:
+    """Sum pitching counting stats from two entries and recompute IP/WHIP/ERA."""
+    count_keys = ["gp", "gs", "bf", "np", "w", "l", "sv", "svo", "bs", "h", "r", "er",
+                  "bb", "so", "kl", "hbp", "lob", "bk", "pik", "cs", "sb", "wp"]
+    merged = {k: safe_int(existing.get(k)) + safe_int(new.get(k)) for k in count_keys}
+
+    ip = innings_to_float(existing.get("ip")) + innings_to_float(new.get("ip"))
+    outs = round(ip * 3)
+    merged["ip"] = f"{outs // 3}.{outs % 3}"
+
+    ip_float = outs / 3.0
+    merged["era"] = round((merged["er"] * 7) / ip_float, 2) if ip_float > 0 else 0.0
+    merged["whip"] = round((merged["bb"] + merged["h"]) / ip_float, 2) if ip_float > 0 else 0.0
+    merged["baa"] = existing.get("baa")
+    return merged
+
+
+def _merge_fielding(existing: dict, new: dict) -> dict:
+    """Sum fielding counting stats from two entries and recompute fielding percentage."""
+    count_keys = ["tc", "po", "a", "e", "dp", "tp"]
+    merged = {k: safe_int(existing.get(k)) + safe_int(new.get(k)) for k in count_keys}
+    denom = merged["po"] + merged["a"] + merged["e"]
+    merged["fpct"] = round((merged["po"] + merged["a"]) / denom, 3) if denom > 0 else 0.0
+    return merged
+
+
+def _merge_catching(existing: dict, new: dict) -> dict:
+    """Sum catching counting stats (SB-against/CS/PB) and recompute CS%."""
+    count_keys = ["pb", "sb", "cs", "pik", "ci"]
+    merged = {k: safe_int(existing.get(k)) + safe_int(new.get(k)) for k in count_keys}
+
+    inn = innings_to_float(existing.get("inn")) + innings_to_float(new.get("inn"))
+    outs = round(inn * 3)
+    merged["inn"] = f"{outs // 3}.{outs % 3}"
+
+    attempts = merged["sb"] + merged["cs"]
+    merged["cs_pct"] = round(merged["cs"] / attempts, 3) if attempts > 0 else 0.0
+    return merged
+
+
+def _merge_innings_played(existing: dict, new: dict) -> dict:
+    """Sum innings played per position across both entries."""
+    merged = {}
+    for k in ["total", "p", "c", "first_base", "second_base", "third_base",
+              "ss", "lf", "cf", "rf", "sf"]:
+        inn = innings_to_float(existing.get(k)) + innings_to_float(new.get(k))
+        outs = round(inn * 3)
+        merged[k] = f"{outs // 3}.{outs % 3}"
     return merged
 
 
