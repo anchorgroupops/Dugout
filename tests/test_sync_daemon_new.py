@@ -4132,6 +4132,7 @@ def _make_fake_announcer_engine(tmp_path=None):
          "status": "ready", "is_active": True}
     ])
     fake.save_announcer_roster = MagicMock()
+    fake.MAX_SONGS = 4
     fake.get_roster_stats = MagicMock(return_value={"total": 1, "ready": 1})
     fake.render_player_audio = MagicMock()
     fake.render_all_pending = MagicMock(return_value={"rendered": 1})
@@ -4146,6 +4147,7 @@ def _make_fake_announcer_engine(tmp_path=None):
     fake.load_voice_profiles = MagicMock(return_value=[{"id": "v1", "name": "Coach"}])
     fake.get_default_voice_profile_id = MagicMock(return_value="v1")
     fake.get_voice_profile = MagicMock(side_effect=lambda pid: {"id": pid} if pid in ("v1", "halo") else None)
+    fake.resolve_voice_profile = MagicMock(return_value={"id": "halo", "qwen_instruct": "Huge."})
     fake.set_default_voice_profile = MagicMock(side_effect=lambda pid: {"id": pid} if pid in ("v1", "halo") else (_ for _ in ()).throw(ValueError(pid)))
     fake._ROSTER_LOCK = MagicMock()
     fake._ROSTER_LOCK.__enter__ = MagicMock(return_value=None)
@@ -4305,6 +4307,48 @@ class TestHandleAnnouncerPhonetics:
         data = resp.get_json()
         assert data["status"] == "ok"
         assert "announcement_preview" in data
+
+    def test_saving_songs_keeps_status_and_mirrors_first_song(self, flask_app, monkeypatch, tmp_path):
+        fake = _make_fake_announcer_engine(tmp_path)
+        monkeypatch.setitem(sys.modules, "announcer_engine", fake)
+        body = {"songs": [{"url": "https://x.test/a.mp3", "start": 12},
+                          {"url": "https://x.test/b.mp3", "start": 999}], "song_pick": ""}
+        with flask_app.test_client() as client:
+            resp = self._post(client, "07-jane-doe", body, monkeypatch)
+        assert resp.status_code == 200
+        updates = fake.update_player.call_args[0][1]
+        assert "status" not in updates
+        assert [s["start"] for s in updates["songs"]] == [12.0, 300.0]
+        assert updates["walkup_song_url"] == "https://x.test/a.mp3"
+
+    def test_pin_alone_leaves_pronunciation_alone(self, flask_app, monkeypatch, tmp_path):
+        fake = _make_fake_announcer_engine(tmp_path)
+        monkeypatch.setitem(sys.modules, "announcer_engine", fake)
+        with flask_app.test_client() as client:
+            resp = self._post(client, "07-jane-doe", {"intro_pick": "a"}, monkeypatch)
+        assert resp.status_code == 200
+        assert fake.update_player.call_args[0][1] == {"intro_pick": "a"}
+
+    def test_too_many_songs_returns_400(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setitem(sys.modules, "announcer_engine", _make_fake_announcer_engine(tmp_path))
+        songs = [{"url": f"https://x.test/{i}.mp3"} for i in range(5)]
+        with flask_app.test_client() as client:
+            resp = self._post(client, "07-jane-doe", {"songs": songs}, monkeypatch)
+        assert resp.status_code == 400
+
+    def test_remove_intro_drops_it_and_clears_pin(self, flask_app, monkeypatch, tmp_path):
+        fake = _make_fake_announcer_engine(tmp_path)
+        fake.get_player_by_id = MagicMock(return_value={
+            "id": "07-jane-doe", "first": "Jane", "last": "Doe", "number": "7", "intro_pick": "a",
+            "intros": [{"id": "a", "clip_url": "/c/a.mp3"}, {"id": "b", "clip_url": "/c/b.mp3"}]})
+        monkeypatch.setitem(sys.modules, "announcer_engine", fake)
+        with flask_app.test_client() as client:
+            resp = self._post(client, "07-jane-doe", {"remove_intro": "a"}, monkeypatch)
+        assert resp.status_code == 200
+        updates = fake.update_player.call_args[0][1]
+        assert [i["id"] for i in updates["intros"]] == ["b"]
+        assert updates["announcer_audio_url"] == "/c/b.mp3"
+        assert updates["intro_pick"] == ""
 
     def test_player_not_found_returns_404(self, flask_app, monkeypatch, tmp_path):
         fake = _make_fake_announcer_engine(tmp_path)
@@ -4697,6 +4741,23 @@ class TestHandleAnnouncerRender:
         data = resp.get_json()
         assert data["status"] == "queued"
         assert data["quality"] == "best"
+
+    def test_chosen_voice_reaches_the_worker_job(self, flask_app, monkeypatch, tmp_path):
+        fake = _make_fake_announcer_engine(tmp_path)
+        monkeypatch.setitem(sys.modules, "announcer_engine", fake)
+        adb = self._make_adb(worker_alive=True)
+        with flask_app.test_client() as client:
+            resp = self._post(client, "07-jane-doe", {"quality": "best", "voice_id": "v1"}, monkeypatch, adb)
+        assert resp.status_code == 202
+        assert adb.enqueue_render.call_args.kwargs["voice"] == "v1"
+
+    def test_unknown_voice_returns_400(self, flask_app, monkeypatch, tmp_path):
+        monkeypatch.setitem(sys.modules, "announcer_engine", _make_fake_announcer_engine(tmp_path))
+        adb = self._make_adb(worker_alive=True)
+        with flask_app.test_client() as client:
+            resp = self._post(client, "07-jane-doe", {"voice_id": "nobody"}, monkeypatch, adb)
+        assert resp.status_code == 400
+        adb.enqueue_render.assert_not_called()
 
     def test_mac_offline_renders_on_pi(self, flask_app, monkeypatch, tmp_path):
         fake = _make_fake_announcer_engine(tmp_path)

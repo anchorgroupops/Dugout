@@ -1,6 +1,7 @@
 from __future__ import annotations
 import time
 import json
+import uuid
 import os
 import re
 import logging
@@ -4905,6 +4906,12 @@ def handle_announcer_render(player_id):
     requested_quality = str(req_data.get("quality") or "best")
     if requested_quality not in ("quick", "best"):
         requested_quality = "best"
+    # "Add announcement" names the voice; otherwise the player's own or the team's.
+    from announcer_engine import get_voice_profile, resolve_voice_profile
+    voice_id = str(req_data.get("voice_id") or "").strip()[:32] or None
+    if voice_id and not get_voice_profile(voice_id):
+        return jsonify({"error": "unknown_voice_profile"}), 400
+    voice = get_voice_profile(voice_id) or resolve_voice_profile(player)
 
     adb = _announcer_db()
 
@@ -4913,7 +4920,8 @@ def handle_announcer_render(player_id):
         from announcer_engine import script_for_worker, pa_style_instruct
         job = adb.enqueue_render(player_id, game_context, quality="best",
                                  text=script_for_worker(player, game_context),
-                                 instruct=pa_style_instruct("stadium"))
+                                 instruct=voice.get("qwen_instruct") or pa_style_instruct("stadium"),
+                                 voice=voice["id"])
         logging.info("[Announcer] Queued best-quality render: player=%s job=%s", player_id, job["id"])
         return jsonify({"status": "queued", "quality": "best", "job_id": job["id"],
                         "player_id": player_id}), 202
@@ -4927,7 +4935,8 @@ def handle_announcer_render(player_id):
 
     def _bg_render():
         try:
-            render_player_audio(player_id, game_context=game_context, quality="quick")
+            render_player_audio(player_id, game_context=game_context, quality="quick",
+                                voice_id=voice["id"])
             if draft:
                 # Flag as draft so Mac re-renders when it comes back online
                 job = adb.enqueue_render(player_id, game_context, quality="best")
@@ -4971,7 +4980,7 @@ def handle_announcer_phonetics(player_id):
     if invalid:
         return invalid
 
-    from announcer_engine import update_player, build_announcement_text, get_player_by_id
+    from announcer_engine import update_player, build_announcement_text, get_player_by_id, MAX_SONGS
 
     data = request.get_json(silent=True) or {}
     phonetic = (data.get("phonetic_hint") or "")[:200]
@@ -4979,7 +4988,56 @@ def handle_announcer_phonetics(player_id):
     walkup_url = (data.get("walkup_song_url") or "")[:500]
     intro_ts = data.get("intro_timestamp")
 
-    updates = {"phonetic_hint": phonetic, "tts_instruction": instruction, "status": "pending"}
+    current = get_player_by_id(player_id)
+    if not current:
+        return jsonify({"error": "player_not_found"}), 404
+    # Pin and delete requests send only their own field, so a missing key
+    # leaves the stored value alone rather than blanking it.
+    updates = {}
+    if "phonetic_hint" in data:
+        updates["phonetic_hint"] = phonetic
+    if "tts_instruction" in data:
+        updates["tts_instruction"] = instruction
+    # Only a change to how the name is said makes the existing clips stale;
+    # saving songs or pins must not light up "Render".
+    if any(v != (current.get(k) or "") for k, v in updates.items()):
+        updates["status"] = "pending"
+
+    if "songs" in data:
+        raw = data.get("songs")
+        if not isinstance(raw, list) or len(raw) > MAX_SONGS:
+            return jsonify({"error": "songs_invalid", "max": MAX_SONGS}), 400
+        songs = []
+        for s in raw:
+            url = str((s or {}).get("url") or "").strip()[:500]
+            if not url:
+                continue
+            if urlparse(url).scheme not in ("http", "https"):
+                return jsonify({"error": "song url must be HTTP(S)"}), 400
+            try:
+                start = max(0.0, min(float(s.get("start") or 0), 300.0))
+            except (TypeError, ValueError):
+                start = 0.0
+            sid = str(s.get("id") or "").strip()[:16] or uuid.uuid4().hex[:8]
+            songs.append({"id": sid, "url": url, "start": start})
+        updates["songs"] = songs
+        # Keep the single-song fields in step for anything that still reads them.
+        updates["walkup_song_url"] = songs[0]["url"] if songs else ""
+        updates["intro_timestamp"] = songs[0]["start"] if songs else 5.0
+        walkup_url, intro_ts = "", None
+    if "song_pick" in data:
+        updates["song_pick"] = str(data.get("song_pick") or "")[:16]
+    if "intro_pick" in data:
+        updates["intro_pick"] = str(data.get("intro_pick") or "")[:16]
+    if data.get("remove_intro"):
+        gone = str(data["remove_intro"])[:16]
+        intros = [i for i in current.get("intros") or [] if i.get("id") != gone]
+        updates["intros"] = intros
+        updates["announcer_audio_url"] = intros[-1]["clip_url"] if intros else ""
+        if not intros:
+            updates["status"] = "pending"
+        if current.get("intro_pick") == gone:
+            updates["intro_pick"] = ""
     if "voice_profile_id" in data:
         from announcer_engine import get_voice_profile
         vp = str(data.get("voice_profile_id") or "").strip()[:32]

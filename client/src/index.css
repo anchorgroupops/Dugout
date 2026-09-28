@@ -2140,3 +2140,29 @@ body:has(.announcer-modal-overlay) .navbar {
 .announcer-voice-current { display: inline-flex; align-items: center; gap: 0.25rem; font-size: var(--text-xs); color: var(--primary-color); font-weight: 700; }
 .announcer-form-group small { font-size: 0.7rem; color: var(--text-muted); }
 .announcer-form-group select { min-height: var(--touch-min); }
+
+/* Calls and songs lists in the player sheet; next pair in the DJ bar */
+.announcer-modal small.announcer-hint { display: block; margin-top: var(--space-sm); font-size: var(--text-xs); }
+.announcer-section-head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-sm);
+  margin-top: var(--space-md); padding-bottom: 0.25rem; border-bottom: 1px solid var(--surface-border); font-weight: 700;
+}
+.announcer-section-head small { font-weight: 400; font-size: var(--text-xs); color: var(--text-muted); }
+.announcer-icon-btn {
+  display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; flex-shrink: 0;
+  border-radius: 8px; border: 1px solid var(--surface-border); background: rgba(255, 255, 255, 0.04); color: var(--text-muted); cursor: pointer;
+}
+.announcer-icon-btn:disabled { opacity: 0.4; cursor: default; }
+.announcer-icon-btn--on { color: #f0b429; border-color: rgba(240, 180, 41, 0.5); background: rgba(240, 180, 41, 0.15); }
+.announcer-add-row { display: flex; gap: var(--space-sm); margin: var(--space-sm) 0; }
+.announcer-add-row select {
+  flex: 1; min-width: 0; min-height: var(--touch-min); padding: 0 0.5rem; border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06); border: 1px solid var(--surface-border); color: var(--text-main); font-size: 0.85rem;
+}
+.announcer-add-row select option { background: var(--bg-color); color: var(--text-main); }
+.announcer-song-row { display: flex; align-items: center; gap: 0.35rem; padding: 0.35rem 0; }
+.announcer-song-row input { flex: 1; min-width: 0; min-height: 40px; }
+.announcer-song-row .announcer-song-start { flex: 0 0 4.2rem; }
+.announcer-dj-pair { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; font-size: var(--text-xs); color: var(--text-muted); }
+.announcer-dj-pair > span { display: inline-flex; align-items: center; gap: 0.25rem; max-width: 12rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.announcer-dj-shuffle { width: 30px; height: 30px; }

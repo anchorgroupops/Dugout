@@ -952,3 +952,14 @@ def test_pa_job_round_trip(db):
     assert pa["text"] == "Play ball"
     assert pa["status"] == "COMPLETED"
     assert pa["clip_url"] == "/announcer-clips/pa/x.mp3"
+
+
+# ---------------------------------------------------------------------------
+# v5: worker jobs remember the voice they were asked for
+# ---------------------------------------------------------------------------
+
+def test_job_keeps_requested_voice(db):
+    job = adb.enqueue_render("p1", {}, text="Now batting", voice="callum")
+    assert job["voice"] == "callum"
+    [row] = _raw(db, "SELECT voice FROM render_queue")
+    assert row["voice"] == "callum"

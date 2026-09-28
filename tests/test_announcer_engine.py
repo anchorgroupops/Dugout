@@ -1964,3 +1964,56 @@ class TestPlayerWithNoJerseyNumber:
         said = self._say({"first": "Ruby", "last": "VanDeusen", "number": "67"},
                          {"achievement": "grand_slam"})
         assert "number sixty-seven" in said
+
+
+# ---------------------------------------------------------------------------
+# Multiple announcements per player — intros/songs lists and add_intro
+# ---------------------------------------------------------------------------
+
+class TestIntroLists:
+    def _roster(self, tmp_path, monkeypatch, player):
+        roster_file = tmp_path / "roster.json"
+        roster_file.write_text(json.dumps([player]))
+        monkeypatch.setattr(ae_mod, "ROSTER_FILE", roster_file)
+        monkeypatch.setattr(ae_mod, "_ensure_dirs", lambda: None)
+        monkeypatch.setattr(ae_mod, "reconcile_roster_with_team", lambda r: (r, False))
+        monkeypatch.setattr(ae_mod, "_mark_stale_renders", lambda r: False)
+        return roster_file
+
+    def test_legacy_entry_becomes_first_list_item(self, tmp_path, monkeypatch):
+        self._roster(tmp_path, monkeypatch, {
+            "id": "07-jane-doe", "announcer_audio_url": "/c/old.mp3",
+            "walkup_song_url": "https://x.test/a.mp3", "intro_timestamp": 9})
+        p = ae_mod.get_player_by_id("07-jane-doe")
+        assert [i["clip_url"] for i in p["intros"]] == ["/c/old.mp3"]
+        assert p["songs"] == [{"id": "legacy", "url": "https://x.test/a.mp3", "start": 9}]
+
+    def test_new_render_keeps_the_previous_clip(self, tmp_path, monkeypatch):
+        self._roster(tmp_path, monkeypatch, {"id": "07-jane-doe", "announcer_audio_url": "/c/a.mp3"})
+        p = ae_mod.add_intro("07-jane-doe", "/c/b.mp3", "brian", draft=False)
+        assert [i["clip_url"] for i in p["intros"]] == ["/c/a.mp3", "/c/b.mp3"]
+        assert p["intros"][1]["voice"] == "brian"
+        assert p["announcer_audio_url"] == "/c/b.mp3"
+
+    def test_full_list_drops_oldest_unpinned(self, tmp_path, monkeypatch):
+        intros = [{"id": f"i{n}", "clip_url": f"/c/{n}.mp3"} for n in range(ae_mod.MAX_INTROS)]
+        self._roster(tmp_path, monkeypatch, {"id": "07-jane-doe", "intros": intros, "intro_pick": "i0"})
+        p = ae_mod.add_intro("07-jane-doe", "/c/new.mp3", "halo", draft=True)
+        ids = [i["id"] for i in p["intros"]]
+        assert len(ids) == ae_mod.MAX_INTROS
+        assert "i0" in ids and "i1" not in ids
+        assert p["intros"][-1]["draft"] is True
+
+    def test_unknown_player_returns_none(self, tmp_path, monkeypatch):
+        self._roster(tmp_path, monkeypatch, {"id": "07-jane-doe"})
+        assert ae_mod.add_intro("99-nobody", "/c/x.mp3", "halo", draft=False) is None
+
+    def test_worker_clip_is_appended_with_its_voice(self, tmp_path, monkeypatch):
+        self._roster(tmp_path, monkeypatch, {"id": "07-jane-doe", "announcer_audio_url": "/c/a.mp3"})
+        monkeypatch.setattr(ae_mod, "CLIPS_DIR", tmp_path / "clips")
+        monkeypatch.setattr(ae_mod, "archive_and_transcode", MagicMock(side_effect=RuntimeError("no ffmpeg")))
+        url = ae_mod.save_job_audio({"id": "j1", "player_id": "07-jane-doe", "voice": "george"}, b"RIFF0000")
+        p = ae_mod.get_player_by_id("07-jane-doe")
+        assert [i["clip_url"] for i in p["intros"]] == ["/c/a.mp3", url]
+        assert p["intros"][1]["voice"] == "george"
+        assert p["status"] == "ready"

@@ -164,6 +164,12 @@ _V4_COLUMN_ALTERS = [
     "ALTER TABLE render_queue ADD COLUMN clip_url TEXT",
 ]
 
+# v5: walk-up jobs record the voice they were rendered in, so the finished
+# clip can be labelled in the player's announcement list.
+_V5_COLUMN_ALTERS = [
+    "ALTER TABLE render_queue ADD COLUMN voice TEXT",
+]
+
 
 def init_db() -> None:
     """Create or migrate schema. Safe to call repeatedly."""
@@ -207,6 +213,15 @@ def init_db() -> None:
             conn.execute("INSERT OR IGNORE INTO schema_version VALUES (4)")
             log.info("[announcer_db] Applied schema v4")
 
+        if current < 5:
+            for sql in _V5_COLUMN_ALTERS:
+                try:
+                    conn.execute(sql)
+                except sqlite3.OperationalError:
+                    pass  # column already exists
+            conn.execute("INSERT OR IGNORE INTO schema_version VALUES (5)")
+            log.info("[announcer_db] Applied schema v5")
+
 
 # ---------------------------------------------------------------------------
 # Render Queue
@@ -214,7 +229,8 @@ def init_db() -> None:
 
 def enqueue_render(player_id: str, game_context: dict, quality: str = "best",
                    kind: str = "player", text: str | None = None,
-                   instruct: str | None = None, status: str = "PENDING") -> dict:
+                   instruct: str | None = None, status: str = "PENDING",
+                   voice: str | None = None) -> dict:
     """Insert a job (PENDING unless the caller renders it itself). Returns the job dict."""
     job_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
@@ -224,16 +240,16 @@ def enqueue_render(player_id: str, game_context: dict, quality: str = "best",
         conn.execute(
             """INSERT INTO render_queue
                (id, player_id, game_context, quality, status, priority, created_at,
-                kind, text, instruct)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                kind, text, instruct, voice)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (job_id, player_id, json.dumps(game_context), quality, status, priority, now,
-             kind, text, instruct),
+             kind, text, instruct, voice),
         )
 
     return {
         "id": job_id, "player_id": player_id, "quality": quality,
         "status": status, "priority": priority, "created_at": now,
-        "kind": kind, "text": text, "instruct": instruct,
+        "kind": kind, "text": text, "instruct": instruct, "voice": voice,
     }
 
 

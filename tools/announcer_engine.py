@@ -20,6 +20,7 @@ import os
 import struct
 import threading
 import time
+import uuid
 import wave
 from abc import ABC, abstractmethod
 from datetime import datetime
@@ -855,6 +856,10 @@ VOICE_PROFILES: list[dict] = [
         "elevenlabs_voice_id": "nPczCjzI2devNBz1zQrb", "model_id": "eleven_multilingual_v2",
         "voice_settings": {"stability": 0.30, "similarity_boost": 0.85, "style": 0.75, "use_speaker_boost": True},
         "pitch_semitones": -2.0,
+        # Qwen3 VoiceDesign direction used by the free render worker.
+        "qwen_instruct": ("A colossal, gravelly, ultra-deep male arena announcer with a larger-than-life "
+                          "video-game-trailer delivery. Slow, heavy and punched, with long dramatic pauses, "
+                          "stretching the player's name out huge."),
     },
     {
         "id": "brian", "name": "Brian",
@@ -862,6 +867,8 @@ VOICE_PROFILES: list[dict] = [
         "elevenlabs_voice_id": "nPczCjzI2devNBz1zQrb", "model_id": "eleven_multilingual_v2",
         "voice_settings": {"stability": 0.45, "similarity_boost": 0.85, "style": 0.45, "use_speaker_boost": True},
         "pitch_semitones": 0.0,
+        "qwen_instruct": ("A deep, resonant male baritone announcer giving a confident, straight, "
+                          "polished read. Clear and commanding, not shouting."),
     },
     {
         "id": "callum", "name": "Callum",
@@ -869,6 +876,8 @@ VOICE_PROFILES: list[dict] = [
         "elevenlabs_voice_id": "N2lVS1w4EtoT3dr4eOWO", "model_id": "eleven_multilingual_v2",
         "voice_settings": {"stability": 0.35, "similarity_boost": 0.85, "style": 0.65, "use_speaker_boost": True},
         "pitch_semitones": 0.0,
+        "qwen_instruct": ("A rough, gravelly, gritty male announcer with a raspy edge and swagger, "
+                          "punching every word like a fight-night introduction."),
     },
     {
         "id": "george", "name": "George",
@@ -876,6 +885,8 @@ VOICE_PROFILES: list[dict] = [
         "elevenlabs_voice_id": "JBFqnCBsd6RMkjVDRZzb", "model_id": "eleven_multilingual_v2",
         "voice_settings": {"stability": 0.40, "similarity_boost": 0.85, "style": 0.55, "use_speaker_boost": True},
         "pitch_semitones": 0.0,
+        "qwen_instruct": ("A warm, friendly male storyteller voice announcing at a ballpark, "
+                          "smiling and proud, building gently to the player's name."),
     },
     {
         "id": "adam", "name": "Adam",
@@ -883,6 +894,9 @@ VOICE_PROFILES: list[dict] = [
         "elevenlabs_voice_id": "pNInz6obpgDQGcFmaJgB", "model_id": "eleven_multilingual_v2",
         "voice_settings": {"stability": 0.40, "similarity_boost": 0.85, "style": 0.60, "use_speaker_boost": True},
         "pitch_semitones": 0.0,
+        "qwen_instruct": ("An electrifying Major League Baseball stadium PA announcer introducing the home "
+                          "team's star. Booming baritone, building anticipation, then stretching the "
+                          "player's name out long and loud as the crowd roars."),
     },
 ]
 
@@ -1087,8 +1101,7 @@ def build_situational_announcement(player: dict, game_context: dict | None = Non
         )
     else:
         script = (
-            f"[breath] Now batting for {ANNOUNCER_TEAM_PHRASE}... [pause:0.7s] "
-            f"{number_call}{name}!"
+            f"[breath] Now batting... [pause:0.7s] {number_call}{name}!"
         )
 
     if tts_instruction and not achievement:
@@ -1208,6 +1221,33 @@ def _mark_stale_renders(roster: list[dict]) -> bool:
     return changed
 
 
+MAX_INTROS = 4
+MAX_SONGS = 4
+
+
+def _ensure_lists(p: dict) -> None:
+    """Give a roster entry its `intros` and `songs` lists.
+
+    Entries from before multi-intro support carry one announcer_audio_url and
+    one walkup_song_url; they become item 1 of each list. Read-time only, so
+    the roster file is rewritten the next time anything saves.
+    """
+    if not isinstance(p.get("intros"), list):
+        p["intros"] = [{
+            "id": "legacy",
+            "voice": p.get("voice_rendered") or p.get("voice_profile_id") or "",
+            "clip_url": p["announcer_audio_url"],
+            "draft": p.get("render_quality") == "quick",
+            "created_at": p.get("rendered_at") or "",
+        }] if p.get("announcer_audio_url") else []
+    if not isinstance(p.get("songs"), list):
+        p["songs"] = [{
+            "id": "legacy",
+            "url": p["walkup_song_url"],
+            "start": p.get("intro_timestamp", 5.0),
+        }] if p.get("walkup_song_url") else []
+
+
 def load_announcer_roster() -> list[dict]:
     """Load the announcer roster, reconciling it against current team.json.
 
@@ -1234,6 +1274,8 @@ def load_announcer_roster() -> list[dict]:
                     _atomic_write_json(ROSTER_FILE, roster)
                 except OSError as e:
                     logging.warning("[Announcer] Could not persist reconciled roster: %s", e)
+        for p in roster:
+            _ensure_lists(p)
         return roster
 
     # Bootstrap from team data
@@ -1244,6 +1286,8 @@ def load_announcer_roster() -> list[dict]:
             logging.info("[Announcer] Bootstrapped roster with %d players", len(roster))
         except OSError as e:
             logging.warning("[Announcer] Could not persist bootstrapped roster (permission issue): %s", e)
+    for p in roster or []:
+        _ensure_lists(p)
     return roster or []
 
 
@@ -1275,6 +1319,33 @@ def update_player(player_id: str, updates: dict) -> dict | None:
                 save_announcer_roster(roster)
                 return roster[i]
     return None
+
+
+def add_intro(player_id: str, clip_url: str, voice_id: str, draft: bool,
+              updates: dict | None = None) -> dict | None:
+    """Append a finished walk-up to the player's announcements.
+
+    A full list drops its oldest clip that isn't pinned. announcer_audio_url
+    still tracks the newest clip for anything that reads a single URL.
+    """
+    with _ROSTER_LOCK:
+        player = get_player_by_id(player_id)
+        if not player:
+            return None
+        pinned = player.get("intro_pick") or ""
+        intros = list(player.get("intros") or [])
+        intros.append({
+            "id": uuid.uuid4().hex[:8],
+            "voice": voice_id,
+            "clip_url": clip_url,
+            "draft": draft,
+            "created_at": datetime.now(ET).isoformat(),
+        })
+        while len(intros) > MAX_INTROS:
+            oldest = next(i for i, x in enumerate(intros) if x["id"] != pinned)
+            intros.pop(oldest)
+        return update_player(player_id, {**(updates or {}), "intros": intros,
+                                         "announcer_audio_url": clip_url})
 
 
 # ---------------------------------------------------------------------------
@@ -1404,8 +1475,12 @@ def archive_and_transcode(audio_bytes: bytes, player_id: str,
 
 
 def render_player_audio(player_id: str, game_context: dict | None = None,
-                        quality: str = "best") -> dict:
-    """Render TTS audio for a single player. Returns updated player dict."""
+                        quality: str = "best", voice_id: str | None = None) -> dict:
+    """Render TTS audio for a single player. Returns updated player dict.
+
+    A standard walk-up is added to the player's announcements; a situational
+    (Halo) call only replaces announcer_audio_url, since it's a one-off.
+    """
     player = get_player_by_id(player_id)
     if not player:
         raise ValueError(f"Player not found: {player_id}")
@@ -1414,7 +1489,7 @@ def render_player_audio(player_id: str, game_context: dict | None = None,
 
     try:
         provider = get_quick_tts_provider() if quality == "quick" else get_tts_provider()
-        voice = resolve_voice_profile(player)
+        voice = get_voice_profile(voice_id) or resolve_voice_profile(player)
         raw_text = build_announcement_text(player, game_context)
         # Edge gets SSML, ElevenLabs gets <break/> pauses, the rest plain text —
         # never let [breath] / [pause:Xs] be spoken literally.
@@ -1443,7 +1518,7 @@ def render_player_audio(player_id: str, game_context: dict | None = None,
             clip_path.write_bytes(audio_bytes)
             clip_url = f"/announcer-clips/{safe_id}/{ts}.mp3"
 
-        updated = update_player(player_id, {
+        done = {
             "status": "ready",
             "announcer_audio_url": clip_url,
             "rendered_at": datetime.now(ET).isoformat(),
@@ -1451,7 +1526,11 @@ def render_player_audio(player_id: str, game_context: dict | None = None,
             "voice_rendered": voice["id"],
             "wrap_version": STADIUM_WRAP_VERSION,
             "error_message": "",
-        })
+        }
+        if game_context:
+            updated = update_player(player_id, done)
+        else:
+            updated = add_intro(player_id, clip_url, voice["id"], quality == "quick", done)
         logging.info("[Announcer] Rendered %s via %s (%d bytes, quality=%s)",
                      player_id, provider.name, len(audio_bytes), quality)
         return updated or player
@@ -1544,14 +1623,19 @@ def save_job_audio(job: dict, audio_bytes: bytes) -> str:
         clip_url = f"/announcer-clips/{safe_id}/{name}"
 
     if not is_pa:
-        update_player(job["player_id"], {
+        done = {
             "status": "ready",
             "announcer_audio_url": clip_url,
             "rendered_at": datetime.now(ET).isoformat(),
             "render_quality": "best",
             "wrap_version": STADIUM_WRAP_VERSION,
             "error_message": "",
-        })
+        }
+        if json.loads(job.get("game_context") or "null"):
+            update_player(job["player_id"], done)
+        else:
+            voice = job.get("voice") or get_default_voice_profile_id()
+            add_intro(job["player_id"], clip_url, voice, False, {**done, "voice_rendered": voice})
     return clip_url
 
 

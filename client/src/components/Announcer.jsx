@@ -2,15 +2,16 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { createPortal } from 'react-dom';
 import {
   Mic, Play, Square, SkipBack, SkipForward, RefreshCw, UserPlus,
-  AlertCircle, Volume2, Zap, X, ChevronDown, ChevronUp, Check, Trash2,
+  AlertCircle, Volume2, Zap, X, ChevronDown, ChevronUp, Check, Trash2, Pin, Shuffle, Plus, Music,
 } from 'lucide-react';
 import { playIntro, playClip, stop as stopAudio, preload, cleanup, setVolume } from '../utils/audioController';
 import { apiRequest } from '../utils/apiClient';
 
 // One screen, Ballpark DJ style: the batting order is a list of big rows, each
-// with its own Play. Tap a row to fix how the name is said, pick a voice, or set
-// the walk-up song. A sticky bar at the bottom shows who is up and carries the
-// game-situation controls and the Halo moments.
+// with its own Play. Tap a row to fix how the name is said, add calls in any
+// voice, or set walk-up songs. Each at-bat plays a random call and song (never
+// the pair just played) unless one is pinned. A sticky bar at the bottom shows
+// who is up and what will play, and carries the situation controls and Halo.
 
 const MODAL_SCROLL_STYLE = {
   maxHeight: '85dvh', overflowY: 'auto', overscrollBehavior: 'contain', WebkitOverflowScrolling: 'touch',
@@ -60,8 +61,34 @@ function spokenName(first, last) {
 function previewLine(player, phonetic) {
   const name = (phonetic || '').trim() || spokenName(player.first, player.last);
   const num = numToWord(player.number);
-  return `Now batting for your Sharks... ${num ? `NUMBEEEER ${num}... ` : ''}${name}!`;
+  return `Now batting... ${num ? `NUMBEEEER ${num}... ` : ''}${name}!`;
 }
+
+// Mirrors MAX_INTROS / MAX_SONGS in tools/announcer_engine.py.
+const MAX_ITEMS = 4;
+
+// Rosters cached before multiple calls existed carry one clip and one song.
+const introsOf = (p) => p.intros || (p.announcer_audio_url ? [{ id: 'legacy', clip_url: p.announcer_audio_url, voice: p.voice_rendered || '' }] : []);
+const songsOf = (p) => p.songs || (p.walkup_song_url ? [{ id: 'legacy', url: p.walkup_song_url, start: p.intro_timestamp ?? 5 }] : []);
+
+function randomOther(items, lastId) {
+  const pool = items.length > 1 ? items.filter(x => x.id !== lastId) : items;
+  return pool[Math.floor(Math.random() * pool.length)]?.id || '';
+}
+const rollPair = (p, last = {}) => ({ intro: randomOther(introsOf(p), last.intro), song: randomOther(songsOf(p), last.song) });
+
+// A pin wins, then the queued pick, then the first item.
+function pairFor(p, q = {}) {
+  const pick = (items, pinnedId, id) => items.find(x => x.id === pinnedId) || items.find(x => x.id === id) || items[0] || null;
+  return { intro: pick(introsOf(p), p.intro_pick, q.intro), song: pick(songsOf(p), p.song_pick, q.song) };
+}
+
+function songLabel(url) {
+  try { return decodeURIComponent(new URL(url).pathname.split('/').pop()).replace(/\.[a-z0-9]+$/i, '') || 'Walk-up song'; }
+  catch { return 'Walk-up song'; }
+}
+
+const newId = () => Math.random().toString(36).slice(2, 10);
 
 function useEscapeToClose(onClose) {
   useEffect(() => {
@@ -79,8 +106,10 @@ function StatusLed({ status }) {
 
 // ── Lineup row ─────────────────────────────────────────────────────────────
 function LineupRow({ player, slot, isCurrent, isPlaying, onPlay, onOpen }) {
-  const hasClip = Boolean(player.announcer_audio_url);
-  const hasSong = Boolean(player.walkup_song_url);
+  const calls = introsOf(player).length;
+  const songs = songsOf(player).length;
+  const hasClip = calls > 0;
+  const hasSong = songs > 0;
   return (
     <div className={`announcer-lineup-row glass-panel${isCurrent ? ' announcer-lineup-row--current' : ''}`}>
       <button type="button" className="announcer-lineup-main" onClick={() => onOpen(player)} aria-label={`Edit ${player.first} ${player.last}`}>
@@ -93,8 +122,8 @@ function LineupRow({ player, slot, isCurrent, isPlaying, onPlay, onOpen }) {
             {player.status === 'rendering' ? 'Rendering…'
               : player.status === 'error' ? 'Render failed'
               : hasClip && player.status === 'pending' ? 'Ready · new voice available'
-              : hasClip ? 'Announcer ready' : 'Tap to set up'}
-            {hasSong && <span> · <Volume2 size={11} style={{ verticalAlign: '-2px' }} /> walk-up</span>}
+              : hasClip ? `${calls} call${calls === 1 ? '' : 's'}` : 'Tap to set up'}
+            {hasSong && <span> · <Music size={11} style={{ verticalAlign: '-2px' }} /> {songs} song{songs === 1 ? '' : 's'}</span>}
           </span>
         </span>
       </button>
@@ -115,20 +144,27 @@ function LineupRow({ player, slot, isCurrent, isPlaying, onPlay, onOpen }) {
 function PlayerSheet({ player, profiles, defaultVoiceId, onClose, onSave, onRender, onRemove }) {
   useEscapeToClose(onClose);
   const [phonetic, setPhonetic] = useState(player.phonetic_hint || '');
-  const [voice, setVoice] = useState(player.voice_profile_id || '');
-  const [song, setSong] = useState(player.walkup_song_url || '');
-  const [introTs, setIntroTs] = useState(player.intro_timestamp ?? 5);
+  const [voice, setVoice] = useState(player.voice_profile_id || defaultVoiceId);
+  const [songs, setSongs] = useState(() => songsOf(player).map(s => ({ ...s })));
+  const [songPick, setSongPick] = useState(player.song_pick || '');
+  const [hearing, setHearing] = useState('');
   const [busy, setBusy] = useState('');
   const [msg, setMsg] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState('');
   const [confirmRemove, setConfirmRemove] = useState(false);
-  const defaultName = profiles.find(p => p.id === defaultVoiceId)?.name || 'Team voice';
+  const intros = introsOf(player);
+  const voiceName = (id) => profiles.find(p => p.id === id)?.name || 'Announcer';
 
-  const payload = () => ({
-    phonetic_hint: phonetic.trim(),
-    voice_profile_id: voice,
-    walkup_song_url: song.trim(),
-    intro_timestamp: Number(introTs) || 0,
-  });
+  useEffect(() => () => stopAudio(), []);
+
+  const payload = () => {
+    const kept = songs.filter(s => s.url.trim()).map(s => ({ id: s.id, url: s.url.trim(), start: Number(s.start) || 0 }));
+    return {
+      phonetic_hint: phonetic.trim(),
+      songs: kept,
+      song_pick: kept.some(s => s.id === songPick) ? songPick : '',
+    };
+  };
 
   const save = async () => {
     setBusy('save'); setMsg('');
@@ -137,23 +173,35 @@ function PlayerSheet({ player, profiles, defaultVoiceId, onClose, onSave, onRend
     finally { setBusy(''); }
   };
 
-  const saveAndRender = async () => {
+  const addCall = async () => {
     setBusy('render'); setMsg('');
     try {
       await onSave(player.id, payload());
-      await onRender(player.id);
+      await onRender(player.id, null, voice);
       // The parent shows the "Rendering…" notice; this sheet is about to close.
       onClose();
     } catch (e) { setMsg(e.message || 'Render failed'); setBusy(''); }
   };
 
-  const testPlay = () => {
-    if (player.announcer_audio_url) playClip(player.announcer_audio_url);
+  // Pins and deletes on calls save straight away; songs wait for Save.
+  const saveNow = async (data) => {
+    setMsg('');
+    try { await onSave(player.id, data); } catch (e) { setMsg(e.message || 'Save failed'); }
   };
+
+  const hear = (id, { clipUrl, songUrl, at }) => {
+    if (hearing === id) { stopAudio(); setHearing(''); return; }
+    setHearing(id);
+    const done = () => setHearing('');
+    if (clipUrl) playClip(clipUrl, done).catch(done);
+    else playIntro({ walkupUrl: songUrl, clipUrl: '', introTimestamp: at, onEnd: done }).catch(done);
+  };
+
+  const editSong = (i, patch) => setSongs(list => list.map((s, j) => (j === i ? { ...s, ...patch } : s)));
 
   return createPortal(
     <div className="announcer-modal-overlay" onClick={onClose}>
-      <div className="announcer-modal glass-panel" onClick={e => e.stopPropagation()} style={{ maxWidth: 420, ...MODAL_SCROLL_STYLE }}>
+      <div className="announcer-modal glass-panel" onClick={e => e.stopPropagation()} style={{ maxWidth: 440, ...MODAL_SCROLL_STYLE }}>
         <div className="announcer-modal-header">
           <h3 style={{ margin: 0 }}><span className="announcer-jersey">#{player.number}</span> {player.first} {player.last}</h3>
           <button type="button" className="announcer-modal-close" onClick={onClose} aria-label="Close"><X size={18} /></button>
@@ -173,35 +221,81 @@ function PlayerSheet({ player, profiles, defaultVoiceId, onClose, onSave, onRend
         </label>
         <div className="announcer-preview-text">{previewLine(player, phonetic)}</div>
 
-        <label className="announcer-form-group">
-          <span>Voice</span>
-          <select value={voice} onChange={e => setVoice(e.target.value)}>
-            <option value="">Team voice ({defaultName})</option>
+        <div className="announcer-section-head">
+          <span>Calls</span>
+          <small>{intros.some(i => i.id === player.intro_pick) ? 'Pinned call plays every time' : 'Random each at-bat'}</small>
+        </div>
+        {intros.length === 0 && <p className="announcer-hint">No calls yet. Pick a voice and add one.</p>}
+        {intros.map((i, n) => {
+          const pinned = i.id === player.intro_pick;
+          return (
+            <div key={i.id} className="announcer-voice-row">
+              <button type="button" className="announcer-btn-round" onClick={() => hear(i.id, { clipUrl: i.clip_url })} aria-label={`Hear call ${n + 1}`}>
+                {hearing === i.id ? <Square size={16} /> : <Play size={16} style={{ marginLeft: 2 }} />}
+              </button>
+              <div className="announcer-voice-text">
+                <strong>{voiceName(i.voice)}</strong>
+                <span>{i.draft ? 'Quick draft' : 'Studio'}{pinned ? ' · pinned' : ''}</span>
+              </div>
+              <button type="button" className={`announcer-icon-btn${pinned ? ' announcer-icon-btn--on' : ''}`} aria-pressed={pinned}
+                onClick={() => saveNow({ intro_pick: pinned ? '' : i.id })} aria-label={pinned ? `Unpin call ${n + 1}` : `Always play call ${n + 1}`}>
+                <Pin size={16} />
+              </button>
+              <button type="button" className="announcer-icon-btn" aria-label={confirmDelete === i.id ? `Confirm delete call ${n + 1}` : `Delete call ${n + 1}`}
+                onClick={() => { if (confirmDelete === i.id) { setConfirmDelete(''); saveNow({ remove_intro: i.id }); } else setConfirmDelete(i.id); }}>
+                {confirmDelete === i.id ? <Check size={16} /> : <Trash2 size={16} />}
+              </button>
+            </div>
+          );
+        })}
+        <div className="announcer-add-row">
+          <select value={voice} onChange={e => setVoice(e.target.value)} aria-label="Voice for the new call">
             {profiles.map(p => <option key={p.id} value={p.id}>{p.name} — {p.tagline}</option>)}
           </select>
-        </label>
+          <button type="button" className="announcer-btn announcer-btn-primary" onClick={addCall} disabled={Boolean(busy)}>
+            {busy === 'render' ? <RefreshCw size={14} className="sync-spin" /> : <Plus size={14} />} Add call
+          </button>
+        </div>
+        {intros.length >= MAX_ITEMS && <small className="announcer-hint">A new call replaces the oldest one that isn't pinned.</small>}
 
-        <label className="announcer-form-group">
-          <span>Walk-up song (link)</span>
-          <input value={song} onChange={e => setSong(e.target.value)} placeholder="https://…mp3" inputMode="url" maxLength={500} />
-        </label>
-        <label className="announcer-form-group">
-          <span>Start the song at (seconds)</span>
-          <input type="number" min="0" max="300" step="0.5" value={introTs} onChange={e => setIntroTs(e.target.value)} />
-        </label>
+        <div className="announcer-section-head">
+          <span>Walk-up songs</span>
+          <small>{songs.some(s => s.id === songPick) ? 'Pinned song plays every time' : 'Random each at-bat'}</small>
+        </div>
+        {songs.map((s, n) => {
+          const pinned = s.id === songPick;
+          return (
+            <div key={s.id} className="announcer-song-row">
+              <input value={s.url} onChange={e => editSong(n, { url: e.target.value })} placeholder="https://…mp3" inputMode="url" maxLength={500} aria-label={`Song ${n + 1} link`} />
+              <input type="number" min="0" max="300" step="0.5" value={s.start} onChange={e => editSong(n, { start: e.target.value })}
+                className="announcer-song-start" aria-label={`Song ${n + 1} start, in seconds`} title="Start at (seconds)" />
+              <button type="button" className="announcer-icon-btn" disabled={!s.url.trim()} aria-label={`Hear song ${n + 1}`}
+                onClick={() => hear(s.id, { songUrl: s.url.trim(), at: Number(s.start) || 0 })}>
+                {hearing === s.id ? <Square size={16} /> : <Play size={16} />}
+              </button>
+              <button type="button" className={`announcer-icon-btn${pinned ? ' announcer-icon-btn--on' : ''}`} aria-pressed={pinned}
+                onClick={() => setSongPick(pinned ? '' : s.id)} aria-label={pinned ? `Unpin song ${n + 1}` : `Always play song ${n + 1}`}>
+                <Pin size={16} />
+              </button>
+              <button type="button" className="announcer-icon-btn" onClick={() => setSongs(list => list.filter((_, j) => j !== n))} aria-label={`Remove song ${n + 1}`}>
+                <X size={16} />
+              </button>
+            </div>
+          );
+        })}
+        {songs.length < MAX_ITEMS && (
+          <button type="button" className="announcer-btn announcer-btn-secondary" onClick={() => setSongs(list => [...list, { id: newId(), url: '', start: 5 }])}>
+            <Plus size={14} /> Add song
+          </button>
+        )}
+        <small className="announcer-hint">The number is where the song starts, in seconds. 0 finds the beat for you.</small>
 
         {msg && <div className="announcer-error-msg" role="status">{msg}</div>}
 
         <div className="announcer-form-actions">
-          <button type="button" className="announcer-btn announcer-btn-primary" onClick={saveAndRender} disabled={Boolean(busy)}>
-            {busy === 'render' ? <RefreshCw size={14} className="sync-spin" /> : <Mic size={14} />} Save &amp; render
-          </button>
-          <button type="button" className="announcer-btn announcer-btn-secondary" onClick={save} disabled={Boolean(busy)}>
+          <button type="button" className="announcer-btn announcer-btn-primary" onClick={save} disabled={Boolean(busy)}>
             {busy === 'save' ? <RefreshCw size={14} className="sync-spin" /> : <Check size={14} />} Save
           </button>
-          {player.announcer_audio_url && (
-            <button type="button" className="announcer-btn announcer-btn-accent" onClick={testPlay}><Play size={14} /> Hear it</button>
-          )}
         </div>
 
         <button
@@ -459,6 +553,11 @@ export default function Announcer({ lineups }) {
   const [showHalo, setShowHalo] = useState(false);
   const [showFormer, setShowFormer] = useState(false);
   const [renderAllBusy, setRenderAllBusy] = useState(false);
+  // Next call/song queued per player, and what each played last, so the DJ bar
+  // can show what's coming and a replay never repeats the same pair.
+  const [queued, setQueued] = useState({});
+  const [nowPair, setNowPair] = useState(null);
+  const lastPlayed = useRef({});
   const pollRef = useRef(null);
   const pollStopRef = useRef(null);
 
@@ -596,27 +695,48 @@ export default function Announcer({ lineups }) {
   const onDeck = battingOrder[currentIdx + 1] || null;
 
   useEffect(() => {
-    if (onDeck) preload([onDeck.walkup_song_url, onDeck.announcer_audio_url].filter(Boolean));
-  }, [onDeck]);
+    const need = [current, onDeck].filter(p => p && !queued[p.id]);
+    if (need.length) setQueued(q => ({ ...q, ...Object.fromEntries(need.map(p => [p.id, rollPair(p, lastPlayed.current[p.id])])) }));
+  }, [current, onDeck, queued]);
+
+  const nextPair = current ? pairFor(current, queued[current.id]) : null;
+  const deckPair = onDeck ? pairFor(onDeck, queued[onDeck.id]) : null;
+  const deckSong = deckPair?.song?.url || '';
+  const deckClip = deckPair?.intro?.clip_url || '';
+  useEffect(() => {
+    preload([deckSong, deckClip].filter(Boolean));
+  }, [deckSong, deckClip]);
 
   // ── playback ──
   const stop = useCallback(() => { stopAudio(); setPlaying(false); setProgress({ elapsed: 0, duration: 0 }); }, []);
 
-  const playPlayer = useCallback(async (p) => {
+  // `override` plays a specific call (Halo) instead of this at-bat's pick.
+  const playPlayer = useCallback(async (p, override) => {
     if (currentId === p.id && playing) { stop(); return; }
+    const pair = override || pairFor(p, queued[p.id] || rollPair(p, lastPlayed.current[p.id]));
+    if (!override) {
+      lastPlayed.current[p.id] = { intro: pair.intro?.id, song: pair.song?.id };
+      setQueued(q => ({ ...q, [p.id]: rollPair(p, lastPlayed.current[p.id]) }));
+    }
+    setNowPair(pair);
     setCurrentId(p.id);
     setPlaying(true);
+    const start = pair.song?.start ?? 5;
     try {
       await playIntro({
-        walkupUrl: p.walkup_song_url || '',
-        clipUrl: p.announcer_audio_url || '',
-        introTimestamp: p.intro_timestamp ?? 5,
-        autoBPM: (p.intro_timestamp ?? 5) === 0,
+        walkupUrl: pair.song?.url || '',
+        clipUrl: pair.intro?.clip_url || '',
+        introTimestamp: start,
+        autoBPM: start === 0,
         onEnd: () => setPlaying(false),
         onProgress: setProgress,
       });
     } catch { setPlaying(false); }
-  }, [currentId, playing, stop]);
+  }, [currentId, playing, stop, queued]);
+
+  const reshuffle = () => {
+    if (current) setQueued(q => ({ ...q, [current.id]: rollPair(current, { intro: nextPair.intro?.id, song: nextPair.song?.id }) }));
+  };
 
   const step = (delta) => {
     stop();
@@ -631,8 +751,9 @@ export default function Announcer({ lineups }) {
     await fetchRoster();
   };
 
-  const renderPlayer = async (playerId, gameContext) => {
+  const renderPlayer = async (playerId, gameContext, voiceId) => {
     const body = gameContext ? { quality: 'best', game_context: gameContext } : { quality: 'best' };
+    if (voiceId) body.voice_id = voiceId;
     const res = await apiRequest(`/api/announcer/render/${playerId}`, { method: 'POST', headers: ORIGIN_HEADERS(), body: JSON.stringify(body) });
     if (!res.ok) throw new Error('Could not start render');
     if (!gameContext) {
@@ -700,7 +821,7 @@ export default function Announcer({ lineups }) {
       const fresh = list.find(p => p.id === current.id);
       if (fresh && fresh.status === 'ready' && fresh.rendered_at && fresh.rendered_at !== since) {
         setNotice('');
-        playPlayer({ ...fresh, walkup_song_url: '' });
+        playPlayer(fresh, { intro: { clip_url: fresh.announcer_audio_url, voice: '' }, song: null });
         return;
       }
       if (fresh?.status === 'error') { setNotice(`Render failed: ${fresh.error_message || 'unknown'}`); return; }
@@ -708,6 +829,10 @@ export default function Announcer({ lineups }) {
     setNotice('Render is taking longer than usual — it will appear on the row when done.');
   };
 
+  const shown = playing ? nowPair : nextPair;
+  const canShuffle = current && (
+    (introsOf(current).length > 1 && !introsOf(current).some(i => i.id === current.intro_pick)) ||
+    (songsOf(current).length > 1 && !songsOf(current).some(s => s.id === current.song_pick)));
   const pct = progress.duration > 0 ? Math.min(100, (progress.elapsed / progress.duration) * 100) : 0;
   const defaultVoice = profiles.find(p => p.id === defaultVoiceId);
   const pendingCount = active.filter(p => p.status !== 'ready').length;
@@ -780,6 +905,17 @@ export default function Announcer({ lineups }) {
             <div className="announcer-dj-title">
               <span className="announcer-dj-label">{playing ? 'Now batting' : 'Up next'}</span>
               <span className="announcer-dj-name"><span className="announcer-jersey">#{current.number}</span> {current.first} {current.last}</span>
+              {shown && (shown.intro || shown.song) && (
+                <span className="announcer-dj-pair">
+                  {shown.intro && <span><Mic size={11} /> {shown.intro.voice ? (profiles.find(v => v.id === shown.intro.voice)?.name || 'Announcer') : 'Halo call'}</span>}
+                  {shown.song && <span><Music size={11} /> {songLabel(shown.song.url)}</span>}
+                  {!playing && canShuffle && (
+                    <button type="button" className="announcer-icon-btn announcer-dj-shuffle" onClick={reshuffle} aria-label="Pick a different call and song">
+                      <Shuffle size={13} />
+                    </button>
+                  )}
+                </span>
+              )}
               {onDeck && <span className="announcer-dj-ondeck">On deck: #{onDeck.number} {onDeck.first}</span>}
             </div>
             <div className="announcer-dj-controls">
