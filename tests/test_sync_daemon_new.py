@@ -5675,6 +5675,38 @@ class TestHandleCatalogSearch:
             resp = client.get("/api/announcer/catalog/search")
         assert resp.status_code == 200
 
+    def test_non_numeric_limit_does_not_500(self, flask_app, monkeypatch):
+        adb = MagicMock()
+        adb.search_catalog = MagicMock(return_value=[])
+        monkeypatch.setattr(sd, "_announcer_db", lambda: adb)
+        with flask_app.test_client() as client:
+            resp = client.get("/api/announcer/catalog/search?limit=abc")
+        assert resp.status_code == 200
+        adb.search_catalog.assert_called_once_with("", limit=20)
+
+    def test_empty_limit_does_not_500(self, flask_app, monkeypatch):
+        adb = MagicMock()
+        adb.search_catalog = MagicMock(return_value=[])
+        monkeypatch.setattr(sd, "_announcer_db", lambda: adb)
+        with flask_app.test_client() as client:
+            resp = client.get("/api/announcer/catalog/search?limit=")
+        assert resp.status_code == 200
+        adb.search_catalog.assert_called_once_with("", limit=20)
+
+
+class TestHandleSongSearchLimitParsing:
+    def test_non_numeric_limit_does_not_500(self, flask_app, monkeypatch):
+        import sys as _sys
+        fake_yt_dlp = MagicMock()
+        fake_ydl = MagicMock()
+        fake_ydl.extract_info = MagicMock(return_value={"entries": []})
+        fake_yt_dlp.YoutubeDL.return_value.__enter__ = MagicMock(return_value=fake_ydl)
+        fake_yt_dlp.YoutubeDL.return_value.__exit__ = MagicMock(return_value=False)
+        monkeypatch.setitem(_sys.modules, "yt_dlp", fake_yt_dlp)
+        with flask_app.test_client() as client:
+            resp = client.get("/api/announcer/songs/search?q=test&limit=abc")
+        assert resp.status_code != 500
+
 
 class TestHandleMusicAuth:
     _ORIGIN = "https://test.music.auth.com"
