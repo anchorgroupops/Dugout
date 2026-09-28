@@ -98,7 +98,11 @@ function App() {
 
   const fetchData = useCallback(async () => {
     try {
-      const [teamRes, swotRes, lineupsRes, availRes, gamesRes, scheduleRes] = await Promise.all([
+      // Settle (not `Promise.all`) + per-response `.catch` on the JSON parse:
+      // one endpoint timing out (rejects after fetchWithRetry's retries are
+      // exhausted) or returning malformed JSON must not sink the other five
+      // and throw away a team fetch that already succeeded.
+      const results = await Promise.allSettled([
         fetchWithRetry('/api/team'),
         fetchWithRetry('/data/sharks/swot_analysis.json'),
         fetchWithRetry('/data/sharks/lineups.json'),
@@ -106,6 +110,12 @@ function App() {
         fetchWithRetry('/api/games'),
         fetchWithRetry('/api/schedule')
       ]);
+      const [teamRes, swotRes, lineupsRes, availRes, gamesRes, scheduleRes] =
+        results.map(r => (r.status === 'fulfilled' ? r.value : null));
+      const readJson = async (res, fallback = null) => {
+        if (!res?.ok) return fallback;
+        try { return await res.json(); } catch { return fallback; }
+      };
 
       // Graceful team fallback. The previous code threw on a non-OK
       // /api/team response, which crashed the entire data-loading
@@ -115,11 +125,8 @@ function App() {
       // cache, then degrade-but-still-render. If we genuinely have
       // nothing, pass `team: null` through and let downstream tabs
       // show their own empty states.
-      let team = null;
+      let team = await readJson(teamRes);
       let teamFromFallback = false;
-      if (teamRes.ok) {
-        try { team = await teamRes.json(); } catch { team = null; }
-      }
       if (!team || (typeof team === 'object' && !team.roster)) {
         try {
           const staticRes = await fetch('/data/sharks/team.json', { cache: 'no-store' });
@@ -140,11 +147,11 @@ function App() {
         }
       }
 
-      const swot = swotRes.ok ? await swotRes.json() : null;
-      const lineups = lineupsRes.ok ? await lineupsRes.json() : null;
-      const availability = availRes.ok ? await availRes.json() : {};
-      const games = gamesRes.ok ? await gamesRes.json() : null;
-      const schedule = scheduleRes.ok ? await scheduleRes.json() : null;
+      const swot = await readJson(swotRes);
+      const lineups = await readJson(lineupsRes);
+      const availability = await readJson(availRes, {});
+      const games = await readJson(gamesRes);
+      const schedule = await readJson(scheduleRes);
 
       // "Never downgrade" cache policy: if a fresh fetch produced a null /
       // empty value but our previous cache had real data, keep the prior
