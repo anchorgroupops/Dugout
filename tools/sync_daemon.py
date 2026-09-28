@@ -2221,16 +2221,24 @@ def _fetch_gc_games(team_id: str | None = None) -> list:
     agrees on what the next game is.
     """
     team_id = team_id or _resolve_critical_env("GC_TEAM_ID", "NuGgx6WvP7TO")
-    try:
-        resp = requests.get(
-            f"https://api.team-manager.gc.com/public/teams/{team_id}/games",
-            timeout=10,
-        )
-        if resp.ok:
-            body = resp.json()
-            return body if isinstance(body, list) else []
-    except Exception as e:
-        logging.warning(f"[GC games] fetch failed: {e}")
+    url = f"https://api.team-manager.gc.com/public/teams/{team_id}/games"
+    for attempt in range(3):
+        try:
+            resp = requests.get(url, timeout=10)
+            if resp.ok:
+                body = resp.json()
+                return body if isinstance(body, list) else []
+            if resp.status_code == 429 or resp.status_code >= 500:
+                if attempt < 2:
+                    retry_after = resp.headers.get("Retry-After")
+                    time.sleep(float(retry_after) if retry_after else (2 ** attempt))
+                    continue
+            return []
+        except Exception as e:
+            if attempt < 2:
+                time.sleep(2 ** attempt)
+                continue
+            logging.warning(f"[GC games] fetch failed: {e}")
     return []
 
 
