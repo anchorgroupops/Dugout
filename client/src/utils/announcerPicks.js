@@ -159,6 +159,17 @@ const ERROR_WORDS = {
   text_required: 'Type what the announcer should say.',
   text_too_long: 'That is too long for one announcement.',
   rate_limited: 'Too many changes at once. Wait a moment and try again.',
+  unknown_profile: 'That voice no longer exists. Pick another.',
+  voice_unavailable: 'That voice is not set up on the server yet (its service key is missing).',
+  builtin_voice: 'Built-in voices can’t be removed.',
+  voice_already_added: 'That voice is already in the list.',
+  voice_id_taken: 'A voice with a very similar id is already in the list.',
+  invalid_fish_reference_id: 'That is not a fish.audio voice id.',
+  voice_not_found: 'fish.audio has no public voice with that id.',
+  voice_lookup_failed: 'Couldn’t reach fish.audio to look that voice up. Try again.',
+  voice_search_failed: 'Couldn’t reach fish.audio to search. Try again.',
+  invalid_query: 'Search for 2 to 60 letters.',
+  too_many_custom_voices: 'That’s the most voices you can add. Remove one first.',
 };
 
 export function describeApiError(status, code) {

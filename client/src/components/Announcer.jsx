@@ -243,7 +243,7 @@ function PlayerSheet({ player, profiles, defaultVoiceId, audio, voiceName, onHea
         })}
         <div className="announcer-add-row">
           <select value={voice} onChange={e => setVoice(e.target.value)} aria-label="Voice for the new call">
-            {profiles.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            {profiles.map(p => <option key={p.id} value={p.id} disabled={p.available === false}>{p.name}{p.available === false ? ' (not set up)' : ''}</option>)}
           </select>
           <button type="button" className="announcer-btn announcer-btn-primary" onClick={makeCall}
             disabled={Boolean(busy) || st.kind === 'rendering'}>
@@ -327,14 +327,135 @@ function PlayerSheet({ player, profiles, defaultVoiceId, audio, voiceName, onHea
 }
 
 // ── Settings sheet: team voice, subs, former players ───────────────────────
-function SettingsSheet({ profiles, defaultVoiceId, audio, former, onHear, onChooseVoice, onAddSub, onEdit, onClose }) {
+const VOICE_GROUPS = [
+  { key: 'fish_audio', label: 'fish.audio' },
+  { key: 'elevenlabs', label: 'ElevenLabs' },
+  { key: '', label: 'Worker' },
+];
+const groupOf = (p) => (VOICE_GROUPS.some(g => g.key === p.provider) ? p.provider : '');
+
+// One voice: hear it, make it the team voice, or make every player a call in it.
+function VoiceRow({ p, isDefault, audio, busy, makingHere, rendering, confirm, onHear, onChoose, onMakeAll, onDelete }) {
+  const off = p.available === false;
+  return (
+    <div className={`announcer-item-row announcer-voice-row${isDefault ? ' announcer-item-row--active' : ''}${off ? ' announcer-item-row--off' : ''}`}>
+      <HearButton hearKey={`sample:${p.id}`} audio={audio} label={`${p.name} sample`} disabled={off}
+        onHear={() => onHear(`sample:${p.id}`, { clipUrl: `/api/announcer/voice-sample/${p.id}`, label: `${p.name} sample` })} />
+      <div className="announcer-item-text">
+        <strong>{p.name}</strong>
+        <span>{off ? `Not set up: ${p.unavailable_reason || 'service key missing'} on the server` : p.tagline}</span>
+      </div>
+      <div className="announcer-voice-actions">
+        {isDefault
+          ? <span className="announcer-voice-current"><Check size={14} /> Team voice</span>
+          : (
+            <button type="button" className="announcer-btn announcer-btn-accent" onClick={() => onChoose(p.id)}
+              disabled={Boolean(busy) || off} aria-label={`Set ${p.name} as team voice`}>
+              {busy === p.id ? <Spinner /> : 'Set as team voice'}
+            </button>
+          )}
+        <button type="button" className="announcer-btn announcer-btn-secondary" onClick={() => onMakeAll(p)}
+          disabled={Boolean(busy) || off} aria-label={`Make all calls in ${p.name}`}>
+          {busy === `all:${p.id}` ? <Spinner /> : makingHere && rendering > 0 ? <><Spinner /> {rendering}</> : <><Mic size={14} /> All calls</>}
+        </button>
+        {p.custom && (
+          <button type="button" className={`announcer-icon-btn${confirm === p.id ? ' announcer-icon-btn--danger' : ''}`}
+            onClick={() => onDelete(p)} disabled={Boolean(busy)}
+            aria-label={confirm === p.id ? `Tap again to remove ${p.name}` : `Remove ${p.name}`}>
+            {confirm === p.id ? <Check size={16} /> : <Trash2 size={16} />}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Search the public fish.audio catalogue and add a voice to the list.
+function VoiceSearch({ profiles, onAdd, setMsg }) {
+  const [q, setQ] = useState('');
+  const [results, setResults] = useState(null);
+  const [busy, setBusy] = useState('');
+  const added = new Set(profiles.map(p => p.fish_reference_id).filter(Boolean));
+
+  const search = async (e) => {
+    e.preventDefault();
+    const term = q.trim();
+    if (term.length < 2) { setMsg({ text: 'Type at least 2 letters to search.', kind: 'error' }); return; }
+    setBusy('search'); setMsg(null);
+    try {
+      const res = await fetch(`/api/announcer/voice-library/search?q=${encodeURIComponent(term.slice(0, 60))}`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(describeApiError(res.status, data.error));
+      setResults(data.results || []);
+    } catch (ex) { setMsg({ text: ex.message, kind: 'error' }); }
+    finally { setBusy(''); }
+  };
+  const add = async (v) => {
+    setBusy(v.id); setMsg(null);
+    try {
+      await onAdd(v);
+      setMsg({ text: `Added ${v.title}. Hear it or use it above.`, kind: 'ok' });
+    } catch (ex) { setMsg({ text: ex.message, kind: 'error' }); }
+    finally { setBusy(''); }
+  };
+
+  return (
+    <>
+      <form className="announcer-add-row" onSubmit={search}>
+        <input value={q} onChange={e => setQ(e.target.value)} placeholder="Find more voices" maxLength={60}
+          aria-label="Search fish.audio voices" />
+        <button type="submit" className="announcer-btn announcer-btn-secondary" disabled={Boolean(busy)}>
+          {busy === 'search' ? <Spinner /> : 'Search'}
+        </button>
+      </form>
+      {results && results.length === 0 && <small className="announcer-hint">No voices found. Try another name.</small>}
+      {results && results.map(v => (
+        <div key={v.id} className="announcer-item-row">
+          <div className="announcer-item-text">
+            <strong>{v.title}</strong>
+            <span>{v.likes.toLocaleString()} likes{v.author ? ` · by ${v.author}` : ''}</span>
+          </div>
+          {added.has(v.id)
+            ? <span className="announcer-voice-current"><Check size={14} /> Added</span>
+            : (
+              <button type="button" className="announcer-btn announcer-btn-accent" onClick={() => add(v)}
+                disabled={Boolean(busy)} aria-label={`Add ${v.title}`}>
+                {busy === v.id ? <Spinner /> : <><Plus size={14} /> Add</>}
+              </button>
+            )}
+        </div>
+      ))}
+    </>
+  );
+}
+
+function SettingsSheet({ profiles, defaultVoiceId, audio, former, rendering, onHear, onChooseVoice, onMakeAllInVoice,
+  onAddVoice, onDeleteVoice, onAddSub, onEdit, onClose }) {
   const [busy, setBusy] = useState('');
   const [msg, setMsg] = useState(null);
   const [sub, setSub] = useState({ first: '', last: '', number: '' });
+  const [makingVoice, setMakingVoice] = useState('');
+  const [confirm, setConfirm] = useState('');
 
   const choose = async (id) => {
     setBusy(id); setMsg(null);
     try { setMsg({ text: await onChooseVoice(id), kind: 'ok' }); }
+    catch (e) { setMsg({ text: e.message, kind: 'error' }); }
+    finally { setBusy(''); }
+  };
+  const makeAll = async (p) => {
+    setBusy(`all:${p.id}`); setMsg(null);
+    try {
+      const n = await onMakeAllInVoice(p.id);
+      setMakingVoice(p.id);
+      setMsg({ text: n ? `Making ${n} call${n === 1 ? '' : 's'} in ${p.name}. Each is added next to the calls players already have.` : 'No players to make calls for.', kind: 'ok' });
+    } catch (e) { setMsg({ text: e.message, kind: 'error' }); }
+    finally { setBusy(''); }
+  };
+  const remove = async (p) => {
+    if (confirm !== p.id) { setConfirm(p.id); return; }
+    setConfirm(''); setBusy(p.id); setMsg(null);
+    try { await onDeleteVoice(p.id); setMsg({ text: `Removed ${p.name}.`, kind: 'ok' }); }
     catch (e) { setMsg({ text: e.message, kind: 'error' }); }
     finally { setBusy(''); }
   };
@@ -352,23 +473,26 @@ function SettingsSheet({ profiles, defaultVoiceId, audio, former, onHear, onChoo
 
   return (
     <Sheet title="Announcer settings" onClose={onClose}>
-      <section className="announcer-section">
-        <div className="announcer-section-head"><span>Team voice</span><small>Changing it remakes every team-voice call</small></div>
-        {profiles.map(p => (
-          <div key={p.id} className={`announcer-item-row${p.id === defaultVoiceId ? ' announcer-item-row--active' : ''}`}>
-            <HearButton hearKey={`sample:${p.id}`} audio={audio} label={`${p.name} sample`}
-              onHear={() => onHear(`sample:${p.id}`, { clipUrl: `/api/announcer/voice-sample/${p.id}`, label: `${p.name} sample` })} />
-            <div className="announcer-item-text"><strong>{p.name}</strong><span>{p.tagline}</span></div>
-            {p.id === defaultVoiceId
-              ? <span className="announcer-voice-current"><Check size={14} /> In use</span>
-              : (
-                <button type="button" className="announcer-btn announcer-btn-accent" onClick={() => choose(p.id)} disabled={Boolean(busy)}>
-                  {busy === p.id ? <Spinner /> : 'Use'}
-                </button>
-              )}
-          </div>
-        ))}
-      </section>
+      {VOICE_GROUPS.map(g => {
+        const list = profiles.filter(p => groupOf(p) === g.key);
+        if (!list.length && g.key !== 'fish_audio') return null;
+        return (
+          <section key={g.key || 'worker'} className="announcer-section">
+            <div className="announcer-section-head">
+              <span>{g.label} voices</span>
+              <small>{rendering > 0 ? <><Spinner size={11} /> Making {rendering} call{rendering === 1 ? '' : 's'}</> : 'Team voice remakes every team-voice call'}</small>
+            </div>
+            {list.map(p => (
+              <VoiceRow key={p.id} p={p} isDefault={p.id === defaultVoiceId} audio={audio} busy={busy}
+                makingHere={makingVoice === p.id} rendering={rendering} confirm={confirm}
+                onHear={onHear} onChoose={choose} onMakeAll={makeAll} onDelete={remove} />
+            ))}
+            {g.key === 'fish_audio' && <VoiceSearch profiles={profiles} onAdd={onAddVoice} setMsg={setMsg} />}
+          </section>
+        );
+      })}
+
+      <SheetMessage msg={msg} />
 
       <form className="announcer-section" onSubmit={addSub}>
         <div className="announcer-section-head"><span><UserPlus size={14} /> Add a sub</span></div>
@@ -382,7 +506,6 @@ function SettingsSheet({ profiles, defaultVoiceId, audio, former, onHear, onChoo
         </button>
       </form>
 
-      <SheetMessage msg={msg} />
 
       {former.length > 0 && (
         <section className="announcer-section">
@@ -766,13 +889,21 @@ export default function Announcer({ lineups }) {
     await api(`/api/announcer/player/${playerId}`, 'DELETE');
     await fetchRoster();
   };
-  const renderAll = async () => {
+  const renderAll = async (voiceId) => {
     setBatchBusy(true);
     try {
-      const data = await api('/api/announcer/render-all', 'POST');
+      const data = await api('/api/announcer/render-all', 'POST', voiceId ? { voice_id: voiceId } : {});
       await fetchRoster();
       return data.count ?? 0;
     } finally { setBatchBusy(false); }
+  };
+  const addVoice = async (v) => {
+    await api('/api/announcer/voice-profiles', 'POST', { fish_reference_id: v.id, name: v.title });
+    await fetchProfiles();
+  };
+  const deleteVoice = async (profileId) => {
+    await api(`/api/announcer/voice-profiles/${profileId}`, 'DELETE');
+    await fetchProfiles();
   };
   const makeMissing = async () => {
     try {
@@ -884,8 +1015,10 @@ export default function Announcer({ lineups }) {
           onRemove={removePlayer} onMoment={fireMoment} />
       )}
       {sheet?.kind === 'settings' && (
-        <SettingsSheet profiles={profiles} defaultVoiceId={defaultVoiceId} audio={audio} former={former} onHear={hear}
-          onChooseVoice={chooseVoice} onAddSub={addSub} onEdit={(x) => setSheet({ kind: 'player', id: x.id })} onClose={closeSheet} />
+        <SettingsSheet profiles={profiles} defaultVoiceId={defaultVoiceId} audio={audio} former={former}
+          rendering={counts.rendering} onHear={hear} onChooseVoice={chooseVoice} onMakeAllInVoice={renderAll}
+          onAddVoice={addVoice} onDeleteVoice={deleteVoice} onAddSub={addSub}
+          onEdit={(x) => setSheet({ kind: 'player', id: x.id })} onClose={closeSheet} />
       )}
       {sheet?.kind === 'pa' && <PASheet audio={audio} onClose={closeSheet} />}
     </div>

@@ -5046,7 +5046,11 @@ def handle_announcer_render(player_id):
 
 @app.route('/api/announcer/render-all', methods=['POST'])
 def handle_announcer_render_all():
-    """Batch render all pending players (sequential, in background)."""
+    """Batch render all pending players (sequential, in background).
+
+    Body `{voice_id}` instead makes a new call in that voice for every active
+    player, whatever their status; it is added next to their existing calls.
+    """
     blocked = _guard_mutating_request()
     if blocked:
         return blocked
@@ -5054,19 +5058,32 @@ def handle_announcer_render_all():
     import threading
     from announcer_engine import claim_render_batch, render_players
 
+    voice_id = str((request.get_json(silent=True) or {}).get("voice_id") or "").strip()
+    if voice_id:
+        from announcer_engine import get_voice_profile, provider_unavailable_reason, claim_voice_batch
+        profile = get_voice_profile(voice_id) if _VOICE_PROFILE_ID_RE.match(voice_id) else None
+        if not profile:
+            return jsonify({"error": "unknown_voice_profile"}), 400
+        # Refuse before claiming: otherwise every row, good calls included,
+        # would flip to "rendering" and then to "error".
+        reason = provider_unavailable_reason(profile)
+        if reason:
+            return jsonify({"error": "voice_unavailable", "reason": reason}), 409
+
     # Every player in the batch shows "rendering" before this returns.
-    ids = claim_render_batch()
+    ids = claim_voice_batch() if voice_id else claim_render_batch()
 
     def _bg_render_all():
         try:
-            result = render_players(ids)
+            result = render_players(ids, voice_id=voice_id) if voice_id else render_players(ids)
             logging.info("[Announcer] Batch render: %s", result)
         except Exception as e:
             logging.error("[Announcer] batch render error: %s", e)
 
     if ids:
         threading.Thread(target=_bg_render_all, daemon=True).start()
-    return jsonify({"status": "rendering_all", "count": len(ids), "player_ids": ids}), 202
+    return jsonify({"status": "rendering_all", "count": len(ids), "player_ids": ids,
+                    **({"voice_id": voice_id} if voice_id else {})}), 202
 
 
 @app.route('/api/announcer/phonetics/<player_id>', methods=['POST'])
@@ -5282,7 +5299,12 @@ def handle_announcer_voice_profile_default():
     if not _VOICE_PROFILE_ID_RE.match(profile_id):
         return jsonify({"error": "invalid_profile_id"}), 400
     from announcer_engine import (set_default_voice_profile, load_announcer_roster,
-                                  save_announcer_roster, _ROSTER_LOCK)
+                                  save_announcer_roster, _ROSTER_LOCK,
+                                  get_voice_profile, provider_unavailable_reason)
+    profile = get_voice_profile(profile_id)
+    if profile and provider_unavailable_reason(profile):
+        return jsonify({"error": "voice_unavailable",
+                        "reason": provider_unavailable_reason(profile)}), 409
     try:
         set_default_voice_profile(profile_id)
     except ValueError:
@@ -5304,7 +5326,11 @@ def handle_announcer_voice_sample(profile_id):
     if not _VOICE_PROFILE_ID_RE.match(profile_id or ""):
         return jsonify({"error": "invalid_profile_id"}), 400
     try:
-        from announcer_engine import render_voice_sample
+        from announcer_engine import render_voice_sample, get_voice_profile, provider_unavailable_reason
+        profile = get_voice_profile(profile_id)
+        reason = provider_unavailable_reason(profile) if profile else ""
+        if reason:
+            return jsonify({"error": "voice_unavailable", "reason": reason}), 409
         path = render_voice_sample(profile_id)
     except ValueError:
         return jsonify({"error": "unknown_profile"}), 404
@@ -5313,6 +5339,52 @@ def handle_announcer_voice_sample(profile_id):
         return jsonify({"error": "sample_failed"}), 503
     return Response(path.read_bytes(), mimetype="audio/mpeg",
                     headers={"Cache-Control": "public, max-age=86400"})
+
+
+@app.route('/api/announcer/voice-library/search', methods=['GET'])
+def handle_announcer_voice_library_search():
+    """Search the public fish.audio voice catalogue (no key needed)."""
+    query = request.args.get("q", "").strip()
+    if not 2 <= len(query) <= 60:
+        return jsonify({"error": "invalid_query"}), 400
+    try:
+        from announcer_engine import search_fish_voices
+        return jsonify({"results": search_fish_voices(query, limit=12)})
+    except Exception as e:
+        logging.warning("[Announcer] fish.audio search failed: %s", e)
+        return jsonify({"error": "voice_search_failed"}), 502
+
+
+@app.route('/api/announcer/voice-profiles', methods=['POST'])
+def handle_announcer_voice_profile_add():
+    """Add a fish.audio catalogue voice. Body: {fish_reference_id, name?}."""
+    blocked = _guard_mutating_request()
+    if blocked:
+        return blocked
+    data = request.get_json(silent=True) or {}
+    from announcer_engine import add_custom_voice_profile, VoiceProfileError
+    try:
+        profile = add_custom_voice_profile(str(data.get("fish_reference_id") or ""),
+                                           str(data.get("name") or ""))
+    except VoiceProfileError as e:
+        return jsonify({"error": e.code}), e.status
+    return jsonify({"status": "ok", "profile": profile}), 201
+
+
+@app.route('/api/announcer/voice-profiles/<profile_id>', methods=['DELETE'])
+def handle_announcer_voice_profile_delete(profile_id):
+    """Remove a custom voice. Built-in voices answer 409."""
+    blocked = _guard_mutating_request()
+    if blocked:
+        return blocked
+    if not _VOICE_PROFILE_ID_RE.match(profile_id or ""):
+        return jsonify({"error": "invalid_profile_id"}), 400
+    from announcer_engine import delete_custom_voice_profile, VoiceProfileError
+    try:
+        delete_custom_voice_profile(profile_id)
+    except VoiceProfileError as e:
+        return jsonify({"error": e.code}), e.status
+    return jsonify({"status": "ok", "deleted": profile_id})
 
 
 # ---------------------------------------------------------------------------

@@ -2248,3 +2248,10 @@ body:has(.announcer-modal-overlay) .navbar {
   .announcer-modal-overlay { padding-bottom: calc(var(--bottom-nav-space) + var(--space-sm)); }
   .announcer-sheet { max-height: calc(100dvh - var(--bottom-nav-space) - var(--safe-top, 0px) - 2 * var(--space-md)); }
 }
+/* Voice rows: actions wrap under the name on narrow phones; 44px targets kept. */
+.announcer-voice-row { flex-wrap: wrap; }
+.announcer-voice-row .announcer-item-text { flex: 1 1 9rem; }
+.announcer-voice-actions { display: flex; align-items: center; gap: var(--space-xs); margin-left: auto; flex-shrink: 0; }
+.announcer-voice-actions .announcer-btn { min-height: var(--touch-min); white-space: nowrap; }
+.announcer-item-row--off .announcer-item-text strong { color: var(--text-muted); }
+.announcer-item-row--off .announcer-btn-round { opacity: 0.4; }

@@ -482,7 +482,7 @@ class TestRenderVoiceSample:
                 calls.append((text, voice_config["id"]))
                 return b"x" * 2000
 
-        monkeypatch.setattr(ae_mod, "get_tts_provider", lambda: _P())
+        monkeypatch.setattr(ae_mod, "provider_for_voice", lambda *a, **k: _P())
         monkeypatch.setattr(ae_mod, "archive_and_transcode",
                             lambda audio, pid, **kw: (None, kw["out_mp3"].write_bytes(audio) and kw["out_mp3"]))
         p1 = ae_mod.render_voice_sample("george")
@@ -1378,8 +1378,7 @@ class TestRenderPlayerAudio:
         mock_provider = MagicMock()
         mock_provider.synthesize.return_value = b"raw_audio"
         mock_provider.name = "mock"
-        monkeypatch.setattr(ae_mod, "get_quick_tts_provider", lambda: mock_provider)
-        monkeypatch.setattr(ae_mod, "get_tts_provider", lambda: mock_provider)
+        monkeypatch.setattr(ae_mod, "provider_for_voice", lambda *a, **k: mock_provider)
         result = ae_mod.render_player_audio("7-jane-doe", quality="quick")
         assert result["status"] == "ready"
         assert "/announcer-clips/" in result["announcer_audio_url"]
@@ -1390,7 +1389,7 @@ class TestRenderPlayerAudio:
         mock_provider = MagicMock()
         mock_provider.synthesize.return_value = b"best_audio"
         mock_provider.name = "mock"
-        monkeypatch.setattr(ae_mod, "get_tts_provider", lambda: mock_provider)
+        monkeypatch.setattr(ae_mod, "provider_for_voice", lambda *a, **k: mock_provider)
         monkeypatch.setattr(ae_mod, "archive_and_transcode",
                             MagicMock(side_effect=RuntimeError("ffmpeg not found")))
         result = ae_mod.render_player_audio("7-jane-doe", quality="best")
@@ -1404,7 +1403,7 @@ class TestRenderPlayerAudio:
         mock_provider.name = "mock"
         fake_mp3 = tmp_path / "out.mp3"
         fake_mp3.write_bytes(b"mp3")
-        monkeypatch.setattr(ae_mod, "get_tts_provider", lambda: mock_provider)
+        monkeypatch.setattr(ae_mod, "provider_for_voice", lambda *a, **k: mock_provider)
         monkeypatch.setattr(ae_mod, "archive_and_transcode",
                             MagicMock(return_value=(tmp_path / "out.flac", fake_mp3)))
         result = ae_mod.render_player_audio("7-jane-doe", quality="best")
@@ -1416,7 +1415,7 @@ class TestRenderPlayerAudio:
         mock_provider = MagicMock()
         mock_provider.synthesize.side_effect = RuntimeError("TTS boom")
         mock_provider.name = "mock"
-        monkeypatch.setattr(ae_mod, "get_tts_provider", lambda: mock_provider)
+        monkeypatch.setattr(ae_mod, "provider_for_voice", lambda *a, **k: mock_provider)
         with pytest.raises(RuntimeError, match="TTS boom"):
             ae_mod.render_player_audio("7-jane-doe", quality="best")
         # player should be marked error
@@ -1430,7 +1429,7 @@ class TestRenderPlayerAudio:
         # Return bytes larger than the 10MB cap
         mock_provider.synthesize.return_value = b"x" * (ae_mod.MAX_TTS_OUTPUT_BYTES + 1)
         mock_provider.name = "mock"
-        monkeypatch.setattr(ae_mod, "get_tts_provider", lambda: mock_provider)
+        monkeypatch.setattr(ae_mod, "provider_for_voice", lambda *a, **k: mock_provider)
         with pytest.raises(RuntimeError, match="TTS output too large"):
             ae_mod.render_player_audio("7-jane-doe", quality="best")
 
@@ -1650,8 +1649,7 @@ class TestQuickRenderGetsStadiumWrap:
         monkeypatch.setattr(ae_mod, "CLIPS_DIR", tmp_path / "clips")
         monkeypatch.setattr(ae_mod, "_bootstrap_roster_from_team", lambda: [])
         monkeypatch.setattr(ae_mod, "_ensure_dirs", lambda: None)
-        monkeypatch.setattr(ae_mod, "get_quick_tts_provider", lambda: MockTTS())
-        monkeypatch.setattr(ae_mod, "get_tts_provider", lambda: MockTTS())
+        monkeypatch.setattr(ae_mod, "provider_for_voice", lambda *a, **k: MockTTS())
         wrap = MagicMock(return_value=(None, tmp_path / "clips" / "p1" / "x.mp3"))
         monkeypatch.setattr(ae_mod, "archive_and_transcode", wrap)
         return wrap
@@ -1721,7 +1719,7 @@ class TestElevenLabsPauses:
                 captured["text"] = text
                 return b"\xff\xfb" + b"\x00" * 100
 
-        monkeypatch.setattr(ae_mod, "get_tts_provider", lambda: _EL())
+        monkeypatch.setattr(ae_mod, "provider_for_voice", lambda *a, **k: _EL())
         monkeypatch.setattr(ae_mod, "archive_and_transcode",
                             lambda audio, pid, **kw: (None, (tmp_path / "clips" / pid).mkdir(parents=True, exist_ok=True) or (tmp_path / "clips" / pid / "x.mp3")))
         (tmp_path / "clips" / "7-ember-h").mkdir(parents=True, exist_ok=True)
@@ -1800,7 +1798,7 @@ class TestStaleRenderMarking:
                 calls.append(text)
                 return b"x" * 2000
 
-        monkeypatch.setattr(ae_mod, "get_tts_provider", lambda: _P())
+        monkeypatch.setattr(ae_mod, "provider_for_voice", lambda *a, **k: _P())
         monkeypatch.setattr(ae_mod, "archive_and_transcode",
                             lambda audio, pid, **kw: (None, kw["out_mp3"].write_bytes(audio) and kw["out_mp3"]))
         out = ae_mod.render_voice_sample("halo")

@@ -507,6 +507,60 @@ class ElevenLabsTTS(TTSProvider):
         raise RuntimeError("ElevenLabs: exhausted retries")  # pragma: no cover
 
 
+FISH_AUDIO_API = "https://api.fish.audio"
+FISH_AUDIO_DEFAULT_MODEL = "s2.1-pro"
+
+
+class FishAudioTTS(TTSProvider):
+    """fish.audio TTS: character voices picked by the catalogue model id.
+
+    The voice comes from `fish_reference_id` in the voice profile; without one
+    fish.audio uses its default voice, so the provider still works in the chain.
+    """
+
+    @property
+    def name(self) -> str:
+        return "fish_audio"
+
+    def available(self) -> bool:
+        return bool(_resolve_secret("FISH_AUDIO_API_KEY"))
+
+    def synthesize(self, text: str, voice_config: dict) -> bytes:
+        api_key = _resolve_secret("FISH_AUDIO_API_KEY")
+        if not api_key:
+            raise RuntimeError("FISH_AUDIO_API_KEY not set")
+        model = os.getenv("FISH_AUDIO_MODEL", "").strip() or FISH_AUDIO_DEFAULT_MODEL
+        payload = {
+            "text": text,
+            "format": "mp3",
+            "mp3_bitrate": 128,
+            "normalize": True,
+            "latency": "normal",
+            "prosody": {"speed": float(voice_config.get("speed", 1.0)), "volume": 0},
+        }
+        if voice_config.get("fish_reference_id"):
+            payload["reference_id"] = voice_config["fish_reference_id"]
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "model": model,
+        }
+        resp = requests.post(f"{FISH_AUDIO_API}/v1/tts", json=payload, headers=headers, timeout=60)
+        if resp.status_code != 200:
+            try:
+                err = resp.json()
+            except ValueError:
+                err = None
+            err = err if isinstance(err, dict) else {}
+            detail = err.get("message") or resp.text[:200]
+            reason = err.get("reason") or ""
+            raise RuntimeError(f"fish.audio returned {resp.status_code}: {detail}"
+                               + (f" ({reason})" if reason else ""))
+        if not resp.content:
+            raise RuntimeError("fish.audio returned no audio")
+        return resp.content
+
+
 class EdgeTTSProvider(TTSProvider):
     """Microsoft Edge TTS via edge-tts package — free, no API key, neural voices.
 
@@ -723,8 +777,8 @@ def _has_replicate_voice_ref() -> bool:
 
 
 # Ordered provider registry — probed top-to-bottom at render time.
-# Best Quality chain (Mac/cloud):  LocalVLLM → Replicate3B → ElevenLabs → EdgeTTS → Kokoro → GoogleCloud → Mock
-# Quick chain (Pi-side):           LocalVLLM → Replicate0.6B → ElevenLabs → EdgeTTS → Kokoro → GoogleCloud → Mock
+# Best Quality chain (Mac/cloud):  LocalVLLM → Replicate3B → ElevenLabs → FishAudio → EdgeTTS → Kokoro → GoogleCloud → Mock
+# Quick chain (Pi-side):           LocalVLLM → Replicate0.6B → ElevenLabs → FishAudio → EdgeTTS → Kokoro → GoogleCloud → Mock
 #
 # ElevenLabs sits above EdgeTTS because it is the only key-free-of-Replicate path
 # that actually delivers the stadium-announcer read.  EdgeTTS/Kokoro/GoogleCloud
@@ -739,6 +793,7 @@ def _build_provider_chain(quick: bool = False) -> list[TTSProvider]:
         chain.append(Replicate06bTTS() if quick else ReplicateTTS())
     if _resolve_secret("ELEVENLABS_API_KEY"):
         chain.append(ElevenLabsTTS())
+    chain.append(FishAudioTTS())  # available() gates it on FISH_AUDIO_API_KEY
     chain.append(EdgeTTSProvider())
     chain.append(KokoroTTSProvider())
     chain.append(GoogleCloudTTSProvider())
@@ -836,6 +891,19 @@ def check_provider_health() -> dict:
         except Exception:
             results["elevenlabs_ping"] = False
 
+    fish_key = _resolve_secret("FISH_AUDIO_API_KEY")
+    if fish_key:
+        try:
+            r = _req.get(
+                f"{FISH_AUDIO_API}/model",
+                params={"page_size": 1},
+                headers={"Authorization": f"Bearer {fish_key}"},
+                timeout=5,
+            )
+            results["fish_audio_ping"] = r.status_code == 200
+        except Exception:
+            results["fish_audio_ping"] = False
+
     return results
 
 
@@ -854,6 +922,7 @@ VOICE_PROFILES: list[dict] = [
         "id": "halo", "name": "Halo Announcer",
         "tagline": "Deep, booming, larger than life — the default",
         "elevenlabs_voice_id": "nPczCjzI2devNBz1zQrb", "model_id": "eleven_multilingual_v2",
+        "provider": "elevenlabs",
         "voice_settings": {"stability": 0.30, "similarity_boost": 0.85, "style": 0.75, "use_speaker_boost": True},
         "pitch_semitones": -2.0,
         # Qwen3 VoiceDesign direction used by the free render worker.
@@ -865,6 +934,7 @@ VOICE_PROFILES: list[dict] = [
         "id": "brian", "name": "Brian",
         "tagline": "Deep and resonant, straight read",
         "elevenlabs_voice_id": "nPczCjzI2devNBz1zQrb", "model_id": "eleven_multilingual_v2",
+        "provider": "elevenlabs",
         "voice_settings": {"stability": 0.45, "similarity_boost": 0.85, "style": 0.45, "use_speaker_boost": True},
         "pitch_semitones": 0.0,
         "qwen_instruct": ("A deep, resonant male baritone announcer giving a confident, straight, "
@@ -874,6 +944,7 @@ VOICE_PROFILES: list[dict] = [
         "id": "callum", "name": "Callum",
         "tagline": "Gravel and grit",
         "elevenlabs_voice_id": "N2lVS1w4EtoT3dr4eOWO", "model_id": "eleven_multilingual_v2",
+        "provider": "elevenlabs",
         "voice_settings": {"stability": 0.35, "similarity_boost": 0.85, "style": 0.65, "use_speaker_boost": True},
         "pitch_semitones": 0.0,
         "qwen_instruct": ("A rough, gravelly, gritty male announcer with a raspy edge and swagger, "
@@ -883,6 +954,7 @@ VOICE_PROFILES: list[dict] = [
         "id": "george", "name": "George",
         "tagline": "Warm storyteller",
         "elevenlabs_voice_id": "JBFqnCBsd6RMkjVDRZzb", "model_id": "eleven_multilingual_v2",
+        "provider": "elevenlabs",
         "voice_settings": {"stability": 0.40, "similarity_boost": 0.85, "style": 0.55, "use_speaker_boost": True},
         "pitch_semitones": 0.0,
         "qwen_instruct": ("A warm, friendly male storyteller voice announcing at a ballpark, "
@@ -892,13 +964,113 @@ VOICE_PROFILES: list[dict] = [
         "id": "adam", "name": "Adam",
         "tagline": "Classic PA announcer",
         "elevenlabs_voice_id": "pNInz6obpgDQGcFmaJgB", "model_id": "eleven_multilingual_v2",
+        "provider": "elevenlabs",
         "voice_settings": {"stability": 0.40, "similarity_boost": 0.85, "style": 0.60, "use_speaker_boost": True},
         "pitch_semitones": 0.0,
         "qwen_instruct": ("An electrifying Major League Baseball stadium PA announcer introducing the home "
                           "team's star. Booming baritone, building anticipation, then stretching the "
                           "player's name out long and loud as the crowd roars."),
     },
+    # fish.audio character voices, by public catalogue model id
+    # (https://fish.audio/m/<id>). Need FISH_AUDIO_API_KEY; the qwen_instruct
+    # is what the free render worker uses when it takes the job instead.
+    {
+        "id": "steitzer", "name": "Jeff Steitzer (Halo Reach)",
+        "tagline": "The Halo multiplayer announcer",
+        "provider": "fish_audio", "fish_reference_id": "86126c4c4dad4911979556b4569802cd",
+        "pitch_semitones": 0.0,
+        "qwen_instruct": ("A colossal, gravelly, ultra-deep male video-game multiplayer announcer. "
+                          "Slow, heavy and punched, with long dramatic pauses, booming every word."),
+    },
+    {
+        "id": "optimus", "name": "Optimus Prime",
+        "tagline": "Noble robot commander",
+        "provider": "fish_audio", "fish_reference_id": "5f8f95aa2dc24a8c96a61bf34938f0f0",
+        "pitch_semitones": 0.0,
+        "qwen_instruct": ("A deep, noble, metallic-edged heroic male commander voice. Slow, "
+                          "resonant and authoritative, delivering each word like a rallying speech."),
+    },
+    {
+        "id": "smash", "name": "Super Smash Bros. Announcer",
+        "tagline": "Fighting-game hype, big and booming",
+        "provider": "fish_audio", "fish_reference_id": "90e65eaaf50e4470b8e6d43ee6afd7d5",
+        "pitch_semitones": 0.0,
+        "qwen_instruct": ("A huge, booming fighting-game announcer calling out a new challenger. "
+                          "Deep, dramatic and loud, stretching the name out with arena echo energy."),
+    },
+    {
+        "id": "spongebob", "name": "SpongeBob",
+        "tagline": "Goofy, high and over-excited",
+        "provider": "fish_audio", "fish_reference_id": "f2e56a18ede949129257ea66be6ef2c2",
+        "pitch_semitones": 0.0,
+        "qwen_instruct": ("A high-pitched, goofy, wildly enthusiastic cartoon voice, bouncing with "
+                          "excitement and giggling energy, shouting the name with glee."),
+    },
+    {
+        "id": "patrick", "name": "Patrick",
+        "tagline": "Slow, dopey and lovable",
+        "provider": "fish_audio", "fish_reference_id": "f2b8fcbe27884e9bb150af0569823727",
+        "pitch_semitones": 0.0,
+        "qwen_instruct": ("A slow, dopey, deep and lovable cartoon voice, cheerful and a little "
+                          "confused, drawing out every word happily."),
+    },
+    {
+        "id": "mortal_kombat", "name": "Mortal Kombat Announcer",
+        "tagline": "Menacing arcade fight call",
+        "provider": "fish_audio", "fish_reference_id": "88872b3d83694d8490b55d75480205a0",
+        "pitch_semitones": 0.0,
+        "qwen_instruct": ("A menacing, gravelly, deep arcade fighting-game announcer, intense and "
+                          "ominous, punching the name out like the start of a fight."),
+    },
 ]
+
+# Custom fish.audio voices the coach added from the catalogue. Read on every
+# lookup: the API and sync containers (and gunicorn workers) are separate
+# processes, so an in-memory copy would go stale.
+VOICE_PROFILES_CUSTOM_FILE = ANNOUNCER_DIR / "voice_profiles_custom.json"
+MAX_CUSTOM_VOICES = 24
+_FISH_ID_RE = _re.compile(r"^[0-9a-f]{32}$")
+
+# Which key each named provider needs, for the UI's "available" flag and the
+# error a render gets when it is missing.
+_PROVIDER_KEYS = {"elevenlabs": "ELEVENLABS_API_KEY", "fish_audio": "FISH_AUDIO_API_KEY"}
+_PROVIDER_CLASSES = {"elevenlabs": ElevenLabsTTS, "fish_audio": FishAudioTTS}
+
+
+def _load_custom_profiles() -> list[dict]:
+    data = _read_json(VOICE_PROFILES_CUSTOM_FILE, default=[])
+    return [p for p in data if isinstance(p, dict) and p.get("id")] if isinstance(data, list) else []
+
+
+def _all_profiles() -> list[dict]:
+    return VOICE_PROFILES + _load_custom_profiles()
+
+
+def provider_unavailable_reason(profile: dict) -> str:
+    """Why a profile's named provider can't render right now, or '' if it can."""
+    key = _PROVIDER_KEYS.get(profile.get("provider") or "")
+    if key and not _resolve_secret(key):
+        return f"{key} not set"
+    return ""
+
+
+def provider_for_voice(voice: dict, quality: str = "best") -> TTSProvider:
+    """The provider a render in this voice must use.
+
+    A profile that names a provider gets that provider or a clear error: a
+    character voice silently rendered in Edge TTS is the wrong voice, not a
+    fallback. Profiles without one keep the ordinary chain.
+    """
+    name = voice.get("provider") or ""
+    if not name:
+        return get_quick_tts_provider() if quality == "quick" else get_tts_provider()
+    cls = _PROVIDER_CLASSES.get(name)
+    if cls is None:
+        raise RuntimeError(f"Unknown TTS provider: {name}")
+    reason = provider_unavailable_reason(voice)
+    if reason:
+        raise RuntimeError(reason)
+    return cls()
 
 VOICE_SELECTION_FILE = ANNOUNCER_DIR / "voice_selection.json"
 VOICE_SAMPLES_DIR = ANNOUNCER_DIR / "voice_samples"
@@ -912,17 +1084,18 @@ def text_for_provider(provider: "TTSProvider", raw_text: str) -> str:
     """Turn the script's [breath]/[pause] markup into what each provider can use.
 
     Edge TTS builds SSML itself, ElevenLabs takes <break/> tags, everything
-    else gets plain text so the markers are never spoken literally.
+    else (fish.audio included) gets plain text so the markers are never
+    spoken literally.
     """
     if isinstance(provider, EdgeTTSProvider):
         return raw_text
     if isinstance(provider, ElevenLabsTTS):
         return _tags_to_elevenlabs(raw_text)
-    return _strip_markup_tags(raw_text)
+    return _strip_markup_tags(raw_text)  # fish.audio, Kokoro, Google, workers
 
 
 def get_voice_profile(profile_id: str | None) -> dict | None:
-    for p in VOICE_PROFILES:
+    for p in _all_profiles():
         if p["id"] == profile_id:
             return p
     return None
@@ -935,8 +1108,15 @@ def get_default_voice_profile_id() -> str:
 
 
 def load_voice_profiles() -> list[dict]:
+    """Built-in + custom profiles, each saying whether its provider can render now."""
     default_id = get_default_voice_profile_id()
-    return [{**p, "is_default": p["id"] == default_id} for p in VOICE_PROFILES]
+    out = []
+    for p in _all_profiles():
+        reason = provider_unavailable_reason(p)
+        out.append({**p, "provider": p.get("provider") or "", "available": not reason,
+                    "unavailable_reason": reason, "custom": bool(p.get("custom")),
+                    "is_default": p["id"] == default_id})
+    return out
 
 
 def get_default_voice_profile() -> dict:
@@ -950,6 +1130,105 @@ def set_default_voice_profile(profile_id: str) -> dict:
     _ensure_dirs()
     _atomic_write_json(VOICE_SELECTION_FILE, {"default_profile_id": profile_id})
     return profile
+
+
+class VoiceProfileError(ValueError):
+    """A custom-voice request the caller got wrong; `code` is the API error."""
+
+    def __init__(self, code: str, status: int = 400):
+        super().__init__(code)
+        self.code, self.status = code, status
+
+
+def _fish_model(item: dict) -> dict:
+    return {"id": item.get("_id") or "", "title": item.get("title") or "",
+            "likes": int(item.get("like_count") or 0),
+            "author": (item.get("author") or {}).get("nickname") or ""}
+
+
+def _usable_fish_model(item: dict) -> bool:
+    return (isinstance(item, dict) and _FISH_ID_RE.match(item.get("_id") or "") is not None
+            and item.get("type", "tts") == "tts" and item.get("state", "trained") == "trained"
+            and not item.get("dmca_taken_down"))
+
+
+def search_fish_voices(query: str, limit: int = 12) -> list[dict]:
+    """Public fish.audio catalogue search (no key). Raises RuntimeError on failure."""
+    resp = requests.get(f"{FISH_AUDIO_API}/model",
+                        params={"title": query, "language": "en", "sort_by": "score",
+                                "page_size": limit},
+                        timeout=10)
+    if resp.status_code != 200:
+        raise RuntimeError(f"fish.audio search returned {resp.status_code}")
+    items = (resp.json() or {}).get("items") or []
+    return [_fish_model(i) for i in items if _usable_fish_model(i)][:limit]
+
+
+def lookup_fish_voice(reference_id: str) -> dict | None:
+    """One public catalogue entry, or None if fish.audio doesn't have it."""
+    if not _FISH_ID_RE.match(reference_id or ""):
+        return None
+    resp = requests.get(f"{FISH_AUDIO_API}/model/{reference_id}", timeout=10)
+    if resp.status_code == 404:
+        return None
+    if resp.status_code != 200:
+        raise RuntimeError(f"fish.audio lookup returned {resp.status_code}")
+    item = {**(resp.json() or {}), "_id": reference_id}
+    return _fish_model(item) if _usable_fish_model(item) else None
+
+
+def add_custom_voice_profile(reference_id: str, name: str = "") -> dict:
+    """Add a fish.audio catalogue voice as a profile. Raises VoiceProfileError."""
+    reference_id = (reference_id or "").strip().lower()
+    if not _FISH_ID_RE.match(reference_id):
+        raise VoiceProfileError("invalid_fish_reference_id")
+    name = _re.sub(r"[\x00-\x1f\x7f]", "", name or "").strip()[:60]
+    profile_id = f"fish_{reference_id[:8]}"
+
+    def _check_free(profiles: list[dict]) -> None:
+        if any(p.get("fish_reference_id") == reference_id for p in profiles):
+            raise VoiceProfileError("voice_already_added", 409)
+        if any(p["id"] == profile_id for p in profiles):
+            raise VoiceProfileError("voice_id_taken", 409)
+
+    _check_free(_all_profiles())  # before spending a network call
+    author = ""
+    if not name:
+        try:
+            model = lookup_fish_voice(reference_id)
+        except (requests.RequestException, RuntimeError, ValueError) as e:
+            logging.warning("[Announcer] fish.audio lookup failed for %s: %s", reference_id, e)
+            raise VoiceProfileError("voice_lookup_failed", 502)
+        if not model:
+            raise VoiceProfileError("voice_not_found", 404)
+        name, author = model["title"][:60] or profile_id, model["author"]
+    profile = {
+        "id": profile_id, "name": name,
+        "tagline": f"fish.audio voice by {author}" if author else "Custom fish.audio voice",
+        "provider": "fish_audio", "fish_reference_id": reference_id,
+        "pitch_semitones": 0.0, "custom": True,
+    }
+    # Re-check under the lock: another request may have added it meanwhile.
+    with _ROSTER_LOCK:
+        _check_free(_all_profiles())
+        custom = _load_custom_profiles()
+        if len(custom) >= MAX_CUSTOM_VOICES:
+            raise VoiceProfileError("too_many_custom_voices", 409)
+        _ensure_dirs()
+        _atomic_write_json(VOICE_PROFILES_CUSTOM_FILE, custom + [profile])
+    return profile
+
+
+def delete_custom_voice_profile(profile_id: str) -> None:
+    """Remove a custom profile. Built-ins can't be removed. Raises VoiceProfileError."""
+    if any(p["id"] == profile_id for p in VOICE_PROFILES):
+        raise VoiceProfileError("builtin_voice", 409)
+    with _ROSTER_LOCK:
+        custom = _load_custom_profiles()
+        kept = [p for p in custom if p["id"] != profile_id]
+        if len(kept) == len(custom):
+            raise VoiceProfileError("unknown_profile", 404)
+        _atomic_write_json(VOICE_PROFILES_CUSTOM_FILE, kept)
 
 
 def resolve_voice_profile(player: dict) -> dict:
@@ -969,7 +1248,7 @@ def render_voice_sample(profile_id: str) -> Path:
     out = VOICE_SAMPLES_DIR / f"{profile_id}.v{STADIUM_WRAP_VERSION}.mp3"
     if out.exists() and out.stat().st_size > 1000:
         return out
-    provider = get_tts_provider()
+    provider = provider_for_voice(profile)
     text = text_for_provider(provider, VOICE_SAMPLE_TEXT)
     audio = provider.synthesize(text, profile)
     try:
@@ -1565,8 +1844,8 @@ def render_player_audio(player_id: str, game_context: dict | None = None,
     update_player(player_id, rendering_fields(player.get("render_job_id") or ""))
 
     try:
-        provider = get_quick_tts_provider() if quality == "quick" else get_tts_provider()
         voice = get_voice_profile(voice_id) or resolve_voice_profile(player)
+        provider = provider_for_voice(voice, quality)
         raw_text = build_announcement_text(player, game_context)
         # Edge gets SSML, ElevenLabs gets <break/> pauses, the rest plain text —
         # never let [breath] / [pause:Xs] be spoken literally.
@@ -1733,10 +2012,20 @@ def claim_render_batch() -> list[str]:
     players saw nothing in flight, stopped polling, and the rest of the batch
     finished silently. Players already rendering are left to their own job.
     """
+    return _claim(lambda p: p.get("status") in ("pending", "error"))
+
+
+def claim_voice_batch() -> list[str]:
+    """Claim every active player for a new call in one voice, whatever their
+    status: "make all calls in this voice" adds a call to players who already
+    have one. Only rows already rendering are left to their own job."""
+    return _claim(lambda p: p.get("status") != "rendering")
+
+
+def _claim(wanted) -> list[str]:
     with _ROSTER_LOCK:
         roster = load_announcer_roster()
-        ids = [p["id"] for p in roster
-               if p.get("is_active") and p.get("status") in ("pending", "error")]
+        ids = [p["id"] for p in roster if p.get("is_active") and wanted(p)]
         if ids:
             for p in roster:
                 if p["id"] in ids:
@@ -1745,12 +2034,16 @@ def claim_render_batch() -> list[str]:
     return ids
 
 
-def render_players(player_ids: list[str]) -> dict:
-    """Render the standard walk-up for each player in turn. Returns a summary."""
+def render_players(player_ids: list[str], voice_id: str | None = None) -> dict:
+    """Render the standard walk-up for each player in turn, in `voice_id` if
+    given (each lands as an extra call; existing ones stay). Returns a summary."""
     results = {"total": len(player_ids), "success": 0, "failed": 0, "errors": []}
     for pid in player_ids:
         try:
-            render_player_audio(pid)
+            if voice_id:
+                render_player_audio(pid, voice_id=voice_id)
+            else:
+                render_player_audio(pid)
             results["success"] += 1
         except Exception as e:
             results["failed"] += 1

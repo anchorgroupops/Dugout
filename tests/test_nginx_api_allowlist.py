@@ -90,3 +90,19 @@ def test_mutating_route_is_allowed_by_nginx(rule, sample, methods):
         f"{rule}: nginx location `{pat}` allows {sorted(allowed)}, "
         f"Flask needs {sorted(methods)} — add/extend a location in client/nginx.conf"
     )
+
+
+@pytest.mark.parametrize("path,method", [
+    ("/api/announcer/voice-profiles", "POST"),                  # add a fish.audio voice
+    ("/api/announcer/voice-profiles/fish_01234567", "DELETE"),  # remove a custom voice
+    ("/api/announcer/voice-profiles/default", "POST"),          # keeps the write block
+    ("/api/announcer/voice-library/search", "GET"),             # catalogue proxy
+])
+def test_voice_library_paths_reach_flask(path, method):
+    pat, allowed = _match(path)
+    assert pat is not None and (allowed is None or method in allowed), (path, pat, allowed)
+
+
+def test_voice_default_keeps_the_long_render_timeout_location():
+    pat, _ = _match("/api/announcer/voice-profiles/default")
+    assert "render-all" in pat
