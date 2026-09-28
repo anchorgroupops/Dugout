@@ -3643,9 +3643,12 @@ class TestHandleScoreboardMoreBranches:
             with flask_app.test_client() as client:
                 resp = client.get("/api/scoreboard")
         data = resp.get_json()
-        # Local enrichment finds today's game by date fallback → overrides score
+        # Local enrichment finds today's game by date fallback and enriches
+        # batting stats, but a live game keeps its score from the GC API
+        # rather than the local (CSV-import) snapshot.
         assert data["status"] == "live"
-        assert data["sharks_score"] == 4  # from local file
+        assert data["sharks_score"] == 3  # from GC API, not local file
+        assert data["sharks_batting"] == [{"name": "Jane", "h": 1}]
 
 
 # ---------------------------------------------------------------------------

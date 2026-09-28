@@ -2413,12 +2413,17 @@ def handle_scoreboard():
                         (gdata.get("date") or "")[:10] == game_date):
                         result["sharks_batting"] = _augment_sharks_batting(gdata.get("sharks_batting") or [])
                         result["opponent_batting"] = gdata.get("opponent_batting") or []
-                        local_score = gdata.get("score")
-                        if isinstance(local_score, dict):
-                            if local_score.get("sharks") is not None:
-                                result["sharks_score"] = _safe_int(str(local_score["sharks"]))
-                            if local_score.get("opponent") is not None:
-                                result["opponent_score"] = _safe_int(str(local_score["opponent"]))
+                        # Local game files are CSV-import snapshots (final score of a
+                        # completed game, or a same-date doubleheader's other game) —
+                        # never overwrite a live game's score with one. Doing so showed
+                        # a stale/wrong score as current mid-game (SIGN candidate).
+                        if display_status != "live":
+                            local_score = gdata.get("score")
+                            if isinstance(local_score, dict):
+                                if local_score.get("sharks") is not None:
+                                    result["sharks_score"] = _safe_int(str(local_score["sharks"]))
+                                if local_score.get("opponent") is not None:
+                                    result["opponent_score"] = _safe_int(str(local_score["opponent"]))
                         break
                 except Exception:
                     continue
@@ -2749,10 +2754,16 @@ def _fetch_gc_live_events(gc_game_id: str) -> dict | None:
         runners = []
         outs = 0
         last_play = ""
+        outs_found = False
+        runners_found = False
 
         # Walk backwards through events to find current at-bat and game state.
         # Some streams expose `on_deck`/`next_batter` on plate-appearance events;
-        # capture either alongside `current_batter`.
+        # capture either alongside `current_batter`. `outs`/`runners` must only
+        # be taken from the FIRST (most recent) event that has them — without
+        # the found-flags this loop kept walking into older events whenever
+        # `next_batter` was missing (the common case) and overwrote outs/runners
+        # with the oldest event's values instead of the current game state.
         for ev in reversed(events):
             ev_type = str(ev.get("type", "")).lower()
             ev_data = ev.get("data") or ev
@@ -2773,10 +2784,11 @@ def _fetch_gc_live_events(gc_game_id: str) -> dict | None:
                         "number": str(on_deck_info.get("number", "")),
                     }
 
-            if ev_data.get("outs") is not None:
+            if not outs_found and ev_data.get("outs") is not None:
                 outs = int(ev_data.get("outs", 0))
+                outs_found = True
 
-            if ev_data.get("runners") is not None:
+            if not runners_found and ev_data.get("runners") is not None:
                 raw_runners = ev_data.get("runners") or []
                 # Normalize to {first, second, third} booleans regardless of API shape
                 if isinstance(raw_runners, list):
@@ -2805,6 +2817,7 @@ def _fetch_gc_live_events(gc_game_id: str) -> dict | None:
                         "second": bool(raw_runners.get("second") or raw_runners.get("2")),
                         "third": bool(raw_runners.get("third") or raw_runners.get("3")),
                     }
+                runners_found = True
 
             if not last_play and ev_data.get("description"):
                 last_play = str(ev_data["description"])[:200]
