@@ -165,17 +165,25 @@ def is_season(value: str | None, season: str | None) -> bool:
 
 
 def find_season_csv(search_dir: Path, season: str) -> Path | None:
-    """Newest "Sharks <Season> Stats*.csv" export for `season`, or None.
+    """Newest "<Team> <Season> Stats*.csv" export for `season`, or None.
 
     Only the given season is considered. Returning another season's export
     here is how Spring 2026 kept overwriting the Fall roster. "Newest" is by
-    mtime, not name: sorted() put "Stats.csv" after "Stats (12).csv".
+    mtime, then by the browser's "(N)" download suffix, because a fresh
+    checkout gives every tracked export the same mtime (plain sorted() put
+    "Stats.csv" after "Stats (12).csv").
     """
     label = season_label(season)
+    search_dir = Path(search_dir)
     if not label or not search_dir.exists():
         return None
-    candidates = list(search_dir.glob(f"Sharks {label} Stats*.csv"))
-    return max(candidates, key=lambda p: p.stat().st_mtime) if candidates else None
+
+    def _order(p: Path) -> tuple[float, int]:
+        n = re.search(r"\((\d+)\)", p.name)
+        return p.stat().st_mtime, int(n.group(1)) if n else 0
+
+    candidates = list(search_dir.glob(f"*{label} Stats*.csv"))
+    return max(candidates, key=_order) if candidates else None
 
 
 def own_team(path: Path | None = None) -> Team:

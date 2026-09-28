@@ -8,6 +8,7 @@ stale Spring team_enriched.json masked a fresh Fall team.json.
 from __future__ import annotations
 
 import json
+import os
 import sys
 import types
 from pathlib import Path
@@ -76,6 +77,19 @@ class TestFindSeasonCsv:
     def test_spring_and_fall_picks_fall(self, tmp_path):
         (tmp_path / "Sharks Spring 2026 Stats.csv").write_text("x")
         fall = tmp_path / "Sharks Fall 2026 Stats.csv"
+        fall.write_text("x")
+        assert find_season_csv(tmp_path, FALL_SLUG) == fall
+
+    def test_equal_mtimes_pick_highest_download_suffix(self, tmp_path):
+        # A fresh checkout stamps every tracked export with the same mtime.
+        for name in ("Stats.csv", "Stats (3).csv", "Stats (12).csv"):
+            p = tmp_path / f"Sharks Fall 2026 {name}"
+            p.write_text("x")
+            os.utime(p, (1_000_000, 1_000_000))
+        assert find_season_csv(tmp_path, FALL_SLUG).name == "Sharks Fall 2026 Stats (12).csv"
+
+    def test_any_team_name_prefix(self, tmp_path):
+        fall = tmp_path / "The Sharks Fall 2026 Stats.csv"
         fall.write_text("x")
         assert find_season_csv(tmp_path, FALL_SLUG) == fall
 
