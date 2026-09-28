@@ -7697,7 +7697,7 @@ class TestCsvIngestFromLocal:
         monkeypatch.setattr(sd, "SHARKS_DIR", sharks_dir)
         other_docs = tmp_path / "Other docs"
         other_docs.mkdir()
-        csv_file = other_docs / "Sharks Spring 2026 Stats v1.csv"
+        csv_file = other_docs / f"Sharks {sd.season_label(sd.GC_SEASON_SLUG_DEFAULT)} Stats v1.csv"
         csv_file.write_text("player,number\nJane,7")
         # Inject fake gc_csv_ingest
         fake_gc = types.ModuleType("gc_csv_ingest")
@@ -7716,7 +7716,7 @@ class TestCsvIngestFromLocal:
         monkeypatch.setattr(sd, "SHARKS_DIR", sharks_dir)
         other_docs = tmp_path / "Other docs"
         other_docs.mkdir()
-        csv_file = other_docs / "Sharks Spring 2026 Stats v1.csv"
+        csv_file = other_docs / f"Sharks {sd.season_label(sd.GC_SEASON_SLUG_DEFAULT)} Stats v1.csv"
         csv_file.write_text("player,number")
         fake_gc = types.ModuleType("gc_csv_ingest")
         fake_gc.parse_gc_csv = MagicMock(return_value=[])
@@ -7735,7 +7735,7 @@ class TestCsvIngestFromLocal:
         monkeypatch.setattr(sd, "SHARKS_DIR", sharks_dir)
         other_docs = tmp_path / "Other docs"
         other_docs.mkdir()
-        csv_file = other_docs / "Sharks Spring 2026 Stats v1.csv"
+        csv_file = other_docs / f"Sharks {sd.season_label(sd.GC_SEASON_SLUG_DEFAULT)} Stats v1.csv"
         csv_file.write_text("data")
         fake_gc = types.ModuleType("gc_csv_ingest")
         fake_gc.parse_gc_csv = MagicMock(side_effect=RuntimeError("csv error"))
@@ -7783,7 +7783,7 @@ class TestBootstrapFromCsv:
         monkeypatch.setattr(sd, "SHARKS_DIR", sharks_dir)
         other_docs = tmp_path / "Other docs"
         other_docs.mkdir()
-        csv_file = other_docs / "Sharks Spring 2026 Stats v1.csv"
+        csv_file = other_docs / f"Sharks {sd.season_label(sd.GC_SEASON_SLUG_DEFAULT)} Stats v1.csv"
         csv_file.write_text("player,number\nJane,7")
         fake_gc = types.ModuleType("gc_csv_ingest")
         fake_gc.parse_gc_csv = MagicMock(return_value=[{"name": "Jane", "number": "7"}])
@@ -7801,7 +7801,7 @@ class TestBootstrapFromCsv:
         monkeypatch.setattr(sd, "SHARKS_DIR", sharks_dir)
         other_docs = tmp_path / "Other docs"
         other_docs.mkdir()
-        csv_file = other_docs / "Sharks Spring 2026 Stats v1.csv"
+        csv_file = other_docs / f"Sharks {sd.season_label(sd.GC_SEASON_SLUG_DEFAULT)} Stats v1.csv"
         csv_file.write_text("")
         fake_gc = types.ModuleType("gc_csv_ingest")
         fake_gc.parse_gc_csv = MagicMock(return_value=[])
@@ -7817,7 +7817,7 @@ class TestBootstrapFromCsv:
         monkeypatch.setattr(sd, "SHARKS_DIR", sharks_dir)
         other_docs = tmp_path / "Other docs"
         other_docs.mkdir()
-        csv_file = other_docs / "Sharks Spring 2026 Stats v1.csv"
+        csv_file = other_docs / f"Sharks {sd.season_label(sd.GC_SEASON_SLUG_DEFAULT)} Stats v1.csv"
         csv_file.write_text("data")
         fake_gc = types.ModuleType("gc_csv_ingest")
         fake_gc.parse_gc_csv = MagicMock(side_effect=RuntimeError("parse error"))
@@ -8013,7 +8013,7 @@ class TestBootstrapFromCsvEmptyRoster:
         monkeypatch.setattr(sd, "SHARKS_DIR", sharks_dir)
         other_docs = tmp_path / "Other docs"
         other_docs.mkdir()
-        csv_file = other_docs / "Sharks Spring 2026 Stats v1.csv"
+        csv_file = other_docs / f"Sharks {sd.season_label(sd.GC_SEASON_SLUG_DEFAULT)} Stats v1.csv"
         csv_file.write_text("no data")
         fake_gc = types.ModuleType("gc_csv_ingest")
         fake_gc.parse_gc_csv = MagicMock(return_value=[])
@@ -9089,7 +9089,7 @@ class TestBootstrapFromCsvEmptyRosterWarningLine:
 
         other_docs = tmp_path / "Other docs"
         other_docs.mkdir()
-        csv_file = other_docs / "Sharks Spring 2026 Stats_v1.csv"
+        csv_file = other_docs / f"Sharks {sd.season_label(sd.GC_SEASON_SLUG_DEFAULT)} Stats_v1.csv"
         csv_file.write_text("dummy")
 
         import types

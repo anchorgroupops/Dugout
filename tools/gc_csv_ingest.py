@@ -7,7 +7,7 @@ Reads the comprehensive 200-column GC CSV export and produces:
   3. data/sharks/season_stats.csv — copy of the source CSV
 
 Usage:
-    python tools/gc_csv_ingest.py --csv-path "Scorebooks/Other docs/Sharks Spring 2026 Stats (4).csv"
+    python tools/gc_csv_ingest.py --csv-path "Scorebooks/Other docs/Sharks Fall 2026 Stats.csv"
 """
 
 from __future__ import annotations
@@ -26,9 +26,13 @@ from stats_normalizer import innings_to_float, safe_float, safe_int
 # Import works whether run as `python tools/gc_csv_ingest.py` (tools/ on path)
 # or as `python -m tools.gc_csv_ingest` (repo root on path).
 try:
-    from team_registry import Team, require_by_slug
+    from team_registry import (
+        Team, find_season_csv, is_season, own_team, require_by_slug, season_key, season_label,
+    )
 except ImportError:
-    from tools.team_registry import Team, require_by_slug
+    from tools.team_registry import (
+        Team, find_season_csv, is_season, own_team, require_by_slug, season_key, season_label,
+    )
 
 ET = ZoneInfo("America/New_York")
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -554,11 +558,23 @@ def parse_gc_csv(csv_path: Path, team_dir: Path = SHARKS_DIR) -> list[dict]:
 def build_team_json(roster: list[dict], csv_path: Path,
                     team: Team | None = None,
                     team_dir: Path = SHARKS_DIR) -> dict:
-    """Build team.json-compatible structure from parsed roster."""
-    team_name_default = team.name if team is not None else "The Sharks"
-    league_default = team.league if (team and team.league) else "PCLL Majors"
-    season_default = team.season_slug if team is not None else "Spring 2026"
-    gc_team_id_default = team.id if team is not None else ""
+    """Build team.json-compatible structure from parsed roster.
+
+    Season and GC team id always come from the registry (the team being
+    ingested), never from the team.json being replaced; carrying those over
+    kept stamping Fall data "Spring 2026". Raises ValueError if the CSV's
+    filename names a different season, so last season's export can't be
+    relabelled as this season's.
+    """
+    if team is None:
+        team = own_team()
+    if season_key(csv_path.name) and not is_season(csv_path.name, team.season_slug):
+        raise ValueError(
+            f"{csv_path.name} is not a {season_label(team.season_slug)} export "
+            f"(registry season {team.season_slug})"
+        )
+    team_name_default = team.name
+    league_default = team.league or "PCLL Majors"
 
     # Preserve existing team metadata if available
     team_file = team_dir / "team.json"
@@ -569,17 +585,15 @@ def build_team_json(roster: list[dict], csv_path: Path,
         meta = {
             "team_name": existing.get("team_name", team_name_default),
             "league": existing.get("league", league_default),
-            "season": existing.get("season", season_default),
-            "gc_team_url": existing.get("gc_team_url", ""),
-            "gc_team_id": existing.get("gc_team_id", gc_team_id_default),
         }
     else:
         meta = {
             "team_name": team_name_default,
             "league": league_default,
-            "season": season_default,
-            "gc_team_id": gc_team_id_default,
         }
+    meta["season"] = team.season_slug
+    meta["gc_team_id"] = team.id
+    meta["gc_team_url"] = f"https://web.gc.com/teams/{team.id}/{team.season_slug}"
 
     meta["last_updated"] = datetime.now(ET).isoformat()
     meta["source"] = f"gc_csv_export:{csv_path.name}"
@@ -742,13 +756,12 @@ def main():
         if not csv_path.is_absolute():
             csv_path = ROOT_DIR / csv_path
     else:
-        # Auto-discover from Scorebooks/Other docs (Sharks-only legacy path)
-        search_dir = ROOT_DIR / "Scorebooks" / "Other docs"
-        candidates = sorted(search_dir.glob("Sharks Spring 2026 Stats*.csv"))
-        if not candidates:
-            print("ERROR: No CSV found. Specify positional path or --csv-path.")
+        # Auto-discover this season's export from Scorebooks/Other docs
+        csv_path = find_season_csv(ROOT_DIR / "Scorebooks" / "Other docs", team.season_slug)
+        if csv_path is None:
+            print(f"ERROR: No {season_label(team.season_slug)} CSV found. "
+                  "Specify positional path or --csv-path.")
             return
-        csv_path = candidates[-1]
 
     if not csv_path.exists():
         print(f"ERROR: CSV not found: {csv_path}")

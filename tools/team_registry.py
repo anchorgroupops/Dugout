@@ -127,3 +127,104 @@ def _env_fallback() -> list[Team]:
         is_own_team=True,
         active=True,
     )]
+
+
+# ---------------------------------------------------------------------------
+# Current-season helpers
+#
+# Season values in the data files are mixed: GC CSV filenames and old
+# team.json files say "Spring 2026", the registry and newer files say
+# "2026-fall-sharks". season_key() reduces both to ("2026", "fall") so a file
+# from last season can be told apart from this one.
+# ---------------------------------------------------------------------------
+
+_TERM_RE = re.compile(r"(spring|summer|fall|autumn|winter)", re.IGNORECASE)
+_YEAR_RE = re.compile(r"(20\d\d)")
+
+
+def season_key(value: str | None) -> tuple[str, str] | None:
+    """("2026", "fall") from "Fall 2026" or "2026-fall-sharks"; None if unparseable."""
+    text = str(value or "")
+    year, term = _YEAR_RE.search(text), _TERM_RE.search(text)
+    if not year or not term:
+        return None
+    t = term.group(1).lower()
+    return year.group(1), ("fall" if t == "autumn" else t)
+
+
+def season_label(value: str | None) -> str:
+    """"Fall 2026" — the form GameChanger uses in CSV export filenames."""
+    key = season_key(value)
+    return f"{key[1].capitalize()} {key[0]}" if key else ""
+
+
+def is_season(value: str | None, season: str | None) -> bool:
+    """True when both parse and name the same season."""
+    a, b = season_key(value), season_key(season)
+    return a is not None and a == b
+
+
+def find_season_csv(search_dir: Path, season: str) -> Path | None:
+    """Newest "Sharks <Season> Stats*.csv" export for `season`, or None.
+
+    Only the given season is considered. Returning another season's export
+    here is how Spring 2026 kept overwriting the Fall roster. "Newest" is by
+    mtime, not name: sorted() put "Stats.csv" after "Stats (12).csv".
+    """
+    label = season_label(season)
+    if not label or not search_dir.exists():
+        return None
+    candidates = list(search_dir.glob(f"Sharks {label} Stats*.csv"))
+    return max(candidates, key=lambda p: p.stat().st_mtime) if candidates else None
+
+
+def own_team(path: Path | None = None) -> Team:
+    """The Sharks' current registry entry (current GC team id + season slug)."""
+    return require_by_slug("sharks", path)
+
+
+def current_gc_ids() -> tuple[str, str]:
+    """(team_id, season_slug): GC_TEAM_ID+GC_SEASON_SLUG env if both set, else teams.yaml.
+
+    Replaces the old hard-coded Spring 2026 fallbacks, which sent every run on
+    a box without a .env to last season's team page.
+    """
+    team_id = os.getenv("GC_TEAM_ID", "").strip()
+    season = os.getenv("GC_SEASON_SLUG", "").strip()
+    if team_id and season:
+        return team_id, season
+    try:
+        t = own_team()
+    except RegistryError:
+        return team_id, season
+    return t.id, t.season_slug  # never mix an env id with a registry season
+
+
+def pick_team_file(candidates, season: str) -> tuple[Path | None, bool]:
+    """First existing candidate that is not from another season.
+
+    A file is skipped only when its `season` names a different season; files
+    with no parseable season (or an unparseable `season` argument) are taken
+    as-is. Returns (path, current). When
+    every existing file is from another season, returns the first one with
+    current=False so callers can report the mismatch instead of silently
+    presenting last season as this one.
+    """
+    import json
+
+    first = None
+    for p in candidates:
+        p = Path(p)
+        if not p.exists():
+            continue
+        first = first or p
+        try:
+            with p.open("r", encoding="utf-8") as fh:
+                data = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        file_season = data.get("season") if isinstance(data, dict) else None
+        if season_key(season) is None or season_key(file_season) is None \
+                or is_season(file_season, season):
+            return p, True
+    return first, False

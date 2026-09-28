@@ -47,8 +47,12 @@ GC_BASE_URL = "https://web.gc.com"
 GC_LOGIN_URL = f"{GC_BASE_URL}/login"
 
 # Team-specific config (env-overridable)
-GC_TEAM_ID = os.getenv("GC_TEAM_ID", "NuGgx6WvP7TO")
-GC_SEASON_SLUG = os.getenv("GC_SEASON_SLUG", "2026-spring-sharks")
+try:
+    from team_registry import current_gc_ids
+except ImportError:  # pragma: no cover - imported as tools.<module>
+    from tools.team_registry import current_gc_ids
+# env GC_TEAM_ID/GC_SEASON_SLUG, else config/teams.yaml (was hard-coded Spring 2026)
+GC_TEAM_ID, GC_SEASON_SLUG = current_gc_ids()
 GC_STATS_URL = f"{GC_BASE_URL}/teams/{GC_TEAM_ID}/{GC_SEASON_SLUG}/season-stats"
 
 # Headless mode: set GC_HEADLESS=false in .env to watch the browser
@@ -1156,7 +1160,7 @@ class GameChangerScraper:
         team = {
             "team_name": self.team_name,
             "league": "PCLL Majors",
-            "season": "Spring 2026",
+            "season": self.season_slug,
             "gc_team_url": self.stats_url,
             "gc_team_id": self.team_id,
             "gc_season_slug": self.season_slug,

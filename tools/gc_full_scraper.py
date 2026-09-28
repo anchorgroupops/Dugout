@@ -43,8 +43,12 @@ LOG_DIR = ROOT_DIR / "logs"
 GC_BASE = "https://web.gc.com"
 GC_API_BASE = "https://api.team-manager.gc.com"
 
-GC_TEAM_ID = os.getenv("GC_TEAM_ID", "NuGgx6WvP7TO")
-GC_SEASON_SLUG = os.getenv("GC_SEASON_SLUG", "2026-spring-sharks")
+try:
+    from team_registry import current_gc_ids
+except ImportError:  # pragma: no cover - imported as tools.<module>
+    from tools.team_registry import current_gc_ids
+# env GC_TEAM_ID/GC_SEASON_SLUG, else config/teams.yaml (was hard-coded Spring 2026)
+GC_TEAM_ID, GC_SEASON_SLUG = current_gc_ids()
 GC_EMAIL = os.getenv("GC_EMAIL", "")
 GC_PASSWORD = os.getenv("GC_PASSWORD", "")
 GC_HEADLESS = os.getenv("GC_HEADLESS", "true").lower() != "false"

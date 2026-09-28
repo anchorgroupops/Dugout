@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from unittest.mock import patch
 
@@ -9,6 +10,9 @@ import pytest
 
 import tools.gc_ingest_pipeline as pipeline_mod
 from tools.gc_ingest_pipeline import _assemble_report, _auto_discover_csv, _team_dir
+from tools.team_registry import Team
+
+FALL = Team(id="fallTeam", season_slug="2026-fall-sharks", name="The Sharks", data_slug="sharks")
 
 
 # ---------------------------------------------------------------------------
@@ -31,20 +35,34 @@ class TestAutoDiscoverCsv:
         monkeypatch.setattr(pipeline_mod, "_ROOT_DIR", tmp_path)
         target = tmp_path / "Scorebooks" / "Other docs"
         target.mkdir(parents=True)
-        csv_path = target / "Sharks Spring 2026 Stats (1).csv"
+        csv_path = target / "Sharks Fall 2026 Stats (1).csv"
         csv_path.write_text("data")
-        result = _auto_discover_csv()
+        result = _auto_discover_csv(FALL)
         assert result == csv_path
 
-    def test_returns_last_when_multiple_match(self, tmp_path, monkeypatch):
+    def test_returns_newest_when_multiple_match(self, tmp_path, monkeypatch):
         monkeypatch.setattr(pipeline_mod, "_ROOT_DIR", tmp_path)
         target = tmp_path / "Scorebooks" / "Other docs"
         target.mkdir(parents=True)
-        for i in (1, 2, 3):
-            (target / f"Sharks Spring 2026 Stats ({i}).csv").write_text("data")
-        result = _auto_discover_csv()
+        # "Stats.csv" sorts after "Stats (12).csv" by name; newest must win by mtime.
+        for i, name in enumerate(("Stats.csv", "Stats (3).csv", "Stats (12).csv")):
+            p = target / f"Sharks Fall 2026 {name}"
+            p.write_text("data")
+            os.utime(p, (1_000_000 + i, 1_000_000 + i))
+        result = _auto_discover_csv(FALL)
         assert result is not None
-        assert "Stats (3)" in result.name
+        assert result.name == "Sharks Fall 2026 Stats (12).csv"
+
+    def test_ignores_previous_season_export(self, tmp_path, monkeypatch):
+        """A committed Spring 2026 CSV must never be picked for the Fall season."""
+        monkeypatch.setattr(pipeline_mod, "_ROOT_DIR", tmp_path)
+        target = tmp_path / "Scorebooks" / "Other docs"
+        target.mkdir(parents=True)
+        (target / "Sharks Spring 2026 Stats.csv").write_text("data")
+        assert _auto_discover_csv(FALL) is None
+        fall = target / "Sharks Fall 2026 Stats.csv"
+        fall.write_text("data")
+        assert _auto_discover_csv(FALL) == fall
 
 
 # ---------------------------------------------------------------------------

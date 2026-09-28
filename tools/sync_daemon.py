@@ -60,6 +60,17 @@ GC_LIVE_SCRAPE_ENABLED = os.getenv("GC_LIVE_SCRAPE_ENABLED", "false").strip().lo
 
 N8N_WEBHOOK_URL = os.getenv("N8N_WEBHOOK_URL", "").strip()
 
+# Current GC team + season come from config/teams.yaml. These are only the
+# fallbacks behind GC_TEAM_ID / GC_SEASON_SLUG; they used to be hard-coded to
+# the Spring 2026 team, so a box without a .env kept serving last season.
+from team_registry import RegistryError, find_season_csv, own_team, pick_team_file, season_label
+try:
+    _OWN_TEAM = own_team()
+    GC_TEAM_ID_DEFAULT, GC_SEASON_SLUG_DEFAULT = _OWN_TEAM.id, _OWN_TEAM.season_slug
+except RegistryError as _e:  # pragma: no cover - broken teams.yaml
+    logging.error("[Config] team registry unreadable: %s", _e)
+    GC_TEAM_ID_DEFAULT, GC_SEASON_SLUG_DEFAULT = "", ""
+
 DATA_DIR = Path(__file__).parent.parent / "data"
 SHARKS_DIR = DATA_DIR / "sharks"
 WALKUP_DIR = SHARKS_DIR / "walkup"
@@ -1292,7 +1303,7 @@ def run_sync_cycle():
             from opponent_discovery import discover_and_persist_opponents
             discovery = discover_and_persist_opponents(
                 data_dir=DATA_DIR,
-                sharks_team_id=_resolve_critical_env("GC_TEAM_ID", "NuGgx6WvP7TO"),
+                sharks_team_id=_resolve_critical_env("GC_TEAM_ID", GC_TEAM_ID_DEFAULT),
             )
             missing = len((discovery or {}).get("missing_schedule_opponents", []))
             logging.info(f"[Sync] Opponent discovery refreshed (missing schedule opponents={missing}).")
@@ -1329,8 +1340,8 @@ def run_sync_cycle():
             from gc_web_mobile_scraper import sync_recent_games as sync_web_mobile_games
 
             web_ingest = sync_web_mobile_games(
-                team_id=_resolve_critical_env("GC_TEAM_ID", "NuGgx6WvP7TO"),
-                season_slug=_resolve_critical_env("GC_SEASON_SLUG", "2026-spring-sharks"),
+                team_id=_resolve_critical_env("GC_TEAM_ID", GC_TEAM_ID_DEFAULT),
+                season_slug=_resolve_critical_env("GC_SEASON_SLUG", GC_SEASON_SLUG_DEFAULT),
                 sharks_team_name=os.getenv("TEAM_NAME", "Sharks"),
                 max_games=int(os.getenv("GC_WEB_BOX_MAX_GAMES", "8")),
             )
@@ -2255,7 +2266,7 @@ def _fetch_gc_games(team_id: str | None = None) -> list:
     Shared by /api/scoreboard and the /api/schedule fallback so every tab
     agrees on what the next game is.
     """
-    team_id = team_id or _resolve_critical_env("GC_TEAM_ID", "NuGgx6WvP7TO")
+    team_id = team_id or _resolve_critical_env("GC_TEAM_ID", GC_TEAM_ID_DEFAULT)
     url = f"https://api.team-manager.gc.com/public/teams/{team_id}/games"
     for attempt in range(3):
         try:
@@ -2341,7 +2352,7 @@ def handle_scoreboard():
     Checks for in-progress or today's game, returns score, inning, and
     game status so the frontend can render a real-time scoreboard.
     Falls back to schedule_manual.json for context when no API data."""
-    team_id = _resolve_critical_env("GC_TEAM_ID", "NuGgx6WvP7TO")
+    team_id = _resolve_critical_env("GC_TEAM_ID", GC_TEAM_ID_DEFAULT)
     gc_api_base = "https://api.team-manager.gc.com"
 
     now = datetime.now(ET)
@@ -3573,17 +3584,14 @@ def handle_h2h(opponent_slug):
 @app.route('/api/team', methods=['GET'])
 def handle_team():
     """Return team data, enriched from app_stats and reconciled with scorebook totals."""
-    team_file = SHARKS_DIR / "team_enriched.json"
-    if not team_file.exists():
-        team_file = SHARKS_DIR / "team_merged.json"
-    if not team_file.exists():
-        team_file = SHARKS_DIR / "team.json"
-    if not team_file.exists():
+    team_file, season_current = _current_team_file()
+    if team_file is None:
         return jsonify({"error": "No team data found"}), 404
 
     team = _read_json_file(team_file, default=None)
     if not isinstance(team, dict):
         return jsonify({"error": "team_data_unavailable"}), 503
+    team["season_current"] = season_current
 
     # Enrich roster with current app_stats.json (always most up-to-date)
     _enrich_team_with_app_stats(team)
@@ -3686,33 +3694,41 @@ def handle_team():
 
     # Ensure GC identifiers are always present (hardcoded fallbacks for The Sharks)
     if not team.get("gc_team_id"):
-        team["gc_team_id"] = _resolve_critical_env("GC_TEAM_ID", "NuGgx6WvP7TO")
+        team["gc_team_id"] = _resolve_critical_env("GC_TEAM_ID", GC_TEAM_ID_DEFAULT)
     if not team.get("gc_season_slug"):
-        team["gc_season_slug"] = _resolve_critical_env("GC_SEASON_SLUG", "2026-spring-sharks")
+        team["gc_season_slug"] = _resolve_critical_env("GC_SEASON_SLUG", GC_SEASON_SLUG_DEFAULT)
 
     return jsonify(team)
+
+
+def _current_team_file() -> tuple[Path | None, bool]:
+    """(team file, is-current-season) using the enriched > merged > team.json order.
+
+    A derived file from another season is skipped rather than served: a stale
+    Spring team_enriched.json used to mask a fresh Fall team.json. If no file is
+    from the current season, the first existing one is returned with False so
+    the API can say which season it is actually showing.
+    """
+    return pick_team_file(
+        [SHARKS_DIR / "team_enriched.json", SHARKS_DIR / "team_merged.json", SHARKS_DIR / "team.json"],
+        GC_SEASON_SLUG_DEFAULT,
+    )
 
 
 def _read_team_roster_payload() -> dict:
     """Shared helper for /api/roster and /api/players — returns roster + meta."""
     try:
-        team_files = [
-            SHARKS_DIR / "team_enriched.json",
-            SHARKS_DIR / "team_merged.json",
-            SHARKS_DIR / "team.json",
-        ]
-        team = None
-        for tf in team_files:
-            if tf.exists():
-                team = _read_json_file(tf, default=None)
-                if isinstance(team, dict):
-                    break
+        team_file, season_current = _current_team_file()
+        team = _read_json_file(team_file, default=None) if team_file else None
         if not isinstance(team, dict):
             return {"roster": [], "last_updated": None}
         return {
             "roster": team.get("roster", []) or [],
             "team_name": team.get("team_name"),
             "last_updated": team.get("last_updated"),
+            "season": team.get("season"),
+            "current_season": GC_SEASON_SLUG_DEFAULT,
+            "season_current": season_current,
         }
     except Exception as e:
         logging.error("[Roster helper] failed: %s", e, exc_info=True)
@@ -6329,15 +6345,14 @@ def _csv_ingest_from_local():
     Used as a fallback in the sync cycle when gc_csv_auto (browser-based
     download) is unavailable due to auth cooldown or missing credentials.
     """
-    search_dir = SCOREBOOKS_DIR / "Other docs"
-    if not search_dir.exists():
+    # Only this season's export. This used to glob "Sharks Spring 2026" and,
+    # since it runs every cycle the GC login is off (the default), rewrote
+    # team.json with last season's roster every 12 hours.
+    csv_path = find_season_csv(SCOREBOOKS_DIR / "Other docs", GC_SEASON_SLUG_DEFAULT)
+    if csv_path is None:
+        logging.info("[Sync] No local %s CSV export — local ingest fallback skipped.",
+                     season_label(GC_SEASON_SLUG_DEFAULT) or "current-season")
         return
-
-    candidates = sorted(search_dir.glob("Sharks Spring 2026 Stats*.csv"))
-    if not candidates:
-        return
-
-    csv_path = candidates[-1]
     try:
         from gc_csv_ingest import parse_gc_csv, build_team_json, build_app_stats_json
         import shutil
@@ -6374,12 +6389,11 @@ def _bootstrap_from_csv():
         logging.info("[Bootstrap] No Scorebooks/Other docs/ directory — CSV bootstrap skipped.")
         return
 
-    candidates = sorted(search_dir.glob("Sharks Spring 2026 Stats*.csv"))
-    if not candidates:
-        logging.info("[Bootstrap] No GC CSV files found in %s — CSV bootstrap skipped.", search_dir)
+    csv_path = find_season_csv(search_dir, GC_SEASON_SLUG_DEFAULT)
+    if csv_path is None:
+        logging.info("[Bootstrap] No %s GC CSV in %s — CSV bootstrap skipped.",
+                     season_label(GC_SEASON_SLUG_DEFAULT) or "current-season", search_dir)
         return
-
-    csv_path = candidates[-1]  # Latest export
     logging.info("[Bootstrap] No team.json found — bootstrapping from CSV: %s", csv_path.name)
 
     try:

@@ -1118,18 +1118,37 @@ def build_announcement_text(player: dict, game_context: dict | None = None) -> s
     return build_situational_announcement(player, game_context)
 
 
+def _current_season() -> str:
+    try:
+        from team_registry import RegistryError, own_team
+    except ImportError:  # pragma: no cover - imported as tools.announcer_engine
+        from tools.team_registry import RegistryError, own_team
+    try:
+        return own_team().season_slug
+    except RegistryError:
+        return ""
+
+
 def _bootstrap_roster_from_team() -> list[dict]:
-    """Create initial announcer roster from existing team.json data."""
-    team_files = [
-        DATA_DIR / "sharks" / "team_enriched.json",
-        DATA_DIR / "sharks" / "team_merged.json",
-        DATA_DIR / "sharks" / "team.json",
-    ]
-    team = None
-    for tf in team_files:
-        if tf.exists():
-            team = _read_json(tf)
-            break
+    """Announcer roster entries for the current season's team file.
+
+    Returns [] when the only team data on disk is from another season, so
+    reconcile leaves the roster alone instead of activating last season's
+    players (a stale Spring team_enriched.json used to win on existence alone).
+    """
+    try:
+        from team_registry import pick_team_file
+    except ImportError:  # pragma: no cover
+        from tools.team_registry import pick_team_file
+    tf, current = pick_team_file(
+        [DATA_DIR / "sharks" / n for n in ("team_enriched.json", "team_merged.json", "team.json")],
+        _current_season(),
+    )
+    if tf is None or not current:
+        if tf is not None:
+            logging.warning("[Announcer] %s is not from the current season — roster left as-is", tf.name)
+        return []
+    team = _read_json(tf)
 
     if not isinstance(team, dict):
         return []

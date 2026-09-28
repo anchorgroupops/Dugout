@@ -43,9 +43,9 @@ SHARKS_DIR = _ROOT_DIR / "data" / "sharks"  # legacy default; new code uses _tea
 # Import works whether run as `python tools/gc_ingest_pipeline.py` (tools/ on path)
 # or as `python -m tools.gc_ingest_pipeline` (repo root on path).
 try:
-    from team_registry import Team, require_by_slug
+    from team_registry import Team, find_season_csv, require_by_slug
 except ImportError:
-    from tools.team_registry import Team, require_by_slug
+    from tools.team_registry import Team, find_season_csv, require_by_slug
 
 
 def _team_dir(team: Team) -> Path:
@@ -74,13 +74,10 @@ def _atomic_write_json(path: Path, data) -> None:
 # Auto-discovery
 # ---------------------------------------------------------------------------
 
-def _auto_discover_csv() -> Path | None:
-    """Find the most recently added GC CSV export in Scorebooks/Other docs/."""
-    search_dir = _ROOT_DIR / "Scorebooks" / "Other docs"
-    if not search_dir.exists():
-        return None
-    candidates = sorted(search_dir.glob("Sharks Spring 2026 Stats*.csv"))
-    return candidates[-1] if candidates else None
+def _auto_discover_csv(team: Team | None = None) -> Path | None:
+    """Newest current-season GC CSV export in Scorebooks/Other docs/."""
+    team = team or require_by_slug("sharks")
+    return find_season_csv(_ROOT_DIR / "Scorebooks" / "Other docs", team.season_slug)
 
 
 # ---------------------------------------------------------------------------
@@ -368,7 +365,7 @@ def _assemble_report(
             team_meta = {
                 "team_name": t.get("team_name", "The Sharks"),
                 "league": t.get("league", "PCLL Majors"),
-                "season": t.get("season", "Spring 2026"),
+                "season": t.get("season", ""),
                 "record": t.get("record", "0-0"),
             }
         except Exception:
@@ -440,7 +437,7 @@ Examples:
         if not csv_path.is_absolute():
             csv_path = _ROOT_DIR / csv_path
     else:
-        csv_path = _auto_discover_csv()
+        csv_path = _auto_discover_csv(team)
         if not csv_path:
             print("ERROR: No CSV found. Use --csv to specify a path, or place a CSV in Scorebooks/Other docs/")
             sys.exit(1)
