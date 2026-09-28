@@ -2214,6 +2214,17 @@ def handle_game_detail(game_id):
     return jsonify(data)
 
 
+def _gc_retry_delay(resp, attempt: int, cap: float = 2.0) -> float:
+    """Backoff for a 429/5xx from GC. Honours a numeric Retry-After but never
+    waits longer than `cap` — this runs inside a live API request, so a
+    hostile or HTTP-date Retry-After must not stall a gunicorn worker."""
+    try:
+        delay = float(resp.headers.get("Retry-After") or 2 ** attempt)
+    except (TypeError, ValueError):
+        delay = 2 ** attempt
+    return max(0.0, min(delay, cap))
+
+
 def _fetch_gc_games(team_id: str | None = None) -> list:
     """Games list from GameChanger's public team API; [] on any failure.
 
@@ -2230,8 +2241,7 @@ def _fetch_gc_games(team_id: str | None = None) -> list:
                 return body if isinstance(body, list) else []
             if resp.status_code == 429 or resp.status_code >= 500:
                 if attempt < 2:
-                    retry_after = resp.headers.get("Retry-After")
-                    time.sleep(float(retry_after) if retry_after else (2 ** attempt))
+                    time.sleep(_gc_retry_delay(resp, attempt))
                     continue
             return []
         except Exception as e:

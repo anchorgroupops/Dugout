@@ -70,9 +70,11 @@ def _fetch_public_games(team_id: str, max_retries: int = 3) -> list[dict]:
             resp = requests.get(url, timeout=30)
             if resp.status_code == 429 or resp.status_code >= 500:
                 if attempt < max_retries - 1:
-                    retry_after = resp.headers.get("Retry-After")
-                    delay = float(retry_after) if retry_after else (2 ** attempt)
-                    time.sleep(delay)
+                    try:
+                        delay = float(resp.headers.get("Retry-After") or 2 ** attempt)
+                    except (TypeError, ValueError):
+                        delay = 2 ** attempt  # HTTP-date form; fall back to backoff
+                    time.sleep(max(0.0, min(delay, 60.0)))
                     continue
                 resp.raise_for_status()
             resp.raise_for_status()
