@@ -244,7 +244,10 @@ function App() {
           setSyncStage(sync.stage || 'idle');
           setSyncProgress(sync.progress || 0);
           if (sync.milestones?.length) setSyncMilestones(sync.milestones);
-          if (sync.stage && sync.stage !== 'idle') setSyncLoading(true);
+          // Mirror a cycle that is already running (e.g. the nightly one, or a
+          // kick from another device) and release the button when it ends.
+          // While Manual Sync's own poll is active it owns this flag.
+          if (!syncPollRef.current) setSyncLoading(Boolean(sync.stage && sync.stage !== 'idle'));
         }
       } catch { /* ignore health/sync check failures */ }
       return healthy;
