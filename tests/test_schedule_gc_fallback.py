@@ -65,4 +65,62 @@ def test_fetch_gc_games_returns_empty_on_network_error(monkeypatch):
     def boom(*a, **k):
         raise RuntimeError("offline")
     monkeypatch.setattr(sd.requests, "get", boom)
+    monkeypatch.setattr(sd.time, "sleep", lambda s: None)
     assert sd._fetch_gc_games("team") == []
+
+
+class _FakeResp:
+    def __init__(self, status_code, body=None, headers=None):
+        self.status_code = status_code
+        self.ok = status_code < 400
+        self._body = body or []
+        self.headers = headers or {}
+
+    def json(self):
+        return self._body
+
+
+def test_fetch_gc_games_retries_429_then_succeeds(monkeypatch):
+    calls = []
+
+    def fake_get(url, timeout=10):
+        calls.append(url)
+        if len(calls) == 1:
+            return _FakeResp(429, headers={"Retry-After": "0"})
+        return _FakeResp(200, body=_FAKE_GAMES)
+
+    monkeypatch.setattr(sd.requests, "get", fake_get)
+    monkeypatch.setattr(sd.time, "sleep", lambda s: None)
+    result = sd._fetch_gc_games("team")
+    assert len(calls) == 2
+    assert result == _FAKE_GAMES
+
+
+def test_fetch_gc_games_gives_up_after_repeated_5xx(monkeypatch):
+    calls = []
+
+    def fake_get(url, timeout=10):
+        calls.append(url)
+        return _FakeResp(503)
+
+    monkeypatch.setattr(sd.requests, "get", fake_get)
+    monkeypatch.setattr(sd.time, "sleep", lambda s: None)
+    assert sd._fetch_gc_games("team") == []
+    assert len(calls) == 3
+
+
+@pytest.mark.parametrize("retry_after", ["3600", "Wed, 21 Oct 2026 07:28:00 GMT"])
+def test_fetch_gc_games_retry_after_is_capped_inside_request(monkeypatch, retry_after):
+    # A huge or HTTP-date Retry-After must not stall the API request.
+    calls, sleeps = [], []
+
+    def fake_get(url, timeout=10):
+        calls.append(url)
+        if len(calls) == 1:
+            return _FakeResp(429, headers={"Retry-After": retry_after})
+        return _FakeResp(200, body=_FAKE_GAMES)
+
+    monkeypatch.setattr(sd.requests, "get", fake_get)
+    monkeypatch.setattr(sd.time, "sleep", sleeps.append)
+    assert sd._fetch_gc_games("team") == _FAKE_GAMES
+    assert sleeps and max(sleeps) <= 2.0

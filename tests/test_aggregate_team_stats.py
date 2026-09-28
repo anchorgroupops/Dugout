@@ -235,7 +235,7 @@ class TestTeamFileFromEntry:
 
     def test_missing_entry_returns_sharks_default(self):
         result = _team_file_from_entry({})
-        assert result.parts[-2:] == ("sharks", "team.json")
+        assert result.as_posix().endswith("sharks/team.json")
 
 
 # ---------------------------------------------------------------------------
