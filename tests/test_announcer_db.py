@@ -932,3 +932,23 @@ class TestIsWorkerAliveException:
             )
         result = adb.is_worker_alive(max_age_seconds=3600)
         assert result is False
+
+
+# ---------------------------------------------------------------------------
+# v4: worker jobs carry their script; PA announcements
+# ---------------------------------------------------------------------------
+
+def test_claim_job_refuses_second_claim(db):
+    job = adb.enqueue_render("p1", {}, text="Now batting", instruct="loud")
+    assert adb.claim_job(job["id"], "mac") is True
+    assert adb.claim_job(job["id"], "pc") is False
+
+
+def test_pa_job_round_trip(db):
+    job = adb.enqueue_render("pa", {}, kind="pa", text="Play ball", instruct="calm")
+    adb.enqueue_render("p1", {}, text="Now batting")
+    adb.set_job_clip(job["id"], "/announcer-clips/pa/x.mp3")
+    [pa] = adb.list_pa_jobs()
+    assert pa["text"] == "Play ball"
+    assert pa["status"] == "COMPLETED"
+    assert pa["clip_url"] == "/announcer-clips/pa/x.mp3"

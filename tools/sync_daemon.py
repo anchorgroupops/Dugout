@@ -372,6 +372,23 @@ def _presented_write_token() -> str:
     return ""
 
 
+def _require_worker_token():
+    """Render-worker routes: the shared write token is mandatory, never optional.
+
+    Unlike _guard_write_token this does not no-op when DUGOUT_WRITE_TOKEN is
+    unset — these routes hand out job scripts and accept file uploads.
+    """
+    expected = _write_token_expected()
+    if not expected:
+        return jsonify({"error": "worker_token_not_configured"}), 503
+    presented = _presented_write_token()
+    if not presented or not hmac.compare_digest(presented.encode(), expected.encode()):
+        logging.warning("[Security] Bad worker token for %s from %s",
+                        _sanitize_log(request.path), _sanitize_log(_client_ip()))
+        return jsonify({"error": "worker_token_invalid"}), 401
+    return None
+
+
 def _guard_write_token():
     """Require the shared write token on mutating /api requests.
 
@@ -4887,7 +4904,10 @@ def handle_announcer_render(player_id):
 
     if requested_quality == "best" and adb.is_worker_alive(max_age_seconds=_MAC_HEARTBEAT_MAX_AGE):
         # Mac is online — enqueue for Best Quality render
-        job = adb.enqueue_render(player_id, game_context, quality="best")
+        from announcer_engine import script_for_worker, pa_style_instruct
+        job = adb.enqueue_render(player_id, game_context, quality="best",
+                                 text=script_for_worker(player, game_context),
+                                 instruct=pa_style_instruct("stadium"))
         logging.info("[Announcer] Queued best-quality render: player=%s job=%s", player_id, job["id"])
         return jsonify({"status": "queued", "quality": "best", "job_id": job["id"],
                         "player_id": player_id}), 202
@@ -5161,7 +5181,10 @@ def handle_announcer_heartbeat():
 
 @app.route('/api/announcer/render-queue', methods=['GET'])
 def handle_announcer_render_queue_get():
-    """Mac polls for PENDING best-quality jobs."""
+    """Render workers poll for PENDING best-quality jobs."""
+    blocked = _require_worker_token()
+    if blocked:
+        return blocked
     adb = _announcer_db()
     jobs = adb.get_pending_jobs(quality="best")
     return jsonify({"jobs": jobs})
@@ -5169,8 +5192,8 @@ def handle_announcer_render_queue_get():
 
 @app.route('/api/announcer/render-queue/<job_id>', methods=['PATCH'])
 def handle_announcer_render_queue_claim(job_id):
-    """Mac claims a job (PENDING → PROCESSING) to prevent Pi failover."""
-    blocked = _guard_mutating_request()
+    """A render worker claims a job (PENDING → PROCESSING) or reports it FAILED/COMPLETED."""
+    blocked = _require_worker_token()
     if blocked:
         return blocked
 
@@ -5191,7 +5214,8 @@ def handle_announcer_render_queue_claim(job_id):
         # pick-the-head-of-queue). update_job_status() writes completed_at and
         # clears error/draft_quality, so it is NOT equivalent here — the claim
         # goes through announcer_db.claim_job() instead of inline SQL.
-        adb.claim_job(job_id, worker_id)
+        if not adb.claim_job(job_id, worker_id):
+            return jsonify({"error": "already_claimed"}), 409
     else:
         error = str(data.get("error") or "")[:500] if new_status == "FAILED" else None
         draft = bool(data.get("draft_quality", False))
@@ -5205,61 +5229,90 @@ def handle_announcer_render_queue_claim(job_id):
 def handle_announcer_render_complete(job_id):
     """Mac uploads finished FLAC master + MP3 proxy after Best Quality render.
 
-    Expects multipart/form-data with fields:
-      mp3  — 192kbps MP3 proxy (required)
-      flac — 24-bit/48kHz FLAC archive master (optional)
+    Expects multipart/form-data with field `audio`: the raw WAV/MP3 the
+    worker synthesised. The Pi applies the Stadium Wrap itself, so a worker
+    needs no FFmpeg. Multipart can't pass _guard_mutating_request (JSON-only),
+    so this route requires the worker token instead.
     """
-    blocked = _guard_mutating_request()
+    blocked = _require_worker_token()
     if blocked:
         return blocked
-
     adb = _announcer_db()
     job = adb.get_job(job_id)
     if not job:
         return jsonify({"error": "job_not_found"}), 404
 
-    mp3_file = request.files.get("mp3")
-    flac_file = request.files.get("flac")
+    audio_file = request.files.get("audio")
+    if not audio_file:
+        return jsonify({"error": "audio_required"}), 400
 
-    if not mp3_file:
-        return jsonify({"error": "mp3_required"}), 400
+    from announcer_engine import save_job_audio
+    try:
+        clip_url = save_job_audio(job, audio_file.read())
+    except Exception as e:
+        adb.update_job_status(job_id, "FAILED", error=str(e)[:500])
+        logging.error("[Announcer] render-complete failed: job=%s: %s", job_id, e)
+        return jsonify({"error": "save_failed"}), 500
 
-    from announcer_engine import CLIPS_DIR, ARCHIVE_DIR, _sanitize_player_id
-    player_id = job["player_id"]
-    safe_id = _sanitize_player_id(player_id)
-
-    import time as _t
-    ts = datetime.now(ET).strftime("%Y%m%d_%H%M%S")
-
-    # Save MP3 proxy
-    clips_player_dir = CLIPS_DIR / safe_id
-    clips_player_dir.mkdir(parents=True, exist_ok=True)
-    mp3_path = clips_player_dir / f"{ts}.mp3"
-    mp3_file.save(str(mp3_path))
-
-    # Save FLAC master (optional)
-    if flac_file:
-        archive_player_dir = ARCHIVE_DIR / safe_id
-        archive_player_dir.mkdir(parents=True, exist_ok=True)
-        flac_path = archive_player_dir / f"{ts}.flac"
-        flac_file.save(str(flac_path))
-
-    # Mark job COMPLETED
-    adb.update_job_status(job_id, "COMPLETED", draft_quality=False)
-
-    # Update roster entry with new clip URL
-    from announcer_engine import update_player
-    clip_url = f"/announcer-clips/{safe_id}/{ts}.mp3"
-    update_player(player_id, {
-        "status": "ready",
-        "announcer_audio_url": clip_url,
-        "rendered_at": datetime.now(ET).isoformat(),
-        "render_quality": "best",
-        "error_message": "",
-    })
-
-    logging.info("[Announcer] render-complete: job=%s player=%s mp3=%s", job_id, player_id, mp3_path)
+    adb.set_job_clip(job_id, clip_url)
+    logging.info("[Announcer] render-complete: job=%s kind=%s clip=%s", job_id, job.get("kind"), clip_url)
     return jsonify({"status": "ok", "clip_url": clip_url})
+
+
+@app.route('/api/announcer/pa', methods=['POST'])
+def handle_announcer_pa_create():
+    """Render a free-text PA announcement.
+
+    Worker online → queued for Qwen3-TTS on the worker. Otherwise the Pi
+    renders it now through its quick provider chain.
+    """
+    blocked = _guard_mutating_request()
+    if blocked:
+        return blocked
+    from announcer_engine import PA_MAX_CHARS, PA_STYLES, pa_style_instruct
+
+    data = request.get_json(silent=True) or {}
+    text = " ".join(str(data.get("text") or "").split())
+    if not text:
+        return jsonify({"error": "text_required"}), 400
+    if len(text) > PA_MAX_CHARS:
+        return jsonify({"error": "text_too_long", "max_chars": PA_MAX_CHARS}), 400
+    style = str(data.get("style") or "")
+    if style and style not in PA_STYLES:
+        return jsonify({"error": "unknown_style"}), 400
+
+    adb = _announcer_db()
+    instruct = pa_style_instruct(style)
+    if adb.is_worker_alive(max_age_seconds=_MAC_HEARTBEAT_MAX_AGE):
+        job = adb.enqueue_render("pa", {}, quality="best", kind="pa", text=text, instruct=instruct)
+        return jsonify({"status": "queued", "job": job}), 202
+
+    job = adb.enqueue_render("pa", {}, quality="quick", kind="pa", text=text,
+                             instruct=instruct, status="PROCESSING")
+
+    import threading
+
+    def _bg_pa():
+        from announcer_engine import render_pa_on_pi, save_job_audio
+        try:
+            adb.set_job_clip(job["id"], save_job_audio(job, render_pa_on_pi(text)))
+        except Exception as e:
+            logging.error("[Announcer] PA render failed: job=%s: %s", job["id"], e)
+            adb.update_job_status(job["id"], "FAILED", error=str(e)[:500])
+
+    threading.Thread(target=_bg_pa, daemon=True).start()
+    return jsonify({"status": "rendering", "job": job}), 202
+
+
+@app.route('/api/announcer/pa', methods=['GET'])
+def handle_announcer_pa_list():
+    """Recent PA announcements plus the style presets for the picker."""
+    from announcer_engine import PA_STYLES, DEFAULT_PA_STYLE
+    return jsonify({
+        "announcements": _announcer_db().list_pa_jobs(),
+        "styles": [{"id": k, "name": v["name"]} for k, v in PA_STYLES.items()],
+        "default_style": DEFAULT_PA_STYLE,
+    })
 
 
 @app.route('/api/announcer/render-status/<player_id>', methods=['GET'])

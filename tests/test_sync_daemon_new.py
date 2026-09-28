@@ -1656,7 +1656,8 @@ class TestAnnouncerRenderQueueGet:
         adb.get_pending_jobs = MagicMock(return_value=[])
         monkeypatch.setattr(sd, "_announcer_db", lambda: adb)
         with flask_app.test_client() as client:
-            resp = client.get("/api/announcer/render-queue")
+            monkeypatch.setenv("DUGOUT_WRITE_TOKEN", "tok")
+            resp = client.get("/api/announcer/render-queue", headers={"X-Dugout-Token": "tok"})
         assert resp.status_code == 200
         assert resp.get_json()["jobs"] == []
 
@@ -1665,7 +1666,8 @@ class TestAnnouncerRenderQueueGet:
         adb.get_pending_jobs = MagicMock(return_value=[{"id": "j1"}, {"id": "j2"}])
         monkeypatch.setattr(sd, "_announcer_db", lambda: adb)
         with flask_app.test_client() as client:
-            resp = client.get("/api/announcer/render-queue")
+            monkeypatch.setenv("DUGOUT_WRITE_TOKEN", "tok")
+            resp = client.get("/api/announcer/render-queue", headers={"X-Dugout-Token": "tok"})
         data = resp.get_json()
         assert len(data["jobs"]) == 2
 
@@ -4149,6 +4151,9 @@ def _make_fake_announcer_engine(tmp_path=None):
     fake._ROSTER_LOCK.__enter__ = MagicMock(return_value=None)
     fake._ROSTER_LOCK.__exit__ = MagicMock(return_value=False)
     fake.render_voice_sample = MagicMock()
+    fake.script_for_worker = MagicMock(return_value="Now batting, Jane Doe")
+    fake.pa_style_instruct = MagicMock(return_value="A booming stadium announcer.")
+    fake.save_job_audio = MagicMock(return_value="/announcer-clips/07-jane-doe/x.mp3")
     fake._sanitize_player_id = lambda s: s.lower().replace(" ", "-")
     fake.CLIPS_DIR = tmp_path / "clips" if tmp_path else Path("/tmp/clips")
     fake.ARCHIVE_DIR = tmp_path / "archive" if tmp_path else Path("/tmp/archive")
@@ -4849,7 +4854,8 @@ class TestHandleAnnouncerHeartbeatAndQueue:
         adb.get_pending_jobs = MagicMock(return_value=[{"id": "job-1"}])
         monkeypatch.setattr(sd, "_announcer_db", lambda: adb)
         with flask_app.test_client() as client:
-            resp = client.get("/api/announcer/render-queue")
+            monkeypatch.setenv("DUGOUT_WRITE_TOKEN", "tok")
+            resp = client.get("/api/announcer/render-queue", headers={"X-Dugout-Token": "tok"})
         assert resp.status_code == 200
         data = resp.get_json()
         assert "jobs" in data
@@ -5598,7 +5604,8 @@ class TestAnnouncerDbFunction:
     def test_render_queue_get_calls_real_announcer_db(self, flask_app, monkeypatch, tmp_path):
         # Don't monkeypatch _announcer_db → calls real function → covers 4325-4327
         with flask_app.test_client() as client:
-            resp = client.get("/api/announcer/render-queue")
+            monkeypatch.setenv("DUGOUT_WRITE_TOKEN", "tok")
+            resp = client.get("/api/announcer/render-queue", headers={"X-Dugout-Token": "tok"})
         assert resp.status_code == 200
 
 
@@ -6185,73 +6192,122 @@ class TestHandleOptimalStart:
 
 
 class TestHandleAnnouncerRenderComplete:
-    _ORIGIN = "https://test.rendercomplete.com"
+    """Workers upload raw `audio`; the route is gated on the worker token."""
 
-    def test_guard_blocked_returns_415_for_json(self, flask_app, monkeypatch):
-        monkeypatch.setattr(sd, "WRITE_ORIGINS", [self._ORIGIN])
-        sd._MUTATE_RATE_BUCKETS.clear()
+    def _post(self, flask_app, monkeypatch, job_id="job-001", data=None, token="tok"):
+        monkeypatch.setenv("DUGOUT_WRITE_TOKEN", "tok")
         with flask_app.test_client() as client:
-            resp = client.post(
-                "/api/announcer/render-complete/job-001",
-                data="not json",
-                content_type="text/plain",
-                headers={"Origin": self._ORIGIN},
+            return client.post(
+                f"/api/announcer/render-complete/{job_id}",
+                data=data or {},
+                content_type="multipart/form-data",
+                headers={"X-Dugout-Token": token},
             )
-        assert resp.status_code == 415
 
-    def test_job_not_found_returns_404(self, flask_app, monkeypatch, tmp_path):
-        monkeypatch.setattr(sd, "WRITE_ORIGINS", [self._ORIGIN])
-        sd._MUTATE_RATE_BUCKETS.clear()
-        monkeypatch.setattr(sd, "_guard_mutating_request", lambda: None)
+    def test_token_not_configured_returns_503(self, flask_app, monkeypatch):
+        monkeypatch.delenv("DUGOUT_WRITE_TOKEN", raising=False)
+        with flask_app.test_client() as client:
+            resp = client.post("/api/announcer/render-complete/job-001", data={},
+                               content_type="multipart/form-data")
+        assert resp.status_code == 503
+
+    def test_bad_token_returns_401(self, flask_app, monkeypatch):
+        resp = self._post(flask_app, monkeypatch, token="wrong")
+        assert resp.status_code == 401
+
+    def test_job_not_found_returns_404(self, flask_app, monkeypatch):
         adb = MagicMock()
         adb.get_job = MagicMock(return_value=None)
         monkeypatch.setattr(sd, "_announcer_db", lambda: adb)
-        with flask_app.test_client() as client:
-            resp = client.post(
-                "/api/announcer/render-complete/nonexistent-job",
-                data=b"",
-                content_type="multipart/form-data",
-            )
+        resp = self._post(flask_app, monkeypatch, job_id="nonexistent-job")
         assert resp.status_code == 404
 
-    def test_missing_mp3_returns_400(self, flask_app, monkeypatch, tmp_path):
-        monkeypatch.setattr(sd, "WRITE_ORIGINS", [self._ORIGIN])
-        sd._MUTATE_RATE_BUCKETS.clear()
-        monkeypatch.setattr(sd, "_guard_mutating_request", lambda: None)
+    def test_missing_audio_returns_400(self, flask_app, monkeypatch):
         adb = MagicMock()
         adb.get_job = MagicMock(return_value={"id": "job-001", "player_id": "07-jane"})
         monkeypatch.setattr(sd, "_announcer_db", lambda: adb)
-        with flask_app.test_client() as client:
-            resp = client.post(
-                "/api/announcer/render-complete/job-001",
-                data={},  # no mp3 file
-                content_type="multipart/form-data",
-            )
+        resp = self._post(flask_app, monkeypatch)
         assert resp.status_code == 400
 
-    def test_success_saves_mp3_and_returns_clip_url(self, flask_app, monkeypatch, tmp_path):
-        monkeypatch.setattr(sd, "WRITE_ORIGINS", [self._ORIGIN])
-        sd._MUTATE_RATE_BUCKETS.clear()
-        monkeypatch.setattr(sd, "_guard_mutating_request", lambda: None)
+    def test_success_saves_audio_and_returns_clip_url(self, flask_app, monkeypatch, tmp_path):
         adb = MagicMock()
-        adb.get_job = MagicMock(return_value={"id": "job-001", "player_id": "07-jane-doe"})
-        adb.update_job_status = MagicMock()
+        job = {"id": "job-001", "player_id": "07-jane-doe", "kind": "player"}
+        adb.get_job = MagicMock(return_value=job)
         monkeypatch.setattr(sd, "_announcer_db", lambda: adb)
         fake = _make_fake_announcer_engine(tmp_path)
-        fake.CLIPS_DIR = tmp_path / "clips"
-        fake.ARCHIVE_DIR = tmp_path / "archive"
         monkeypatch.setitem(sys.modules, "announcer_engine", fake)
         import io
-        with flask_app.test_client() as client:
-            resp = client.post(
-                "/api/announcer/render-complete/job-001",
-                data={"mp3": (io.BytesIO(b"FAKE_MP3"), "output.mp3")},
-                content_type="multipart/form-data",
-            )
+        resp = self._post(flask_app, monkeypatch, data={"audio": (io.BytesIO(b"RIFFWAV"), "render.wav")})
         assert resp.status_code == 200
-        data = resp.get_json()
-        assert data["status"] == "ok"
-        assert "clip_url" in data
+        assert resp.get_json()["clip_url"] == "/announcer-clips/07-jane-doe/x.mp3"
+        fake.save_job_audio.assert_called_once_with(job, b"RIFFWAV")
+        adb.set_job_clip.assert_called_once_with("job-001", "/announcer-clips/07-jane-doe/x.mp3")
+
+    def test_save_failure_marks_job_failed(self, flask_app, monkeypatch, tmp_path):
+        adb = MagicMock()
+        adb.get_job = MagicMock(return_value={"id": "job-001", "player_id": "07-jane-doe"})
+        monkeypatch.setattr(sd, "_announcer_db", lambda: adb)
+        fake = _make_fake_announcer_engine(tmp_path)
+        fake.save_job_audio = MagicMock(side_effect=RuntimeError("too large"))
+        monkeypatch.setitem(sys.modules, "announcer_engine", fake)
+        import io
+        resp = self._post(flask_app, monkeypatch, data={"audio": (io.BytesIO(b"x"), "render.wav")})
+        assert resp.status_code == 500
+        adb.update_job_status.assert_called_once_with("job-001", "FAILED", error="too large")
+
+
+class TestAnnouncerPA:
+    _ORIGIN = "https://test.pa.com"
+
+    def _post(self, flask_app, monkeypatch, body, adb):
+        monkeypatch.setattr(sd, "WRITE_ORIGINS", [self._ORIGIN])
+        monkeypatch.setattr(sd, "_announcer_db", lambda: adb)
+        sd._MUTATE_RATE_BUCKETS.clear()
+        with flask_app.test_client() as client:
+            return client.post("/api/announcer/pa", json=body, headers={"Origin": self._ORIGIN})
+
+    def test_empty_text_returns_400(self, flask_app, monkeypatch):
+        resp = self._post(flask_app, monkeypatch, {"text": "   "}, MagicMock())
+        assert resp.status_code == 400
+
+    def test_too_long_returns_400(self, flask_app, monkeypatch):
+        resp = self._post(flask_app, monkeypatch, {"text": "a" * 601}, MagicMock())
+        assert resp.get_json()["error"] == "text_too_long"
+
+    def test_unknown_style_returns_400(self, flask_app, monkeypatch):
+        resp = self._post(flask_app, monkeypatch, {"text": "Hello", "style": "opera"}, MagicMock())
+        assert resp.get_json()["error"] == "unknown_style"
+
+    def test_worker_online_queues_for_worker(self, flask_app, monkeypatch):
+        adb = MagicMock()
+        adb.is_worker_alive = MagicMock(return_value=True)
+        adb.enqueue_render = MagicMock(return_value={"id": "pa-1"})
+        resp = self._post(flask_app, monkeypatch, {"text": "Play  ball", "style": "hype"}, adb)
+        assert resp.status_code == 202
+        assert resp.get_json()["status"] == "queued"
+        _, kwargs = adb.enqueue_render.call_args
+        assert kwargs["kind"] == "pa" and kwargs["text"] == "Play ball" and kwargs["quality"] == "best"
+
+    def test_worker_offline_renders_on_pi(self, flask_app, monkeypatch):
+        adb = MagicMock()
+        adb.is_worker_alive = MagicMock(return_value=False)
+        adb.enqueue_render = MagicMock(return_value={"id": "pa-2"})
+        started = []
+        monkeypatch.setattr("threading.Thread.start", lambda self: started.append(self))
+        resp = self._post(flask_app, monkeypatch, {"text": "Play ball"}, adb)
+        assert resp.get_json()["status"] == "rendering"
+        _, kwargs = adb.enqueue_render.call_args
+        assert kwargs["quality"] == "quick" and kwargs["status"] == "PROCESSING"
+        assert len(started) == 1
+
+    def test_list_returns_announcements_and_styles(self, flask_app, monkeypatch):
+        adb = MagicMock()
+        adb.list_pa_jobs = MagicMock(return_value=[{"id": "pa-1"}])
+        monkeypatch.setattr(sd, "_announcer_db", lambda: adb)
+        with flask_app.test_client() as client:
+            data = client.get("/api/announcer/pa").get_json()
+        assert data["announcements"] == [{"id": "pa-1"}]
+        assert {s["id"] for s in data["styles"]} >= {"stadium", "calm"}
 
 
 class TestAnnouncerRenderStatusSSE:
@@ -6321,20 +6377,21 @@ class TestAnnouncerRenderStatusSSE:
 class TestHandleAnnouncerRenderQueueClaim:
     _ORIGIN = "https://test.queue.com"
 
-    def test_guard_blocked(self, flask_app, monkeypatch):
+    def test_missing_worker_token_returns_401(self, flask_app, monkeypatch):
         monkeypatch.setattr(sd, "WRITE_ORIGINS", [self._ORIGIN])
+        monkeypatch.setenv("DUGOUT_WRITE_TOKEN", "tok")
         sd._MUTATE_RATE_BUCKETS.clear()
         with flask_app.test_client() as client:
             resp = client.patch(
                 "/api/announcer/render-queue/job-001",
-                data="not json",
-                content_type="text/plain",
-                headers={"Origin": self._ORIGIN},
+                json={"status": "FAILED"},
+                headers={"Origin": self._ORIGIN},  # a trusted Origin alone is not enough
             )
-        assert resp.status_code == 415
+        assert resp.status_code == 401
 
     def test_invalid_status_returns_400(self, flask_app, monkeypatch):
         monkeypatch.setattr(sd, "WRITE_ORIGINS", [self._ORIGIN])
+        monkeypatch.setenv("DUGOUT_WRITE_TOKEN", "tok")
         sd._MUTATE_RATE_BUCKETS.clear()
         adb = MagicMock()
         monkeypatch.setattr(sd, "_announcer_db", lambda: adb)
@@ -6343,12 +6400,13 @@ class TestHandleAnnouncerRenderQueueClaim:
                 "/api/announcer/render-queue/job-001",
                 json={"status": "INVALID"},
                 content_type="application/json",
-                headers={"Origin": self._ORIGIN},
+                headers={"Origin": self._ORIGIN, "X-Dugout-Token": "tok"},
             )
         assert resp.status_code == 400
 
     def test_job_not_found_returns_404(self, flask_app, monkeypatch):
         monkeypatch.setattr(sd, "WRITE_ORIGINS", [self._ORIGIN])
+        monkeypatch.setenv("DUGOUT_WRITE_TOKEN", "tok")
         sd._MUTATE_RATE_BUCKETS.clear()
         adb = MagicMock()
         adb.get_job = MagicMock(return_value=None)
@@ -6358,12 +6416,13 @@ class TestHandleAnnouncerRenderQueueClaim:
                 "/api/announcer/render-queue/job-001",
                 json={"status": "COMPLETED"},
                 content_type="application/json",
-                headers={"Origin": self._ORIGIN},
+                headers={"Origin": self._ORIGIN, "X-Dugout-Token": "tok"},
             )
         assert resp.status_code == 404
 
     def test_failed_status_update_with_error(self, flask_app, monkeypatch):
         monkeypatch.setattr(sd, "WRITE_ORIGINS", [self._ORIGIN])
+        monkeypatch.setenv("DUGOUT_WRITE_TOKEN", "tok")
         sd._MUTATE_RATE_BUCKETS.clear()
         adb = MagicMock()
         adb.get_job = MagicMock(side_effect=[
@@ -6377,7 +6436,7 @@ class TestHandleAnnouncerRenderQueueClaim:
                 "/api/announcer/render-queue/job-001",
                 json={"status": "FAILED", "error": "render crashed"},
                 content_type="application/json",
-                headers={"Origin": self._ORIGIN},
+                headers={"Origin": self._ORIGIN, "X-Dugout-Token": "tok"},
             )
         assert resp.status_code == 200
 
@@ -8984,6 +9043,7 @@ class TestRenderQueueClaimProcessingPath:
 
     def test_processing_status_calls_claim_job(self, flask_app, monkeypatch, tmp_path):
         monkeypatch.setattr(sd, "WRITE_ORIGINS", [self._ORIGIN])
+        monkeypatch.setenv("DUGOUT_WRITE_TOKEN", "tok")
         sd._MUTATE_RATE_BUCKETS.clear()
 
         adb = MagicMock()
@@ -8999,50 +9059,11 @@ class TestRenderQueueClaimProcessingPath:
                 "/api/announcer/render-queue/job-001",
                 json={"status": "PROCESSING", "worker_id": "mac-studio"},
                 content_type="application/json",
-                headers={"Origin": self._ORIGIN},
+                headers={"Origin": self._ORIGIN, "X-Dugout-Token": "tok"},
             )
         assert resp.status_code == 200
         adb.claim_job.assert_called_once_with("job-001", "mac-studio")
         adb.update_job_status.assert_not_called()
-
-
-# ===========================================================================
-# handle_announcer_render_complete: FLAC file save (lines 4435-4438)
-# ===========================================================================
-
-class TestRenderCompleteWithFlac:
-    """Lines 4435-4438: optional FLAC file is saved to ARCHIVE_DIR."""
-    _ORIGIN = "https://test.flac.com"
-
-    def test_flac_file_saved_to_archive_dir(self, flask_app, monkeypatch, tmp_path):
-        monkeypatch.setattr(sd, "WRITE_ORIGINS", [self._ORIGIN])
-        sd._MUTATE_RATE_BUCKETS.clear()
-        monkeypatch.setattr(sd, "_guard_mutating_request", lambda: None)
-
-        adb = MagicMock()
-        adb.get_job = MagicMock(return_value={"id": "job-002", "player_id": "07-jane-doe"})
-        adb.update_job_status = MagicMock()
-        monkeypatch.setattr(sd, "_announcer_db", lambda: adb)
-
-        fake = _make_fake_announcer_engine(tmp_path)
-        fake.CLIPS_DIR = tmp_path / "clips"
-        fake.ARCHIVE_DIR = tmp_path / "archive"
-        monkeypatch.setitem(sys.modules, "announcer_engine", fake)
-
-        import io
-        with flask_app.test_client() as client:
-            resp = client.post(
-                "/api/announcer/render-complete/job-002",
-                data={
-                    "mp3": (io.BytesIO(b"FAKE_MP3"), "output.mp3"),
-                    "flac": (io.BytesIO(b"FAKE_FLAC"), "output.flac"),
-                },
-                content_type="multipart/form-data",
-            )
-        assert resp.status_code == 200
-        # Archive dir should have been created with FLAC content
-        flac_files = list((tmp_path / "archive" / "07-jane-doe").glob("*.flac"))
-        assert len(flac_files) == 1
 
 
 # ===========================================================================
