@@ -11,6 +11,7 @@
     "build": "vite build",
     "lint": "eslint . && node scripts/check_jsx_refs.mjs",
     "check:jsx": "node scripts/check_jsx_refs.mjs",
+    "test": "node --test tests/*.test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

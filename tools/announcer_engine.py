@@ -1193,6 +1193,10 @@ def reconcile_roster_with_team(roster: list[dict]) -> tuple[list[dict], bool]:
             logging.info("[Announcer] Added new player to roster: %s", player["id"])
 
     for player in roster:
+        # A sub added in the Announcer is never on team.json. Deactivating
+        # her here hid her from the batting order on the very next load.
+        if player.get("is_sub"):
+            continue
         on_team = player.get("id") in team_ids
         if player.get("is_active", True) != on_team:
             player["is_active"] = on_team
@@ -1217,6 +1221,49 @@ def _mark_stale_renders(roster: list[dict]) -> bool:
             continue
         if int(p.get("wrap_version") or 0) < STADIUM_WRAP_VERSION:
             p["status"] = "pending"
+            changed = True
+    return changed
+
+
+# A render that has not finished in this long is dead: the Pi thread died with
+# its process, or a worker claimed the job and went away. Without this a row
+# said "Rendering…" forever and the PWA had to cap its polling blindly.
+RENDER_STALL_SECONDS = int(os.getenv("ANNOUNCER_RENDER_STALL_SECONDS", "600"))
+RENDER_STALLED_MESSAGE = "Render stopped responding. Tap Retry."
+
+
+def _now_iso() -> str:
+    return datetime.now(ET).isoformat()
+
+
+def rendering_fields(job_id: str = "") -> dict:
+    """Roster fields for a render that is now in flight."""
+    return {"status": "rendering", "error_message": "",
+            "render_started_at": _now_iso(), "render_job_id": job_id}
+
+
+def _expire_stuck_renders(roster: list[dict]) -> bool:
+    """Turn renders older than RENDER_STALL_SECONDS into errors the coach can retry.
+
+    An entry with no start time predates this field; any thread that was
+    rendering it died in the restart that shipped the field, so it is stuck too.
+    """
+    changed = False
+    now = datetime.now(ET)
+    for p in roster:
+        if p.get("status") != "rendering":
+            continue
+        try:
+            started = datetime.fromisoformat(p.get("render_started_at") or "")
+            if started.tzinfo is None:
+                started = started.replace(tzinfo=ET)
+            age = (now - started).total_seconds()
+        except ValueError:
+            age = float("inf")
+        if age > RENDER_STALL_SECONDS:
+            p["status"] = "error"
+            p["error_message"] = RENDER_STALLED_MESSAGE
+            p["render_job_id"] = ""
             changed = True
     return changed
 
@@ -1263,6 +1310,7 @@ def load_announcer_roster() -> list[dict]:
     if isinstance(roster, list) and roster:
         roster, changed = reconcile_roster_with_team(roster)
         changed = _mark_stale_renders(roster) or changed
+        changed = _expire_stuck_renders(roster) or changed
         if changed:
             # Re-read under the lock so this write can't clobber a status update
             # that another worker landed between our read and now.
@@ -1270,6 +1318,7 @@ def load_announcer_roster() -> list[dict]:
                 fresh = _read_json(ROSTER_FILE, default=None)
                 roster, _ = reconcile_roster_with_team(fresh if isinstance(fresh, list) else roster)
                 _mark_stale_renders(roster)
+                _expire_stuck_renders(roster)
                 try:
                     _atomic_write_json(ROSTER_FILE, roster)
                 except OSError as e:
@@ -1485,7 +1534,8 @@ def render_player_audio(player_id: str, game_context: dict | None = None,
     if not player:
         raise ValueError(f"Player not found: {player_id}")
 
-    update_player(player_id, {"status": "rendering", "error_message": ""})
+    # Keep the job id a worker-queued render may already have stamped.
+    update_player(player_id, rendering_fields(player.get("render_job_id") or ""))
 
     try:
         provider = get_quick_tts_provider() if quality == "quick" else get_tts_provider()
@@ -1526,6 +1576,7 @@ def render_player_audio(player_id: str, game_context: dict | None = None,
             "voice_rendered": voice["id"],
             "wrap_version": STADIUM_WRAP_VERSION,
             "error_message": "",
+            "render_job_id": "",
         }
         if game_context:
             updated = update_player(player_id, done)
@@ -1540,6 +1591,7 @@ def render_player_audio(player_id: str, game_context: dict | None = None,
         update_player(player_id, {
             "status": "error",
             "error_message": str(e)[:500],
+            "render_job_id": "",
         })
         raise
 
@@ -1630,6 +1682,7 @@ def save_job_audio(job: dict, audio_bytes: bytes) -> str:
             "render_quality": "best",
             "wrap_version": STADIUM_WRAP_VERSION,
             "error_message": "",
+            "render_job_id": "",
         }
         if json.loads(job.get("game_context") or "null"):
             update_player(job["player_id"], done)
@@ -1645,21 +1698,57 @@ def render_pa_on_pi(text: str) -> bytes:
     return provider.synthesize(text_for_provider(provider, text), get_default_voice_profile())
 
 
-def render_all_pending() -> dict:
-    """Render audio for all active players with status != ready. Returns summary."""
-    roster = load_announcer_roster()
-    active = [p for p in roster if p.get("is_active") and p.get("status") != "ready"]
-    results = {"total": len(active), "success": 0, "failed": 0, "errors": []}
+def claim_render_batch() -> list[str]:
+    """Mark every active player that needs a call as rendering, in one write.
 
-    for p in active:
+    The batch renders one player at a time. It used to flip each player to
+    "rendering" only as its turn came, so a PWA poll landing between two
+    players saw nothing in flight, stopped polling, and the rest of the batch
+    finished silently. Players already rendering are left to their own job.
+    """
+    with _ROSTER_LOCK:
+        roster = load_announcer_roster()
+        ids = [p["id"] for p in roster
+               if p.get("is_active") and p.get("status") in ("pending", "error")]
+        if ids:
+            for p in roster:
+                if p["id"] in ids:
+                    p.update(rendering_fields())
+            save_announcer_roster(roster)
+    return ids
+
+
+def render_players(player_ids: list[str]) -> dict:
+    """Render the standard walk-up for each player in turn. Returns a summary."""
+    results = {"total": len(player_ids), "success": 0, "failed": 0, "errors": []}
+    for pid in player_ids:
         try:
-            render_player_audio(p["id"])
+            render_player_audio(pid)
             results["success"] += 1
         except Exception as e:
             results["failed"] += 1
-            results["errors"].append({"player_id": p["id"], "error": str(e)[:200]})
-
+            results["errors"].append({"player_id": pid, "error": str(e)[:200]})
     return results
+
+
+def render_all_pending() -> dict:
+    """Render audio for all active players that need a call. Returns summary."""
+    return render_players(claim_render_batch())
+
+
+def mark_job_failed(job: dict, error: str) -> None:
+    """A worker reported a walk-up job FAILED: show it on the player's row.
+
+    Only the job the row is waiting on counts. A background draft re-render
+    failing must not turn a player with a good call into an error.
+    """
+    if job.get("kind") == "pa":
+        return
+    with _ROSTER_LOCK:
+        player = get_player_by_id(job.get("player_id") or "")
+        if player and player.get("render_job_id") == job.get("id"):
+            update_player(player["id"], {"status": "error", "render_job_id": "",
+                                         "error_message": (error or "Render worker failed")[:500]})
 
 
 def get_roster_stats() -> dict:
