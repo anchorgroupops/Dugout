@@ -2120,6 +2120,7 @@ class TestLoadPracticeRsvpDefaults:
 class TestHandleVoiceUpdate:
     def test_returns_404_when_no_file_no_api_key(self, flask_app, monkeypatch, tmp_path):
         monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        monkeypatch.delenv("ELEVENLABS_API_KEY", raising=False)
         # No voice file, no ElevenLabs key — should return 404 error JSON
         with flask_app.test_client() as client:
             resp = client.get("/api/voice-update")
