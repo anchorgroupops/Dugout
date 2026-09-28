@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import os
 import shutil
@@ -598,6 +599,12 @@ def build_team_json(roster: list[dict], csv_path: Path,
 
     meta["last_updated"] = datetime.now(ET).isoformat()
     meta["source"] = f"gc_csv_export:{csv_path.name}"
+    # Lets the daemon's local fallback recognise an export it already ingested
+    # without trusting mtimes, which git resets on every checkout.
+    try:
+        meta["source_sha256"] = hashlib.sha256(Path(csv_path).read_bytes()).hexdigest()
+    except OSError:
+        meta.pop("source_sha256", None)
 
     # Calculate record from known_game_results.json (authoritative source)
     max_gp = max((p.get("games_played", 0) for p in roster), default=0)

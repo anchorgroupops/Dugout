@@ -7829,24 +7829,26 @@ class TestCsvIngestFromLocal:
         monkeypatch.setitem(sys.modules, "gc_csv_ingest", fake_gc)
         return sharks_dir, csv_file, fake_gc
 
-    def test_skips_when_team_json_newer_than_csv(self, tmp_path, monkeypatch):
-        # The static Spring export was re-ingested every cycle, refreshing
-        # last_updated and overwriting newer autopull data.
-        import os
+    def test_skips_export_already_ingested_even_after_checkout_touches_it(self, tmp_path, monkeypatch):
+        # The static export was re-ingested every cycle, refreshing
+        # last_updated and overwriting newer autopull data. A git checkout
+        # resets the tracked CSV's mtime, so the guard must be by content.
+        import hashlib, os
         sharks_dir, csv_file, fake_gc = self._setup_candidate(tmp_path, monkeypatch)
         team_file = sharks_dir / "team.json"
-        team_file.write_text(json.dumps({"roster": ["autopull"]}))
-        os.utime(csv_file, (1_000_000, 1_000_000))
+        team_file.write_text(json.dumps({
+            "roster": ["autopull"],
+            "source_sha256": hashlib.sha256(csv_file.read_bytes()).hexdigest(),
+        }))
+        os.utime(team_file, (1_000_000, 1_000_000))  # CSV now looks newer
         sd._csv_ingest_from_local()
         fake_gc.parse_gc_csv.assert_not_called()
-        assert json.loads(team_file.read_text()) == {"roster": ["autopull"]}
+        assert json.loads(team_file.read_text())["roster"] == ["autopull"]
 
-    def test_ingests_when_csv_newer_than_team_json(self, tmp_path, monkeypatch):
-        import os
+    def test_ingests_when_export_content_differs(self, tmp_path, monkeypatch):
         sharks_dir, csv_file, fake_gc = self._setup_candidate(tmp_path, monkeypatch)
         team_file = sharks_dir / "team.json"
-        team_file.write_text(json.dumps({"roster": ["old"]}))
-        os.utime(team_file, (1_000_000, 1_000_000))
+        team_file.write_text(json.dumps({"roster": ["old"], "source_sha256": "0" * 64}))
         sd._csv_ingest_from_local()
         fake_gc.parse_gc_csv.assert_called_once()
         assert json.loads(team_file.read_text()) == {"roster": ["new"]}

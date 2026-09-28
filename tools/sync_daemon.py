@@ -1,5 +1,6 @@
 from __future__ import annotations
 import time
+import hashlib
 import json
 import uuid
 import os
@@ -6389,6 +6390,10 @@ def _trigger_post_game_analysis():
         send_alert("Post-game analysis encountered errors. Check sync_daemon logs.", level="ERROR")
 
 
+def _file_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def _csv_ingest_from_local():
     """Re-ingest team data from the latest local GC CSV export.
 
@@ -6404,19 +6409,28 @@ def _csv_ingest_from_local():
                      season_label(GC_SEASON_SLUG_DEFAULT) or "current-season")
         return
 
-    # Only ingest an export that is newer than the current team.json. This
-    # used to re-ingest the same static CSV every cycle, stamping
-    # last_updated=now (stale data looked fresh) and clobbering whatever the
-    # nightly autopull had written.
+    # Skip an export whose content team.json already came from. This used to
+    # re-ingest the same static CSV every cycle, stamping last_updated=now
+    # (stale data looked fresh) and clobbering whatever the nightly autopull
+    # had written. Content hash, not mtime: the export is git-tracked, so
+    # every checkout or deploy resets its mtime to "now".
     team_file = SHARKS_DIR / "team.json"
-    if team_file.exists() and team_file.stat().st_mtime >= csv_path.stat().st_mtime:
-        return
+    csv_sha = _file_sha256(csv_path)
+    if team_file.exists():
+        try:
+            with open(team_file) as f:
+                if json.load(f).get("source_sha256") == csv_sha:
+                    return
+        except (OSError, ValueError):
+            pass
     try:
         from gc_csv_ingest import parse_gc_csv, build_team_json, build_app_stats_json
         import shutil
 
         roster = parse_gc_csv(csv_path)
         if not roster:
+            logging.warning("[Sync] %s parsed to an empty roster — local ingest fallback skipped.",
+                            csv_path.name)
             return
 
         team_json = build_team_json(roster, csv_path)
