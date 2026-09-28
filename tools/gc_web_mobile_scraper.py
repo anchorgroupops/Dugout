@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import json
 import re
+import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import requests
+import os
 
 try:
     from playwright.sync_api import sync_playwright
@@ -26,6 +29,22 @@ MOBILE_UA = (
 )
 
 
+def _atomic_write_json(path: Path, data) -> None:
+    """Write JSON via temp-file + os.replace so a crash mid-write can't leave
+    a half-written game file for the API/dashboard to read."""
+    fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        os.replace(tmp_path, str(path))
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
 def _slug(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", (value or "").lower()).strip("_")
 
@@ -37,14 +56,41 @@ def _safe_int(value: str) -> int:
         return 0
 
 
-def _fetch_public_games(team_id: str) -> list[dict]:
+def _fetch_public_games(team_id: str, max_retries: int = 3) -> list[dict]:
+    """Fetch GC's public games list, retrying transient failures with backoff.
+
+    429/5xx and network timeouts are retried; a 429's Retry-After header is
+    honored when present. Other 4xx responses fail immediately — retrying a
+    bad team_id wastes time and gets us no further.
+    """
     url = f"{GC_API_BASE}/public/teams/{team_id}/games"
-    resp = requests.get(url, timeout=30)
-    resp.raise_for_status()
-    games = resp.json()
-    if not isinstance(games, list):
-        return []
-    return games
+    last_exc: Exception | None = None
+    for attempt in range(max_retries):
+        try:
+            resp = requests.get(url, timeout=30)
+            if resp.status_code == 429 or resp.status_code >= 500:
+                if attempt < max_retries - 1:
+                    try:
+                        delay = float(resp.headers.get("Retry-After") or 2 ** attempt)
+                    except (TypeError, ValueError):
+                        delay = 2 ** attempt  # HTTP-date form; fall back to backoff
+                    time.sleep(max(0.0, min(delay, 60.0)))
+                    continue
+                resp.raise_for_status()
+            resp.raise_for_status()
+            games = resp.json()
+            if not isinstance(games, list):
+                return []
+            return games
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+            last_exc = e
+            if attempt < max_retries - 1:
+                time.sleep(2 ** attempt)
+                continue
+            raise
+    if last_exc:
+        raise last_exc
+    return []
 
 
 def _valid_team_name(text: str) -> bool:
@@ -266,7 +312,7 @@ def sync_recent_games(
                     "opponent_batting": opp_rows,
                 }
 
-                output_file.write_text(json.dumps(out, indent=2), encoding="utf-8")
+                _atomic_write_json(output_file, out)
                 outputs.append(str(output_file))
                 saved += 1
             except Exception:
