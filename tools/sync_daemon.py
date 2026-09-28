@@ -3726,6 +3726,13 @@ def handle_team():
         ).isoformat()
     except Exception:
         pass
+    # ...but prefer when the stats were actually ingested (team.json's own
+    # stamp): every sync cycle rewrites team_enriched/team_merged even when no
+    # new GC data arrived, which made old stats read "Updated just now".
+    if base_team_file.exists():
+        ingested_at = (_read_json_file(base_team_file, default={}) or {}).get("last_updated")
+        if isinstance(ingested_at, str) and ingested_at:
+            team["last_updated"] = ingested_at
 
     # Ensure GC identifiers are always present (hardcoded fallbacks for The Sharks)
     if not team.get("gc_team_id"):

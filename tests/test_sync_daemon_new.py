@@ -3873,6 +3873,17 @@ class TestHandleTeam:
             resp = client.get("/api/team")
         assert resp.status_code == 200
 
+    def test_last_updated_is_ingest_time_not_merged_file_mtime(self, flask_app, monkeypatch, tmp_path):
+        """SIGN-015: the sync cycle rewrites team_merged every run, so its
+        mtime made weeks-old stats read "Updated just now"."""
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        (tmp_path / "team_merged.json").write_text('{"team_name": "The Sharks", "roster": []}')
+        (tmp_path / "team.json").write_text(
+            '{"roster": [], "last_updated": "2026-09-01T03:00:00-04:00"}')
+        with flask_app.test_client() as client:
+            data = client.get("/api/team").get_json()
+        assert data["last_updated"] == "2026-09-01T03:00:00-04:00"
+
 
 # ---------------------------------------------------------------------------
 # handle_borrowed_player — POST endpoint (lines 3231-3283)
