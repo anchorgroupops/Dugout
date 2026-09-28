@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Users, Activity, RefreshCw, ListOrdered, Calendar, Trophy, Dumbbell, Volume2, Target, AlertTriangle, MoreHorizontal, Download, Globe, GlobeLock, Clock, Radio, Mic, ClipboardList } from 'lucide-react';
+import { Users, Activity, RefreshCw, ListOrdered, Calendar, Trophy, Dumbbell, Volume2, Target, AlertTriangle, MoreHorizontal, Download, Globe, GlobeLock, Clock, Radio, Mic, ClipboardList, Lock } from 'lucide-react';
 import { formatDateTime, formatRelative } from './utils/formatDate';
 import { usePWAInstall } from './utils/usePWAInstall';
 import { useOnlineStatus } from './utils/useOnlineStatus';
@@ -9,6 +9,8 @@ import Scoreboard from './components/Scoreboard';
 import ErrorBoundary from './components/ErrorBoundary';
 import { lazyWithRetry } from './utils/lazyWithRetry';
 import { fetchWithBackoff, apiRequest } from './utils/apiClient';
+import { checkAppAuth, isAuthRequiredResponse, logoutApp } from './utils/appAuth';
+import PasswordGate from './components/PasswordGate';
 const Swot = lazyWithRetry(() => import('./components/Swot'));
 const Games = lazyWithRetry(() => import('./components/Games'));
 const League = lazyWithRetry(() => import('./components/League'));
@@ -63,6 +65,8 @@ function App() {
   const [syncLoading, setSyncLoading] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [loadingTimedOut, setLoadingTimedOut] = useState(false);
+  // Team-password gate (SIGN-021): 'checking' → 'open' | 'locked'.
+  const [authState, setAuthState] = useState('checking');
   // Hydrate team/availability/lineups from localStorage so the UI has
   // something to show before (or instead of) a successful network fetch.
   const cachedFromLocal = (() => {
@@ -112,6 +116,13 @@ function App() {
       ]);
       const [teamRes, swotRes, lineupsRes, availRes, gamesRes, scheduleRes] =
         results.map(r => (r.status === 'fulfilled' ? r.value : null));
+      // Session expired or the password changed: show the gate. Checked
+      // before the static/localStorage fallbacks below, which would
+      // otherwise quietly render the cached roster to a locked-out browser.
+      if (await isAuthRequiredResponse(teamRes)) {
+        setAuthState('locked');
+        return false;
+      }
       const readJson = async (res, fallback = null) => {
         if (!res?.ok) return fallback;
         try { return await res.json(); } catch { return fallback; }
@@ -258,7 +269,29 @@ function App() {
     }
   }, [fetchWithRetry]);
 
+  // Ask the server whether this browser has a team session before loading
+  // anything. Only a 401 locks; offline or a server error opens the app on
+  // cached data.
   useEffect(() => {
+    let cancelled = false;
+    checkAppAuth().then((state) => { if (!cancelled) setAuthState(state); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const handleLock = useCallback(async () => {
+    if (syncPollRef.current) {
+      clearInterval(syncPollRef.current);
+      syncPollRef.current = null;
+    }
+    setSyncLoading(false);
+    setMoreMenuOpen(false);
+    await logoutApp();
+    setAuthState('locked');
+  }, []);
+
+  useEffect(() => {
+    // The poll loop only runs while unlocked; locking tears it down.
+    if (authState !== 'open') return undefined;
     // Backoff-aware polling loop. Replace the naive 30s setInterval with
     // a setTimeout chain that doubles delay on consecutive failed loads
     // (network OR /api/team !ok) to keep the rate-limit cascade from
@@ -297,7 +330,7 @@ function App() {
       if (nextTimer) clearTimeout(nextTimer);
       clearTimeout(timeoutId);
     };
-  }, [fetchData]);
+  }, [fetchData, authState]);
 
   // Handle Spotify OAuth callback — SPA catches /spotify-callback via nginx try_files
   useEffect(() => {
@@ -573,6 +606,9 @@ function App() {
     return raw;
   })();
 
+  if (authState === 'checking') return <div className="loader"></div>;
+  if (authState === 'locked') return <PasswordGate onUnlocked={() => setAuthState('open')} />;
+
   return (
     <div data-landscape={isLandscape ? '' : undefined} className={isLandscape ? 'landscape-mode' : ''}>
       {/* ─── Top Navigation ─── */}
@@ -685,6 +721,10 @@ function App() {
                 <RefreshCw size={16} className={syncLoading ? 'sync-spin' : ''} />
                 {syncLoading ? 'Syncing...' : 'Manual Sync'}
               </button>
+              <button className="sync-btn" onClick={handleLock} title="Lock the dashboard on this device" aria-label="Lock the dashboard on this device">
+                <Lock size={16} />
+                Lock
+              </button>
               {syncLoading && syncMilestones.length > 0 && (
                 <SyncProgressBar progress={syncProgress} stage={syncStage} milestones={syncMilestones} />
               )}
@@ -771,6 +811,10 @@ function App() {
               >
                 <RefreshCw size={20} className={syncLoading ? 'sync-spin' : ''} />
                 {syncLoading ? 'Syncing…' : 'Manual Sync'}
+              </button>
+              <button className="more-menu-item" onClick={handleLock}>
+                <Lock size={20} />
+                Lock
               </button>
               {canInstall && (
                 <button

@@ -437,7 +437,7 @@ textarea {
   touch-action: manipulation;
 }
 
-/* ==========================================================================
+/* ===================================================================
    TOUCH-DEVICE BASELINE
    Everything in this block keys off `pointer: coarse` rather than a width
    breakpoint. A rotated iPhone 15 Pro Max reports 932px wide, so width-based
@@ -1584,7 +1584,7 @@ input[type="checkbox"]:checked::after {
   }
 }
 
-/* ==========================================================================
+/* ===================================================================
    ANNOUNCER
    ========================================================================== */
 
@@ -2255,3 +2255,92 @@ body:has(.announcer-modal-overlay) .navbar {
 .announcer-voice-actions .announcer-btn { min-height: var(--touch-min); white-space: nowrap; }
 .announcer-item-row--off .announcer-item-text strong { color: var(--text-muted); }
 .announcer-item-row--off .announcer-btn-round { opacity: 0.4; }
+
+
+/* ─── Team-password gate (SIGN-021) ─── */
+.password-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: calc(var(--space-md) + env(safe-area-inset-top, 0px)) var(--space-md) calc(var(--space-md) + env(safe-area-inset-bottom, 0px));
+  background: var(--bg-gradient);
+  overflow-y: auto;
+}
+
+.password-gate-card {
+  width: 100%;
+  max-width: 360px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-2xl) var(--space-xl);
+  text-align: center;
+}
+
+.password-gate-crest {
+  border-radius: 50%;
+  margin-bottom: var(--space-xs);
+}
+
+.password-gate-title {
+  font-size: 1.75rem;
+  line-height: 1.1;
+  margin: 0;
+}
+
+.password-gate-sub {
+  color: var(--text-muted);
+  margin: 0 0 var(--space-xs);
+}
+
+.password-gate-input {
+  width: 100%;
+  min-height: 44px;
+  font-size: 16px; /* 16px stops iOS zooming into the field */
+  padding: 0.65rem 0.9rem;
+  border-radius: 12px;
+  border: 1px solid var(--surface-border);
+  background: rgba(5, 10, 22, 0.6);
+  color: var(--text-main);
+}
+
+.password-gate-input:focus {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 1px;
+}
+
+.password-gate-input[aria-invalid='true'] {
+  border-color: var(--danger);
+}
+
+.password-gate-btn {
+  width: 100%;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border: 1px solid rgba(130, 203, 195, 0.4);
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(130, 203, 195, 0.25), rgba(4, 101, 104, 0.35));
+  color: var(--primary-color);
+  font-weight: 700;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.password-gate-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.password-gate-error {
+  color: var(--danger);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  margin: 0;
+}

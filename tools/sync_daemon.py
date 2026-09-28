@@ -360,7 +360,9 @@ def _is_private_or_loopback(ip_str: str) -> bool:
 # shared secret that every mutating /api request must present (in addition to
 # the Origin check). /api/deploy* and /api/sync/kick* are exempt because they
 # already require DEPLOY_WEBHOOK_TOKEN via _require_deploy_token().
-WRITE_TOKEN_EXEMPT_PREFIXES = ("/api/deploy", "/api/sync/kick")
+# /api/auth/login|logout are how a browser gets/drops the team-password
+# session; they cannot require a token the visitor doesn't have yet.
+WRITE_TOKEN_EXEMPT_PREFIXES = ("/api/deploy", "/api/sync/kick", "/api/auth/login", "/api/auth/logout")
 
 
 def _write_token_expected() -> str:
@@ -438,6 +440,91 @@ if not os.getenv("DUGOUT_WRITE_TOKEN", "").strip():
     logging.warning(
         "[Security] DUGOUT_WRITE_TOKEN not set — mutating /api endpoints are "
         "protected by Origin check only"
+    )
+
+
+# ---------------------------------------------------------
+# Team-password gate for every /api read and write (SIGN-021)
+# ---------------------------------------------------------
+# DUGOUT_APP_PASSWORD is the shared team password. When set, every /api
+# request needs the `dugout_session` cookie that POST /api/auth/login issues,
+# except the auth routes themselves, /api/health (container healthcheck,
+# opcheck, CI), machine callers that present the write/worker token or the
+# deploy bearer, and /api/deploy (its own bearer). nginx gates /data/,
+# /announcer-clips/ and /audio/music/ by asking GET /api/auth/check.
+APP_SESSION_COOKIE = "dugout_session"
+APP_SESSION_MAX_AGE = 180 * 24 * 60 * 60
+APP_LOGIN_FAIL_DELAY_SEC = 0.3
+APP_AUTH_EXEMPT_PATHS = frozenset({
+    "/api/auth/login", "/api/auth/check", "/api/auth/logout", "/api/health", "/api/deploy",
+})
+
+
+def _app_password() -> str:
+    """Configured team password ('' = gate off). Read per-request."""
+    return os.getenv("DUGOUT_APP_PASSWORD", "").strip()
+
+
+def _app_session_value() -> str:
+    """Expected cookie value. Keyed by DUGOUT_SESSION_SECRET (or, when unset,
+    a hash of the password). The password hash is also in the message, so
+    changing the password invalidates every session whether or not a
+    separate secret is configured."""
+    pw_hash = hashlib.sha256(_app_password().encode()).digest()
+    secret = os.getenv("DUGOUT_SESSION_SECRET", "").strip()
+    key = secret.encode() if secret else pw_hash
+    return hmac.new(key, b"dugout-session-v1" + pw_hash, hashlib.sha256).hexdigest()
+
+
+def _has_app_session() -> bool:
+    presented = request.cookies.get(APP_SESSION_COOKIE, "")
+    return bool(presented) and hmac.compare_digest(
+        presented.encode(), _app_session_value().encode()
+    )
+
+
+def _presents_valid_worker_token() -> bool:
+    """Same test as _require_worker_token(), minus its bad-token log line
+    (this runs on every gated request)."""
+    expected = _write_token_expected()
+    presented = _presented_write_token()
+    return bool(expected and presented) and hmac.compare_digest(
+        presented.encode(), expected.encode()
+    )
+
+
+def _presents_valid_deploy_bearer() -> bool:
+    """Same test as _require_deploy_token(), quietly."""
+    expected = os.getenv("DEPLOY_WEBHOOK_TOKEN", "").strip()
+    auth = request.headers.get("Authorization", "")
+    return bool(expected and auth) and hmac.compare_digest(
+        auth.encode(), f"Bearer {expected}".encode()
+    )
+
+
+def _guard_app_session():
+    """401 auth_required for a gated /api request that has no session.
+    Returns (response, status) on rejection, else None."""
+    if not _app_password():
+        return None
+    if not request.path.startswith("/api/") or request.method.upper() == "OPTIONS":
+        return None
+    if request.path in APP_AUTH_EXEMPT_PATHS:
+        return None
+    if _has_app_session() or _presents_valid_worker_token() or _presents_valid_deploy_bearer():
+        return None
+    return jsonify({"error": "auth_required"}), 401
+
+
+def _request_is_https() -> bool:
+    proto = (request.headers.get("X-Forwarded-Proto") or "").split(",")[0].strip().lower()
+    return request.is_secure or proto == "https"
+
+
+if not os.getenv("DUGOUT_APP_PASSWORD", "").strip():
+    logging.warning(
+        "[Security] DUGOUT_APP_PASSWORD not set — roster, stats, audio and every "
+        "/api read are public (team-password gate off)"
     )
 
 
@@ -1681,6 +1768,12 @@ def _security_before_request():
     content_length = request.content_length
     if content_length is not None and content_length > max_bytes:
         return jsonify({"error": "payload_too_large", "max_bytes": max_bytes}), 413
+
+    # Team-password gate first: nothing under /api/ answers without a
+    # session (or a machine credential) once DUGOUT_APP_PASSWORD is set.
+    locked = _guard_app_session()
+    if locked:
+        return locked
 
     if _is_mutating_api_request():
         limited = _guard_mutating_rate_limit()
@@ -3604,6 +3697,55 @@ def _autopull_health(db_path: Path, now: datetime, threshold_hours: float) -> di
         entry["stale"] = bool(age_hours > threshold_hours
                               or (last and last[0] != "success"))
     return entry
+
+
+@app.route('/api/auth/login', methods=['POST'])
+def handle_auth_login():
+    """Exchange the team password for the `dugout_session` cookie (204).
+
+    Rate limited like every write (MUTATE_RATE_MAX per IP per minute) plus a
+    fixed delay on a wrong password; Origin-checked like every JSON write.
+    """
+    blocked = _guard_mutating_request()
+    if blocked:
+        return blocked
+    expected = _app_password()
+    if not expected:
+        return Response(status=204)  # gate off: nothing to unlock
+    body = request.get_json(silent=True)
+    presented = str(body.get("password") or "").strip() if isinstance(body, dict) else ""
+    if not hmac.compare_digest(presented.encode(), expected.encode()):
+        time.sleep(APP_LOGIN_FAIL_DELAY_SEC)
+        logging.warning("[Security] Wrong team password from %s", _sanitize_log(_client_ip()))
+        return jsonify({"error": "bad_password"}), 401
+    resp = Response(status=204)
+    resp.set_cookie(
+        APP_SESSION_COOKIE, _app_session_value(),
+        max_age=APP_SESSION_MAX_AGE, path="/",
+        httponly=True, samesite="Lax", secure=_request_is_https(),
+    )
+    return resp
+
+
+@app.route('/api/auth/check', methods=['GET'])
+def handle_auth_check():
+    """204 when the session cookie is valid (or the gate is off), else 401.
+    nginx's auth_request for /data/, clips and music asks this."""
+    if not _app_password() or _has_app_session():
+        return Response(status=204)
+    return jsonify({"error": "auth_required"}), 401
+
+
+@app.route('/api/auth/logout', methods=['POST'])
+def handle_auth_logout():
+    """Clear the session cookie (204). No Origin/JSON check: it can only
+    remove the caller's own cookie."""
+    resp = Response(status=204)
+    resp.delete_cookie(
+        APP_SESSION_COOKIE, path="/",
+        httponly=True, samesite="Lax", secure=_request_is_https(),
+    )
+    return resp
 
 
 @app.route('/api/auth/verify', methods=['POST'])
