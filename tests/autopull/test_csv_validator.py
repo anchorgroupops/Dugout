@@ -138,3 +138,84 @@ class TestOverlap:
     def test_single_missing_known_col(self):
         result = cv._overlap(["a", "b"], ["a", "b", "c"])
         assert abs(result - 2 / 3) < 1e-9
+
+
+# ---------------------------------------------------------------------------
+# GC export layout: BOM + section-label row + real header + trailer rows.
+# Fall 2026 exports were header-only (3 lines) yet were accepted as
+# "success, 3 rows" and ingested as a 0-player team.json every night.
+# ---------------------------------------------------------------------------
+
+_GC_SECTION = '﻿"","","","Batting","","","Pitching","","Fielding",""\r\n'
+_GC_HEADER = '"Number","Last","First","GP","PA","AB","IP","GP","PO","A"\r\n'
+_GC_BLANK = '"","","","","","","","","",""\r\n'
+_GC_TRAILER = (
+    '"Totals","","","3","20","15","4.0","2","6","3"\r\n'
+    + _GC_BLANK
+    + '"Glossary","","","GP=Games played","","","","","",""\r\n'
+)
+_GC_KNOWN = ["Number", "Last", "First", "GP", "PA", "AB", "IP", "PO", "A"]
+_LEGACY_BASELINE = ["Batting", "Fielding", "Pitching", '﻿""']
+
+
+def _gc_csv(tmp_path: Path, body: str, trailer: str = _GC_TRAILER) -> Path:
+    p = tmp_path / "season_stats_gc.csv"
+    p.write_text(_GC_SECTION + _GC_HEADER + body + trailer, encoding="utf-8")
+    return p
+
+
+class TestGcExportLayout:
+    def test_header_only_export_is_rejected(self, tmp_path):
+        # Exact shape GC produced every night 2026-09-23..28: section row,
+        # header row, one blank row — no players.
+        p = tmp_path / "fall.csv"
+        p.write_text(_GC_SECTION + _GC_HEADER + _GC_BLANK.rstrip("\r\n"),
+                     encoding="utf-8")
+        result = cv.validate(p, known_columns=_LEGACY_BASELINE)
+        assert result.accepted is False
+        assert "no data rows" in result.reason.lower()
+        assert result.row_count == 0
+
+    def test_totals_and_glossary_alone_are_not_players(self, tmp_path):
+        result = cv.validate(_gc_csv(tmp_path, body=""), known_columns=None)
+        assert result.accepted is False
+        assert "no data rows" in result.reason.lower()
+
+    def test_counts_player_rows_only(self, tmp_path):
+        body = (
+            '"7","Tester","Alex","3","9","7","1.0","1","2","1"\r\n'
+            '"12","Sample","Blair","3","8","6","","","1","0"\r\n'
+            # GC sometimes omits number and last name; still a player.
+            '"","","Casey","1","3","2","","","0","0"\r\n'
+        )
+        result = cv.validate(_gc_csv(tmp_path, body), known_columns=None)
+        assert result.accepted is True
+        assert result.row_count == 3
+
+    def test_columns_come_from_real_header_without_bom(self, tmp_path):
+        body = '"7","Tester","Alex","3","9","7","1.0","1","2","1"\r\n'
+        result = cv.validate(_gc_csv(tmp_path, body), known_columns=None)
+        assert result.columns[:3] == ["Number", "Last", "First"]
+        assert not any("﻿" in c for c in result.columns)
+        assert "Batting" not in result.columns
+
+    def test_legacy_section_label_baseline_does_not_quarantine(self, tmp_path):
+        # Every schema_profile row recorded before this fix is the section
+        # labels + BOM junk. Treating it as a real baseline would be 0%
+        # overlap -> critical drift -> quarantine forever.
+        body = '"7","Tester","Alex","3","9","7","1.0","1","2","1"\r\n'
+        result = cv.validate(_gc_csv(tmp_path, body),
+                             known_columns=_LEGACY_BASELINE)
+        assert result.accepted is True
+        assert result.drift_severity == "none"
+
+    def test_real_header_baseline_still_detects_drift(self, tmp_path):
+        p = tmp_path / "drift.csv"
+        p.write_text(
+            _GC_SECTION + '"Jersey","Name","Foo","Bar","Baz","Qux","","","",""\r\n'
+            '"7","Tester","1","2","3","4","","","",""\r\n',
+            encoding="utf-8",
+        )
+        result = cv.validate(p, known_columns=_GC_KNOWN)
+        assert result.accepted is False
+        assert result.drift_severity == "critical"

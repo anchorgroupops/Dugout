@@ -140,6 +140,33 @@ def wait_until_authenticated(page: Any, *, max_polls: int = AUTH_SETTLE_POLLS,
     return False
 
 
+GC_API_HOST = "api.team-manager.gc.com"
+
+
+def _watch_me_responses(page: Any) -> list[int]:
+    """Record the status of every GC `/me/*` API response `page` receives.
+
+    `/me/user` 200 is the real proof of a live session (SIGN-012). The saved
+    storage_state restores `eden-auth-tokens` into localStorage even when
+    those tokens are dead, and there is no `jwt` cookie, so neither can tell
+    a live session from a dead one on reuse.
+    """
+    statuses: list[int] = []
+
+    def _on_response(resp: Any) -> None:
+        try:
+            if GC_API_HOST in resp.url and "/me/" in resp.url:
+                statuses.append(int(resp.status))
+        except Exception:
+            pass
+
+    try:
+        page.on("response", _on_response)
+    except Exception:
+        pass
+    return statuses
+
+
 def _has_password_input(page: Any) -> bool:
     try:
         return page.locator("input[type='password']").count() > 0
@@ -237,12 +264,26 @@ class SessionManager:
         # forced a fresh email+code login (and a GC verification email) on
         # every run even when the stored cookies were still valid.
         if "storage_state" in ctx_kwargs:
+            me_statuses = _watch_me_responses(page)
             page.goto(GC_BASE, wait_until="domcontentloaded", timeout=60_000)
             page.wait_for_load_state("networkidle", timeout=30_000)
-            if not is_login_page(page) and is_authenticated(page):
-                log.info("Reused saved GC session from %s — no login needed",
-                         self.auth_file)
+            me_ok = 200 in me_statuses
+            me_denied = not me_ok and any(s in (401, 403) for s in me_statuses)
+            if not me_denied and not is_login_page(page) and is_authenticated(page):
+                log.info("Reused saved GC session from %s — no login needed (%s)",
+                         self.auth_file,
+                         "/me 200" if me_ok else "no /me call seen; UI heuristic")
+                if me_ok:
+                    # The SPA refreshes eden-auth-tokens during this visit;
+                    # persist them or the file keeps the old ones forever.
+                    try:
+                        context.storage_state(path=str(self.auth_file))
+                    except Exception as e:
+                        log.warning("Could not re-save GC session: %s", e)
                 return page, False
+            if me_denied:
+                log.warning("Saved GC session rejected by the GC API (/me/* -> %s)",
+                            me_statuses)
             log.info("Saved GC session is stale — performing full login")
         else:
             log.info("No saved GC session at %s — performing full login",

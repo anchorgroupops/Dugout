@@ -713,3 +713,31 @@ class TestParseRowSection:
         col_map = {"a": 0, "b": 2, "c": 4}
         result = _parse_row_section(row, col_map)
         assert set(result.keys()) == {"a", "b", "c"}
+
+
+class TestMainExitCodes:
+    """autopull falls back to `gc_csv_ingest.py` and trusts its exit code."""
+
+    def _run(self, monkeypatch, tmp_path, argv):
+        monkeypatch.setattr(csv_mod, "DATA_DIR", tmp_path / "data")
+        monkeypatch.setattr(csv_mod.sys, "argv", ["gc_csv_ingest.py", *argv])
+        with pytest.raises(SystemExit) as exc:
+            csv_mod.main()
+        return exc.value.code
+
+    def test_header_only_csv_exits_nonzero_and_writes_nothing(self, monkeypatch, tmp_path):
+        team_dir = tmp_path / "data" / "sharks"
+        team_dir.mkdir(parents=True)
+        (team_dir / "team.json").write_text('{"roster": [{"first": "Alex"}]}')
+        csv_path = tmp_path / "empty.csv"
+        csv_path.write_text(
+            '﻿"","","","Batting"\r\n"Number","Last","First","GP"\r\n"","","",""',
+            encoding="utf-8",
+        )
+        assert self._run(monkeypatch, tmp_path, [str(csv_path), "--team", "sharks"]) == 1
+        assert json.loads((team_dir / "team.json").read_text()) == {"roster": [{"first": "Alex"}]}
+        assert not (team_dir / "app_stats.json").exists()
+
+    def test_missing_csv_exits_nonzero(self, monkeypatch, tmp_path):
+        missing = tmp_path / "nope.csv"
+        assert self._run(monkeypatch, tmp_path, [str(missing), "--team", "sharks"]) == 1

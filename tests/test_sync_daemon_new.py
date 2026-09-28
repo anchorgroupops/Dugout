@@ -3873,6 +3873,17 @@ class TestHandleTeam:
             resp = client.get("/api/team")
         assert resp.status_code == 200
 
+    def test_last_updated_is_ingest_time_not_merged_file_mtime(self, flask_app, monkeypatch, tmp_path):
+        """SIGN-016: the sync cycle rewrites team_merged every run, so its
+        mtime made weeks-old stats read "Updated just now"."""
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        (tmp_path / "team_merged.json").write_text('{"team_name": "The Sharks", "roster": []}')
+        (tmp_path / "team.json").write_text(
+            '{"roster": [], "last_updated": "2026-09-01T03:00:00-04:00"}')
+        with flask_app.test_client() as client:
+            data = client.get("/api/team").get_json()
+        assert data["last_updated"] == "2026-09-01T03:00:00-04:00"
+
 
 # ---------------------------------------------------------------------------
 # handle_borrowed_player — POST endpoint (lines 3231-3283)
@@ -4482,6 +4493,63 @@ class TestHandleHealthStaleness:
         data = resp.get_json()
         assert "app_stats" not in data["stale_sources"]
         assert data["sources"]["app_stats"]["stale"] is True
+
+
+class TestHandleHealthAutopull:
+    """gc_autopull freshness comes from the autopull run log, not file mtimes."""
+
+    def _db(self, tmp_path, runs):
+        from tools.autopull.state import StateDB
+        sharks = tmp_path / "data" / "sharks"
+        sharks.mkdir(parents=True)
+        db_path = tmp_path / "data" / "autopull" / "autopull_state.db"
+        db_path.parent.mkdir(parents=True)
+        db = StateDB(db_path)
+        db.init_schema()
+        with db._conn() as c:
+            for started, outcome, reason in runs:
+                c.execute(
+                    "INSERT INTO runs (started_at, completed_at, trigger, outcome, failure_reason) "
+                    "VALUES (?, ?, 'cron', ?, ?)",
+                    (started, started, outcome, reason),
+                )
+        return sharks
+
+    def _health(self, flask_app, monkeypatch, sharks):
+        monkeypatch.setattr(sd, "SHARKS_DIR", sharks)
+        with flask_app.test_client() as client:
+            return client.get("/api/health").get_json()
+
+    def test_absent_db_adds_no_source(self, flask_app, monkeypatch, tmp_path):
+        sharks = tmp_path / "data" / "sharks"
+        sharks.mkdir(parents=True)
+        data = self._health(flask_app, monkeypatch, sharks)
+        assert "gc_autopull" not in data["sources"]
+
+    def test_recent_success_is_fresh(self, flask_app, monkeypatch, tmp_path):
+        now = datetime.now(sd.ET).isoformat()
+        sharks = self._db(tmp_path, [(now, "success", None)])
+        data = self._health(flask_app, monkeypatch, sharks)
+        assert data["sources"]["gc_autopull"]["stale"] is False
+        assert "gc_autopull" not in data["stale_sources"]
+
+    def test_quarantined_last_run_is_stale(self, flask_app, monkeypatch, tmp_path):
+        now = datetime.now(sd.ET)
+        sharks = self._db(tmp_path, [
+            ((now - timedelta(hours=24)).isoformat(), "success", None),
+            (now.isoformat(), "quarantined", "No data rows"),
+        ])
+        data = self._health(flask_app, monkeypatch, sharks)
+        src = data["sources"]["gc_autopull"]
+        assert src["stale"] is True
+        assert src["last_outcome"] == "quarantined"
+        assert "gc_autopull" in data["stale_sources"]
+
+    def test_no_success_ever_is_stale(self, flask_app, monkeypatch, tmp_path):
+        now = datetime.now(sd.ET).isoformat()
+        sharks = self._db(tmp_path, [(now, "failure", "auth")])
+        data = self._health(flask_app, monkeypatch, sharks)
+        assert "gc_autopull" in data["stale_sources"]
 
 
 # ---------------------------------------------------------------------------
@@ -7742,6 +7810,46 @@ class TestCsvIngestFromLocal:
         monkeypatch.setitem(sys.modules, "gc_csv_ingest", fake_gc)
         # Should not raise
         sd._csv_ingest_from_local()
+
+    def _setup_candidate(self, tmp_path, monkeypatch):
+        import types, sys
+        monkeypatch.setattr(sd, "SCOREBOOKS_DIR", tmp_path)
+        sharks_dir = tmp_path / "sharks"
+        sharks_dir.mkdir()
+        monkeypatch.setattr(sd, "SHARKS_DIR", sharks_dir)
+        other_docs = tmp_path / "Other docs"
+        other_docs.mkdir()
+        csv_file = other_docs / "Sharks Spring 2026 Stats.csv"
+        csv_file.write_text("player,number\nJane,7")
+        fake_gc = types.ModuleType("gc_csv_ingest")
+        fake_gc.parse_gc_csv = MagicMock(return_value=[{"name": "Jane", "number": "7"}])
+        fake_gc.build_team_json = MagicMock(return_value={"roster": ["new"]})
+        fake_gc.build_app_stats_json = MagicMock(return_value={"batting": []})
+        monkeypatch.setitem(sys.modules, "gc_csv_ingest", fake_gc)
+        return sharks_dir, csv_file, fake_gc
+
+    def test_skips_when_team_json_newer_than_csv(self, tmp_path, monkeypatch):
+        # The static Spring export was re-ingested every cycle, refreshing
+        # last_updated and overwriting newer autopull data.
+        import os
+        sharks_dir, csv_file, fake_gc = self._setup_candidate(tmp_path, monkeypatch)
+        team_file = sharks_dir / "team.json"
+        team_file.write_text(json.dumps({"roster": ["autopull"]}))
+        os.utime(csv_file, (1_000_000, 1_000_000))
+        sd._csv_ingest_from_local()
+        fake_gc.parse_gc_csv.assert_not_called()
+        assert json.loads(team_file.read_text()) == {"roster": ["autopull"]}
+
+    def test_ingests_when_csv_newer_than_team_json(self, tmp_path, monkeypatch):
+        import os
+        sharks_dir, csv_file, fake_gc = self._setup_candidate(tmp_path, monkeypatch)
+        team_file = sharks_dir / "team.json"
+        team_file.write_text(json.dumps({"roster": ["old"]}))
+        os.utime(team_file, (1_000_000, 1_000_000))
+        sd._csv_ingest_from_local()
+        fake_gc.parse_gc_csv.assert_called_once()
+        assert json.loads(team_file.read_text()) == {"roster": ["new"]}
+        assert (sharks_dir / "season_stats.csv").read_text() == "player,number\nJane,7"
 
 
 # ===========================================================================
