@@ -105,6 +105,22 @@ def run_pipeline(csv_path: Path, scorebook_path: Path | None, out_path: Path,
     team_dir.mkdir(parents=True, exist_ok=True)
     roster: list = []
 
+    # Parse before touching anything on disk: a header-only GC export parses
+    # to 0 players and must fail loudly instead of wiping team.json (and the
+    # enriched/merged files below) with an empty roster.
+    from gc_csv_ingest import parse_gc_csv, build_team_json, build_app_stats_json
+    try:
+        roster = parse_gc_csv(csv_path, team_dir=team_dir)
+    except Exception as exc:
+        stages["csv_ingest"] = {"status": "error", "detail": str(exc)}
+        print(f"[PIPELINE] FATAL: CSV ingest failed: {exc}")
+        raise RuntimeError(f"CSV ingest failed: {exc}") from exc
+    if not roster:
+        stages["csv_ingest"] = {"status": "error", "detail": "0 players parsed"}
+        print(f"[PIPELINE] FATAL: {csv_path.name} has no player rows; "
+              "existing team data left untouched")
+        raise RuntimeError(f"CSV ingest failed: {csv_path.name} has no player rows")
+
     # Invalidate any stale enriched/merged team files. The API prefers
     # team_enriched.json > team_merged.json > team.json; if older enriched
     # files exist from a sync_daemon cycle that hasn't run recently, they
@@ -122,9 +138,6 @@ def run_pipeline(csv_path: Path, scorebook_path: Path | None, out_path: Path,
     # ── Stage 1: CSV ingest ──────────────────────────────────────────────────
     print(f"[PIPELINE] Stage 1: CSV ingest ({csv_path.name}) -> {team_dir}")
     try:
-        from gc_csv_ingest import parse_gc_csv, build_team_json, build_app_stats_json
-
-        roster = parse_gc_csv(csv_path, team_dir=team_dir)
         team_json = build_team_json(roster, csv_path, team=team, team_dir=team_dir)
         app_stats = build_app_stats_json(roster)
 

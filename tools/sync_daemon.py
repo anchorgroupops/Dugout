@@ -3538,7 +3538,50 @@ def handle_health():
         }
         if stale and is_required:
             result["stale_sources"].append(name)
+
+    # File mtimes above are refreshed by every sync cycle even when no GC data
+    # arrives, so they cannot show a broken pull. Where the nightly autopull
+    # runs, report its last *successful* pull and its last outcome.
+    autopull_db = SHARKS_DIR.parent / "autopull" / "autopull_state.db"
+    if autopull_db.exists():
+        entry = _autopull_health(autopull_db, now, STALE_THRESHOLD_HOURS)
+        result["sources"]["gc_autopull"] = entry
+        if entry["stale"]:
+            result["stale_sources"].append("gc_autopull")
     return jsonify(result)
+
+
+def _autopull_health(db_path: Path, now: datetime, threshold_hours: float) -> dict:
+    """Stale unless the last finished autopull succeeded within the threshold."""
+    entry = {"exists": True, "required": True, "stale": True, "file": db_path.name}
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        try:
+            last_ok = conn.execute(
+                "SELECT MAX(COALESCE(completed_at, started_at)) FROM runs "
+                "WHERE outcome = 'success'"
+            ).fetchone()[0]
+            last = conn.execute(
+                "SELECT outcome, failure_reason FROM runs "
+                "WHERE outcome != 'in_progress' ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+        finally:
+            conn.close()
+    except sqlite3.Error as e:
+        entry["error"] = str(e)
+        return entry
+    if last:
+        entry["last_outcome"], entry["last_failure_reason"] = last
+    if last_ok:
+        ts = datetime.fromisoformat(last_ok)
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=ET)
+        age_hours = (now - ts).total_seconds() / 3600
+        entry["last_updated"] = ts.isoformat()
+        entry["age_hours"] = round(age_hours, 1)
+        entry["stale"] = bool(age_hours > threshold_hours
+                              or (last and last[0] != "success"))
+    return entry
 
 
 @app.route('/api/auth/verify', methods=['POST'])
@@ -6338,6 +6381,13 @@ def _csv_ingest_from_local():
         return
 
     csv_path = candidates[-1]
+    # Only ingest an export that is newer than the current team.json. This
+    # used to re-ingest the same static Spring CSV every cycle, stamping
+    # last_updated=now (stale data looked fresh) and clobbering whatever the
+    # nightly autopull had written.
+    team_file = SHARKS_DIR / "team.json"
+    if team_file.exists() and team_file.stat().st_mtime >= csv_path.stat().st_mtime:
+        return
     try:
         from gc_csv_ingest import parse_gc_csv, build_team_json, build_app_stats_json
         import shutil
@@ -6349,9 +6399,11 @@ def _csv_ingest_from_local():
         team_json = build_team_json(roster, csv_path)
         app_stats = build_app_stats_json(roster)
 
-        _write_json_file(SHARKS_DIR / "team.json", team_json)
+        _write_json_file(team_file, team_json)
         _write_json_file(SHARKS_DIR / "app_stats.json", app_stats)
-        shutil.copy2(csv_path, SHARKS_DIR / "season_stats.csv")
+        # copyfile, not copy2: copystat on a file owned by the other uid of
+        # the shared ./data tree raises EPERM (SIGN-013).
+        shutil.copyfile(csv_path, SHARKS_DIR / "season_stats.csv")
 
         logging.info("[Sync] CSV local ingest fallback: %d players from %s", len(roster), csv_path.name)
     except Exception as e:

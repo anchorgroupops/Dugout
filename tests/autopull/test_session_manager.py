@@ -806,3 +806,59 @@ def test_new_logged_in_page_launches_without_automation_flag(tmp_path, monkeypat
 
     kwargs = pw_ctx.chromium.launch.call_args[1]
     assert "--disable-blink-features=AutomationControlled" in kwargs.get("args", [])
+
+
+class _Resp:
+    def __init__(self, url, status):
+        self.url, self.status = url, status
+
+
+def _page_with_me_responses(statuses):
+    """FakePage whose probe navigation emits GC /me/* responses."""
+    page = FakePage(url="https://web.gc.com/teams")
+    handlers = []
+    page.on = lambda event, fn: handlers.append(fn) if event == "response" else None
+
+    def _goto(url, **kw):
+        if url == sm.GC_BASE:
+            for s in statuses:
+                for h in handlers:
+                    h(_Resp(f"https://{sm.GC_API_HOST}/me/user", s))
+    page.goto = MagicMock(side_effect=_goto)
+    return page
+
+
+def test_reuse_with_me_200_resaves_refreshed_tokens(tmp_path, monkeypatch):
+    """A /me 200 proves the session; persist the tokens the SPA refreshed."""
+    auth = tmp_path / "gc_session.json"
+    auth.write_text("{}")
+    page = _page_with_me_responses([200])
+    pw_ctx, context = _make_playwright_ctx(page)
+    monkeypatch.setattr(sm, "is_login_page", lambda p: False)
+    mgr = _make_manager(tmp_path, auth_file=auth)
+    monkeypatch.setattr(mgr, "_submit_email", MagicMock())
+
+    _, refreshed = mgr.new_logged_in_page(pw_ctx)
+    assert refreshed is False
+    mgr._submit_email.assert_not_called()
+    context.storage_state.assert_called_once_with(path=str(auth))
+
+
+@pytest.mark.parametrize("status", [401, 403])
+def test_reuse_rejected_by_me_api_falls_through_to_login(tmp_path, monkeypatch, status):
+    """The UI heuristic passes a dead session (no sign-in button, no jwt
+    cookie expected); a /me 401/403 must force a real login instead of
+    exporting an empty stats table."""
+    auth = tmp_path / "gc_session.json"
+    auth.write_text("{}")
+    page = _page_with_me_responses([status])
+    pw_ctx, _ = _make_playwright_ctx(page)
+    monkeypatch.setattr(sm, "is_login_page", lambda p: False)
+    monkeypatch.setattr(sm, "is_2fa_page", lambda p: False)
+    monkeypatch.setattr(sm, "is_authenticated", lambda p: True)
+    mgr = _make_manager(tmp_path, auth_file=auth)
+    monkeypatch.setattr(mgr, "_submit_email", MagicMock())
+
+    mgr.new_logged_in_page(pw_ctx)
+    goto_urls = [c[0][0] for c in page.goto.call_args_list]
+    assert goto_urls == [sm.GC_BASE, mgr.login_url]

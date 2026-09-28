@@ -439,3 +439,34 @@ class TestTeamDir:
         )
         result = _team_dir(team)
         assert isinstance(result, PathClass)
+
+
+class TestEmptyExportGuard:
+    """A header-only GC export must fail and leave existing data alone.
+
+    Fall 2026: every nightly run wrote a 0-player team.json and deleted
+    team_enriched/team_merged before reporting success.
+    """
+
+    def test_header_only_csv_raises_and_preserves_team_files(self, monkeypatch, tmp_path):
+        from tools.team_registry import Team
+        monkeypatch.setattr(pipeline_mod, "_ROOT_DIR", tmp_path)
+        team = Team(id="x", season_slug="fall26", name="Sharks",
+                    data_slug="sharks", active=True)
+        team_dir = tmp_path / "data" / "sharks"
+        team_dir.mkdir(parents=True)
+        existing = {"roster": [{"first": "Alex", "last": "Tester"}]}
+        for name in ("team.json", "team_merged.json", "team_enriched.json"):
+            (team_dir / name).write_text(json.dumps(existing))
+        csv_path = tmp_path / "season_stats_20260928.csv"
+        csv_path.write_text(
+            '﻿"","","","Batting"\r\n"Number","Last","First","GP"\r\n"","","",""',
+            encoding="utf-8",
+        )
+
+        with pytest.raises(RuntimeError, match="no player rows"):
+            pipeline_mod.run_pipeline(csv_path, None, team_dir / "gc_report.json", team=team)
+
+        for name in ("team.json", "team_merged.json", "team_enriched.json"):
+            assert json.loads((team_dir / name).read_text()) == existing
+        assert not (team_dir / "season_stats.csv").exists()

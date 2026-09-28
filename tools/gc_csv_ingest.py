@@ -17,6 +17,7 @@ import csv
 import json
 import os
 import shutil
+import sys
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -747,18 +748,22 @@ def main():
         candidates = sorted(search_dir.glob("Sharks Spring 2026 Stats*.csv"))
         if not candidates:
             print("ERROR: No CSV found. Specify positional path or --csv-path.")
-            return
+            sys.exit(1)
         csv_path = candidates[-1]
 
     if not csv_path.exists():
         print(f"ERROR: CSV not found: {csv_path}")
-        return
+        sys.exit(1)
 
     print(f"Ingesting {csv_path.name} for team {team.name} ({team.data_slug})")
 
     # Parse
     roster = parse_gc_csv(csv_path, team_dir=team_dir)
     print(f"Parsed {len(roster)} players")
+    if not roster:
+        # Header-only GC export: never overwrite team.json with an empty roster.
+        print(f"ERROR: {csv_path.name} has no player rows; team data left untouched")
+        sys.exit(1)
 
     # Build outputs
     team_json = build_team_json(roster, csv_path, team=team, team_dir=team_dir)
