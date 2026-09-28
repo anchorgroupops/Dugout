@@ -14,6 +14,9 @@ TOKEN = "test-kick-token-123"
 @pytest.fixture
 def client(monkeypatch):
     monkeypatch.setenv("DEPLOY_WEBHOOK_TOKEN", TOKEN)
+    # Mutating routes share a 12-per-minute per-IP bucket; clear it so this
+    # file passes regardless of which other POST tests ran first.
+    sync_daemon._MUTATE_RATE_BUCKETS.clear()
     # Reset the kick state between tests.
     sync_daemon._KICK_STATUS.update(
         {"status": "idle", "last_started": "", "last_completed": "", "last_success": None, "error": ""}
@@ -118,3 +121,42 @@ def test_kick_captures_exception_in_status(client, monkeypatch):
     assert sync_daemon._KICK_STATUS["status"] == "idle"
     assert sync_daemon._KICK_STATUS["last_success"] is False
     assert "oh no" in sync_daemon._KICK_STATUS["error"]
+
+
+# --- Dashboard path: JSON POST with Origin + X-Dugout-Token, no deploy bearer ---
+
+DASH = {"Origin": "http://localhost:5173", "Content-Type": "application/json"}
+
+
+@pytest.fixture
+def dash_client(monkeypatch):
+    monkeypatch.delenv("DEPLOY_WEBHOOK_TOKEN", raising=False)
+    monkeypatch.delenv("DUGOUT_WRITE_TOKEN", raising=False)
+    monkeypatch.setattr(sync_daemon, "run_sync_cycle", lambda: True)
+    sync_daemon._MUTATE_RATE_BUCKETS.clear()
+    sync_daemon._KICK_STATUS.update(
+        {"status": "idle", "last_started": "", "last_completed": "", "last_success": None, "error": ""}
+    )
+    sync_daemon.app.config["TESTING"] = True
+    return sync_daemon.app.test_client()
+
+
+def test_dashboard_kick_starts_without_deploy_token(dash_client):
+    # Manual Sync used to POST /api/run (gone) and fall through to the cloud job.
+    r = dash_client.post("/api/sync/kick", data="{}", headers=DASH)
+    assert r.status_code == 202
+    assert r.get_json()["status"] == "started"
+
+
+def test_dashboard_kick_rejects_foreign_origin(dash_client):
+    r = dash_client.post("/api/sync/kick", data="{}", headers={**DASH, "Origin": "https://evil.example"})
+    assert r.status_code == 403
+
+
+def test_dashboard_kick_requires_write_token_when_configured(dash_client, monkeypatch):
+    monkeypatch.setenv("DUGOUT_WRITE_TOKEN", "wt-secret")
+    r = dash_client.post("/api/sync/kick", data="{}", headers=DASH)
+    assert r.status_code == 401
+    assert r.get_json()["error"] == "write_token_required"
+    r = dash_client.post("/api/sync/kick", data="{}", headers={**DASH, "X-Dugout-Token": "wt-secret"})
+    assert r.status_code == 202

@@ -8699,6 +8699,17 @@ class TestHandleStandings:
         sharks_row = next((s for s in data["standings"] if s["slug"] == "sharks"), None)
         assert sharks_row is not None
 
+    def test_default_league_label_follows_registry_season(self, flask_app, monkeypatch, tmp_path):
+        """No standings file: the label names the current season, never a hard-coded Spring."""
+        from team_registry import season_label
+        monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)
+        monkeypatch.setattr(sd, "DATA_DIR", tmp_path)
+        monkeypatch.setattr(sd, "_build_games_feed", lambda **kw: [])
+        with flask_app.test_client() as client:
+            data = client.get("/api/standings").get_json()
+        assert season_label(sd.GC_SEASON_SLUG_DEFAULT) in data["league"]
+        assert "Spring '26" not in data["league"]
+
     def test_standings_file_parsed(self, flask_app, monkeypatch, tmp_path):
         """standings file with valid data is returned."""
         monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path)

@@ -404,17 +404,18 @@ def _require_worker_token():
     return None
 
 
-def _guard_write_token():
+def _guard_write_token(ignore_exempt: bool = False):
     """Require the shared write token on mutating /api requests.
 
     Returns (response, status) on rejection, else None. No-op when
     DUGOUT_WRITE_TOKEN is unset (legacy Origin-only behaviour). The token
-    value itself is never logged.
+    value itself is never logged. `ignore_exempt` lets a route that is
+    exempt from the central check apply it on one of its own paths.
     """
     expected = _write_token_expected()
     if not expected:
         return None
-    if _write_token_exempt_path(request.path):
+    if not ignore_exempt and _write_token_exempt_path(request.path):
         return None
 
     presented = _presented_write_token()
@@ -2897,7 +2898,8 @@ def _fetch_gc_live_events(gc_game_id: str) -> dict | None:
 @app.route('/api/standings', methods=['GET'])
 def handle_standings():
     """Return PCLL league standings."""
-    league_name = "PCLL Spring '26 Majors Softball"
+    # Default label follows the registry season; the file's own label wins.
+    league_name = f"PCLL {season_label(GC_SEASON_SLUG_DEFAULT) or 'Majors'} Majors Softball"
     standings: list[dict] = []
 
     standings_file = DATA_DIR / "pcll_standings.json"
@@ -3333,13 +3335,21 @@ def handle_sync_kick():
     is too slow (e.g. you just fixed a stale-data bug and don't want to
     wait until the next scheduled cycle).
 
-    Secured with the same bearer token used by /api/deploy
-    (DEPLOY_WEBHOOK_TOKEN).  Returns 202 immediately; poll
-    /api/sync/kick/status or /api/health to see results.
+    Two callers, two credentials:
+      * CI / operators: the /api/deploy bearer (DEPLOY_WEBHOOK_TOKEN).
+      * The dashboard's Manual Sync button: a JSON POST with the normal
+        Origin check and X-Dugout-Token, like every other write. It used to
+        POST a route that no longer existed and fall through to the cloud job.
+    Returns 202 immediately; poll /api/sync/kick/status or /api/health.
     """
-    auth_err = _require_deploy_token()
-    if auth_err:
-        return auth_err
+    if request.headers.get("Authorization") or not request.is_json:
+        auth_err = _require_deploy_token()
+        if auth_err:
+            return auth_err
+    else:
+        blocked = _guard_mutating_request() or _guard_write_token(ignore_exempt=True)
+        if blocked:
+            return blocked
 
     with _KICK_LOCK:
         if _KICK_STATUS["status"] == "running":

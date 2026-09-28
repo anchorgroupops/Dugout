@@ -380,18 +380,29 @@ function App() {
     setSyncProgress(0);
     setSyncStatusText('Triggering sync...');
     try {
-      // 1. Try local sync first
-      let res = await apiRequest('/api/run', { method: 'POST' }).catch(() => ({ ok: false }));
-      
-      // 2. Fallback to Modal cloud if local fails (e.g. dev environment vs cloud production)
-      if (!res.ok) {
-        console.log("Local sync unavailable, trying Modal cloud fallback...");
+      // 1. Kick the daemon's sync cycle. 409 means one is already running,
+      //    which is fine: we just poll it. (The old /api/run route no longer
+      //    exists, so every tap used to fall through to the cloud job.)
+      let res;
+      try {
+        res = await apiRequest('/api/sync/kick', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}',
+        });
+      } catch {
+        // 2. Local API unreachable: fall back to the Modal cloud job.
+        console.log('Local sync unreachable, trying Modal cloud fallback...');
         res = await fetch('https://anchorgroupops--softball-strategy-sharks-manual-sync.modal.run', {
-          method: 'POST'
+          method: 'POST',
         });
       }
-      
-      if (!res.ok) throw new Error('Sync trigger failed');
+
+      if (!res.ok && res.status !== 409) {
+        let detail = '';
+        try { detail = (await res.json())?.error || ''; } catch { /* not json */ }
+        throw new Error(detail ? `Sync trigger failed (${detail})` : `Sync trigger failed (${res.status})`);
+      }
 
       // Capture the current health timestamp to detect fresh data
       let baseTimestamp = null;
