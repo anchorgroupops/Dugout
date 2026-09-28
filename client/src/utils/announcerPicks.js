@@ -80,6 +80,17 @@ export function songLabel(url) {
   }
 }
 
+// A song's in-point (its `start`, seconds into the track) as the row shows
+// it: 12 -> "Song starts at 0:12", 72.5 -> "Song starts at 1:12.5".
+export function songStartLabel(start) {
+  const sec = Math.max(0, Number(start) || 0);
+  if (!sec) return 'Song starts at the top';
+  const m = Math.floor(sec / 60);
+  const rest = Math.round((sec - m * 60) * 10) / 10;
+  const [whole, frac] = String(rest).split('.');
+  return `Song starts at ${m}:${whole.padStart(2, '0')}${frac ? `.${frac}` : ''}`;
+}
+
 // One status per row. `canPlay` is what the big button does, independent of
 // whether a newer render is in flight or failed: an old call still plays.
 export function rowState(p) {

@@ -6,16 +6,20 @@
  *                                ├─→ MasterGain → Destination
  *   ClipSource   → ClipGain ───┘
  *
- * Playback flow:
- *   1. Music starts at full volume
- *   2. At the song's start mark: duck music to DUCK_LEVEL over 300ms
- *   3. Play the announcer clip
- *   4. On clip end: restore music over 300ms
+ * Playback flow (walk-up = call + song):
+ *   1. The announcer call plays first, from t = 0
+ *   2. The song comes in OVERLAP seconds before the call ends, at its
+ *      in-point (the per-song `start`, seconds into the track), ducked to
+ *      DUCK_LEVEL under the call's tail
+ *   3. When the call ends the song ramps to full over DUCK_RAMP_MS and plays on
+ * Both sources and the gain ramp are scheduled up front on the AudioContext
+ * clock (planWalkup gives the numbers), so there are no timers to drift.
  *
  * Exactly one thing plays at a time. Every play() takes a new generation
- * number; anything scheduled by an older play (a fetch still in flight, a
- * duck timer, an `ended` handler, the progress ticker) checks it and does
- * nothing once it is stale. Without that, a second tap during a slow fetch
+ * number; anything scheduled by an older play (a fetch still in flight, an
+ * `ended` handler, the progress ticker) checks it and does nothing once it
+ * is stale, and haltAudio() stops a song that is scheduled but not yet
+ * audible, so it never comes in after a Stop or a batter switch. Without that, a second tap during a slow fetch
  * played both clips over each other, and the first batter's `ended` event
  * (which fires asynchronously after stop()) marked the second batter's
  * announcement finished before it had started.
@@ -26,6 +30,7 @@
 
 const DUCK_LEVEL = 0.4; // keep 40% of the music under the call
 const DUCK_RAMP_MS = 300;
+const OVERLAP = 0.5; // seconds the song comes in before the call ends
 const FETCH_TIMEOUT_MS = 15000;
 // Decoded audio is large (a 3-minute song is ~60 MB of float PCM), so keep
 // only a handful of buffers; the service worker caches the compressed files.
@@ -40,7 +45,6 @@ let walkupGain = null;
 let clipGain = null;
 let walkupSource = null;
 let clipSource = null;
-let duckTimer = null;
 let progressTimer = null;
 let generation = 0;
 
@@ -167,7 +171,6 @@ function stopSource(src) {
 }
 
 function haltAudio() {
-  if (duckTimer) { clearTimeout(duckTimer); duckTimer = null; }
   if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
   stopSource(walkupSource);
   stopSource(clipSource);
@@ -179,57 +182,6 @@ function haltAudio() {
   if (ctx && clipGain) {
     try { clipGain.gain.setValueAtTime(1.0, ctx.currentTime); } catch { /* ok */ }
   }
-}
-
-/**
- * Detect BPM of an AudioBuffer using autocorrelation on the first 20s.
- * Returns { bpm, confidence } or null if detection fails / confidence < 0.5.
- */
-export function detectBPM(audioBuffer) {
-  try {
-    const sampleRate = audioBuffer.sampleRate;
-    const analysisSeconds = Math.min(20, audioBuffer.duration);
-    const numSamples = Math.floor(analysisSeconds * sampleRate);
-    const downsampleRate = 3000;
-    const downsampleFactor = Math.floor(sampleRate / downsampleRate);
-    const channelData = audioBuffer.getChannelData(0);
-    const downsampled = [];
-    for (let i = 0; i < numSamples; i += downsampleFactor) downsampled.push(channelData[i]);
-    const n = downsampled.length;
-    if (n < 128) return null;
-    const minLag = Math.floor(downsampleRate * 60 / 200);
-    const maxLag = Math.floor(downsampleRate * 60 / 50);
-    let bestLag = -1;
-    let bestCorr = -Infinity;
-    let sum = 0;
-    for (let i = 0; i < n; i++) sum += downsampled[i] * downsampled[i];
-    const norm = sum / n;
-    if (norm === 0) return null;
-    for (let lag = minLag; lag <= Math.min(maxLag, n - 1); lag++) {
-      let corr = 0;
-      for (let i = 0; i < n - lag; i++) corr += downsampled[i] * downsampled[i + lag];
-      corr /= (n - lag) * norm;
-      if (corr > bestCorr) { bestCorr = corr; bestLag = lag; }
-    }
-    if (bestLag < 1 || bestCorr < 0.1) return null;
-    const bpm = Math.round((downsampleRate * 60) / bestLag);
-    const confidence = Math.min(1, bestCorr);
-    if (confidence < 0.5) return null;
-    return { bpm, confidence: Math.round(confidence * 100) / 100 };
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Seconds into the track at which to start the call so it lands
- * `barsBeforeDrop` bars before the drop. Assumes 4/4.
- */
-export function calcBeatOffset(bpm, dropBar = 8, barsBeforeDrop = 2) {
-  if (!bpm || bpm <= 0) return 5;
-  const secondsPerBar = (60 / bpm) * 4;
-  const triggerBar = Math.max(1, dropBar - barsBeforeDrop);
-  return Math.round((triggerBar - 1) * secondsPerBar * 10) / 10;
 }
 
 /** Fetch and decode the next batter's audio ahead of time. Never throws. */
@@ -253,9 +205,30 @@ export async function warm(urls, concurrency = 3) {
 }
 
 /**
- * Play a walk-up: optional song, optional announcer clip ducked over it.
- * Replaces whatever is playing. Resolves once playback has started (or
- * failed); the outcome is in getState(), never thrown.
+ * Where each part of a walk-up sits on the timeline, in seconds from the tap.
+ * The call starts at 0; the song starts OVERLAP seconds before the call ends
+ * (at 0 if the call is shorter than that, or if there is no call), playing
+ * from `inPoint` seconds into the track. An in-point that is negative, not a
+ * number, or past the end of the song plays the song from the top.
+ *
+ * @returns {{ songAt: number, songOffset: number, callEnd: number, total: number }}
+ *   total is when the last part ends (drives the progress bar).
+ */
+export function planWalkup({ clipDuration = 0, songDuration = 0, inPoint = 0, overlap = OVERLAP } = {}) {
+  const callEnd = Math.max(0, Number(clipDuration) || 0);
+  const songLen = Math.max(0, Number(songDuration) || 0);
+  let songOffset = Math.max(0, Number(inPoint) || 0);
+  if (songOffset >= songLen) songOffset = 0;
+  const songAt = Math.max(0, callEnd - Math.max(0, overlap));
+  const songEnd = songLen ? songAt + (songLen - songOffset) : 0;
+  return { songAt, songOffset, callEnd, total: Math.max(callEnd, songEnd) };
+}
+
+/**
+ * Play a walk-up: the announcer call first, then the song coming in under
+ * the call's last half-second (see planWalkup). Either part may be missing.
+ * Replaces whatever is playing. Resolves once playback has been scheduled
+ * (or failed); the outcome is in getState(), never thrown.
  *
  * @param {Object} o
  * @param {string} o.key        caller's id for this playback (shown as "playing")
@@ -263,9 +236,9 @@ export async function warm(urls, concurrency = 3) {
  * @param {string} [o.detail]   secondary line (voice + song)
  * @param {string} [o.songUrl]
  * @param {string} [o.clipUrl]
- * @param {number} [o.songStart=5] seconds into the song to start the call; 0 = find the beat
+ * @param {number} [o.songStart=0] the song's in-point: seconds into the track it starts from
  */
-export async function play({ key, label = '', detail = '', songUrl = '', clipUrl = '', songStart = 5 }) {
+export async function play({ key, label = '', detail = '', songUrl = '', clipUrl = '', songStart = 0 }) {
   haltAudio();
   const gen = ++generation;
   const audioCtx = getContext(); // before any await: must run inside the tap
@@ -295,64 +268,61 @@ export async function play({ key, label = '', detail = '', songUrl = '', clipUrl
   const warning = songErr ? `Song didn't load (${songErr}) — call only`
     : clipErr ? `Call didn't load (${clipErr}) — song only` : '';
 
-  let introAt = Math.max(0, Number(songStart) || 0);
-  if (walkupBuf && introAt === 0) {
-    const bpm = detectBPM(walkupBuf);
-    if (bpm) introAt = calcBeatOffset(bpm.bpm);
-  }
-
+  const plan = planWalkup({
+    clipDuration: clipBuf ? clipBuf.duration : 0,
+    songDuration: walkupBuf ? walkupBuf.duration : 0,
+    inPoint: songStart,
+  });
+  const duration = plan.total;
   const now = audioCtx.currentTime;
-  walkupGain.gain.setValueAtTime(1.0, now);
-  clipGain.gain.setValueAtTime(1.0, now);
-
-  const duration = walkupBuf ? walkupBuf.duration : clipBuf.duration;
   const startedAt = now;
+
+  // The sequence ends when every part has ended: a song started near its end
+  // can finish before the call does.
+  let running = (walkupBuf ? 1 : 0) + (clipBuf ? 1 : 0);
   const finish = () => {
     if (gen !== generation) return;
     haltAudio();
     setState(IDLE);
   };
+  const partEnded = () => {
+    if (gen !== generation) return;
+    if (--running <= 0) finish();
+  };
+
+  clipGain.gain.setValueAtTime(1.0, now);
+  walkupGain.gain.cancelScheduledValues?.(now);
+  if (walkupBuf && clipBuf) {
+    // Ducked under the call's tail, back to full as the call ends.
+    const callEnd = now + plan.callEnd;
+    walkupGain.gain.setValueAtTime(DUCK_LEVEL, now);
+    walkupGain.gain.setValueAtTime(DUCK_LEVEL, callEnd);
+    walkupGain.gain.linearRampToValueAtTime(1.0, callEnd + DUCK_RAMP_MS / 1000);
+  } else {
+    walkupGain.gain.setValueAtTime(1.0, now);
+  }
 
   setState({ ...IDLE, status: 'playing', key, label, detail, warning, duration });
   progressTimer = setInterval(() => {
     if (gen !== generation) return;
-    setState({ ...state, elapsed: Math.min(duration, audioCtx.currentTime - startedAt) });
+    setState({ ...state, elapsed: Math.min(duration, Math.max(0, audioCtx.currentTime - startedAt)) });
   }, 250);
 
+  if (clipBuf) {
+    clipSource = audioCtx.createBufferSource();
+    clipSource.buffer = clipBuf;
+    clipSource.connect(clipGain);
+    clipSource.onended = partEnded;
+    clipSource.start(now);
+  }
+
   if (walkupBuf) {
+    // Scheduled ahead; haltAudio()'s stop() cancels it if it hasn't begun.
     walkupSource = audioCtx.createBufferSource();
     walkupSource.buffer = walkupBuf;
     walkupSource.connect(walkupGain);
-    walkupSource.onended = finish; // the song ends the sequence
-    walkupSource.start(0);
-  }
-
-  if (clipBuf) {
-    const startClip = () => {
-      duckTimer = null;
-      if (gen !== generation) return;
-      if (walkupBuf) {
-        const t = audioCtx.currentTime;
-        walkupGain.gain.setValueAtTime(walkupGain.gain.value, t);
-        walkupGain.gain.linearRampToValueAtTime(DUCK_LEVEL, t + DUCK_RAMP_MS / 1000);
-      }
-      clipSource = audioCtx.createBufferSource();
-      clipSource.buffer = clipBuf;
-      clipSource.connect(clipGain);
-      clipSource.onended = () => {
-        if (gen !== generation) return;
-        if (walkupBuf) {
-          const t = audioCtx.currentTime;
-          walkupGain.gain.setValueAtTime(DUCK_LEVEL, t);
-          walkupGain.gain.linearRampToValueAtTime(1.0, t + DUCK_RAMP_MS / 1000);
-        } else {
-          finish(); // clip only: the clip ends the sequence
-        }
-      };
-      clipSource.start(0);
-    };
-    if (walkupBuf) duckTimer = setTimeout(startClip, introAt * 1000);
-    else startClip();
+    walkupSource.onended = partEnded;
+    walkupSource.start(now + plan.songAt, plan.songOffset);
   }
 }
 

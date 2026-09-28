@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  orderBattingLineup, pairFor, randomOther, rowState, pickMode, previewLine, describeApiError, needsRender,
+  orderBattingLineup, pairFor, randomOther, rowState, pickMode, previewLine, describeApiError, needsRender, songStartLabel,
 } from '../src/utils/announcerPicks.js';
 
 const P = (id, first, last, number, extra = {}) => ({ id, first, last, number, status: 'ready', ...extra });
@@ -81,4 +81,13 @@ test('server error codes become instructions', () => {
   assert.match(describeApiError(401, 'write_token_required'), /write token/);
   assert.match(describeApiError(429, undefined), /Too many/);
   assert.match(describeApiError(500, 'delete_failed'), /server had a problem \(500: delete_failed\)/);
+});
+
+test("a song's in-point reads as a clock time, not a call mark", () => {
+  assert.equal(songStartLabel(12), 'Song starts at 0:12');
+  assert.equal(songStartLabel('5'), 'Song starts at 0:05');
+  assert.equal(songStartLabel(72.5), 'Song starts at 1:12.5');
+  assert.equal(songStartLabel(0), 'Song starts at the top');
+  assert.equal(songStartLabel(undefined), 'Song starts at the top');
+  assert.equal(songStartLabel(-4), 'Song starts at the top');
 });

@@ -10,7 +10,7 @@ import {
 } from '../utils/audioController';
 import { apiRequest } from '../utils/apiClient';
 import {
-  MAX_ITEMS, introsOf, songsOf, rollPair, pairFor, isPinned, pickMode, songLabel, rowState,
+  MAX_ITEMS, introsOf, songsOf, rollPair, pairFor, isPinned, pickMode, songLabel, songStartLabel, rowState,
   needsRender, orderBattingLineup, previewLine, describeApiError,
 } from '../utils/announcerPicks';
 
@@ -144,7 +144,7 @@ function PlayerRow({ player, slot, audio, isNext, voiceName, onAnnounce, onEdit 
 function PlayerSheet({ player, profiles, defaultVoiceId, audio, voiceName, onHear, onClose, onSave, onRender, onRemove, onMoment }) {
   const [phonetic, setPhonetic] = useState(player.phonetic_hint || '');
   const [voice, setVoice] = useState(player.voice_profile_id || defaultVoiceId);
-  const [newSong, setNewSong] = useState({ url: '', start: '5' });
+  const [newSong, setNewSong] = useState({ url: '', start: '0' });
   const [busy, setBusy] = useState('');
   const [msg, setMsg] = useState(null);
   const [confirm, setConfirm] = useState('');
@@ -182,7 +182,7 @@ function PlayerSheet({ player, profiles, defaultVoiceId, audio, voiceName, onHea
     if (!/^https?:\/\//i.test(url)) { setMsg({ text: 'Paste a link that starts with http:// or https://', kind: 'error' }); return; }
     const kept = songs.map(s => ({ id: s.id, url: s.url, start: s.start }));
     save('song', { songs: [...kept, { url, start: Number(newSong.start) || 0 }] }, 'Song added.')
-      .then(ok => { if (ok) setNewSong({ url: '', start: '5' }); });
+      .then(ok => { if (ok) setNewSong({ url: '', start: '0' }); });
   };
 
   return (
@@ -267,7 +267,7 @@ function PlayerSheet({ player, profiles, defaultVoiceId, audio, voiceName, onHea
                 onHear={() => onHear(`hear:${s.id}`, { songUrl: s.url, songStart: s.start, label: songLabel(s.url) })} />
               <div className="announcer-item-text">
                 <strong>{songLabel(s.url)}</strong>
-                <span>{Number(s.start) ? `Call at ${s.start}s` : 'Call on the beat'}{pinned ? ' · always plays' : ''}</span>
+                <span>{songStartLabel(s.start)}{pinned ? ' · always plays' : ''}</span>
               </div>
               <button type="button" className={`announcer-icon-btn${pinned ? ' announcer-icon-btn--on' : ''}`} aria-pressed={pinned}
                 aria-label={pinned ? `Stop always playing song ${n + 1}` : `Always play song ${n + 1}`}
@@ -290,13 +290,13 @@ function PlayerSheet({ player, profiles, defaultVoiceId, audio, voiceName, onHea
             <input value={newSong.url} onChange={e => setNewSong(v => ({ ...v, url: e.target.value }))}
               placeholder="Song link (https://…mp3)" inputMode="url" maxLength={500} aria-label="New song link" />
             <input type="number" min="0" max="300" step="0.5" value={newSong.start} className="announcer-song-start"
-              onChange={e => setNewSong(v => ({ ...v, start: e.target.value }))} aria-label="Seconds into the song for the call" />
+              onChange={e => setNewSong(v => ({ ...v, start: e.target.value }))} aria-label="Seconds into the song where it starts" />
             <button type="submit" className="announcer-btn announcer-btn-secondary" disabled={Boolean(busy) || !newSong.url.trim()}>
               {busy === 'song' ? <Spinner /> : <Plus size={14} />} Add
             </button>
           </form>
         )}
-        <small className="announcer-hint">The number is when the call starts, in seconds into the song. 0 finds the beat.</small>
+        <small className="announcer-hint">The number is where the song starts, in seconds into the track (12 = 0:12; 0 = from the top). The call plays first and the song comes in under its last half-second.</small>
       </section>
 
       <SheetMessage msg={msg} />
@@ -727,13 +727,13 @@ export default function Announcer({ lineups }) {
     if (idx >= 0 && battingOrder.length) setUpNextId(battingOrder[(idx + 1) % battingOrder.length].id);
     const req = {
       key: p.id, label: `${jersey(p)} ${fullName(p)}`, detail: describePair(pair),
-      songUrl: pair.song?.url || '', clipUrl: pair.intro?.clip_url || '', songStart: pair.song?.start ?? 5,
+      songUrl: pair.song?.url || '', clipUrl: pair.intro?.clip_url || '', songStart: pair.song?.start ?? 0,
     };
     lastRequest.current = req;
     play(req);
   }, [audio.key, audio.status, queued, battingOrder, describePair]);
 
-  const hear = useCallback((key, { clipUrl = '', songUrl = '', songStart = 5, label = '' }) => {
+  const hear = useCallback((key, { clipUrl = '', songUrl = '', songStart = 0, label = '' }) => {
     const s = getAudioState();
     if (s.key === key && (s.status === 'playing' || s.status === 'loading')) { stopAudio(); return; }
     const req = { key, label: `Preview: ${label}`, clipUrl, songUrl, songStart };
