@@ -246,7 +246,9 @@ def prepare_notebooklm_payload() -> Path:
     if roster:
         team_name = team_data.get("team_name", "The Sharks")
         record = team_data.get("record", "")
-        season = team_data.get("season", "Spring 2026")
+        from team_registry import season_label
+        raw_season = team_data.get("season", "")
+        season = season_label(raw_season) or raw_season
         lines.append(f"## {team_name} — {season} {record}")
         lines.append(f"_Source: {team_file.name}_")
         lines.append("")

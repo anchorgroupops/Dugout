@@ -80,13 +80,23 @@ class TestFindSeasonCsv:
         fall.write_text("x")
         assert find_season_csv(tmp_path, FALL_SLUG) == fall
 
-    def test_equal_mtimes_pick_highest_download_suffix(self, tmp_path):
-        # A fresh checkout stamps every tracked export with the same mtime.
-        for name in ("Stats.csv", "Stats (3).csv", "Stats (12).csv"):
+    def test_same_second_checkout_picks_highest_download_suffix(self, tmp_path):
+        # git writes tracked files in byte order, so "(12)" lands on disk a
+        # few milliseconds before "Stats.csv". Same second, later float mtime
+        # for the unnumbered file: the (N) suffix must still decide.
+        for name, frac in (("Stats (12).csv", 0.10), ("Stats (3).csv", 0.20), ("Stats.csv", 0.30)):
             p = tmp_path / f"Sharks Fall 2026 {name}"
             p.write_text("x")
-            os.utime(p, (1_000_000, 1_000_000))
+            os.utime(p, (1_000_000 + frac, 1_000_000 + frac))
         assert find_season_csv(tmp_path, FALL_SLUG).name == "Sharks Fall 2026 Stats (12).csv"
+
+    def test_newer_second_beats_download_suffix(self, tmp_path):
+        old = tmp_path / "Sharks Fall 2026 Stats (12).csv"
+        new = tmp_path / "Sharks Fall 2026 Stats.csv"
+        for p, t in ((old, 1_000_000), (new, 1_000_060)):
+            p.write_text("x")
+            os.utime(p, (t, t))
+        assert find_season_csv(tmp_path, FALL_SLUG) == new
 
     def test_any_team_name_prefix(self, tmp_path):
         fall = tmp_path / "The Sharks Fall 2026 Stats.csv"

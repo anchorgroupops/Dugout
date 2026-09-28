@@ -7819,7 +7819,8 @@ class TestCsvIngestFromLocal:
         monkeypatch.setattr(sd, "SHARKS_DIR", sharks_dir)
         other_docs = tmp_path / "Other docs"
         other_docs.mkdir()
-        csv_file = other_docs / "Sharks Spring 2026 Stats.csv"
+        from team_registry import season_label
+        csv_file = other_docs / f"Sharks {season_label(sd.GC_SEASON_SLUG_DEFAULT)} Stats.csv"
         csv_file.write_text("player,number\nJane,7")
         fake_gc = types.ModuleType("gc_csv_ingest")
         fake_gc.parse_gc_csv = MagicMock(return_value=[{"name": "Jane", "number": "7"}])

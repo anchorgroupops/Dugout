@@ -169,18 +169,21 @@ def find_season_csv(search_dir: Path, season: str) -> Path | None:
 
     Only the given season is considered. Returning another season's export
     here is how Spring 2026 kept overwriting the Fall roster. "Newest" is by
-    mtime, then by the browser's "(N)" download suffix, because a fresh
-    checkout gives every tracked export the same mtime (plain sorted() put
-    "Stats.csv" after "Stats (12).csv").
+    whole-second mtime, then by the browser's "(N)" download suffix, because
+    a fresh checkout writes every tracked export within the same second
+    (plain sorted() put "Stats.csv" after "Stats (12).csv").
     """
     label = season_label(season)
     search_dir = Path(search_dir)
     if not label or not search_dir.exists():
         return None
 
-    def _order(p: Path) -> tuple[float, int]:
+    def _order(p: Path) -> tuple[int, int]:
+        # Whole seconds: a checkout writes the tracked exports milliseconds
+        # apart in byte order ("(12)" before "Stats.csv"), so a raw float
+        # mtime would pick the unnumbered file.
         n = re.search(r"\((\d+)\)", p.name)
-        return p.stat().st_mtime, int(n.group(1)) if n else 0
+        return int(p.stat().st_mtime), int(n.group(1)) if n else 0
 
     candidates = list(search_dir.glob(f"*{label} Stats*.csv"))
     return max(candidates, key=_order) if candidates else None
