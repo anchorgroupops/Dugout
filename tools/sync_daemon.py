@@ -4885,7 +4885,7 @@ def handle_announcer_roster():
             if team_names:
                 for p in roster:
                     full = f"{(p.get('first') or '').strip()} {(p.get('last') or '').strip()}".strip()
-                    p["is_ghost"] = bool(full and full not in team_names)
+                    p["is_ghost"] = bool(full and full not in team_names and not p.get("is_sub"))
         except Exception as _ge:
             logging.debug("[Announcer] Ghost detection skipped: %s", _ge)
 
@@ -4929,11 +4929,16 @@ def handle_announcer_player_delete(player_id):
     if invalid:
         return invalid
     try:
-        from announcer_engine import load_announcer_roster, save_announcer_roster
+        from announcer_engine import (load_announcer_roster, save_announcer_roster,
+                                      _bootstrap_roster_from_team)
         roster = load_announcer_roster()
         new_roster = [p for p in roster if p.get("id") != player_id]
         if len(new_roster) == len(roster):
             return jsonify({"error": "player_not_found"}), 404
+        # Someone GameChanger still lists is re-added, blank, on the next
+        # roster load, so "removing" her only deleted her calls and songs.
+        if any(p.get("id") == player_id for p in _bootstrap_roster_from_team()):
+            return jsonify({"error": "player_on_team"}), 409
         save_announcer_roster(new_roster)
         return jsonify({"status": "removed", "player_id": player_id})
     except Exception as e:
@@ -4958,7 +4963,7 @@ def handle_announcer_render(player_id):
         return invalid
 
     import threading
-    from announcer_engine import render_player_audio, get_player_by_id
+    from announcer_engine import render_player_audio, get_player_by_id, update_player, rendering_fields
 
     player = get_player_by_id(player_id)
     if not player:
@@ -4989,6 +4994,9 @@ def handle_announcer_render(player_id):
                                  text=script_for_worker(player, game_context),
                                  instruct=voice.get("qwen_instruct") or pa_style_instruct("stadium"),
                                  voice=voice["id"])
+        # Mark the row in the same request, linked to this job, so the PWA's
+        # next poll sees it in flight and a FAILED report can find it.
+        update_player(player_id, rendering_fields(job["id"]))
         logging.info("[Announcer] Queued best-quality render: player=%s job=%s", player_id, job["id"])
         return jsonify({"status": "queued", "quality": "best", "job_id": job["id"],
                         "player_id": player_id}), 202
@@ -5005,12 +5013,22 @@ def handle_announcer_render(player_id):
             render_player_audio(player_id, game_context=game_context, quality="quick",
                                 voice_id=voice["id"])
             if draft:
-                # Flag as draft so Mac re-renders when it comes back online
-                job = adb.enqueue_render(player_id, game_context, quality="best")
+                # Flag as draft so the worker re-renders when it comes back.
+                # The job must carry its script: a worker fails any job
+                # without one ("legacy job without a script").
+                from announcer_engine import script_for_worker, pa_style_instruct
+                job = adb.enqueue_render(player_id, game_context, quality="best",
+                                         text=script_for_worker(player, game_context),
+                                         instruct=voice.get("qwen_instruct") or pa_style_instruct("stadium"),
+                                         voice=voice["id"])
                 adb.update_job_status(job["id"], "PENDING", draft_quality=True)
         except Exception as e:
             logging.error("[Announcer] bg render failed for %s: %s", player_id, e)
 
+    # Mark the row before the thread starts. The thread used to be the first
+    # to write "rendering", so the PWA's immediate re-fetch could still see the
+    # old status, conclude nothing was in flight and stop polling.
+    update_player(player_id, rendering_fields())
     threading.Thread(target=_bg_render, daemon=True).start()
     return jsonify({"status": "rendering", "quality": effective_quality,
                     "draft_quality": draft, "player_id": player_id}), 202
@@ -5024,17 +5042,21 @@ def handle_announcer_render_all():
         return blocked
 
     import threading
-    from announcer_engine import render_all_pending
+    from announcer_engine import claim_render_batch, render_players
+
+    # Every player in the batch shows "rendering" before this returns.
+    ids = claim_render_batch()
 
     def _bg_render_all():
         try:
-            result = render_all_pending()
+            result = render_players(ids)
             logging.info("[Announcer] Batch render: %s", result)
         except Exception as e:
             logging.error("[Announcer] batch render error: %s", e)
 
-    threading.Thread(target=_bg_render_all, daemon=True).start()
-    return jsonify({"status": "rendering_all"}), 202
+    if ids:
+        threading.Thread(target=_bg_render_all, daemon=True).start()
+    return jsonify({"status": "rendering_all", "count": len(ids), "player_ids": ids}), 202
 
 
 @app.route('/api/announcer/phonetics/<player_id>', methods=['POST'])
@@ -5148,7 +5170,7 @@ def handle_announcer_add_sub():
     if not first:
         return jsonify({"error": "first_name_required"}), 400
 
-    from announcer_engine import _sanitize_player_id
+    from announcer_engine import _sanitize_player_id, rendering_fields
     player_id = _sanitize_player_id(f"{number}-{first}-{last}")
     roster = load_announcer_roster()
 
@@ -5166,10 +5188,12 @@ def handle_announcer_add_sub():
         "walkup_song_url": "",
         "intro_timestamp": 5.0,
         "announcer_audio_url": "",
-        "status": "pending",
         "is_active": True,
+        # Not on team.json: keeps reconcile from deactivating her.
+        "is_sub": True,
         "rendered_at": "",
-        "error_message": "",
+        # Rendering from the first write, so the PWA polls until it lands.
+        **rendering_fields(),
     }
     # Validate walkup URL scheme
     raw_walkup = (data.get("walkup_song_url") or "").strip()[:500]
@@ -5351,6 +5375,9 @@ def handle_announcer_render_queue_claim(job_id):
         error = str(data.get("error") or "")[:500] if new_status == "FAILED" else None
         draft = bool(data.get("draft_quality", False))
         adb.update_job_status(job_id, new_status, error=error, draft_quality=draft)
+        if new_status == "FAILED":
+            from announcer_engine import mark_job_failed
+            mark_job_failed(job, error or "")
 
     updated = adb.get_job(job_id)
     return jsonify({"status": "ok", "job": updated})
@@ -5382,6 +5409,8 @@ def handle_announcer_render_complete(job_id):
         clip_url = save_job_audio(job, audio_file.read())
     except Exception as e:
         adb.update_job_status(job_id, "FAILED", error=str(e)[:500])
+        from announcer_engine import mark_job_failed
+        mark_job_failed(job, str(e))
         logging.error("[Announcer] render-complete failed: job=%s: %s", job_id, e)
         return jsonify({"error": "save_failed"}), 500
 

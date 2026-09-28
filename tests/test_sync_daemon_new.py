@@ -4147,6 +4147,13 @@ def _make_fake_announcer_engine(tmp_path=None):
     fake.get_roster_stats = MagicMock(return_value={"total": 1, "ready": 1})
     fake.render_player_audio = MagicMock()
     fake.render_all_pending = MagicMock(return_value={"rendered": 1})
+    fake.claim_render_batch = MagicMock(return_value=["07-jane-doe"])
+    fake.render_players = MagicMock(return_value={"rendered": 1})
+    fake.rendering_fields = lambda job_id="": {"status": "rendering", "error_message": "",
+                                               "render_started_at": "2026-09-28T12:00:00-04:00",
+                                               "render_job_id": job_id}
+    fake.mark_job_failed = MagicMock()
+    fake._bootstrap_roster_from_team = MagicMock(return_value=[])
     fake.get_player_by_id = MagicMock(return_value={
         "id": "07-jane-doe", "first": "Jane", "last": "Doe", "number": "7"
     })
@@ -10553,6 +10560,7 @@ class TestAnnouncerRenderBgExceptions:
         if raise_on_render:
             fake.render_player_audio = MagicMock(side_effect=RuntimeError("render failed"))
         fake.render_all_pending = MagicMock(side_effect=RuntimeError("batch render failed"))
+        fake.render_players = MagicMock(side_effect=RuntimeError("batch render failed"))
         fake.load_announcer_roster = MagicMock(return_value=[
             {"id": "07-jane", "first": "Jane", "last": "Doe", "number": "7",
              "status": "pending", "game_context": {}}
