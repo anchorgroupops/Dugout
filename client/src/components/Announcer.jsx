@@ -307,6 +307,113 @@ function AddSubModal({ onClose, onAdd }) {
   );
 }
 
+// ── PA announcements ───────────────────────────────────────────────────────
+// Free-text lines ("Please welcome the Blue Jays…"). A render worker voices them
+// with Qwen3-TTS when one is online; otherwise the Pi's quick voice does.
+const PA_MAX_CHARS = 600; // matches announcer_engine.PA_MAX_CHARS
+
+function PAModal({ onClose }) {
+  useEscapeToClose(onClose);
+  const [text, setText] = useState('');
+  const [style, setStyle] = useState('stadium');
+  const [styles, setStyles] = useState([]);
+  const [items, setItems] = useState([]);
+  const [waitingId, setWaitingId] = useState('');
+  const [playingId, setPlayingId] = useState('');
+  const [err, setErr] = useState('');
+
+  const load = useCallback(async () => {
+    const res = await fetch('/api/announcer/pa');
+    if (!res.ok) return [];
+    const data = await res.json();
+    setStyles(data.styles || []);
+    setItems(data.announcements || []);
+    return data.announcements || [];
+  }, []);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    load().catch(() => {});
+    return () => stopAudio();
+  }, [load]);
+
+  const play = (item) => {
+    if (playingId === item.id) { stopAudio(); setPlayingId(''); return; }
+    setPlayingId(item.id);
+    playClip(item.clip_url, () => setPlayingId('')).catch(() => setPlayingId(''));
+  };
+
+  // Poll until the new clip lands, then play it straight away.
+  useEffect(() => {
+    if (!waitingId) return undefined;
+    const deadline = Date.now() + 120000;
+    const timer = setInterval(async () => {
+      const list = await load().catch(() => []);
+      const job = list.find(i => i.id === waitingId);
+      if (job?.status === 'COMPLETED' && job.clip_url) { setWaitingId(''); play(job); }
+      else if (job?.status === 'FAILED') { setWaitingId(''); setErr(`Render failed: ${job.error || 'unknown'}`); }
+      else if (Date.now() > deadline) { setWaitingId(''); setErr('Still rendering — it will appear in the list when done.'); }
+    }, 2000);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [waitingId, load]);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!text.trim()) { setErr('Type what the announcer should say'); return; }
+    setErr('');
+    try {
+      const res = await apiRequest('/api/announcer/pa', { method: 'POST', headers: ORIGIN_HEADERS(), body: JSON.stringify({ text, style }) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `${res.status}`);
+      setWaitingId(data.job.id);
+      await load();
+    } catch (ex) { setErr(`Could not render: ${ex.message}`); }
+  };
+
+  return createPortal(
+    <div className="announcer-modal-overlay" onClick={onClose}>
+      <form className="announcer-modal glass-panel" onClick={e => e.stopPropagation()} onSubmit={submit} style={{ maxWidth: 460, ...MODAL_SCROLL_STYLE }}>
+        <div className="announcer-modal-header">
+          <h3 style={{ margin: 0 }}>PA announcement</h3>
+          <button type="button" className="announcer-modal-close" onClick={onClose} aria-label="Close"><X size={18} /></button>
+        </div>
+        <label className="announcer-form-group">
+          <span>What should the announcer say?</span>
+          <textarea value={text} onChange={e => setText(e.target.value)} rows={4} maxLength={PA_MAX_CHARS} autoFocus
+            placeholder="Ladies and gentlemen, please rise for the national anthem." />
+          <small>{text.length}/{PA_MAX_CHARS}</small>
+        </label>
+        <label className="announcer-form-group">
+          <span>Style</span>
+          <select value={style} onChange={e => setStyle(e.target.value)}>
+            {styles.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        </label>
+        {err && <div className="announcer-error-msg">{err}</div>}
+        <div className="announcer-form-actions">
+          <button type="submit" className="announcer-btn announcer-btn-primary" disabled={Boolean(waitingId)}>
+            {waitingId ? <><RefreshCw size={14} className="sync-spin" /> Rendering…</> : <><Mic size={14} /> Render &amp; play</>}
+          </button>
+        </div>
+        {items.length > 0 && <p className="announcer-hint" style={{ marginTop: 'var(--space-md)' }}>Recent</p>}
+        {items.map(item => (
+          <div key={item.id} className="announcer-voice-row">
+            <button type="button" className="announcer-btn-round" onClick={() => play(item)} disabled={!item.clip_url} aria-label="Play announcement">
+              {playingId === item.id ? <Square size={16} /> : <Play size={16} style={{ marginLeft: 2 }} />}
+            </button>
+            <div className="announcer-voice-text">
+              <strong>{item.text}</strong>
+              <span>{item.status === 'COMPLETED' ? (item.quality === 'best' ? 'Qwen3 voice' : 'Quick voice') : item.status.toLowerCase()}</span>
+            </div>
+          </div>
+        ))}
+      </form>
+    </div>,
+    document.body,
+  );
+}
+
 // ── Halo moments ───────────────────────────────────────────────────────────
 function HaloOverlay({ player, onSelect, onClose }) {
   useEscapeToClose(onClose);
@@ -348,6 +455,7 @@ export default function Announcer({ lineups }) {
   const [sheetPlayer, setSheetPlayer] = useState(null);
   const [showVoices, setShowVoices] = useState(false);
   const [showAddSub, setShowAddSub] = useState(false);
+  const [showPA, setShowPA] = useState(false);
   const [showHalo, setShowHalo] = useState(false);
   const [showFormer, setShowFormer] = useState(false);
   const [renderAllBusy, setRenderAllBusy] = useState(false);
@@ -617,6 +725,9 @@ export default function Announcer({ lineups }) {
           <button type="button" className="announcer-btn announcer-btn-secondary" onClick={() => setShowAddSub(true)} aria-label="Add sub">
             <UserPlus size={14} /> Sub
           </button>
+          <button type="button" className="announcer-btn announcer-btn-secondary" onClick={() => setShowPA(true)} aria-label="PA announcement">
+            <Mic size={14} /> PA
+          </button>
         </div>
       </div>
 
@@ -713,6 +824,7 @@ export default function Announcer({ lineups }) {
       )}
       {showVoices && <VoicePicker profiles={profiles} defaultVoiceId={defaultVoiceId} onChoose={chooseVoice} onClose={() => setShowVoices(false)} />}
       {showAddSub && <AddSubModal onClose={() => setShowAddSub(false)} onAdd={addSub} />}
+      {showPA && <PAModal onClose={() => setShowPA(false)} />}
       {showHalo && current && <HaloOverlay player={current} onSelect={fireHalo} onClose={() => setShowHalo(false)} />}
     </div>
   );

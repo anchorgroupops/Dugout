@@ -153,6 +153,18 @@ INSERT OR IGNORE INTO schema_version VALUES (1);
 """
 
 
+# v4: jobs carry their own script. The Pi composes `text` + `instruct` at
+# enqueue time so a remote worker never reads a roster off its own disk
+# (it would be stale or missing). `kind` separates walk-ups from free-text
+# PA announcements; `clip_url` records where a PA render landed.
+_V4_COLUMN_ALTERS = [
+    "ALTER TABLE render_queue ADD COLUMN kind     TEXT DEFAULT 'player'",
+    "ALTER TABLE render_queue ADD COLUMN text     TEXT",
+    "ALTER TABLE render_queue ADD COLUMN instruct TEXT",
+    "ALTER TABLE render_queue ADD COLUMN clip_url TEXT",
+]
+
+
 def init_db() -> None:
     """Create or migrate schema. Safe to call repeatedly."""
     with _conn() as conn:
@@ -186,13 +198,24 @@ def init_db() -> None:
             conn.executescript(_SCHEMA_V3_FINALIZE)
             log.info("[announcer_db] Applied schema v3")
 
+        if current < 4:
+            for sql in _V4_COLUMN_ALTERS:
+                try:
+                    conn.execute(sql)
+                except sqlite3.OperationalError:
+                    pass  # column already exists
+            conn.execute("INSERT OR IGNORE INTO schema_version VALUES (4)")
+            log.info("[announcer_db] Applied schema v4")
+
 
 # ---------------------------------------------------------------------------
 # Render Queue
 # ---------------------------------------------------------------------------
 
-def enqueue_render(player_id: str, game_context: dict, quality: str = "best") -> dict:
-    """Insert a PENDING job. Returns the job dict."""
+def enqueue_render(player_id: str, game_context: dict, quality: str = "best",
+                   kind: str = "player", text: str | None = None,
+                   instruct: str | None = None, status: str = "PENDING") -> dict:
+    """Insert a job (PENDING unless the caller renders it itself). Returns the job dict."""
     job_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
     priority = "high" if quality == "quick" else "normal"
@@ -200,15 +223,42 @@ def enqueue_render(player_id: str, game_context: dict, quality: str = "best") ->
     with _conn() as conn:
         conn.execute(
             """INSERT INTO render_queue
-               (id, player_id, game_context, quality, status, priority, created_at)
-               VALUES (?, ?, ?, ?, 'PENDING', ?, ?)""",
-            (job_id, player_id, json.dumps(game_context), quality, priority, now),
+               (id, player_id, game_context, quality, status, priority, created_at,
+                kind, text, instruct)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (job_id, player_id, json.dumps(game_context), quality, status, priority, now,
+             kind, text, instruct),
         )
 
     return {
         "id": job_id, "player_id": player_id, "quality": quality,
-        "status": "PENDING", "priority": priority, "created_at": now,
+        "status": status, "priority": priority, "created_at": now,
+        "kind": kind, "text": text, "instruct": instruct,
     }
+
+
+def set_job_clip(job_id: str, clip_url: str) -> None:
+    """Mark a job COMPLETED and record where its audio landed."""
+    now = datetime.now(timezone.utc).isoformat()
+    with _conn() as conn:
+        conn.execute(
+            """UPDATE render_queue
+               SET status = 'COMPLETED', completed_at = ?, error = NULL, clip_url = ?
+               WHERE id = ?""",
+            (now, clip_url, job_id),
+        )
+
+
+def list_pa_jobs(limit: int = 30) -> list[dict]:
+    """Most recent PA announcements, newest first."""
+    with _conn() as conn:
+        cur = conn.execute(
+            """SELECT id, text, instruct, quality, status, clip_url, error, created_at, completed_at
+               FROM render_queue WHERE kind = 'pa'
+               ORDER BY created_at DESC LIMIT ?""",
+            (limit,),
+        )
+        return [dict(r) for r in cur.fetchall()]
 
 
 def claim_next_job(worker_id: str, quality: str = "best") -> dict | None:
@@ -244,20 +294,23 @@ def claim_next_job(worker_id: str, quality: str = "best") -> dict | None:
         return dict(job_row) if job_row else None
 
 
-def claim_job(job_id: str, worker_id: str) -> None:
+def claim_job(job_id: str, worker_id: str) -> bool:
     """Mark one specific job PROCESSING on behalf of `worker_id`.
 
     Same write claim_next_job() performs, but for a job the worker already
     picked (the PATCH /api/announcer/render-queue/<job_id> path). Distinct
     from update_job_status(), which stamps completed_at and resets
-    error/draft_quality.
+    error/draft_quality. Returns False if the job was no longer PENDING, so
+    two workers can never both claim it.
     """
     now = datetime.now(timezone.utc).isoformat()
     with _conn() as conn:
-        conn.execute(
-            "UPDATE render_queue SET status = 'PROCESSING', worker_id = ?, claimed_at = ? WHERE id = ?",
+        cur = conn.execute(
+            """UPDATE render_queue SET status = 'PROCESSING', worker_id = ?, claimed_at = ?
+               WHERE id = ? AND status = 'PENDING'""",
             (worker_id, now, job_id),
         )
+        return cur.rowcount == 1
 
 
 def update_job_status(job_id: str, status: str, error: str | None = None,

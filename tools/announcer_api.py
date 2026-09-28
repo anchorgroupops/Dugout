@@ -1,8 +1,8 @@
 """Apex Announcer — Local FastAPI TTS Service.
 
-Serves Qwen3-TTS-1.7B-VoiceDesign inference locally on MacBook Pro (MPS)
-or Raspberry Pi 5 (CPU). Falls back to Replicate cloud API if no local
-model is available.
+Serves facebook/mms-tts-eng (a basic placeholder voice) locally, or proxies
+to Replicate. For real Qwen3-TTS renders use tools/announcer_worker.py, which
+polls the Pi for jobs; this service no longer runs a render worker itself.
 
 Inference mode selected by env vars:
   USE_VLLM=1        → vLLM AsyncLLMEngine (requires CUDA)
@@ -138,9 +138,8 @@ async def startup():
         global _active_provider
         _active_provider = "replicate_proxy"
 
-    # Launch render worker + heartbeat tasks if Pi API URL is configured
-    asyncio.create_task(_heartbeat_loop())
-    asyncio.create_task(_render_worker_loop())
+    # Render work moved to tools/announcer_worker.py — its upload contract
+    # (raw `audio`, worker token) is the one the Pi now accepts.
 
 
 # ---------------------------------------------------------------------------

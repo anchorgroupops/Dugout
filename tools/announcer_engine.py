@@ -1465,6 +1465,93 @@ def render_player_audio(player_id: str, game_context: dict | None = None,
         raise
 
 
+# ---------------------------------------------------------------------------
+# Worker jobs + PA announcements
+# ---------------------------------------------------------------------------
+
+# Qwen3-TTS VoiceDesign is steered by a plain-English description, not numbers.
+# A render worker receives one of these as the job's `instruct`.
+PA_STYLES: dict[str, dict] = {
+    "stadium": {
+        "name": "Stadium announcer",
+        "instruct": ("A booming, deep male stadium announcer. Slow and dramatic with big "
+                     "crowd energy, drawing out the player's name."),
+    },
+    "hype": {
+        "name": "Hype",
+        "instruct": ("An energetic, fast-paced sports hype announcer, excited and loud, "
+                     "rising in pitch on the big words."),
+    },
+    "friendly": {
+        "name": "Friendly PA",
+        "instruct": ("A warm, clear, friendly public-address announcer at a youth ballpark. "
+                     "Upbeat and easy to understand."),
+    },
+    "calm": {
+        "name": "Calm notice",
+        "instruct": ("A calm, measured public-address voice reading a notice. "
+                     "Neutral tone, steady pace, very clear."),
+    },
+}
+DEFAULT_PA_STYLE = "stadium"
+PA_CLIP_ID = "pa"  # PA clips live in CLIPS_DIR/pa, served at /announcer-clips/pa/
+PA_MAX_CHARS = 600
+
+
+def pa_style_instruct(style_id: str | None) -> str:
+    return PA_STYLES.get(style_id or "", PA_STYLES[DEFAULT_PA_STYLE])["instruct"]
+
+
+def script_for_worker(player: dict, game_context: dict | None = None) -> str:
+    """Plain-text walk-up script for a remote worker (markup stripped)."""
+    return _strip_markup_tags(build_announcement_text(player, game_context))
+
+
+def save_job_audio(job: dict, audio_bytes: bytes) -> str:
+    """Stadium-wrap a finished job's audio, file it, and return the clip URL.
+
+    Walk-up jobs also update the player's roster entry; PA jobs only land in
+    CLIPS_DIR/pa. Falls back to the raw bytes when FFmpeg is unavailable.
+    """
+    if len(audio_bytes) > MAX_TTS_OUTPUT_BYTES:
+        raise RuntimeError(f"TTS output too large ({len(audio_bytes)} bytes, max {MAX_TTS_OUTPUT_BYTES})")
+    is_pa = job.get("kind") == "pa"
+    owner = PA_CLIP_ID if is_pa else job["player_id"]
+    safe_id = _sanitize_player_id(owner)
+    clip_dir = CLIPS_DIR / safe_id
+    clip_dir.mkdir(parents=True, exist_ok=True)
+    # Every PA clip shares one directory, so name it by job id — a timestamp
+    # name would let two renders in the same second overwrite each other.
+    stem = _sanitize_player_id(job["id"]) if is_pa else datetime.now(ET).strftime("%Y%m%d_%H%M%S")
+    try:
+        _, mp3_path = archive_and_transcode(audio_bytes, owner, archive=not is_pa,
+                                            out_mp3=clip_dir / f"{stem}.mp3" if is_pa else None)
+        clip_url = f"/announcer-clips/{safe_id}/{mp3_path.name}"
+    except Exception as e:
+        logging.warning("[Announcer] archive_and_transcode failed (%s) — saving raw bytes", e)
+        is_mp3 = audio_bytes[:3] == b"ID3" or audio_bytes[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2")
+        name = f"{stem}.{'mp3' if is_mp3 else 'wav'}"
+        (clip_dir / name).write_bytes(audio_bytes)
+        clip_url = f"/announcer-clips/{safe_id}/{name}"
+
+    if not is_pa:
+        update_player(job["player_id"], {
+            "status": "ready",
+            "announcer_audio_url": clip_url,
+            "rendered_at": datetime.now(ET).isoformat(),
+            "render_quality": "best",
+            "wrap_version": STADIUM_WRAP_VERSION,
+            "error_message": "",
+        })
+    return clip_url
+
+
+def render_pa_on_pi(text: str) -> bytes:
+    """No worker online: render a PA line through the Pi's quick provider chain."""
+    provider = get_quick_tts_provider()
+    return provider.synthesize(text_for_provider(provider, text), get_default_voice_profile())
+
+
 def render_all_pending() -> dict:
     """Render audio for all active players with status != ready. Returns summary."""
     roster = load_announcer_roster()
