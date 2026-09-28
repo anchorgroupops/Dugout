@@ -4171,6 +4171,7 @@ def _make_fake_announcer_engine(tmp_path=None):
     fake._ROSTER_LOCK.__enter__ = MagicMock(return_value=None)
     fake._ROSTER_LOCK.__exit__ = MagicMock(return_value=False)
     fake.render_voice_sample = MagicMock()
+    fake.provider_unavailable_reason = MagicMock(return_value="")
     fake.script_for_worker = MagicMock(return_value="Now batting, Jane Doe")
     fake.pa_style_instruct = MagicMock(return_value="A booming stadium announcer.")
     fake.save_job_audio = MagicMock(return_value="/announcer-clips/07-jane-doe/x.mp3")
