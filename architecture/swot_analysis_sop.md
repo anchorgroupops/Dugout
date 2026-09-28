@@ -26,17 +26,24 @@ Deterministic, formula-driven SWOT classification for individual players and the
 | K/IP | 1.0 | 0.5 | Higher = better |
 | BB/IP | 0.40 | 0.80 | Lower = better |
 
-### Fielding
+### Fielding (minimum 1 chance to qualify)
 
 | Stat | Strong (≥) | Weak (≤) |
 |:---|:---|:---|
 | Fielding % | .950 | .880 |
 
-### Baserunning
+A player with 0 fielding chances (PO+A+E) is not classified: fielding_pct
+computes to 0.0 via 0/0, which would otherwise read as "error-prone" with no
+defensive data behind it.
+
+### Baserunning (minimum 1 attempt to qualify)
 
 | Stat | Strong (≥) | Weak (≤) |
 |:---|:---|:---|
 | SB Success % | .75 | .50 |
+
+Same rule as fielding: a player with 0 SB attempts (SB+CS) is not classified;
+sb_success_rate 0.0 via 0/0 is missing data, not demonstrated inefficiency.
 
 ## SWOT Classification
 

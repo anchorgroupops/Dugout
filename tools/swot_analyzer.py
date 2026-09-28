@@ -37,6 +37,15 @@ MIN_AB_FOR_MATCHUP_COMPARISON = 10
 # Minimum PA to consider opponent "has real data" (avoids empty-vs-data false flag).
 MIN_PA_FOR_MATCHUP_NONEMPTY = 10
 
+# Minimum fielding chances (PO+A+E) before classifying fielding_pct.
+# A player with 0 chances computes fielding_pct via 0/0 -> 0.0, which reads
+# as a fielding weakness with no defensive data behind it.
+MIN_QUALIFYING_FIELDING_CHANCES = 1
+
+# Minimum SB attempts (SB+CS) before classifying sb_success_rate.
+# Same 0/0 trap as fielding: no attempts should not read as poor baserunning.
+MIN_QUALIFYING_SB_ATTEMPTS = 1
+
 HITTING_THRESHOLDS = {
     "ba":  {"strong": 0.350, "weak": 0.200},
     "obp": {"strong": 0.420, "weak": 0.280},
@@ -180,9 +189,11 @@ def compute_derived_stats(player: dict) -> dict:
         },
         "fielding": {
             "fielding_pct": round(fielding_pct, 3),
+            "chances": po + a + e,
         },
         "baserunning": {
             "sb_success_rate": round(sb_success_rate, 3),
+            "attempts": sb + cs,
         },
     }
 
@@ -269,6 +280,15 @@ def classify_fielding(derived: dict) -> tuple[list[str], list[str]]:
     f = derived["fielding"]
     strengths, weaknesses = [], []
 
+    # A player with zero fielding chances (no PO/A/E recorded) computes to
+    # fielding_pct 0.0 via 0/0 — mathematically a "weakness" by the raw
+    # threshold, but there is no defensive data to judge. Callers that build
+    # a derived dict by hand (e.g. unit tests) omit "chances" entirely, so
+    # default to 1 to preserve that classification path; only the real
+    # zero-chances case (chances explicitly 0) is suppressed.
+    if f.get("chances", 1) < MIN_QUALIFYING_FIELDING_CHANCES:
+        return strengths, weaknesses
+
     fp = f.get("fielding_pct", 0)
     if fp >= FIELDING_THRESHOLDS["fielding_pct"]["strong"]:
         strengths.append(f"Reliable fielder (F%: {fp})")
@@ -282,6 +302,11 @@ def classify_baserunning(derived: dict) -> tuple[list[str], list[str]]:
     """Classify baserunning stats into strengths and weaknesses."""
     b = derived["baserunning"]
     strengths, weaknesses = [], []
+
+    # Same 0/0 guard as classify_fielding: no SB attempts means no
+    # baserunning data to judge, not a demonstrated weakness.
+    if b.get("attempts", 1) < MIN_QUALIFYING_SB_ATTEMPTS:
+        return strengths, weaknesses
 
     sb_rate = b.get("sb_success_rate", 0)
     if sb_rate >= BASERUNNING_THRESHOLDS["sb_success_rate"]["strong"]:
@@ -344,7 +369,12 @@ def analyze_player(player: dict) -> dict:
     # Threats: external risks
     if derived["hitting"].get("k_rate", 0) > 0.35:
         threats.append("Vulnerable to strikeout-heavy pitchers")
-    if derived["fielding"].get("fielding_pct", 1) < 0.900:
+    # Gate on chances like classify_fielding: a 0/0 fielding_pct of 0.0 is
+    # missing data, not a demonstrated error problem.
+    if (
+        derived["fielding"].get("chances", 1) >= MIN_QUALIFYING_FIELDING_CHANCES
+        and derived["fielding"].get("fielding_pct", 1) < 0.900
+    ):
         threats.append("Errors could be exploited by aggressive baserunning opponents")
 
     name = player.get("name")
@@ -464,8 +494,17 @@ def _swot_rationale_from_team(result: dict) -> str:
         ),
         reverse=True,
     )[:3]
+    # Exclude zero-chance players: their fielding_pct is a 0/0 -> 0.0
+    # placeholder, not a demonstrated defensive risk (same guard as
+    # classify_fielding / the analyze_player threat check; default of 1
+    # matches those sites so a hand-built dict missing "chances" still
+    # qualifies).
+    fielding_candidates = [
+        p for p in players
+        if float(((p.get("derived_stats") or {}).get("fielding") or {}).get("chances", 1)) >= MIN_QUALIFYING_FIELDING_CHANCES
+    ]
     fielding_risks = sorted(
-        players,
+        fielding_candidates,
         key=lambda p: (
             float(((p.get("derived_stats") or {}).get("fielding") or {}).get("fielding_pct", 1.0)),
             _name(p),
@@ -483,7 +522,7 @@ def _swot_rationale_from_team(result: dict) -> str:
     f_text = ", ".join(
         f"{_name(p)} FPCT {((p.get('derived_stats') or {}).get('fielding') or {}).get('fielding_pct', 1.0)}"
         for p in fielding_risks
-    )
+    ) or "none with qualifying fielding chances"
     return f"Top offensive signals: {ops_text}. Strikeout pressure drivers: {k_text}. Defensive risk markers: {f_text}."
 
 

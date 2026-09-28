@@ -260,6 +260,13 @@ class TestClassifyFielding:
         s, w = classify_fielding({"fielding": {"fielding_pct": 0.920}})
         assert not s and not w
 
+    def test_zero_chances_no_classification(self):
+        # po+a+e=0 -> fielding_pct 0.0 via 0/0, which reads as "error-prone"
+        # under the raw weak threshold (<=0.880) but there is no defensive
+        # data behind it. Regression for SIGN-017 (guardrails.md).
+        s, w = classify_fielding({"fielding": {"fielding_pct": 0.0, "chances": 0}})
+        assert not s and not w
+
 
 class TestClassifyBaserunning:
     def test_effective(self):
@@ -272,6 +279,13 @@ class TestClassifyBaserunning:
 
     def test_middle(self):
         s, w = classify_baserunning({"baserunning": {"sb_success_rate": 0.60}})
+        assert not s and not w
+
+    def test_zero_attempts_no_classification(self):
+        # sb+cs=0 -> sb_success_rate 0.0 via 0/0, which reads as "inefficient"
+        # under the raw weak threshold (<=0.50) with zero steal attempts.
+        # Regression for SIGN-017 (guardrails.md).
+        s, w = classify_baserunning({"baserunning": {"sb_success_rate": 0.0, "attempts": 0}})
         assert not s and not w
 
 
@@ -316,6 +330,22 @@ class TestAnalyzePlayer:
         result = analyze_player(player)
         strengths = " ".join(result["swot"]["strengths"]).lower()
         assert "quality at-bat" in strengths
+
+    def test_zero_fielding_and_baserunning_data_no_false_weakness(self):
+        # Qualifying PA but no fielding or SB/CS recorded at all (e.g. an
+        # outfielder with no chances, or a player who never attempted a
+        # steal). The 0/0 math for fielding_pct and sb_success_rate must
+        # not surface as a weakness or threat with no data behind it.
+        # Regression for SIGN-017 (guardrails.md).
+        player = {"batting": {"ab": 10, "h": 3, "bb": 1, "so": 2}}
+        result = analyze_player(player)
+        assert result["derived_stats"]["fielding"]["chances"] == 0
+        assert result["derived_stats"]["baserunning"]["attempts"] == 0
+        weaknesses = " ".join(result["swot"]["weaknesses"]).lower()
+        threats = " ".join(result["swot"]["threats"]).lower()
+        assert "fielding" not in weaknesses
+        assert "bases" not in weaknesses
+        assert "errors could be exploited" not in threats
 
 
 # ====================================================================
@@ -557,6 +587,41 @@ class TestSwotRationale:
         assert "OPS" in rationale
         assert "K%" in rationale
         assert "FPCT" in rationale
+
+    def test_excludes_zero_chance_players_from_fielding_risks(self):
+        # A zero-chance player's fielding_pct is 0.0 via 0/0. Sorted
+        # ascending without a chances gate, that player would always rank
+        # as the "worst fielder" ahead of anyone with real chances and a
+        # real, non-zero error rate. Regression for SIGN-017
+        # (guardrails.md).
+        roster = [
+            {"number": "1", "first": "Real", "last": "Fielder",
+             "batting": {"ab": 10, "h": 3, "bb": 1, "so": 2},
+             "fielding": {"po": 8, "a": 1, "e": 1}},
+            {"number": "2", "first": "No", "last": "Chances",
+             "batting": {"ab": 10, "h": 2, "bb": 1, "so": 3}},
+        ]
+        result = analyze_team({"team_name": "Sharks", "roster": roster})
+        rationale = _swot_rationale_from_team(result)
+        # "No Chances" legitimately appears in the OPS/K% sections (every
+        # player has hitting data) — only the defensive-risk segment must
+        # exclude the zero-chance player.
+        defensive_segment = rationale.split("Defensive risk markers:")[1]
+        assert "No Chances" not in defensive_segment
+        assert "FPCT 0.0" not in defensive_segment
+
+    def test_no_qualifying_fielders_falls_back_gracefully(self):
+        # When every player in the roster has 0 fielding chances (plausible
+        # for scorebook-only opponent data), fielding_candidates is empty
+        # and the rationale must not end on a bare "Defensive risk
+        # markers: ." — it needs an explicit no-data fallback.
+        roster = [
+            {"number": "2", "first": "No", "last": "Chances",
+             "batting": {"ab": 10, "h": 2, "bb": 1, "so": 3}},
+        ]
+        result = analyze_team({"team_name": "Sharks", "roster": roster})
+        rationale = _swot_rationale_from_team(result)
+        assert "Defensive risk markers: none with qualifying fielding chances." in rationale
 
 
 # ====================================================================
