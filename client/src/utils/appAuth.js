@@ -6,8 +6,17 @@
 // the installed PWA must still boot from cached data in a dugout with no signal.
 
 const CHECK_TIMEOUT_MS = 4000;
+// Set by "Lock" and cleared by a successful login. It makes Lock hold on the
+// device even offline, where the server check cannot answer and would
+// otherwise open the app on the cached roster.
+export const LOCKED_FLAG = 'dugout_locked';
+
+export function isLockedOnDevice() {
+  try { return window.localStorage.getItem(LOCKED_FLAG) === '1'; } catch { return false; }
+}
 
 export async function checkAppAuth(fetchImpl = fetch, timeoutMs = CHECK_TIMEOUT_MS) {
+  if (isLockedOnDevice()) return 'locked';
   const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
   const timer = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
   try {
@@ -44,7 +53,10 @@ export async function loginWithPassword(password, fetchImpl = fetch) {
       credentials: 'same-origin',
       body: JSON.stringify({ password }),
     });
-    if (res.ok) return 'ok';
+    if (res.ok) {
+      try { window.localStorage.removeItem(LOCKED_FLAG); } catch { /* private mode */ }
+      return 'ok';
+    }
     if (res.status === 401) return 'wrong';
     if (res.status === 429) return 'rate_limited';
     return 'error';
@@ -54,6 +66,12 @@ export async function loginWithPassword(password, fetchImpl = fetch) {
 }
 
 export async function logoutApp(fetchImpl = fetch) {
+  // Flag first, then drop the cached roster: the whole point of Lock is that
+  // the device shows nothing until the password is typed again.
+  try {
+    window.localStorage.setItem(LOCKED_FLAG, '1');
+    window.localStorage.removeItem('sharks_data_cache');
+  } catch { /* private mode */ }
   try {
     await fetchImpl('/api/auth/logout', {
       method: 'POST',

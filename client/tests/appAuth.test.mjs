@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { checkAppAuth, isAuthRequiredResponse, loginWithPassword } from '../src/utils/appAuth.js';
+import { checkAppAuth, isAuthRequiredResponse, loginWithPassword, logoutApp } from '../src/utils/appAuth.js';
 
 const json = (status, body) => new Response(JSON.stringify(body), {
   status, headers: { 'Content-Type': 'application/json' },
@@ -48,4 +48,26 @@ test('login posts JSON and maps the server answer', async () => {
   assert.equal(await loginWithPassword('x', async () => json(401, { error: 'bad_password' })), 'wrong');
   assert.equal(await loginWithPassword('x', async () => json(429, { error: 'rate_limited' })), 'rate_limited');
   assert.equal(await loginWithPassword('x', async () => { throw new TypeError('offline'); }), 'error');
+});
+
+test('Lock holds on the device offline and drops the cached roster', async () => {
+  const store = new Map();
+  globalThis.window = { localStorage: {
+    getItem: (k) => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => store.set(k, String(v)),
+    removeItem: (k) => store.delete(k),
+  } };
+  try {
+    store.set('sharks_data_cache', '{"team":{}}');
+    await logoutApp(async () => { throw new Error('offline'); });
+    assert.equal(store.has('sharks_data_cache'), false, 'cached roster cleared');
+    // Server unreachable: without the flag this would open on cached data.
+    assert.equal(await checkAppAuth(async () => { throw new Error('offline'); }), 'locked');
+    const ok = await loginWithPassword('pw', async () => ({ ok: true, status: 204 }));
+    assert.equal(ok, 'ok');
+    assert.equal(store.has('dugout_locked'), false, 'login clears the flag');
+    assert.equal(await checkAppAuth(async () => ({ status: 204 })), 'open');
+  } finally {
+    delete globalThis.window;
+  }
 });

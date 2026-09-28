@@ -158,6 +158,15 @@ class TestCheckAndLogout:
         client.set_cookie(COOKIE, "0" * 64)
         assert client.get("/api/auth/check").status_code == 401
 
+    def test_check_accepts_machine_tokens(self, client, gate_on, monkeypatch):
+        # nginx's auth_request for clips/music asks this route; the render
+        # worker and opcheck present a token, not a cookie.
+        monkeypatch.setenv("DUGOUT_WRITE_TOKEN", WRITE_TOKEN)
+        assert client.get("/api/auth/check", headers={"X-Dugout-Token": WRITE_TOKEN}).status_code == 204
+        assert client.get("/api/auth/check", headers={"X-Dugout-Token": "wrong"}).status_code == 401
+        monkeypatch.setenv("DEPLOY_WEBHOOK_TOKEN", DEPLOY_TOKEN)
+        assert client.get("/api/auth/check", headers={"Authorization": f"Bearer {DEPLOY_TOKEN}"}).status_code == 204
+
     def test_logout_clears_the_session(self, client, gate_on):
         _login(client)
         r = client.post("/api/auth/logout", json={}, headers={"Origin": ORIGIN})

@@ -3731,7 +3731,8 @@ def handle_auth_login():
 def handle_auth_check():
     """204 when the session cookie is valid (or the gate is off), else 401.
     nginx's auth_request for /data/, clips and music asks this."""
-    if not _app_password() or _has_app_session():
+    if (not _app_password() or _has_app_session()
+            or _presents_valid_worker_token() or _presents_valid_deploy_bearer()):
         return Response(status=204)
     return jsonify({"error": "auth_required"}), 401
 
