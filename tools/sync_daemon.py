@@ -5349,7 +5349,7 @@ def handle_song_search():
     q = request.args.get('q', '').strip()[:200]
     if not q:
         return jsonify({'error': 'q_required'}), 400
-    limit = min(int(request.args.get('limit', 8)), 20)
+    limit = min(_safe_int(request.args.get('limit'), 8), 20)
     try:
         import yt_dlp  # installed via requirements.txt
         ydl_opts = {
@@ -5848,7 +5848,7 @@ def handle_catalog_search():
       limit — max results (default 20)
     """
     query = request.args.get("q", "").strip()
-    limit = min(int(request.args.get("limit", 20)), 100)
+    limit = min(_safe_int(request.args.get("limit"), 20), 100)
     adb = _announcer_db()
     rows = adb.search_catalog(query, limit=limit)
     return jsonify({"results": rows, "count": len(rows)})

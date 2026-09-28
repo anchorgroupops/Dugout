@@ -121,3 +121,8 @@ CI now installs FFmpeg so `TestStadiumWrapQuality` actually runs — it was skip
 **Symptom:** `gc-autopull.service` dies in `init_schema` with `sqlite3.OperationalError: attempt to write a readonly database` before ever reaching GC. `./data` and `./logs` are owned by uid/gid 999 (the `sharks` user inside `sharks_api`/`sharks_sync`; shows as `caddy:systemd-journal` on the host) while the timer runs as `joelycannoli` (uid 1000).
 **Fix:** The tree is shared by two uids, so use ACLs rather than chown ping-pong: `sudo setfacl -R -m u:joelycannoli:rwX -m u:999:rwX data logs && sudo setfacl -R -d -m u:joelycannoli:rwX -m u:999:rwX data logs`. The default ACL keeps files created by either side writable by the other. Never `chown -R` `./data` to a single owner.
 **Ref:** ctime 2026-09-15 15:59 on the whole tree; failures 2026-09-16 → 2026-09-23
+
+## SIGN-014: Unvalidated `?limit=` Query Param Crashes Announcer Search Routes
+**Symptom:** `GET /api/announcer/catalog/search?limit=abc` (or `limit=`) returns `500 {"error":"internal_error"}` instead of falling back to the default. `bare int(request.args.get("limit", N))` raises an uncaught `ValueError` on any non-numeric value.
+**Fix:** A bare `int(request.args.get("limit", N))` raises on bad input. Use the already-imported `stats_normalizer.safe_int` helper (aliased `_safe_int` in `sync_daemon.py`) for any `int(request.args.get(...))` parse — it coerces bad/missing input to the default instead of raising. Applied to `/api/announcer/songs/search` and `/api/announcer/catalog/search`. Fuzz-test any new `?limit=`/`?page=`-style query param with non-numeric and empty-string values before shipping.
+**Ref:** session 2026-09-28, route fuzzing of `tools/sync_daemon.py`
