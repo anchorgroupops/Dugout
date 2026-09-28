@@ -13,7 +13,9 @@ import { getWriteToken, setWriteToken } from './writeToken.js';
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 // /api/deploy uses its own DEPLOY_WEBHOOK_TOKEN bearer auth. /api/sync/kick
 // accepts either that bearer (CI) or the dashboard's write token (Manual Sync).
-const WRITE_TOKEN_EXEMPT_PREFIXES = ['/api/deploy'];
+// /api/auth/login|logout are the team-password gate (SIGN-021), exempt
+// server-side too: no write-token prompt before someone has even logged in.
+const WRITE_TOKEN_EXEMPT_PREFIXES = ['/api/deploy', '/api/auth/login', '/api/auth/logout'];
 
 function resolveSameOriginApiPath(url) {
   try {

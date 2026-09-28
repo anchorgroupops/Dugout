@@ -80,6 +80,11 @@ modal deploy tools/modal_app.py
 - `DUGOUT_WRITE_TOKEN` — required `X-Dugout-Token` on every mutating `/api`
   request (SIGN-011). Unset = Origin-check only; never run the public site
   without it.
+- `DUGOUT_APP_PASSWORD` — team password; when set, every `/api` request and
+  nginx's `/data/`, `/announcer-clips/`, `/audio/music/` need the
+  `dugout_session` cookie from `POST /api/auth/login` (SIGN-021). Machine
+  callers use the write token or deploy bearer instead; `/api/health` stays
+  open. Set `DUGOUT_SESSION_SECRET` too.
 - `DEPLOY_WEBHOOK_ENABLED=0` keeps `/api/deploy` dormant (SIGN-007).
 - nginx serves only `/data/sharks/*.json` from the data mount (SIGN-010).
 

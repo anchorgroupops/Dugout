@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 import time
 from datetime import datetime
 from pathlib import Path
@@ -30,6 +31,14 @@ def run_opcheck(base_url: str, include_burst: bool = True) -> dict:
 
     def add(name: str, ok: bool, detail: str):
         checks.append({"name": name, "ok": bool(ok), "detail": detail})
+
+    # Team-password gate (SIGN-021): with DUGOUT_APP_PASSWORD in the
+    # environment, log in first so the session cookie rides every probe.
+    app_password = os.getenv("DUGOUT_APP_PASSWORD", "").strip()
+    if app_password:
+        login_r = s.post(f"{base}/api/auth/login", json={"password": app_password},
+                         headers={"Origin": base}, timeout=30)
+        add("app_login", login_r.status_code == 204, f"status={login_r.status_code}")
 
     # Core data endpoints
     team_r, team = _req_json(s, f"{base}/api/team")

@@ -74,6 +74,9 @@ services:
       - GC_ORG_IDS=${GC_ORG_IDS}
       - GC_TEAM_ID=${GC_TEAM_ID}
       - GC_SEASON_SLUG=${GC_SEASON_SLUG}
+      # Team-password gate (SIGN-021). Unset = site public.
+      - DUGOUT_APP_PASSWORD=${DUGOUT_APP_PASSWORD}
+      - DUGOUT_SESSION_SECRET=${DUGOUT_SESSION_SECRET}
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
@@ -170,6 +173,9 @@ services:
       - LOCAL_TTS_URL=${LOCAL_TTS_URL}
       - DEPLOY_WEBHOOK_TOKEN=${DEPLOY_WEBHOOK_TOKEN}
       - DEPLOY_SSH_KEY_B64=${DEPLOY_SSH_KEY_B64}
+      # Team-password gate (SIGN-021). Unset = site public.
+      - DUGOUT_APP_PASSWORD=${DUGOUT_APP_PASSWORD}
+      - DUGOUT_SESSION_SECRET=${DUGOUT_SESSION_SECRET}
     extra_hosts:
       - "pi-host:host-gateway"
     volumes:
