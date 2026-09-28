@@ -1472,15 +1472,24 @@ def render_player_audio(player_id: str, game_context: dict | None = None,
 # Qwen3-TTS VoiceDesign is steered by a plain-English description, not numbers.
 # A render worker receives one of these as the job's `instruct`.
 PA_STYLES: dict[str, dict] = {
+    "halo": {
+        "name": "Arena legend",
+        "instruct": ("A colossal, gravelly, ultra-deep male arena announcer with a menacing, "
+                     "larger-than-life video-game-trailer delivery. Every word is slow, heavy "
+                     "and punched, with long dramatic pauses and huge reverb-hall presence, "
+                     "like announcing the final boss."),
+    },
     "stadium": {
-        "name": "Stadium announcer",
-        "instruct": ("A booming, deep male stadium announcer. Slow and dramatic with big "
-                     "crowd energy, drawing out the player's name."),
+        "name": "Big-league walk-up",
+        "instruct": ("An electrifying Major League Baseball stadium PA announcer introducing "
+                     "the home team's star. Deep, booming baritone at full volume, building "
+                     "anticipation, then stretching the player's name out long and loud as "
+                     "the crowd roars."),
     },
     "hype": {
         "name": "Hype",
-        "instruct": ("An energetic, fast-paced sports hype announcer, excited and loud, "
-                     "rising in pitch on the big words."),
+        "instruct": ("A wildly excited, shouting sports hype announcer, fast and loud, "
+                     "voice rising and cracking with energy on the big words, pure adrenaline."),
     },
     "friendly": {
         "name": "Friendly PA",
@@ -1493,7 +1502,7 @@ PA_STYLES: dict[str, dict] = {
                      "Neutral tone, steady pace, very clear."),
     },
 }
-DEFAULT_PA_STYLE = "stadium"
+DEFAULT_PA_STYLE = "halo"
 PA_CLIP_ID = "pa"  # PA clips live in CLIPS_DIR/pa, served at /announcer-clips/pa/
 PA_MAX_CHARS = 600
 

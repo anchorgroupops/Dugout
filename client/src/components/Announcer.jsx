@@ -315,7 +315,7 @@ const PA_MAX_CHARS = 600; // matches announcer_engine.PA_MAX_CHARS
 function PAModal({ onClose }) {
   useEscapeToClose(onClose);
   const [text, setText] = useState('');
-  const [style, setStyle] = useState('stadium');
+  const [style, setStyle] = useState('halo');
   const [styles, setStyles] = useState([]);
   const [items, setItems] = useState([]);
   const [waitingId, setWaitingId] = useState('');
