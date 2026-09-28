@@ -496,8 +496,9 @@ def _swot_rationale_from_team(result: dict) -> str:
     )[:3]
     # Exclude zero-chance players: their fielding_pct is a 0/0 -> 0.0
     # placeholder, not a demonstrated defensive risk (same guard as
-    # classify_fielding / the line-363 threat gate; default of 1 matches
-    # those sites so a hand-built dict missing "chances" still qualifies).
+    # classify_fielding / the analyze_player threat check; default of 1
+    # matches those sites so a hand-built dict missing "chances" still
+    # qualifies).
     fielding_candidates = [
         p for p in players
         if float(((p.get("derived_stats") or {}).get("fielding") or {}).get("chances", 1)) >= MIN_QUALIFYING_FIELDING_CHANCES
