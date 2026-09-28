@@ -496,10 +496,11 @@ def _swot_rationale_from_team(result: dict) -> str:
     )[:3]
     # Exclude zero-chance players: their fielding_pct is a 0/0 -> 0.0
     # placeholder, not a demonstrated defensive risk (same guard as
-    # classify_fielding / the line-363 threat gate).
+    # classify_fielding / the line-363 threat gate; default of 1 matches
+    # those sites so a hand-built dict missing "chances" still qualifies).
     fielding_candidates = [
         p for p in players
-        if float(((p.get("derived_stats") or {}).get("fielding") or {}).get("chances", 0)) >= MIN_QUALIFYING_FIELDING_CHANCES
+        if float(((p.get("derived_stats") or {}).get("fielding") or {}).get("chances", 1)) >= MIN_QUALIFYING_FIELDING_CHANCES
     ]
     fielding_risks = sorted(
         fielding_candidates,
@@ -520,7 +521,7 @@ def _swot_rationale_from_team(result: dict) -> str:
     f_text = ", ".join(
         f"{_name(p)} FPCT {((p.get('derived_stats') or {}).get('fielding') or {}).get('fielding_pct', 1.0)}"
         for p in fielding_risks
-    )
+    ) or "none with qualifying fielding chances"
     return f"Top offensive signals: {ops_text}. Strikeout pressure drivers: {k_text}. Defensive risk markers: {f_text}."
 
 
