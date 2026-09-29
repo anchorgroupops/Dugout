@@ -5996,6 +5996,15 @@ def handle_announcer_song_upload(player_id):
         updated = ae.update_player(player_id, {
             "songs": songs, "walkup_song_url": songs[0]["url"], "intro_timestamp": songs[0]["start"],
         })
+    # Same pool row music_ingest writes, so /api/music/next and the song
+    # pool routes see uploads too. The roster entry above is what the tab plays.
+    try:
+        _announcer_db().add_player_song(
+            player_id=player_id, song_url=song["url"], song_label=song["label"], source="upload",
+            source_id=song["id"], optimal_start_ms=0, file_path=song["url"],
+        )
+    except Exception as e:
+        logging.warning("[Announcer] player_songs row for upload failed: %s", e)
     logging.info("[Announcer] song uploaded: player=%s url=%s", _sanitize_log(player_id), song["url"])
     return jsonify({"status": "ok", "song": song, "player": updated}), 201
 
@@ -6088,9 +6097,10 @@ def handle_batting_order_put():
     import announcer_engine as ae
     import announcer_media as am
     data = request.get_json(silent=True) or {}
-    known = {p.get("id") for p in ae.load_announcer_roster() if p.get("id")}
+    active = [p["id"] for p in ae.load_announcer_roster()
+              if p.get("id") and p.get("is_active") is not False and not p.get("is_ghost")]
     try:
-        record = am.save_batting_order(data.get("order"), known or None)
+        record = am.save_batting_order(data.get("order"), list(dict.fromkeys(active)))
     except am.UploadError as e:
         return jsonify({"error": e.code}), e.status
     return jsonify({"status": "ok", **record})

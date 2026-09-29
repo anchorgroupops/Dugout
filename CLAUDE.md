@@ -239,7 +239,7 @@ strategies:
   25 MB), Origin-checked in the route, write token via `_security_before_request`
   (body cap raised per path by `_MEDIA_UPLOAD_PATH_RE`). FFmpeg loudnorms and
   re-encodes to 128k MP3; without it the file is stored as-is. nginx has its own
-  26m location above the `songs` regex.
+  30m location above the `songs` regex.
 - `GET /api/announcer/soundboard`, `DELETE /api/announcer/soundboard/<id>`,
   `GET /audio/soundboard/<file>`: six built-in effects are synthesised by FFmpeg
   on first listing (versioned filenames; bump `BUILTIN_VERSION` on change).

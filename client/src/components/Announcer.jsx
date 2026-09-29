@@ -1154,6 +1154,12 @@ export default function Announcer({ lineups }) {
         if (!pendingOrder.current) setManualOrder(manual);
       })
       .catch(() => {});
+    // Fetch the soundboard files now, so the service worker has them if the
+    // signal is gone by the time the coach first opens Sounds.
+    fetch('/api/announcer/soundboard')
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { const urls = (d?.sounds || []).map(s => s.url); if (urls.length) warm(urls); })
+      .catch(() => {});
     return () => stopAudio();
   }, [fetchRoster, fetchProfiles]);
 
@@ -1230,7 +1236,15 @@ export default function Announcer({ lineups }) {
     clearTimeout(orderTimer.current);
     orderTimer.current = setTimeout(flushOrder, debounceMs);
   }, [flushOrder]);
-  useEffect(() => () => { if (pendingOrder.current) flushOrder(); }, [flushOrder]);
+  useEffect(() => {
+    // Leaving the app (lock screen, switch app) saves a pending move now.
+    const onHide = () => { if (document.visibilityState === 'hidden' && pendingOrder.current) flushOrder(); };
+    document.addEventListener('visibilitychange', onHide);
+    return () => {
+      document.removeEventListener('visibilitychange', onHide);
+      if (pendingOrder.current) flushOrder();
+    };
+  }, [flushOrder]);
   const orderIds = battingOrder.map(p => p.id);
   const dropRow = (from, to) => setOrder(moveItem(orderIds, from, to), 0);
   const stepPlayer = (id, dir) => {
@@ -1385,9 +1399,10 @@ export default function Announcer({ lineups }) {
 
   const closeSheet = useCallback((result) => {
     setSheet(null);
+    if (pendingOrder.current) flushOrder(); // don't sit on a Move up/down
     if (result && typeof result.then === 'function') result.then(t => say(t, /not saved/i.test(t) ? 'error' : 'ok'));
     else if (typeof result === 'string') say(result, 'ok');
-  }, [say]);
+  }, [say, flushOrder]);
 
   // ── summary ──
   const counts = useMemo(() => ({

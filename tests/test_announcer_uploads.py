@@ -58,12 +58,22 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(sd, "_load_roster_players", lambda: [])
     monkeypatch.setattr(sd, "SHARKS_DIR", tmp_path / "sharks")
     monkeypatch.setattr(sd, "_MUTATE_RATE_BUCKETS", {})  # 12 writes/min/path would trip across tests
+    pool_rows = []
+
+    class _Adb:  # keeps the real announcer.db out of it
+        @staticmethod
+        def add_player_song(**kw):
+            pool_rows.append(kw)
+            return []
+
+    monkeypatch.setattr(sd, "_announcer_db", lambda: _Adb)
     monkeypatch.delenv("DUGOUT_WRITE_TOKEN", raising=False)
     monkeypatch.delenv("DUGOUT_APP_PASSWORD", raising=False)
     sd.app.config["TESTING"] = True
 
     class E:
         tmp = tmp_path
+        pool = pool_rows
 
         @staticmethod
         def write(players):
@@ -120,6 +130,9 @@ class TestSongUpload:
         stem = song["url"].rsplit("/", 1)[-1][:-4]
         assert len(stem.rsplit("-", 1)[-1]) == 8
         assert [s["url"] for s in env.get("07-jane")["songs"]] == [song["url"]]
+        assert env.pool == [{"player_id": "07-jane", "song_url": song["url"], "song_label": "Walk Up",
+                             "source": "upload", "source_id": song["id"], "optimal_start_ms": 0,
+                             "file_path": song["url"]}]
         assert env.get("07-jane")["walkup_song_url"] == song["url"]
         served = env.client.get(song["url"])
         assert served.status_code == 200 and served.mimetype == "audio/mpeg"
@@ -156,6 +169,19 @@ class TestSongUpload:
         monkeypatch.setattr(am, "MAX_UPLOAD_BYTES", 1000)
         resp = _upload(env.client, "/api/announcer/songs/07-jane/upload", _wav())
         assert resp.status_code == 413 and resp.get_json()["error"] == "file_too_large"
+
+    def test_a_20_mb_file_gets_through_the_raised_body_cap(self, env, monkeypatch):
+        _no_ffmpeg(monkeypatch)
+        big = _wav(0.1)[:44] + b"\x00" * (20 * 1024 * 1024)
+        resp = _upload(env.client, "/api/announcer/songs/07-jane/upload", big)
+        assert resp.status_code == 201, resp.get_json()
+
+    def test_a_body_just_over_the_real_cap_is_413(self, env, monkeypatch):
+        _no_ffmpeg(monkeypatch)
+        big = _wav(0.1)[:44] + b"\x00" * sd.MAX_MEDIA_UPLOAD_BYTES
+        resp = _upload(env.client, "/api/announcer/songs/07-jane/upload", big)
+        assert resp.status_code == 413 and resp.get_json()["error"] == "payload_too_large"
+        assert env.get("07-jane").get("songs") in (None, [])
 
     def test_body_over_the_gate_is_413_before_the_route(self, env, monkeypatch):
         monkeypatch.setattr(sd, "MAX_MEDIA_UPLOAD_BYTES", 2000)
@@ -345,6 +371,20 @@ class TestBattingOrder:
         assert resp.get_json()["order"] == ["12-mia", "07-jane"]  # repeats and unknown ids dropped
         body = env.client.get("/api/announcer/game-lineup").get_json()
         assert body["manual_order"] == ["12-mia", "07-jane"] and body["manual_updated_at"]
+
+    def test_active_players_the_order_leaves_out_are_appended(self, env):
+        resp = self._put(env, {"order": ["12-mia"]})
+        assert resp.get_json()["order"] == ["12-mia", "07-jane"]
+
+    def test_inactive_players_are_dropped(self, env):
+        env.write([
+            {"id": "07-jane", "first": "Jane", "is_active": True},
+            {"id": "12-mia", "first": "Mia", "is_active": True},
+            {"id": "03-old", "first": "Olga", "is_active": False},
+        ])
+        resp = self._put(env, {"order": ["03-old", "12-mia", "07-jane"]})
+        assert resp.get_json()["order"] == ["12-mia", "07-jane"]
+        assert self._put(env, {"order": ["03-old"]}).status_code == 400
 
     def test_delete_resets_to_the_gamechanger_order(self, env):
         self._put(env, {"order": ["12-mia"]})

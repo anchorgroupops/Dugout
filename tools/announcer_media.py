@@ -327,17 +327,24 @@ def read_batting_order() -> dict | None:
     return {"order": [str(x) for x in order if isinstance(x, str)], "updated_at": data.get("updated_at") or ""}
 
 
-def save_batting_order(order, known_ids: set[str] | None = None) -> dict:
-    """Store the coach's order. Unknown ids and repeats are dropped."""
+def save_batting_order(order, active_ids: list[str]) -> dict:
+    """Store the coach's order over the active roster (`active_ids`, roster order).
+
+    Unknown, inactive and repeated ids are dropped; active players the order
+    doesn't name are appended in roster order. An order naming no active
+    player is refused.
+    """
     if not isinstance(order, list) or len(order) > MAX_ORDER or not all(isinstance(x, str) and _ID_RE.match(x) for x in order):
         raise UploadError("order_invalid", 400)
+    active = set(active_ids)
     seen, clean = set(), []
     for pid in order:
-        if pid not in seen and (known_ids is None or pid in known_ids):
+        if pid not in seen and pid in active:
             seen.add(pid)
             clean.append(pid)
     if not clean:
         raise UploadError("order_invalid", 400)
+    clean += [pid for pid in active_ids if pid not in seen]
     record = {"order": clean, "updated_at": datetime.now(ae.ET).isoformat()}
     ae._atomic_write_json(BATTING_ORDER_FILE, record)
     return record
