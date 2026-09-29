@@ -276,6 +276,10 @@ def add_sound(filename: str, data: bytes, label: str = "") -> dict:
              "added_at": datetime.now(ae.ET).isoformat()}
     with ae._ROSTER_LOCK:
         sounds = _read_uploaded_sounds()
+        if len(sounds) >= MAX_SOUNDS:
+            # Lost the race to another upload while ffmpeg ran: drop the file.
+            (SOUNDBOARD_DIR / name).unlink(missing_ok=True)
+            raise UploadError("sounds_full", 409)
         sounds.append(entry)
         ae._atomic_write_json(SOUNDBOARD_FILE, sounds)
     return {**entry, "builtin": False}
