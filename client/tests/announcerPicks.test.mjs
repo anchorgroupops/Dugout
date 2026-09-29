@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   orderBattingLineup, pairFor, randomOther, rowState, pickMode, previewLine, describeApiError, needsRender, songStartLabel,
-  moveItem, dropIndex, songTitle, uploadProblem, MAX_UPLOAD_BYTES,
+  moveItem, dropIndex, songTitle, uploadProblem, MAX_UPLOAD_BYTES, undoTarget, songGapLabel,
 } from '../src/utils/announcerPicks.js';
 
 const P = (id, first, last, number, extra = {}) => ({ id, first, last, number, status: 'ready', ...extra });
@@ -159,4 +159,21 @@ test('upload errors read as instructions, including nginx 413 with no code', () 
   assert.match(describeApiError(415, 'unsupported_audio'), /MP3, WAV or M4A/);
   assert.match(describeApiError(422, 'audio_unreadable'), /wouldn’t play/);
   assert.match(describeApiError(400, 'builtin_sound'), /Built-in/);
+});
+
+test('undo after a later drag restores the previous coach order', () => {
+  const u = undoTarget(['b', 'a', 'c']);
+  assert.deepEqual(u, { kind: 'restore', order: ['b', 'a', 'c'] });
+});
+
+test('undo after the first drag resets to the source order rather than copying it as manual', () => {
+  assert.deepEqual(undoTarget(null), { kind: 'reset' });
+  assert.deepEqual(undoTarget([]), { kind: 'reset' });
+});
+
+test('the gap caption reads as before / as / after the call ends', () => {
+  assert.equal(songGapLabel(-0.5), 'Song starts 0.5s before the call ends');
+  assert.equal(songGapLabel(0), 'Song starts right as the call ends');
+  assert.equal(songGapLabel(1.25), 'Song starts 1.25s after the call ends');
+  assert.equal(songGapLabel('x'), 'Song starts right as the call ends');
 });

@@ -183,6 +183,25 @@ export function dropIndex(from, dy, pitch, count) {
   return Math.max(0, Math.min(count - 1, from + Math.round(dy / pitch)));
 }
 
+// What Undo puts back after a reorder. If the coach already had her own
+// order, that order; if this was the first drag, a reset, so the list goes
+// back to the GameChanger / optimiser order instead of a copy of it that
+// reads "Your order".
+export function undoTarget(prevManualOrder) {
+  return Array.isArray(prevManualOrder) && prevManualOrder.length
+    ? { kind: 'restore', order: [...prevManualOrder] }
+    : { kind: 'reset' };
+}
+
+// The gap slider's caption: -0.5 -> "Song starts 0.5s before the call ends".
+export function songGapLabel(gap) {
+  const g = Number(gap) || 0;
+  const n = Number(Math.abs(g).toFixed(2));
+  if (g < 0) return `Song starts ${n}s before the call ends`;
+  if (g > 0) return `Song starts ${n}s after the call ends`;
+  return 'Song starts right as the call ends';
+}
+
 // Uploads the server takes, by extension or MIME type.
 export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 export function uploadProblem(file) {
