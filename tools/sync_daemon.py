@@ -5237,6 +5237,8 @@ def handle_announcer_render_all():
 
 
 _LOCAL_SONG_URL_RE = re.compile(r"^/audio/(music/[A-Za-z0-9_-]+|walkup)/[A-Za-z0-9_-]+\.(mp3|m4a|ogg|wav)$")
+# Bounds for a player's song_gap, mirrored by GAP_MIN / GAP_MAX in client/src/utils/audioController.js.
+SONG_GAP_MIN, SONG_GAP_MAX = -3.0, 3.0
 
 
 @app.route('/api/announcer/phonetics/<player_id>', methods=['POST'])
@@ -5329,6 +5331,13 @@ def handle_announcer_phonetics(player_id):
             updates["intro_timestamp"] = max(0.0, min(float(intro_ts), 300.0))
         except (TypeError, ValueError):
             pass
+    # Seconds between the call ending and the song starting; negative brings
+    # the song in under the call. The PWA clamps the same way (audioController).
+    if "song_gap" in data:
+        try:
+            updates["song_gap"] = max(SONG_GAP_MIN, min(float(data.get("song_gap")), SONG_GAP_MAX))
+        except (TypeError, ValueError):
+            return jsonify({"error": "song_gap_invalid"}), 400
 
     updated = update_player(player_id, updates)
     if not updated:

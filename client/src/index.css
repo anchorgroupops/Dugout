@@ -2410,3 +2410,29 @@ body:has(.announcer-modal-overlay) .navbar {
   font-weight: 600;
   margin: 0;
 }
+
+/* ── Announcer deck: one big button (Play / Fade / Stop / Retry) with a word
+   under it, a fading state, the gap slider, the More sheet and Advanced. ── */
+.announcer-page { --announcer-bar-space: 170px; }
+.announcer-bar-main { display: flex; flex-direction: column; align-items: center; gap: 2px; flex-shrink: 0; }
+.announcer-bar-main .announcer-bar-btn { width: 72px; height: 72px; }
+.announcer-bar-btn-label { font-size: 0.62rem; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
+.announcer-bar--fading { border-color: rgba(240, 180, 41, 0.6); }
+.announcer-bar--fading .announcer-bar-head { color: #f5d27a; }
+.announcer-bar-btn--fade { background: #f0b429; color: #1a1408; }
+.announcer-bar-btn--stopnow { background: var(--danger); color: #fff; }
+.announcer-row-go--fading { background: rgba(240, 180, 41, 0.25); color: #f5d27a; }
+.announcer-msg-action { flex-shrink: 0; min-height: var(--touch-min); font-size: var(--text-sm); }
+.announcer-gap { display: flex; flex-direction: column; gap: 0.35rem; }
+.announcer-gap input[type="range"] { width: 100%; accent-color: var(--primary-color); min-height: var(--touch-min); margin: 0; }
+.announcer-gap-scale { display: flex; justify-content: space-between; font-size: var(--text-xs); color: var(--text-muted); }
+.announcer-gap-value { font-weight: 600; color: var(--text-main); }
+.announcer-more-grid { display: grid; grid-template-columns: 1fr; gap: var(--space-xs); }
+.announcer-more-grid .announcer-btn { justify-content: flex-start; min-height: 52px; }
+.announcer-advanced { border-top: 1px solid var(--surface-border); padding-top: var(--space-xs); }
+.announcer-advanced > summary {
+  cursor: pointer; min-height: var(--touch-min); display: flex; align-items: center; gap: 0.4rem;
+  font-weight: 600; color: var(--text-muted); list-style: none;
+}
+.announcer-advanced > summary::-webkit-details-marker { display: none; }
+.announcer-advanced[open] > summary { color: var(--text-main); }

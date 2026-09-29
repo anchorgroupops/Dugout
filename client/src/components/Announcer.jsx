@@ -2,26 +2,30 @@ import React, { useState, useEffect, useCallback, useRef, useMemo, useSyncExtern
 import { createPortal } from 'react-dom';
 import {
   Mic, Play, Square, RefreshCw, UserPlus, AlertCircle, Volume2, Zap, X, Check, Trash2, Pin,
-  Shuffle, Plus, Music, Settings, SkipForward, Pencil, WifiOff, Megaphone, RotateCcw,
-  Upload, GripVertical, ListOrdered, ArrowUp, ArrowDown, Drum, Bell, Wind, Users, Flag, AudioLines, Lock,
+  Shuffle, Plus, Music, SkipForward, Pencil, WifiOff, Megaphone, RotateCcw, MoreHorizontal, ChevronRight,
+  Upload, GripVertical, ListOrdered, ArrowUp, ArrowDown, Drum, Bell, Wind, Users, Flag, AudioLines, Lock, Volume1,
 } from 'lucide-react';
 import {
-  subscribe as subscribeAudio, getState as getAudioState, play, playClip, stop as stopAudio,
-  preload, warm, unlock, dismissError, playEffect, preloadEffects,
+  subscribe as subscribeAudio, getState as getAudioState, play, playClip, stop as stopAudio, fadeOut, mainAction,
+  preload, warm, unlock, dismissError, playEffect, preloadEffects, clampGap, DEFAULT_GAP, GAP_MIN, GAP_MAX,
 } from '../utils/audioController';
 import { apiRequest } from '../utils/apiClient';
 import {
   MAX_ITEMS, introsOf, songsOf, rollPair, pairFor, isPinned, pickMode, songTitle, songStartLabel, rowState,
   needsRender, orderBattingLineup, previewLine, describeApiError, moveItem, dropIndex, uploadProblem, UPLOAD_VOICE,
+  undoTarget, songGapLabel,
 } from '../utils/announcerPicks';
 
 // The Announcer tab, built like a sports-app game screen:
 //   • one list, in batting order; tapping a player announces them
 //   • a now-playing bar that always says what is playing, loading, failed,
-//     or up next, with one big button (Play / Stop / Retry)
+//     or up next, with ONE big button: Play the up-next batter; while it
+//     plays, Fade (1.5 s); during the fade, Stop dead; after a failure, Retry
+//   • announcing a batter moves "up next" to the one after her
 //   • every row says whether its call is ready, being made, or failed
-//   • setup (names, calls, songs, voice, subs) lives in sheets that save as
-//     you go and close from anywhere — nothing to lose, nothing to trap you
+//   • setup (calls, songs, gap) is one sheet per player; everything else the
+//     coach rarely touches (PA, sounds, team voice, subs, big moments) is
+//     behind More. Sheets save as you go and close from anywhere
 // Playback state comes from audioController's store, never local flags.
 
 // Must match _HALO_SCRIPTS keys in tools/announcer_engine.py
@@ -149,10 +153,12 @@ function PlayerRow({ player, slot, audio, isNext, voiceName, onAnnounce, onEdit 
   const intros = introsOf(player);
   const songs = songsOf(player);
   const isThis = audio.key === player.id;
-  const busy = isThis && (audio.status === 'playing' || audio.status === 'loading');
+  const busy = isThis && (audio.status === 'playing' || audio.status === 'loading' || audio.status === 'fading');
+  const fading = isThis && audio.status === 'fading';
   const callMode = pickMode(intros, player.intro_pick, 'call', i => voiceName(i.voice));
   const songMode = pickMode(songs, player.song_pick, 'song', songTitle);
-  const mainLabel = !st.canPlay ? `Set up ${fullName(player)}` : busy ? `Stop ${fullName(player)}` : `Announce ${fullName(player)}`;
+  const mainLabel = !st.canPlay ? `Set up ${fullName(player)}` : fading ? `Stop ${fullName(player)} now`
+    : busy ? `Fade out ${fullName(player)}` : `Announce ${fullName(player)}`;
   return (
     <div className={`announcer-row glass-panel${busy ? ' announcer-row--playing' : ''}${isNext && !busy ? ' announcer-row--next' : ''}`}>
       <button type="button" className="announcer-row-main" aria-label={mainLabel}
@@ -162,7 +168,7 @@ function PlayerRow({ player, slot, audio, isNext, voiceName, onAnnounce, onEdit 
         <span className="announcer-row-text">
           <span className="announcer-row-name">{player.first} <strong>{player.last}</strong></span>
           <span className="announcer-row-sub">
-            {busy && <span className="announcer-tag announcer-tag--live">{audio.status === 'loading' ? 'Loading' : 'Playing'}</span>}
+            {busy && <span className="announcer-tag announcer-tag--live">{audio.status === 'loading' ? 'Loading' : fading ? 'Fading' : 'Playing'}</span>}
             {isNext && !busy && <span className="announcer-tag">Up next</span>}
             <span className={`announcer-badge announcer-badge--${st.kind}`}>
               {st.kind === 'rendering' && <Spinner size={11} />}{st.label}
@@ -171,8 +177,8 @@ function PlayerRow({ player, slot, audio, isNext, voiceName, onAnnounce, onEdit 
             {songMode && <span><Music size={11} /> {songMode}</span>}
           </span>
         </span>
-        <span className={`announcer-row-go${busy ? ' announcer-row-go--stop' : ''}${!st.canPlay ? ' announcer-row-go--setup' : ''}`} aria-hidden="true">
-          {!st.canPlay ? <Plus size={22} /> : busy ? <Square size={20} /> : <Play size={22} style={{ marginLeft: 3 }} />}
+        <span className={`announcer-row-go${fading ? ' announcer-row-go--fading' : busy ? ' announcer-row-go--stop' : ''}${!st.canPlay ? ' announcer-row-go--setup' : ''}`} aria-hidden="true">
+          {!st.canPlay ? <Plus size={22} /> : fading ? <Square size={20} /> : busy ? <Volume1 size={22} /> : <Play size={22} style={{ marginLeft: 3 }} />}
         </span>
       </button>
       <button type="button" className="announcer-row-edit" onClick={() => onEdit(player)} aria-label={`Set up ${fullName(player)}`}>
@@ -188,6 +194,8 @@ function PlayerSheet({ player, slot, total, profiles, defaultVoiceId, audio, voi
   const [phonetic, setPhonetic] = useState(player.phonetic_hint || '');
   const [voice, setVoice] = useState(player.voice_profile_id || defaultVoiceId);
   const [newSong, setNewSong] = useState({ url: '', start: '0' });
+  const [gap, setGap] = useState(clampGap(player.song_gap));
+  const gapTimer = useRef(null);
   const [busy, setBusy] = useState('');
   const [msg, setMsg] = useState(null);
   const [confirm, setConfirm] = useState('');
@@ -196,6 +204,16 @@ function PlayerSheet({ player, slot, total, profiles, defaultVoiceId, audio, voi
   const songs = songsOf(player);
   const st = rowState(player);
   const nameDirty = phonetic.trim() !== (player.phonetic_hint || '').trim();
+
+  // The gap slider saves 0.6 s after the last nudge, so dragging it is one
+  // write, not thirty (the API allows 12 writes a minute).
+  const nudgeGap = (value) => {
+    const g = clampGap(value);
+    setGap(g);
+    clearTimeout(gapTimer.current);
+    gapTimer.current = setTimeout(() => onSave(player.id, { song_gap: g }).catch(e => setMsg({ text: `Gap not saved: ${e.message}`, kind: 'error' })), 600);
+  };
+  useEffect(() => () => clearTimeout(gapTimer.current), []);
 
   const run = async (tag, fn, okText) => {
     setBusy(tag); setMsg(null); setConfirm('');
@@ -274,41 +292,6 @@ function PlayerSheet({ player, slot, total, profiles, defaultVoiceId, audio, voi
         </div>
       )}
       {uploading && <div className="announcer-msg announcer-msg--info" role="status"><Spinner /> Uploading and levelling the volume…</div>}
-      <section className="announcer-section">
-        <label className="announcer-form-group">
-          <span>Say the name as</span>
-          <input value={phonetic} onChange={e => setPhonetic(e.target.value)} placeholder={fullName(player)}
-            maxLength={200} autoCapitalize="off" autoCorrect="off" enterKeyHint="done"
-            onKeyDown={e => { if (e.key === 'Enter' && nameDirty) save('name', { phonetic_hint: phonetic.trim() }, 'Saved. Make a call to hear it.'); }} />
-          <small>Spell it how it sounds. Capitals get stressed: <em>ROO-bee van-DOO-sen</em></small>
-        </label>
-        <div className="announcer-preview-text">{previewLine(player, phonetic)}</div>
-        {nameDirty && (
-          <button type="button" className="announcer-btn announcer-btn-secondary" disabled={Boolean(busy)}
-            onClick={() => save('name', { phonetic_hint: phonetic.trim() }, 'Saved. Make a call to hear it.')}>
-            {busy === 'name' ? <Spinner /> : <Check size={14} />} Save name
-          </button>
-        )}
-      </section>
-
-      {slot > 0 && (
-        <section className="announcer-section">
-          <div className="announcer-section-head">
-            <span><ListOrdered size={14} /> Batting order</span>
-            <small>Bats {ordinal(slot)} of {total}</small>
-          </div>
-          <div className="announcer-move-row">
-            <button type="button" className="announcer-btn announcer-btn-secondary" disabled={slot <= 1}
-              onClick={() => onMove(player.id, -1)}>
-              <ArrowUp size={16} /> Move up
-            </button>
-            <button type="button" className="announcer-btn announcer-btn-secondary" disabled={slot >= total}
-              onClick={() => onMove(player.id, 1)}>
-              <ArrowDown size={16} /> Move down
-            </button>
-          </div>
-        </section>
-      )}
 
       <section className={`announcer-section${dropKind === 'call' ? ' announcer-section--drop' : ''}`} {...dropHandlers('call')}>
         <div className="announcer-section-head">
@@ -409,32 +392,86 @@ function PlayerSheet({ player, slot, total, profiles, defaultVoiceId, audio, voi
           </form>
         )}
         {songs.length >= MAX_ITEMS && <small className="announcer-hint">{MAX_ITEMS} songs is the most. Remove one to add another.</small>}
-        <small className="announcer-hint">Uploads (MP3, WAV or M4A, up to 25 MB) play from the top; on a computer you can also drop the file on this sheet. For a link, the number is where the song starts, in seconds into the track (12 = 0:12; 0 = from the top). The call plays first and the song comes in under its last half-second.</small>
+        <small className="announcer-hint">Uploads (MP3, WAV or M4A, up to 25 MB) play from the top; on a computer you can also drop the file on this sheet. For a link, the number is where the song starts, in seconds into the track (12 = 0:12; 0 = from the top).</small>
+      </section>
+
+      <section className="announcer-section">
+        <div className="announcer-section-head">
+          <span><Volume1 size={14} /> Call to song</span>
+          <small className="announcer-gap-value">{songGapLabel(gap)}</small>
+        </div>
+        <div className="announcer-gap">
+          <input type="range" min={GAP_MIN} max={GAP_MAX} step="0.25" value={gap}
+            onChange={e => nudgeGap(e.target.value)} aria-label="Seconds between the call ending and the song starting"
+            aria-valuetext={songGapLabel(gap)} />
+          <div className="announcer-gap-scale"><span>Overlap {Math.abs(GAP_MIN)}s</span><span>Together</span><span>Silence {GAP_MAX}s</span></div>
+        </div>
+        <small className="announcer-hint">Left brings the song in under the end of the call; right leaves a pause. Saves as you slide.</small>
       </section>
 
       <SheetMessage msg={msg} />
 
-      <section className="announcer-section">
-        <div className="announcer-section-head"><span><Zap size={14} /> Big moment</span><small>Makes a one-off call and plays it</small></div>
-        <div className="announcer-halo-grid">
-          {BIG_MOMENTS.map(a => (
-            <button type="button" key={a.key} className="announcer-btn announcer-btn-accent announcer-halo-btn" onClick={() => onMoment(player, a)}>
-              <span>{a.label}</span><small>{a.desc}</small>
-            </button>
-          ))}
-        </div>
-      </section>
+      <details className="announcer-advanced">
+        <summary><ChevronRight size={16} /> Advanced: how the name is said, batting slot, big moments, remove</summary>
 
-      {/* Only subs and former players can be removed: anyone GameChanger
-          still lists comes straight back, so the server refuses (409). */}
-      {(player.is_sub || player.is_ghost || player.is_active === false) ? (
-        <button type="button" className={`announcer-btn announcer-btn-secondary announcer-remove-btn${confirm === 'remove' ? ' announcer-remove-btn--armed' : ''}`}
-          onClick={() => twoTap('remove', () => run('remove', () => onRemove(player.id)).then(ok => { if (ok) onClose(`Removed ${player.first} from the announcer.`); }))}>
-          <Trash2 size={14} /> {confirm === 'remove' ? 'Tap again to remove from the announcer' : 'Remove player'}
-        </button>
-      ) : (
-        <small className="announcer-hint announcer-remove-note">{player.first} is on the GameChanger roster, so she stays here. Subs and former players can be removed.</small>
-      )}
+        <section className="announcer-section">
+          <label className="announcer-form-group">
+            <span>Say the name as</span>
+            <input value={phonetic} onChange={e => setPhonetic(e.target.value)} placeholder={fullName(player)}
+              maxLength={200} autoCapitalize="off" autoCorrect="off" enterKeyHint="done"
+              onKeyDown={e => { if (e.key === 'Enter' && nameDirty) save('name', { phonetic_hint: phonetic.trim() }, 'Saved. Make a call to hear it.'); }} />
+            <small>Spell it how it sounds. Capitals get stressed: <em>ROO-bee van-DOO-sen</em></small>
+          </label>
+          <div className="announcer-preview-text">{previewLine(player, phonetic)}</div>
+          {nameDirty && (
+            <button type="button" className="announcer-btn announcer-btn-secondary" disabled={Boolean(busy)}
+              onClick={() => save('name', { phonetic_hint: phonetic.trim() }, 'Saved. Make a call to hear it.')}>
+              {busy === 'name' ? <Spinner /> : <Check size={14} />} Save name
+            </button>
+          )}
+        </section>
+
+        {slot > 0 && (
+          <section className="announcer-section">
+            <div className="announcer-section-head">
+              <span><ListOrdered size={14} /> Batting order</span>
+              <small>Bats {ordinal(slot)} of {total}</small>
+            </div>
+            <div className="announcer-move-row">
+              <button type="button" className="announcer-btn announcer-btn-secondary" disabled={slot <= 1}
+                onClick={() => onMove(player.id, -1)}>
+                <ArrowUp size={16} /> Move up
+              </button>
+              <button type="button" className="announcer-btn announcer-btn-secondary" disabled={slot >= total}
+                onClick={() => onMove(player.id, 1)}>
+                <ArrowDown size={16} /> Move down
+              </button>
+            </div>
+          </section>
+        )}
+
+        <section className="announcer-section">
+          <div className="announcer-section-head"><span><Zap size={14} /> Big moment</span><small>Makes a one-off call and plays it</small></div>
+          <div className="announcer-halo-grid">
+            {BIG_MOMENTS.map(a => (
+              <button type="button" key={a.key} className="announcer-btn announcer-btn-accent announcer-halo-btn" onClick={() => onMoment(player, a)}>
+                <span>{a.label}</span><small>{a.desc}</small>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        {/* Only subs and former players can be removed: anyone GameChanger
+            still lists comes straight back, so the server refuses (409). */}
+        {(player.is_sub || player.is_ghost || player.is_active === false) ? (
+          <button type="button" className={`announcer-btn announcer-btn-secondary announcer-remove-btn${confirm === 'remove' ? ' announcer-remove-btn--armed' : ''}`}
+            onClick={() => twoTap('remove', () => run('remove', () => onRemove(player.id)).then(ok => { if (ok) onClose(`Removed ${player.first} from the announcer.`); }))}>
+            <Trash2 size={14} /> {confirm === 'remove' ? 'Tap again to remove from the announcer' : 'Remove player'}
+          </button>
+        ) : (
+          <small className="announcer-hint announcer-remove-note">{player.first} is on the GameChanger roster, so she stays here. Subs and former players can be removed.</small>
+        )}
+      </details>
     </Sheet>
   );
 }
@@ -994,28 +1031,53 @@ function SoundboardSheet({ audio, onClose }) {
   );
 }
 
+// ── More sheet: everything the coach rarely touches ────────────────────────
+function MoreSheet({ todo, failed, batchBusy, cached, onMakeMissing, onOpen, onClose }) {
+  return (
+    <Sheet title="More" onClose={onClose}>
+      <div className="announcer-more-grid">
+        {todo > 0 && !cached && (
+          <button type="button" className="announcer-btn announcer-btn-primary" onClick={onMakeMissing} disabled={batchBusy}>
+            {batchBusy ? <Spinner /> : <Mic size={16} />} {failed ? 'Make / retry' : 'Make'} {todo} missing call{todo === 1 ? '' : 's'}
+          </button>
+        )}
+        <button type="button" className="announcer-btn announcer-btn-secondary" onClick={() => onOpen('pa')}><Megaphone size={16} /> PA announcement</button>
+        <button type="button" className="announcer-btn announcer-btn-secondary" onClick={() => onOpen('sounds')}><Zap size={16} /> Sounds</button>
+        <button type="button" className="announcer-btn announcer-btn-secondary" onClick={() => onOpen('settings')}><Volume2 size={16} /> Team voice, subs and former players</button>
+      </div>
+      <small className="announcer-hint">Big moments (grand slam and the like) are in each player's sheet under Advanced.</small>
+    </Sheet>
+  );
+}
+
 // ── Now-playing bar ────────────────────────────────────────────────────────
+// One big button, whatever the state: Play the up-next batter, Fade while
+// something plays, Stop dead during the fade, Retry after a failure.
 function NowPlayingBar({ audio, upNext, upNextDetail, moment, canShuffle, onAnnounce, onRetry, onShuffle, onSkip, onSounds }) {
   const pct = audio.duration > 0 ? Math.min(100, (audio.elapsed / audio.duration) * 100) : 0;
+  const act = mainAction(audio.status);
   let head, name, detail, action;
-  if (audio.status === 'playing' || audio.status === 'loading') {
+  const big = (label, className, icon, onClick, disabled = false) => (
+    <span className="announcer-bar-main">
+      <button type="button" className={`announcer-bar-btn ${className}`} onClick={onClick} aria-label={label} disabled={disabled}>{icon}</button>
+      <span className="announcer-bar-btn-label" aria-hidden="true">{label.split(' ')[0]}</span>
+    </span>
+  );
+  if (act === 'fade') {
     head = audio.status === 'loading' ? 'Loading…' : 'Now playing';
     name = audio.label;
     detail = audio.detail;
-    action = (
-      <button type="button" className="announcer-bar-btn announcer-bar-btn--stop" onClick={stopAudio} aria-label="Stop">
-        {audio.status === 'loading' ? <Spinner size={24} /> : <Square size={24} />}
-      </button>
-    );
-  } else if (audio.status === 'error') {
+    action = big('Fade out', 'announcer-bar-btn--fade', audio.status === 'loading' ? <Spinner size={26} /> : <Volume1 size={28} />, () => fadeOut());
+  } else if (act === 'stop') {
+    head = 'Fading out';
+    name = audio.label;
+    detail = 'Press again to stop now.';
+    action = big('Stop now', 'announcer-bar-btn--stopnow', <Square size={26} />, stopAudio);
+  } else if (act === 'retry') {
     head = "Couldn't play";
     name = audio.label;
     detail = audio.error;
-    action = (
-      <button type="button" className="announcer-bar-btn" onClick={onRetry} aria-label="Try again">
-        <RotateCcw size={24} />
-      </button>
-    );
+    action = big('Retry', '', <RotateCcw size={26} />, onRetry);
   } else if (moment) {
     head = 'Big moment';
     name = moment.text;
@@ -1025,12 +1087,7 @@ function NowPlayingBar({ audio, upNext, upNextDetail, moment, canShuffle, onAnno
     head = 'Up next';
     name = `${jersey(upNext)} ${fullName(upNext)}`;
     detail = upNextDetail;
-    action = (
-      <button type="button" className="announcer-bar-btn" onClick={() => onAnnounce(upNext)} aria-label={`Announce ${fullName(upNext)}`}
-        disabled={!rowState(upNext).canPlay}>
-        <Play size={26} style={{ marginLeft: 3 }} />
-      </button>
-    );
+    action = big(`Play ${fullName(upNext)}`, '', <Play size={30} style={{ marginLeft: 3 }} />, () => onAnnounce(upNext), !rowState(upNext).canPlay);
   } else {
     head = 'Ready';
     name = 'Nothing playing';
@@ -1039,7 +1096,7 @@ function NowPlayingBar({ audio, upNext, upNextDetail, moment, canShuffle, onAnno
   const idle = audio.status === 'idle' && !moment;
   return (
     <div className={`announcer-bar glass-panel announcer-bar--${audio.status}`} role="region" aria-label="Now playing">
-      {(audio.status === 'playing') && <div className="announcer-progress-track"><div className="announcer-progress-fill" style={{ width: `${pct}%` }} /></div>}
+      {(audio.status === 'playing' || audio.status === 'fading') && <div className="announcer-progress-track"><div className="announcer-progress-fill" style={{ width: `${pct}%` }} /></div>}
       <div className="announcer-bar-row">
         {/* Always here, in every state: effects play over whatever is on. */}
         <button type="button" className="announcer-bar-mini announcer-bar-sounds" onClick={onSounds} aria-label="Sounds" title="Sounds">
@@ -1077,12 +1134,14 @@ export default function Announcer({ lineups }) {
   const [loadError, setLoadError] = useState('');
   const [cached, setCached] = useState(false);
   const [toast, setToast] = useState(null);
-  const [sheet, setSheet] = useState(null); // { kind: 'player', id } | { kind: 'settings' } | { kind: 'pa' } | { kind: 'sounds' }
+  const [sheet, setSheet] = useState(null); // { kind: 'player', id } | { kind: 'settings' } | { kind: 'pa' } | { kind: 'sounds' } | { kind: 'more' }
   const [manualOrder, setManualOrder] = useState(null); // the coach's order (player ids), or null
   const [reordering, setReordering] = useState(false);
   const savedOrder = useRef(null);   // last order the server confirmed
   const pendingOrder = useRef(null); // order waiting for its PUT
   const orderTimer = useRef(null);
+  const [undo, setUndo] = useState(null); // { target: undoTarget(...), name } for 6 s after a drop
+  const undoTimer = useRef(null);
   const [upNextId, setUpNextId] = useState(null);
   const [queued, setQueued] = useState({}); // player id → { intro, song } for the next at-bat
   const [moment, setMoment] = useState(null); // { playerId, since, text }
@@ -1246,12 +1305,7 @@ export default function Announcer({ lineups }) {
     };
   }, [flushOrder]);
   const orderIds = battingOrder.map(p => p.id);
-  const dropRow = (from, to) => setOrder(moveItem(orderIds, from, to), 0);
-  const stepPlayer = (id, dir) => {
-    const i = orderIds.indexOf(id);
-    if (i >= 0) setOrder(moveItem(orderIds, i, i + dir), 700);
-  };
-  const resetOrder = async () => {
+  const resetOrder = useCallback(async () => {
     clearTimeout(orderTimer.current);
     pendingOrder.current = null;
     const before = manualOrder;
@@ -1264,6 +1318,29 @@ export default function Announcer({ lineups }) {
       setManualOrder(before);
       say(`Order not reset: ${e.message}`, 'error');
     }
+  }, [manualOrder, fallbackSource, say]);
+  // A drop saves at once and offers Undo for 6 s. Undo puts back the order
+  // the coach had before; after her very first drag that is a reset, so the
+  // list returns to the GameChanger / optimiser order, not a copy of it.
+  const dropRow = (from, to) => {
+    const moved = battingOrder[from];
+    setUndo({ target: undoTarget(isManual ? manualOrder : null), name: moved ? fullName(moved) : 'that' });
+    clearTimeout(undoTimer.current);
+    undoTimer.current = setTimeout(() => setUndo(null), 6000);
+    setOrder(moveItem(orderIds, from, to), 0);
+  };
+  const undoDrop = () => {
+    const u = undo;
+    clearTimeout(undoTimer.current);
+    setUndo(null);
+    if (!u) return;
+    if (u.target.kind === 'restore') setOrder(u.target.order, 0);
+    else resetOrder();
+  };
+  useEffect(() => () => clearTimeout(undoTimer.current), []);
+  const stepPlayer = (id, dir) => {
+    const i = orderIds.indexOf(id);
+    if (i >= 0) setOrder(moveItem(orderIds, i, i + dir), 700);
   };
 
   const upNextPair = upNext ? pairFor(upNext, queued[upNext.id]) : null;
@@ -1296,8 +1373,14 @@ export default function Announcer({ lineups }) {
   }, [roster, moment, say]);
 
   // ── playback ──
+  // Tapping the batter who is playing fades her out; tapping again during the
+  // fade stops dead. Tapping anyone else cuts straight to her (no fade).
   const announce = useCallback((p) => {
-    if (audio.key === p.id && (audio.status === 'playing' || audio.status === 'loading')) { stopAudio(); return; }
+    if (audio.key === p.id) {
+      const act = mainAction(audio.status);
+      if (act === 'fade') { fadeOut(); return; }
+      if (act === 'stop') { stopAudio(); return; }
+    }
     const pair = pairFor(p, queued[p.id]);
     lastPlayed.current[p.id] = { intro: pair.intro?.id, song: pair.song?.id };
     setQueued(q => ({ ...q, [p.id]: rollPair(p, lastPlayed.current[p.id]) }));
@@ -1306,6 +1389,7 @@ export default function Announcer({ lineups }) {
     const req = {
       key: p.id, label: `${jersey(p)} ${fullName(p)}`, detail: describePair(pair),
       songUrl: pair.song?.url || '', clipUrl: pair.intro?.clip_url || '', songStart: pair.song?.start ?? 0,
+      songGap: clampGap(p.song_gap),
     };
     lastRequest.current = req;
     play(req);
@@ -1313,7 +1397,7 @@ export default function Announcer({ lineups }) {
 
   const hear = useCallback((key, { clipUrl = '', songUrl = '', songStart = 0, label = '' }) => {
     const s = getAudioState();
-    if (s.key === key && (s.status === 'playing' || s.status === 'loading')) { stopAudio(); return; }
+    if (s.key === key && (s.status === 'playing' || s.status === 'loading' || s.status === 'fading')) { stopAudio(); return; }
     const req = { key, label: `Preview: ${label}`, clipUrl, songUrl, songStart };
     lastRequest.current = req;
     play(req);
@@ -1421,11 +1505,14 @@ export default function Announcer({ lineups }) {
       <div className="announcer-header">
         <h2><Mic size={22} /> Announcer</h2>
         <div className="announcer-header-actions">
-          <button type="button" className="announcer-btn announcer-btn-secondary announcer-header-btn" onClick={() => setSheet({ kind: 'pa' })}>
-            <Megaphone size={16} /> PA
-          </button>
-          <button type="button" className="announcer-btn announcer-btn-secondary announcer-header-btn" onClick={() => setSheet({ kind: 'settings' })} aria-label="Announcer settings">
-            <Settings size={16} /> <Volume2 size={14} />
+          {battingOrder.length > 1 && (
+            <button type="button" className={`announcer-btn ${reordering ? 'announcer-btn-primary' : 'announcer-btn-secondary'} announcer-header-btn`}
+              onClick={() => { if (reordering) flushOrder(); setReordering(v => !v); }} aria-pressed={reordering}>
+              {reordering ? <><Check size={16} /> Done</> : <><ListOrdered size={16} /> Reorder</>}
+            </button>
+          )}
+          <button type="button" className="announcer-btn announcer-btn-secondary announcer-header-btn" onClick={() => setSheet({ kind: 'more' })} aria-label="More">
+            <MoreHorizontal size={18} />
           </button>
         </div>
       </div>
@@ -1448,26 +1535,28 @@ export default function Announcer({ lineups }) {
         </div>
       )}
 
+      {undo && (
+        <div className="announcer-msg announcer-msg--ok" role="status">
+          <span>Moved {undo.name}.</span>
+          <button type="button" className="announcer-btn announcer-btn-secondary announcer-msg-action" onClick={undoDrop}>
+            <RotateCcw size={14} /> Undo
+          </button>
+        </div>
+      )}
+
       <div className="announcer-summary">
         <span className={`announcer-lineup-source${isManual ? ' announcer-lineup-source--manual' : ''}`}>{lineupSource}</span>
-        {!reordering && <span>{counts.ready}/{active.length} ready</span>}
         {!reordering && counts.rendering > 0 && <span className="announcer-summary-busy"><Spinner size={12} /> Making {counts.rendering}</span>}
         {!reordering && counts.failed > 0 && <span className="announcer-text-danger">{counts.failed} failed</span>}
         {!reordering && counts.todo > 0 && !cached && (
-          <button type="button" className="announcer-btn announcer-btn-primary announcer-summary-btn" onClick={makeMissing} disabled={batchBusy}>
-            {batchBusy ? <Spinner /> : <Mic size={14} />} {counts.failed ? 'Make / retry' : 'Make'} {counts.todo} call{counts.todo === 1 ? '' : 's'}
-          </button>
-        )}
-        {battingOrder.length > 1 && (
-          <button type="button" className={`announcer-btn ${reordering ? 'announcer-btn-primary' : 'announcer-btn-secondary'} announcer-reorder-toggle`}
-            onClick={() => { if (reordering) flushOrder(); setReordering(v => !v); }} aria-pressed={reordering}>
-            {reordering ? <><Check size={16} /> Done</> : <><ListOrdered size={16} /> Reorder</>}
+          <button type="button" className="announcer-btn announcer-btn-secondary announcer-summary-btn" onClick={() => setSheet({ kind: 'more' })}>
+            <Mic size={14} /> {counts.todo} missing call{counts.todo === 1 ? '' : 's'}
           </button>
         )}
       </div>
       {(isManual || reordering) && (
         <div className="announcer-order-bar">
-          <span>{reordering ? 'Drag a batter by the grip. It saves when you let go.' : 'You set this batting order.'}</span>
+          <span>{reordering ? 'Drag a batter by the grip. It saves when you let go, and you can undo.' : 'You set this batting order.'}</span>
           {isManual && (
             <button type="button" className="announcer-btn announcer-btn-secondary" onClick={resetOrder}>
               <RotateCcw size={14} /> {resetLabel}
@@ -1498,6 +1587,10 @@ export default function Announcer({ lineups }) {
           slot={orderIds.indexOf(sheetPlayer.id) + 1} total={orderIds.length}
           voiceName={profileName} onHear={hear} onClose={closeSheet} onSave={savePlayer} onRender={renderPlayer}
           onRemove={removePlayer} onMoment={fireMoment} onMove={stepPlayer} onUploadSong={uploadSong} onUploadCall={uploadCall} />
+      )}
+      {sheet?.kind === 'more' && (
+        <MoreSheet todo={counts.todo} failed={counts.failed} batchBusy={batchBusy} cached={cached}
+          onMakeMissing={() => { setSheet(null); makeMissing(); }} onOpen={(kind) => setSheet({ kind })} onClose={closeSheet} />
       )}
       {sheet?.kind === 'sounds' && <SoundboardSheet audio={audio} onClose={closeSheet} />}
       {sheet?.kind === 'settings' && (
