@@ -414,3 +414,35 @@ def test_batting_order_rejects_non_object_body(env):
                        headers={"Origin": ORIGIN, "Content-Type": "application/json"})
     assert r.status_code == 400
     assert r.get_json() == {"error": "bad_request"}
+
+
+# ── song gap ───────────────────────────────────────────────────────────────
+
+class TestSongGap:
+    """The seconds between a call ending and the song starting, per player."""
+
+    def _post(self, env, body):
+        return env.client.post("/api/announcer/phonetics/07-jane", headers={"Origin": ORIGIN}, json=body)
+
+    def test_gap_is_saved_and_comes_back_on_the_roster_the_pwa_loads(self, env):
+        assert self._post(env, {"song_gap": 1.5}).status_code == 200
+        roster = env.client.get("/api/announcer/roster").get_json()["roster"]
+        assert next(p for p in roster if p["id"] == "07-jane")["song_gap"] == 1.5
+
+    def test_gap_is_clamped_to_three_seconds_either_way(self, env):
+        assert self._post(env, {"song_gap": 9}).status_code == 200
+        assert env.get("07-jane")["song_gap"] == 3.0
+        assert self._post(env, {"song_gap": -9}).status_code == 200
+        assert env.get("07-jane")["song_gap"] == -3.0
+
+    def test_a_gap_that_is_not_a_number_is_refused_and_nothing_changes(self, env):
+        self._post(env, {"song_gap": -1})
+        resp = self._post(env, {"song_gap": "soon"})
+        assert resp.status_code == 400 and resp.get_json()["error"] == "song_gap_invalid"
+        assert env.get("07-jane")["song_gap"] == -1.0
+
+    def test_saving_a_gap_does_not_make_the_calls_stale(self, env):
+        assert self._post(env, {"song_gap": 0}).status_code == 200
+        assert env.get("12-mia")["status"] == "ready"
+        self._post(env, {"song_gap": 0})
+        assert env.get("07-jane")["status"] == "pending"  # was pending already; unchanged
