@@ -242,3 +242,97 @@ test('song only: starts at once from the in-point', async () => {
   assert.ok(Math.abs(ac.getState().duration - 0.6) < 1e-9);
   ac.stop();
 });
+
+// ── Soundboard effects: an independent channel over the walk-up ───────────
+Object.assign(FILES, {
+  '/fx/horn.mp3': { delay: 5, duration: 0.3 },
+  '/fx/bell.mp3': { delay: 5, duration: 0.3 },
+  '/fx/slow.mp3': { delay: 80, duration: 0.3 },
+});
+const fxLive = (name) => [...live].filter(s => s.buffer.name === name).length;
+
+test('an effect plays over a walk-up without stopping it or touching the bar', async () => {
+  reset();
+  await ac.play({ key: 'c', label: '#7 Jane Doe', songUrl: '/c/song.mp3', clipUrl: '/c/call.mp3' });
+  const before = ac.getState();
+  const r = await ac.playEffect('/fx/horn.mp3');
+  assert.equal(r.ok, true);
+  assert.ok(Math.abs(r.duration - 0.3) < 1e-9);
+  assert.equal(fxLive('/fx/horn.mp3'), 1);
+  assert.equal(fxLive('/c/call.mp3'), 1, 'the call kept playing');
+  assert.equal(ac.getState().key, before.key, 'the store never heard about the effect');
+  assert.equal(ac.getState().label, before.label);
+  await wait(400); // the effect has ended; its `ended` must not end the walk-up
+  assert.equal(ac.getState().status, 'playing');
+  assert.equal(ac.getState().key, 'c');
+  ac.stop();
+});
+
+test('different effects overlap; tapping one that is playing restarts it', async () => {
+  reset();
+  await ac.playEffect('/fx/horn.mp3');
+  await ac.playEffect('/fx/bell.mp3');
+  assert.equal(live.size, 2);
+  await ac.playEffect('/fx/horn.mp3');
+  assert.equal(fxLive('/fx/horn.mp3'), 1, 'restarted, not doubled');
+  assert.equal(fxLive('/fx/bell.mp3'), 1);
+  assert.equal(started.filter(n => n === '/fx/horn.mp3').length, 2);
+  ac.stopEffects();
+  assert.equal(live.size, 0);
+});
+
+test('an effect fired while a walk-up is loading does not cancel it', async () => {
+  reset();
+  const p = ac.play({ key: 'slow', clipUrl: '/slow/call.mp3' });
+  await ac.playEffect('/fx/horn.mp3');
+  await p;
+  assert.equal(ac.getState().status, 'playing');
+  assert.equal(ac.getState().key, 'slow');
+  assert.ok(started.includes('/slow/call.mp3'));
+  ac.stop();
+});
+
+test('Stop halts the walk-up, not the effect', async () => {
+  reset();
+  await ac.play({ key: 'c', clipUrl: '/c/call.mp3' });
+  await ac.playEffect('/fx/horn.mp3');
+  ac.stop();
+  assert.equal(fxLive('/c/call.mp3'), 0);
+  assert.equal(fxLive('/fx/horn.mp3'), 1);
+  ac.stopEffects();
+});
+
+test('two quick taps on an effect that is still loading play it once', async () => {
+  reset();
+  await Promise.all([ac.playEffect('/fx/slow.mp3'), ac.playEffect('/fx/slow.mp3')]);
+  await wait(5);
+  assert.equal(started.filter(n => n === '/fx/slow.mp3').length, 1);
+  ac.stopEffects();
+});
+
+test('a missing effect reports why and leaves playback alone', async () => {
+  reset();
+  await ac.play({ key: 'c', clipUrl: '/c/call.mp3' });
+  const r = await ac.playEffect('/gone.mp3');
+  assert.deepEqual(r, { ok: false, error: 'file missing' });
+  assert.equal(ac.getState().status, 'playing');
+  ac.stop();
+});
+
+test("effects don't evict the up-next batter's decoded audio", async () => {
+  reset();
+  const orig = globalThis.fetch;
+  let callFetches = 0;
+  globalThis.fetch = (url, opts) => { if (url === '/a/call.mp3') callFetches++; return orig(url, opts); };
+  try {
+    await ac.preload(['/a/call.mp3']);
+    const many = Array.from({ length: 14 }, (_, i) => '/fx/n' + i + '.mp3');
+    many.forEach(u => { FILES[u] = { delay: 1, duration: 0.05 }; });
+    await ac.preloadEffects(many);
+    await ac.play({ key: 'a', clipUrl: '/a/call.mp3' });
+    assert.equal(callFetches, 1, 'the call was fetched again: an effect evicted it');
+    ac.stop();
+  } finally {
+    globalThis.fetch = orig;
+  }
+});

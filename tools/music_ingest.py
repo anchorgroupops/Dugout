@@ -348,7 +348,8 @@ def serve_music_path(player_id: str, filename: str) -> Path | None:
 
     Returns None if the path escapes CLIPS_DIR (path traversal guard).
     """
-    if not re.match(r"^[A-Za-z0-9_-]+\.(mp3|m4a|ogg)$", filename):
+    # .wav only exists when an upload was stored without FFmpeg to convert it.
+    if not re.match(r"^[A-Za-z0-9_-]+\.(mp3|m4a|ogg|wav)$", filename):
         return None
     if not re.match(r"^[A-Za-z0-9_-]+$", player_id):
         return None

@@ -81,7 +81,7 @@ modal deploy tools/modal_app.py
   request (SIGN-011). Unset = Origin-check only; never run the public site
   without it.
 - `DUGOUT_APP_PASSWORD` — team password; when set, every `/api` request and
-  nginx's `/data/`, `/announcer-clips/`, `/audio/music/` need the
+  nginx's `/data/`, `/announcer-clips/`, `/audio/music/`, `/audio/soundboard/` need the
   `dugout_session` cookie from `POST /api/auth/login` (SIGN-021). Machine
   callers use the write token or deploy bearer instead; `/api/health` stays
   open. Set `DUGOUT_SESSION_SECRET` too.
@@ -229,6 +229,21 @@ strategies:
 - JS/CSS chunks → `NetworkFirst` (3 s timeout) — prevents stale-hash
   cascades after a deploy.
 - Images / fonts → `CacheFirst`.
-- `/announcer-clips/`, `/audio/music/`, `/audio/walkup/` → `CacheFirst` with
-  range-request support; clips are immutable per slug.
+- `/announcer-clips/`, `/audio/music/`, `/audio/walkup/`, `/audio/soundboard/`
+  → `CacheFirst` with range-request support; clips are immutable per slug.
+
+### Announcer coach uploads (`tools/announcer_media.py`)
+
+- `POST /api/announcer/songs/<id>/upload`, `/calls/<id>/upload`,
+  `/soundboard/upload`: multipart `file` (MP3/WAV/M4A, magic-byte sniffed,
+  25 MB), Origin-checked in the route, write token via `_security_before_request`
+  (body cap raised per path by `_MEDIA_UPLOAD_PATH_RE`). FFmpeg loudnorms and
+  re-encodes to 128k MP3; without it the file is stored as-is. nginx has its own
+  26m location above the `songs` regex.
+- `GET /api/announcer/soundboard`, `DELETE /api/announcer/soundboard/<id>`,
+  `GET /audio/soundboard/<file>`: six built-in effects are synthesised by FFmpeg
+  on first listing (versioned filenames; bump `BUILTIN_VERSION` on change).
+- `PUT|DELETE /api/announcer/batting-order`: the coach's order
+  (`batting_order.json`), returned as `manual_order` by `GET /api/announcer/game-lineup`;
+  the PWA ranks it above GameChanger > optimiser > roster.
 - `/api/*` and `*.json` → `NetworkFirst` (5 s timeout, 24 h cache).

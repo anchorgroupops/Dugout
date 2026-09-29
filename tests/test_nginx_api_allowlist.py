@@ -140,6 +140,7 @@ _GATED_LOCATIONS = {
     "bundled data fallback": r"@data_bundled",
     "announcer clips": r"/announcer-clips/",
     "walk-up music": r"~\s+\^/audio/music/\S+",
+    "soundboard": r"~\s+\^/audio/soundboard/\S+",
 }
 
 
@@ -192,3 +193,39 @@ def test_only_data_and_audio_are_gated():
     text = NGINX_CONF.read_text()
     assert "auth_request" not in _own_directives(text.split("server {", 1)[1])
     assert len(re.findall(r"^\s*auth_request\s", text, re.M)) == len(_GATED_LOCATIONS)
+
+
+# ---------------------------------------------------------------------------
+# Coach uploads: the method check above passes even when the songs regex
+# catches the upload, which then 413s at the server's 128k body limit.
+# ---------------------------------------------------------------------------
+
+def _body_size_bytes(body: str) -> int:
+    m = re.search(r"^\s*client_max_body_size\s+(\d+)([kKmM]?);", _own_directives(body), re.M)
+    if not m:
+        return 128 * 1024  # server-level default in nginx.conf
+    return int(m.group(1)) * {"": 1, "k": 1024, "m": 1024 * 1024}[m.group(2).lower()]
+
+
+@pytest.mark.parametrize("path", [
+    "/api/announcer/songs/07-jane/upload",
+    "/api/announcer/calls/07-jane/upload",
+    "/api/announcer/soundboard/upload",
+])
+def test_upload_paths_accept_25_mb(path):
+    pat, allowed = _match(path)
+    assert pat and "upload" in pat, f"{path} matched {pat}"
+    assert "POST" in allowed
+    body = _location_body(r"~\s+" + re.escape(pat))
+    assert _body_size_bytes(body) >= 25 * 1024 * 1024
+
+
+@pytest.mark.parametrize("path,method", [
+    ("/api/announcer/batting-order", "PUT"),
+    ("/api/announcer/batting-order", "DELETE"),
+    ("/api/announcer/soundboard/crowd", "DELETE"),
+    ("/api/announcer/soundboard", "GET"),
+])
+def test_order_and_soundboard_paths_reach_flask(path, method):
+    pat, allowed = _match(path)
+    assert pat is not None and (allowed is None or method in allowed), (path, pat, allowed)

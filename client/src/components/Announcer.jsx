@@ -3,15 +3,16 @@ import { createPortal } from 'react-dom';
 import {
   Mic, Play, Square, RefreshCw, UserPlus, AlertCircle, Volume2, Zap, X, Check, Trash2, Pin,
   Shuffle, Plus, Music, Settings, SkipForward, Pencil, WifiOff, Megaphone, RotateCcw,
+  Upload, GripVertical, ListOrdered, ArrowUp, ArrowDown, Drum, Bell, Wind, Users, Flag, AudioLines, Lock,
 } from 'lucide-react';
 import {
   subscribe as subscribeAudio, getState as getAudioState, play, playClip, stop as stopAudio,
-  preload, warm, unlock, dismissError,
+  preload, warm, unlock, dismissError, playEffect, preloadEffects,
 } from '../utils/audioController';
 import { apiRequest } from '../utils/apiClient';
 import {
-  MAX_ITEMS, introsOf, songsOf, rollPair, pairFor, isPinned, pickMode, songLabel, songStartLabel, rowState,
-  needsRender, orderBattingLineup, previewLine, describeApiError,
+  MAX_ITEMS, introsOf, songsOf, rollPair, pairFor, isPinned, pickMode, songTitle, songStartLabel, rowState,
+  needsRender, orderBattingLineup, previewLine, describeApiError, moveItem, dropIndex, uploadProblem, UPLOAD_VOICE,
 } from '../utils/announcerPicks';
 
 // The Announcer tab, built like a sports-app game screen:
@@ -52,8 +53,48 @@ async function api(path, method = 'POST', body = {}) {
   return data;
 }
 
+// Multipart upload (songs, calls, soundboard). No Content-Type header: the
+// browser writes the multipart boundary. apiRequest adds the write token.
+async function upload(path, file, fields = {}) {
+  const form = new FormData();
+  form.append('file', file);
+  Object.entries(fields).forEach(([k, v]) => form.append(k, v));
+  let res;
+  try {
+    res = await apiRequest(path, { method: 'POST', body: form });
+  } catch {
+    throw new Error(describeApiError(0));
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(describeApiError(res.status, data.error));
+  return data;
+}
+
+const AUDIO_ACCEPT = 'audio/mpeg,audio/mp3,audio/wav,audio/x-wav,audio/mp4,audio/x-m4a,.mp3,.wav,.m4a';
+
+// A visible button that opens the file picker. One tap, one file.
+function FileButton({ label, busy, disabled, onFile, className = 'announcer-btn announcer-btn-secondary', accept = AUDIO_ACCEPT }) {
+  const ref = useRef(null);
+  return (
+    <>
+      <button type="button" className={className} disabled={disabled} onClick={() => ref.current?.click()}>
+        {busy ? <Spinner /> : <Upload size={14} />} {label}
+      </button>
+      <input ref={ref} type="file" accept={accept} hidden tabIndex={-1} aria-hidden="true"
+        onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) onFile(f); }} />
+    </>
+  );
+}
+
+const hasFiles = (e) => Array.from(e.dataTransfer?.types || []).includes('Files');
+
 const fullName = (p) => `${p.first || ''} ${p.last || ''}`.trim();
 const jersey = (p) => (p.number ? `#${p.number}` : '#–');
+const ordinal = (n) => {
+  const s = ['th', 'st', 'nd', 'rd'];
+  const v = n % 100;
+  return `${n}${s[(v - 20) % 10] || s[v] || s[0]}`;
+};
 
 function useEscape(onClose) {
   useEffect(() => {
@@ -64,11 +105,12 @@ function useEscape(onClose) {
 }
 
 // A sheet closes on ✕, Escape or a tap outside. It never holds unsaved work.
-function Sheet({ title, onClose, children }) {
+function Sheet({ title, onClose, children, dialogProps = {} }) {
   useEscape(onClose);
   return createPortal(
     <div className="announcer-modal-overlay" onClick={onClose}>
-      <div className="announcer-modal announcer-sheet glass-panel" role="dialog" aria-modal="true" aria-label={title}
+      <div {...dialogProps} className={`announcer-modal announcer-sheet glass-panel ${dialogProps.className || ''}`}
+        role="dialog" aria-modal="true" aria-label={title}
         onClick={e => e.stopPropagation()}>
         <div className="announcer-modal-header">
           <h3>{title}</h3>
@@ -109,7 +151,7 @@ function PlayerRow({ player, slot, audio, isNext, voiceName, onAnnounce, onEdit 
   const isThis = audio.key === player.id;
   const busy = isThis && (audio.status === 'playing' || audio.status === 'loading');
   const callMode = pickMode(intros, player.intro_pick, 'call', i => voiceName(i.voice));
-  const songMode = pickMode(songs, player.song_pick, 'song', s => songLabel(s.url));
+  const songMode = pickMode(songs, player.song_pick, 'song', songTitle);
   const mainLabel = !st.canPlay ? `Set up ${fullName(player)}` : busy ? `Stop ${fullName(player)}` : `Announce ${fullName(player)}`;
   return (
     <div className={`announcer-row glass-panel${busy ? ' announcer-row--playing' : ''}${isNext && !busy ? ' announcer-row--next' : ''}`}>
@@ -141,13 +183,15 @@ function PlayerRow({ player, slot, audio, isNext, voiceName, onAnnounce, onEdit 
 }
 
 // ── Player setup sheet ─────────────────────────────────────────────────────
-function PlayerSheet({ player, profiles, defaultVoiceId, audio, voiceName, onHear, onClose, onSave, onRender, onRemove, onMoment }) {
+function PlayerSheet({ player, slot, total, profiles, defaultVoiceId, audio, voiceName, onHear, onClose, onSave, onRender,
+  onRemove, onMoment, onMove, onUploadSong, onUploadCall }) {
   const [phonetic, setPhonetic] = useState(player.phonetic_hint || '');
   const [voice, setVoice] = useState(player.voice_profile_id || defaultVoiceId);
   const [newSong, setNewSong] = useState({ url: '', start: '0' });
   const [busy, setBusy] = useState('');
   const [msg, setMsg] = useState(null);
   const [confirm, setConfirm] = useState('');
+  const [dropKind, setDropKind] = useState(''); // '' | 'song' | 'call' while a file is dragged over the sheet
   const intros = introsOf(player);
   const songs = songsOf(player);
   const st = rowState(player);
@@ -176,17 +220,60 @@ function PlayerSheet({ player, profiles, defaultVoiceId, audio, voiceName, onHea
 
   const twoTap = (id, action) => { if (confirm === id) { setConfirm(''); action(); } else setConfirm(id); };
 
+  // Songs are saved as a whole list; an uploaded one keeps its name.
+  const keep = (list) => list.map(s => ({ id: s.id, url: s.url, start: s.start, label: s.label }));
   const addSong = (e) => {
     e.preventDefault();
     const url = newSong.url.trim();
     if (!/^https?:\/\//i.test(url)) { setMsg({ text: 'Paste a link that starts with http:// or https://', kind: 'error' }); return; }
-    const kept = songs.map(s => ({ id: s.id, url: s.url, start: s.start }));
-    save('song', { songs: [...kept, { url, start: Number(newSong.start) || 0 }] }, 'Song added.')
+    save('song', { songs: [...keep(songs), { url, start: Number(newSong.start) || 0 }] }, 'Song added.')
       .then(ok => { if (ok) setNewSong({ url: '', start: '0' }); });
   };
 
+  const uploadFile = (kind, file) => {
+    const problem = uploadProblem(file);
+    if (problem) { setMsg({ text: problem, kind: 'error' }); return; }
+    if (kind === 'song' && songs.length >= MAX_ITEMS) {
+      setMsg({ text: `${player.first} has ${MAX_ITEMS} songs. Remove one to add another.`, kind: 'error' });
+      return;
+    }
+    if (kind === 'song') run('upload-song', () => onUploadSong(player.id, file), `Added ${file.name}. It plays from the top.`);
+    else run('upload-call', () => onUploadCall(player.id, file), `Added ${file.name} as a call.`);
+  };
+
+  // Desktop: drop a file anywhere on the sheet for a song, on Calls for a call.
+  const dropHandlers = (kind) => ({
+    onDragOver: (e) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      e.dataTransfer.dropEffect = 'copy';
+      if (dropKind !== kind) setDropKind(kind);
+    },
+    onDrop: (e) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setDropKind('');
+      const file = e.dataTransfer.files?.[0];
+      if (file) uploadFile(kind, file);
+    },
+  });
+  const sheetDrop = {
+    ...dropHandlers('song'),
+    onDragLeave: (e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDropKind(''); },
+    className: dropKind ? `announcer-sheet--drop announcer-sheet--drop-${dropKind}` : '',
+  };
+  const uploading = busy === 'upload-song' || busy === 'upload-call';
+
   return (
-    <Sheet title={`${jersey(player)} ${fullName(player)}`} onClose={close}>
+    <Sheet title={`${jersey(player)} ${fullName(player)}`} onClose={close} dialogProps={sheetDrop}>
+      {dropKind && (
+        <div className="announcer-drop-hint" aria-hidden="true">
+          <Upload size={18} /> Drop to add as {dropKind === 'call' ? 'a call' : 'a walk-up song'}
+        </div>
+      )}
+      {uploading && <div className="announcer-msg announcer-msg--info" role="status"><Spinner /> Uploading and levelling the volume…</div>}
       <section className="announcer-section">
         <label className="announcer-form-group">
           <span>Say the name as</span>
@@ -204,7 +291,26 @@ function PlayerSheet({ player, profiles, defaultVoiceId, audio, voiceName, onHea
         )}
       </section>
 
-      <section className="announcer-section">
+      {slot > 0 && (
+        <section className="announcer-section">
+          <div className="announcer-section-head">
+            <span><ListOrdered size={14} /> Batting order</span>
+            <small>Bats {ordinal(slot)} of {total}</small>
+          </div>
+          <div className="announcer-move-row">
+            <button type="button" className="announcer-btn announcer-btn-secondary" disabled={slot <= 1}
+              onClick={() => onMove(player.id, -1)}>
+              <ArrowUp size={16} /> Move up
+            </button>
+            <button type="button" className="announcer-btn announcer-btn-secondary" disabled={slot >= total}
+              onClick={() => onMove(player.id, 1)}>
+              <ArrowDown size={16} /> Move down
+            </button>
+          </div>
+        </section>
+      )}
+
+      <section className={`announcer-section${dropKind === 'call' ? ' announcer-section--drop' : ''}`} {...dropHandlers('call')}>
         <div className="announcer-section-head">
           <span>Calls</span>
           <small>{pickMode(intros, player.intro_pick, 'call', i => voiceName(i.voice)) || 'None yet'}</small>
@@ -226,7 +332,7 @@ function PlayerSheet({ player, profiles, defaultVoiceId, audio, voiceName, onHea
                 onHear={() => onHear(`hear:${i.id}`, { clipUrl: i.clip_url, label: `${fullName(player)} · ${voiceName(i.voice)}` })} />
               <div className="announcer-item-text">
                 <strong>{voiceName(i.voice)}</strong>
-                <span>{i.draft ? 'Quick draft' : 'Studio'}{pinned ? ' · always plays' : ''}</span>
+                <span>{i.voice === UPLOAD_VOICE ? 'Your recording' : i.draft ? 'Quick draft' : 'Studio'}{pinned ? ' · always plays' : ''}</span>
               </div>
               <button type="button" className={`announcer-icon-btn${pinned ? ' announcer-icon-btn--on' : ''}`} aria-pressed={pinned}
                 aria-label={pinned ? `Stop always playing call ${n + 1}` : `Always play call ${n + 1}`}
@@ -250,13 +356,15 @@ function PlayerSheet({ player, profiles, defaultVoiceId, audio, voiceName, onHea
             {busy === 'call' ? <Spinner /> : <Plus size={14} />} Make call
           </button>
         </div>
+        <FileButton label="Upload a recorded call" busy={busy === 'upload-call'} disabled={Boolean(busy)}
+          onFile={f => uploadFile('call', f)} />
         {intros.length >= MAX_ITEMS && <small className="announcer-hint">A new call replaces the oldest one that isn't pinned.</small>}
       </section>
 
       <section className="announcer-section">
         <div className="announcer-section-head">
           <span>Walk-up songs</span>
-          <small>{pickMode(songs, player.song_pick, 'song', s => songLabel(s.url)) || 'None'}</small>
+          <small>{pickMode(songs, player.song_pick, 'song', songTitle) || 'None'}</small>
         </div>
         {songs.map((s, n) => {
           const pinned = s.id === player.song_pick;
@@ -264,9 +372,9 @@ function PlayerSheet({ player, profiles, defaultVoiceId, audio, voiceName, onHea
           return (
             <div key={s.id} className="announcer-item-row">
               <HearButton hearKey={`hear:${s.id}`} audio={audio} label={`song ${n + 1}`}
-                onHear={() => onHear(`hear:${s.id}`, { songUrl: s.url, songStart: s.start, label: songLabel(s.url) })} />
+                onHear={() => onHear(`hear:${s.id}`, { songUrl: s.url, songStart: s.start, label: songTitle(s) })} />
               <div className="announcer-item-text">
-                <strong>{songLabel(s.url)}</strong>
+                <strong>{songTitle(s)}</strong>
                 <span>{songStartLabel(s.start)}{pinned ? ' · always plays' : ''}</span>
               </div>
               <button type="button" className={`announcer-icon-btn${pinned ? ' announcer-icon-btn--on' : ''}`} aria-pressed={pinned}
@@ -277,7 +385,7 @@ function PlayerSheet({ player, profiles, defaultVoiceId, audio, voiceName, onHea
               <button type="button" className={`announcer-icon-btn${confirm === delKey ? ' announcer-icon-btn--danger' : ''}`}
                 aria-label={confirm === delKey ? `Tap again to remove song ${n + 1}` : `Remove song ${n + 1}`}
                 onClick={() => twoTap(delKey, () => save('song', {
-                  songs: songs.filter(x => x.id !== s.id).map(x => ({ id: x.id, url: x.url, start: x.start })),
+                  songs: keep(songs.filter(x => x.id !== s.id)),
                   ...(pinned ? { song_pick: '' } : {}),
                 }, 'Song removed.'))}>
                 {confirm === delKey ? <Check size={16} /> : <Trash2 size={16} />}
@@ -285,6 +393,10 @@ function PlayerSheet({ player, profiles, defaultVoiceId, audio, voiceName, onHea
             </div>
           );
         })}
+        {songs.length < MAX_ITEMS && (
+          <FileButton label="Upload MP3/WAV" busy={busy === 'upload-song'} disabled={Boolean(busy)}
+            className="announcer-btn announcer-btn-primary announcer-upload-btn" onFile={f => uploadFile('song', f)} />
+        )}
         {songs.length < MAX_ITEMS && (
           <form className="announcer-add-row" onSubmit={addSong}>
             <input value={newSong.url} onChange={e => setNewSong(v => ({ ...v, url: e.target.value }))}
@@ -296,7 +408,8 @@ function PlayerSheet({ player, profiles, defaultVoiceId, audio, voiceName, onHea
             </button>
           </form>
         )}
-        <small className="announcer-hint">The number is where the song starts, in seconds into the track (12 = 0:12; 0 = from the top). The call plays first and the song comes in under its last half-second.</small>
+        {songs.length >= MAX_ITEMS && <small className="announcer-hint">{MAX_ITEMS} songs is the most. Remove one to add another.</small>}
+        <small className="announcer-hint">Uploads (MP3, WAV or M4A, up to 25 MB) play from the top; on a computer you can also drop the file on this sheet. For a link, the number is where the song starts, in seconds into the track (12 = 0:12; 0 = from the top). The call plays first and the song comes in under its last half-second.</small>
       </section>
 
       <SheetMessage msg={msg} />
@@ -626,8 +739,263 @@ function PASheet({ audio, onClose }) {
   );
 }
 
+// ── Reorder: drag a row by its grip ────────────────────────────────────────
+// No long-press: the grip is the handle, so a finger on it drags at once and
+// a finger anywhere else scrolls the page. The dragged row lifts; the rows it
+// passes slide out of its way; letting go saves. Near the top of the screen
+// or the now-playing bar the page scrolls so any slot can be reached.
+const EDGE_PX = 80;
+
+function ReorderList({ players, onDrop, onStep }) {
+  const listRef = useRef(null);
+  const dragRef = useRef(null);
+  const [drag, setDrag] = useState(null); // { from, over, dy, pitch }
+
+  const pitchOf = () => {
+    const rows = listRef.current?.querySelectorAll('.announcer-reorder-row') || [];
+    if (rows.length > 1) return rows[1].getBoundingClientRect().top - rows[0].getBoundingClientRect().top;
+    return rows[0]?.offsetHeight || 64;
+  };
+  const measure = (d) => {
+    const dy = d.lastY - d.startY + (window.scrollY - d.scroll0);
+    return { from: d.from, dy, pitch: d.pitch, over: dropIndex(d.from, dy, d.pitch, players.length) };
+  };
+  const tick = () => {
+    const d = dragRef.current;
+    if (!d) return;
+    const bottom = document.querySelector('.announcer-bar')?.getBoundingClientRect().top ?? window.innerHeight;
+    let v = 0;
+    if (d.lastY < EDGE_PX) v = -Math.ceil((EDGE_PX - d.lastY) / 5);
+    else if (d.lastY > bottom - EDGE_PX) v = Math.ceil((d.lastY - (bottom - EDGE_PX)) / 5);
+    if (v) { window.scrollBy(0, v); setDrag(measure(d)); }
+    d.raf = requestAnimationFrame(tick);
+  };
+  const start = (e, i) => {
+    if (e.button > 0) return;
+    e.preventDefault();
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    dragRef.current = { from: i, startY: e.clientY, lastY: e.clientY, scroll0: window.scrollY, pitch: pitchOf() };
+    setDrag(measure(dragRef.current));
+    dragRef.current.raf = requestAnimationFrame(tick);
+  };
+  const move = (e) => {
+    const d = dragRef.current;
+    if (!d) return;
+    d.lastY = e.clientY;
+    setDrag(measure(d));
+  };
+  const end = (commit) => {
+    const d = dragRef.current;
+    if (!d) return;
+    cancelAnimationFrame(d.raf);
+    dragRef.current = null;
+    const { from, over } = measure(d);
+    setDrag(null);
+    if (commit && over !== from) onDrop(from, over);
+  };
+  useEffect(() => () => { if (dragRef.current) cancelAnimationFrame(dragRef.current.raf); }, []);
+
+  const shift = (i) => {
+    if (!drag || i === drag.from) return 0;
+    if (drag.from < drag.over && i > drag.from && i <= drag.over) return -drag.pitch;
+    if (drag.from > drag.over && i >= drag.over && i < drag.from) return drag.pitch;
+    return 0;
+  };
+
+  return (
+    <div className={`announcer-roster-list announcer-reorder-list${drag ? ' announcer-reorder-list--dragging' : ''}`} ref={listRef}>
+      {players.map((p, i) => {
+        const lifted = drag?.from === i;
+        const slot = lifted ? drag.over + 1 : i + 1 + (shift(i) ? (shift(i) > 0 ? 1 : -1) : 0);
+        return (
+          <div key={p.id} className={`announcer-reorder-row glass-panel${lifted ? ' announcer-reorder-row--lifted' : ''}`}
+            style={{ transform: lifted ? `translateY(${drag.dy}px) scale(1.02)` : `translateY(${shift(i)}px)` }}>
+            <span className="announcer-row-slot">{slot}</span>
+            <span className="announcer-jersey">{jersey(p)}</span>
+            <span className="announcer-reorder-name">{p.first} <strong>{p.last}</strong></span>
+            <button type="button" className="announcer-reorder-grip"
+              aria-label={`Move ${fullName(p)}, batting ${ordinal(i + 1)}. Drag, or use the arrow keys.`}
+              onPointerDown={e => start(e, i)} onPointerMove={move}
+              onPointerUp={() => end(true)} onPointerCancel={() => end(false)} onLostPointerCapture={() => end(true)}
+              onKeyDown={e => {
+                if (e.key === 'ArrowUp' && i > 0) { e.preventDefault(); onStep(p.id, -1); }
+                if (e.key === 'ArrowDown' && i < players.length - 1) { e.preventDefault(); onStep(p.id, 1); }
+              }}>
+              <GripVertical size={26} />
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Soundboard ─────────────────────────────────────────────────────────────
+const SOUND_ICONS = { 'air-horn': Megaphone, charge: Flag, 'drum-roll': Drum, cowbell: Bell, whistle: Wind, crowd: Users };
+const LONG_PRESS_MS = 550;
+const labelFromFile = (name) => (name || '').replace(/\.[a-z0-9]+$/i, '').replace(/[_]+/g, ' ').trim().slice(0, 24);
+
+// Tap a tile: it plays at once, over the walk-up, without stopping it.
+// The sheet stays open so several can be fired in a row. Press and hold (or
+// Edit) to remove your own sounds; built-ins stay.
+function SoundboardSheet({ audio, onClose }) {
+  const [sounds, setSounds] = useState(null);
+  const [msg, setMsg] = useState(null);
+  const [firing, setFiring] = useState({});
+  const [edit, setEdit] = useState(false);
+  const [armed, setArmed] = useState('');
+  const [pending, setPending] = useState(null); // { file, label } picked, not yet uploaded
+  const [busy, setBusy] = useState(false);
+  const fileRef = useRef(null);
+  const timers = useRef({});
+  const press = useRef({ timer: null, long: false });
+
+  useEffect(() => {
+    let live = true;
+    fetch('/api/announcer/soundboard', { cache: 'no-store' })
+      .then(r => (r.ok ? r.json() : Promise.reject(new Error(`server said ${r.status}`))))
+      .then(d => {
+        if (!live) return;
+        const list = d.sounds || [];
+        setSounds(list);
+        const urls = list.map(s => s.url);
+        // Fetch every file (the service worker keeps them for offline), then
+        // decode them so the first tap is instant.
+        warm(urls).then(() => preloadEffects(urls));
+      })
+      .catch(e => { if (live) { setSounds([]); setMsg({ text: `Couldn't load the sounds (${e.message}).`, kind: 'error' }); } });
+    const t = timers.current;
+    const hold = press.current;
+    return () => { live = false; Object.values(t).forEach(clearTimeout); clearTimeout(hold.timer); };
+  }, []);
+
+  const unmark = (id) => setFiring(f => { const n = { ...f }; delete n[id]; return n; });
+  const fire = async (s) => {
+    setFiring(f => ({ ...f, [s.id]: true }));
+    const r = await playEffect(s.url); // starts the AudioContext before its first await
+    clearTimeout(timers.current[s.id]);
+    if (!r.ok) { unmark(s.id); setMsg({ text: `${s.label} didn't play (${r.error}).`, kind: 'error' }); return; }
+    timers.current[s.id] = setTimeout(() => unmark(s.id), Math.max(300, (r.duration || 0) * 1000));
+  };
+  const remove = async (s) => {
+    setArmed(''); setMsg(null);
+    try {
+      await api(`/api/announcer/soundboard/${s.id}`, 'DELETE');
+      setSounds(list => list.filter(x => x.id !== s.id));
+      setMsg({ text: `Removed ${s.label}.`, kind: 'ok' });
+    } catch (e) { setMsg({ text: e.message, kind: 'error' }); }
+  };
+  const tap = (s) => {
+    if (press.current.long) { press.current.long = false; return; }
+    if (!edit) { fire(s); return; }
+    if (s.builtin) return;
+    if (armed === s.id) remove(s); else setArmed(s.id);
+  };
+  const holdStart = () => {
+    press.current.long = false;
+    clearTimeout(press.current.timer);
+    press.current.timer = setTimeout(() => {
+      press.current.long = true;
+      setEdit(true); setArmed('');
+      navigator.vibrate?.(15);
+    }, LONG_PRESS_MS);
+  };
+  const holdEnd = () => clearTimeout(press.current.timer);
+
+  const pick = (file) => {
+    const problem = uploadProblem(file);
+    if (problem) { setMsg({ text: problem, kind: 'error' }); return; }
+    setMsg(null);
+    setPending({ file, label: labelFromFile(file.name) || 'Sound' });
+  };
+  const send = async (e) => {
+    e.preventDefault();
+    if (!pending) return;
+    setBusy(true); setMsg(null);
+    try {
+      const { sound } = await upload('/api/announcer/soundboard/upload', pending.file, { label: pending.label.trim() });
+      setSounds(list => [...(list || []), sound]);
+      preloadEffects([sound.url]);
+      setPending(null);
+      setMsg({ text: `Added ${sound.label}. Tap it to play.`, kind: 'ok' });
+    } catch (ex) { setMsg({ text: ex.message, kind: 'error' }); }
+    finally { setBusy(false); }
+  };
+
+  const walkup = audio.status === 'playing' || audio.status === 'loading';
+  const ownCount = (sounds || []).filter(s => !s.builtin).length;
+
+  return (
+    <Sheet title="Sounds" onClose={onClose}>
+      <div className="announcer-sound-status">
+        <span className={walkup ? 'announcer-sound-status-live' : ''}>
+          {walkup ? <>Walk-up playing: <strong>{audio.label}</strong></> : 'Nothing else is playing.'}
+        </span>
+        {walkup && (
+          <button type="button" className="announcer-btn announcer-btn-secondary" onClick={stopAudio} aria-label="Stop the walk-up">
+            <Square size={14} /> Stop walk-up
+          </button>
+        )}
+        {ownCount > 0 && (
+          <button type="button" className={`announcer-btn announcer-btn-secondary${edit ? ' announcer-btn--on' : ''}`} aria-pressed={edit}
+            onClick={() => { setEdit(v => !v); setArmed(''); }}>
+            {edit ? <><Check size={14} /> Done</> : <><Pencil size={14} /> Edit</>}
+          </button>
+        )}
+      </div>
+      <small className="announcer-hint">
+        {edit ? 'Tap one of your sounds twice to remove it. Built-in sounds stay.'
+          : 'Tap to play over the walk-up; it keeps playing. Press and hold to remove your own sounds.'}
+      </small>
+
+      {sounds === null ? <div className="announcer-msg"><Spinner /> Loading sounds…</div> : (
+        <div className="announcer-sound-grid">
+          {sounds.map(s => {
+            const Icon = SOUND_ICONS[s.id] || AudioLines;
+            const isArmed = edit && armed === s.id;
+            const label = edit
+              ? (s.builtin ? `${s.label}, built in, can't be removed` : isArmed ? `Tap again to remove ${s.label}` : `Remove ${s.label}`)
+              : `Play ${s.label}`;
+            return (
+              <button key={s.id} type="button" aria-label={label}
+                className={`announcer-sound-tile${firing[s.id] ? ' announcer-sound-tile--firing' : ''}${edit ? ' announcer-sound-tile--edit' : ''}${isArmed ? ' announcer-sound-tile--armed' : ''}${edit && s.builtin ? ' announcer-sound-tile--locked' : ''}`}
+                onClick={() => tap(s)} onPointerDown={holdStart} onPointerUp={holdEnd} onPointerLeave={holdEnd} onPointerCancel={holdEnd}
+                onContextMenu={e => e.preventDefault()}>
+                {edit ? (s.builtin ? <Lock size={24} /> : isArmed ? <Check size={26} /> : <Trash2 size={24} />) : <Icon size={28} />}
+                <span>{isArmed ? 'Tap to remove' : s.label}</span>
+              </button>
+            );
+          })}
+          {!edit && (
+            <button type="button" className="announcer-sound-tile announcer-sound-tile--add" onClick={() => fileRef.current?.click()}
+              disabled={busy} aria-label="Add a sound">
+              <Plus size={28} /><span>Add sound</span>
+            </button>
+          )}
+        </div>
+      )}
+      <input ref={fileRef} type="file" accept={AUDIO_ACCEPT} hidden tabIndex={-1} aria-hidden="true"
+        onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) pick(f); }} />
+
+      {pending && (
+        <form className="announcer-add-row" onSubmit={send}>
+          <input value={pending.label} onChange={e => setPending(p => ({ ...p, label: e.target.value }))} maxLength={24}
+            aria-label="Name for the new sound" placeholder="Name" />
+          <button type="submit" className="announcer-btn announcer-btn-primary" disabled={busy || !pending.label.trim()}>
+            {busy ? <Spinner /> : <Upload size={14} />} Add
+          </button>
+          <button type="button" className="announcer-icon-btn" onClick={() => setPending(null)} aria-label="Cancel" disabled={busy}>
+            <X size={16} />
+          </button>
+        </form>
+      )}
+      <SheetMessage msg={msg} />
+    </Sheet>
+  );
+}
+
 // ── Now-playing bar ────────────────────────────────────────────────────────
-function NowPlayingBar({ audio, upNext, upNextDetail, moment, canShuffle, onAnnounce, onRetry, onShuffle, onSkip }) {
+function NowPlayingBar({ audio, upNext, upNextDetail, moment, canShuffle, onAnnounce, onRetry, onShuffle, onSkip, onSounds }) {
   const pct = audio.duration > 0 ? Math.min(100, (audio.elapsed / audio.duration) * 100) : 0;
   let head, name, detail, action;
   if (audio.status === 'playing' || audio.status === 'loading') {
@@ -664,13 +1032,19 @@ function NowPlayingBar({ audio, upNext, upNextDetail, moment, canShuffle, onAnno
       </button>
     );
   } else {
-    return null;
+    head = 'Ready';
+    name = 'Nothing playing';
+    action = null;
   }
   const idle = audio.status === 'idle' && !moment;
   return (
     <div className={`announcer-bar glass-panel announcer-bar--${audio.status}`} role="region" aria-label="Now playing">
       {(audio.status === 'playing') && <div className="announcer-progress-track"><div className="announcer-progress-fill" style={{ width: `${pct}%` }} /></div>}
       <div className="announcer-bar-row">
+        {/* Always here, in every state: effects play over whatever is on. */}
+        <button type="button" className="announcer-bar-mini announcer-bar-sounds" onClick={onSounds} aria-label="Sounds" title="Sounds">
+          <Zap size={20} />
+        </button>
         <div className="announcer-bar-text" aria-live="polite">
           <span className="announcer-bar-head">{head}</span>
           <span className="announcer-bar-name">{name}</span>
@@ -680,7 +1054,7 @@ function NowPlayingBar({ audio, upNext, upNextDetail, moment, canShuffle, onAnno
         {idle && canShuffle && (
           <button type="button" className="announcer-bar-mini" onClick={onShuffle} aria-label="Pick a different call and song"><Shuffle size={18} /></button>
         )}
-        {idle && (
+        {idle && upNext && (
           <button type="button" className="announcer-bar-mini" onClick={onSkip} aria-label="Skip to the next batter"><SkipForward size={18} /></button>
         )}
         {audio.status === 'error' && (
@@ -703,7 +1077,12 @@ export default function Announcer({ lineups }) {
   const [loadError, setLoadError] = useState('');
   const [cached, setCached] = useState(false);
   const [toast, setToast] = useState(null);
-  const [sheet, setSheet] = useState(null); // { kind: 'player', id } | { kind: 'settings' } | { kind: 'pa' }
+  const [sheet, setSheet] = useState(null); // { kind: 'player', id } | { kind: 'settings' } | { kind: 'pa' } | { kind: 'sounds' }
+  const [manualOrder, setManualOrder] = useState(null); // the coach's order (player ids), or null
+  const [reordering, setReordering] = useState(false);
+  const savedOrder = useRef(null);   // last order the server confirmed
+  const pendingOrder = useRef(null); // order waiting for its PUT
+  const orderTimer = useRef(null);
   const [upNextId, setUpNextId] = useState(null);
   const [queued, setQueued] = useState({}); // player id → { intro, song } for the next at-bat
   const [moment, setMoment] = useState(null); // { playerId, since, text }
@@ -767,7 +1146,13 @@ export default function Announcer({ lineups }) {
     fetchProfiles();
     fetch('/api/announcer/game-lineup')
       .then(r => (r.ok ? r.json() : null))
-      .then(d => { if (d) setGcLineup(d); })
+      .then(d => {
+        if (!d) return;
+        setGcLineup(d);
+        const manual = Array.isArray(d.manual_order) && d.manual_order.length ? d.manual_order : null;
+        savedOrder.current = manual;
+        if (!pendingOrder.current) setManualOrder(manual);
+      })
       .catch(() => {});
     return () => stopAudio();
   }, [fetchRoster, fetchProfiles]);
@@ -802,14 +1187,70 @@ export default function Announcer({ lineups }) {
   // ── batting order ──
   const active = useMemo(() => roster.filter(p => p.is_active !== false && !p.is_ghost), [roster]);
   const former = useMemo(() => roster.filter(p => p.is_ghost || p.is_active === false), [roster]);
-  const { battingOrder, lineupSource } = useMemo(() => orderBattingLineup(active, gcLineup, lineups), [active, gcLineup, lineups]);
+  const { battingOrder, lineupSource, manual: isManual } = useMemo(
+    () => orderBattingLineup(active, gcLineup, lineups, manualOrder), [active, gcLineup, lineups, manualOrder]);
   const upNext = battingOrder.find(p => p.id === upNextId) || battingOrder[0] || null;
+  const fallbackSource = useMemo(() => orderBattingLineup(active, gcLineup, lineups).lineupSource, [active, gcLineup, lineups]);
+  // game-lineup also answers with the optimiser lineup when no GC game exists.
+  const resetLabel = gcLineup?.source === 'gc_game' && gcLineup?.players?.length ? 'Reset to GameChanger order' : 'Reset order';
 
-  const profileName = useCallback((id) => profiles.find(v => v.id === id)?.name || (id ? 'Announcer' : 'Big-moment call'), [profiles]);
+  const profileName = useCallback((id) => (id === UPLOAD_VOICE ? 'Uploaded'
+    : profiles.find(v => v.id === id)?.name || (id ? 'Announcer' : 'Big-moment call')), [profiles]);
   const describePair = useCallback((pair) => [
     pair.intro && `${profileName(pair.intro.voice)} call`,
-    pair.song && songLabel(pair.song.url),
+    pair.song && songTitle(pair.song),
   ].filter(Boolean).join(' + '), [profileName]);
+
+  // ── the coach's batting order ──
+  // Every change updates the list at once. A drag saves straight away; the
+  // sheet's Move up / Move down and the arrow keys wait 0.7 s for the last
+  // tap, so walking a player down eight slots is one save, not eight (the
+  // API allows 12 writes a minute). A failed save puts the last saved order
+  // back and says so.
+  const flushOrder = useCallback(async () => {
+    clearTimeout(orderTimer.current);
+    orderTimer.current = null;
+    const order = pendingOrder.current;
+    if (!order) return;
+    try {
+      await api('/api/announcer/batting-order', 'PUT', { order });
+      savedOrder.current = order;
+      if (pendingOrder.current === order) pendingOrder.current = null;
+    } catch (e) {
+      if (pendingOrder.current === order) {
+        pendingOrder.current = null;
+        setManualOrder(savedOrder.current);
+        say(`Batting order not saved: ${e.message}`, 'error');
+      }
+    }
+  }, [say]);
+  const setOrder = useCallback((ids, debounceMs) => {
+    setManualOrder(ids);
+    pendingOrder.current = ids;
+    clearTimeout(orderTimer.current);
+    orderTimer.current = setTimeout(flushOrder, debounceMs);
+  }, [flushOrder]);
+  useEffect(() => () => { if (pendingOrder.current) flushOrder(); }, [flushOrder]);
+  const orderIds = battingOrder.map(p => p.id);
+  const dropRow = (from, to) => setOrder(moveItem(orderIds, from, to), 0);
+  const stepPlayer = (id, dir) => {
+    const i = orderIds.indexOf(id);
+    if (i >= 0) setOrder(moveItem(orderIds, i, i + dir), 700);
+  };
+  const resetOrder = async () => {
+    clearTimeout(orderTimer.current);
+    pendingOrder.current = null;
+    const before = manualOrder;
+    setManualOrder(null);
+    try {
+      await api('/api/announcer/batting-order', 'DELETE');
+      savedOrder.current = null;
+      say(`Batting order is back to: ${fallbackSource}.`, 'ok');
+    } catch (e) {
+      setManualOrder(before);
+      say(`Order not reset: ${e.message}`, 'error');
+    }
+  };
 
   const upNextPair = upNext ? pairFor(upNext, queued[upNext.id]) : null;
   const upNextDetail = upNext ? (describePair(upNextPair) || rowState(upNext).label) : '';
@@ -883,6 +1324,14 @@ export default function Announcer({ lineups }) {
   };
   const renderPlayer = async (playerId, voiceId) => {
     await api(`/api/announcer/render/${playerId}`, 'POST', { quality: 'best', ...(voiceId ? { voice_id: voiceId } : {}) });
+    await fetchRoster();
+  };
+  const uploadSong = async (playerId, file) => {
+    await upload(`/api/announcer/songs/${playerId}/upload`, file);
+    await fetchRoster();
+  };
+  const uploadCall = async (playerId, file) => {
+    await upload(`/api/announcer/calls/${playerId}/upload`, file);
     await fetchRoster();
   };
   const removePlayer = async (playerId) => {
@@ -985,35 +1434,57 @@ export default function Announcer({ lineups }) {
       )}
 
       <div className="announcer-summary">
-        <span className="announcer-lineup-source">{lineupSource}</span>
-        <span>{counts.ready}/{active.length} ready</span>
-        {counts.rendering > 0 && <span className="announcer-summary-busy"><Spinner size={12} /> Making {counts.rendering}</span>}
-        {counts.failed > 0 && <span className="announcer-text-danger">{counts.failed} failed</span>}
-        {counts.todo > 0 && !cached && (
+        <span className={`announcer-lineup-source${isManual ? ' announcer-lineup-source--manual' : ''}`}>{lineupSource}</span>
+        {!reordering && <span>{counts.ready}/{active.length} ready</span>}
+        {!reordering && counts.rendering > 0 && <span className="announcer-summary-busy"><Spinner size={12} /> Making {counts.rendering}</span>}
+        {!reordering && counts.failed > 0 && <span className="announcer-text-danger">{counts.failed} failed</span>}
+        {!reordering && counts.todo > 0 && !cached && (
           <button type="button" className="announcer-btn announcer-btn-primary announcer-summary-btn" onClick={makeMissing} disabled={batchBusy}>
             {batchBusy ? <Spinner /> : <Mic size={14} />} {counts.failed ? 'Make / retry' : 'Make'} {counts.todo} call{counts.todo === 1 ? '' : 's'}
           </button>
         )}
-      </div>
-
-      <div className="announcer-roster-list">
-        {battingOrder.map((p, i) => (
-          <PlayerRow key={p.id} player={p} slot={i + 1} audio={audio} isNext={upNext?.id === p.id}
-            voiceName={profileName} onAnnounce={announce} onEdit={(x) => setSheet({ kind: 'player', id: x.id })} />
-        ))}
-        {battingOrder.length === 0 && !loadError && (
-          <div className="glass-panel announcer-empty">No players yet. Sync the team, or add a sub in settings.</div>
+        {battingOrder.length > 1 && (
+          <button type="button" className={`announcer-btn ${reordering ? 'announcer-btn-primary' : 'announcer-btn-secondary'} announcer-reorder-toggle`}
+            onClick={() => { if (reordering) flushOrder(); setReordering(v => !v); }} aria-pressed={reordering}>
+            {reordering ? <><Check size={16} /> Done</> : <><ListOrdered size={16} /> Reorder</>}
+          </button>
         )}
       </div>
+      {(isManual || reordering) && (
+        <div className="announcer-order-bar">
+          <span>{reordering ? 'Drag a batter by the grip. It saves when you let go.' : 'You set this batting order.'}</span>
+          {isManual && (
+            <button type="button" className="announcer-btn announcer-btn-secondary" onClick={resetOrder}>
+              <RotateCcw size={14} /> {resetLabel}
+            </button>
+          )}
+        </div>
+      )}
+
+      {reordering ? (
+        <ReorderList players={battingOrder} onDrop={dropRow} onStep={stepPlayer} />
+      ) : (
+        <div className="announcer-roster-list">
+          {battingOrder.map((p, i) => (
+            <PlayerRow key={p.id} player={p} slot={i + 1} audio={audio} isNext={upNext?.id === p.id}
+              voiceName={profileName} onAnnounce={announce} onEdit={(x) => setSheet({ kind: 'player', id: x.id })} />
+          ))}
+          {battingOrder.length === 0 && !loadError && (
+            <div className="glass-panel announcer-empty">No players yet. Sync the team, or add a sub in settings.</div>
+          )}
+        </div>
+      )}
 
       <NowPlayingBar audio={audio} upNext={upNext} upNextDetail={upNextDetail} moment={moment} canShuffle={canShuffle}
-        onAnnounce={announce} onRetry={retry} onShuffle={shuffle} onSkip={skip} />
+        onAnnounce={announce} onRetry={retry} onShuffle={shuffle} onSkip={skip} onSounds={() => setSheet({ kind: 'sounds' })} />
 
       {sheetPlayer && (
         <PlayerSheet key={sheetPlayer.id} player={sheetPlayer} profiles={profiles} defaultVoiceId={defaultVoiceId} audio={audio}
+          slot={orderIds.indexOf(sheetPlayer.id) + 1} total={orderIds.length}
           voiceName={profileName} onHear={hear} onClose={closeSheet} onSave={savePlayer} onRender={renderPlayer}
-          onRemove={removePlayer} onMoment={fireMoment} />
+          onRemove={removePlayer} onMoment={fireMoment} onMove={stepPlayer} onUploadSong={uploadSong} onUploadCall={uploadCall} />
       )}
+      {sheet?.kind === 'sounds' && <SoundboardSheet audio={audio} onClose={closeSheet} />}
       {sheet?.kind === 'settings' && (
         <SettingsSheet profiles={profiles} defaultVoiceId={defaultVoiceId} audio={audio} former={former}
           rendering={counts.rendering} onHear={hear} onChooseVoice={chooseVoice} onMakeAllInVoice={renderAll}

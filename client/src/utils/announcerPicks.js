@@ -80,6 +80,13 @@ export function songLabel(url) {
   }
 }
 
+// An uploaded song carries the name it was uploaded under; a link song is
+// named after its file.
+export const songTitle = (s) => (s?.label || '').trim() || songLabel(s?.url || '');
+
+// Voice id the server stores on an uploaded (pre-recorded) call.
+export const UPLOAD_VOICE = 'upload';
+
 // A song's in-point (its `start`, seconds into the track) as the row shows
 // it: 12 -> "Song starts at 0:12", 72.5 -> "Song starts at 1:12.5".
 export function songStartLabel(start) {
@@ -111,9 +118,23 @@ export const needsRender = (p) => p.status === 'pending' || p.status === 'error'
 
 const nameKey = (first, last) => `${first || ''} ${last || ''}`.trim().replace(/\s+/g, ' ').toLowerCase();
 
-// Batting order: the GameChanger game lineup, else the optimiser lineup, else
-// roster order. Anyone on the roster the lineup doesn't name goes after it.
-export function orderBattingLineup(active, gcLineup, lineups) {
+// Batting order: the coach's own order (ids, saved from the Reorder screen),
+// else the GameChanger game lineup, else the optimiser lineup, else roster
+// order. Ids no longer on the roster are dropped; anyone on the roster the
+// chosen order doesn't name goes after it.
+export function orderBattingLineup(active, gcLineup, lineups, manualOrder = null) {
+  if (Array.isArray(manualOrder) && manualOrder.length) {
+    const byId = new Map(active.map(p => [p.id, p]));
+    const seen = new Set();
+    const ordered = [];
+    for (const id of manualOrder) {
+      const p = byId.get(id);
+      if (p && !seen.has(id)) { seen.add(id); ordered.push(p); }
+    }
+    if (ordered.length) {
+      return { battingOrder: [...ordered, ...active.filter(p => !seen.has(p.id))], lineupSource: 'Your order', manual: true };
+    }
+  }
   const byRef = (ref) => active.find(r => ref.id && r.id === ref.id)
     || active.find(r => ref.number && r.number && String(r.number).trim() === String(ref.number).trim())
     || active.find(r => nameKey(r.first, r.last) && nameKey(r.first, r.last) === nameKey(ref.first, ref.last))
@@ -143,6 +164,35 @@ export function orderBattingLineup(active, gcLineup, lineups) {
   return { battingOrder: active, lineupSource: 'Roster order' };
 }
 
+// `list` with the item at `from` moved to `to` (both clamped). Never mutates.
+export function moveItem(list, from, to) {
+  const n = list.length;
+  if (!n) return [];
+  const f = Math.max(0, Math.min(n - 1, from));
+  const t = Math.max(0, Math.min(n - 1, to));
+  const out = [...list];
+  const [item] = out.splice(f, 1);
+  out.splice(t, 0, item);
+  return out;
+}
+
+// Where the row being dragged would land: its start index plus however many
+// row pitches the pointer has travelled, clamped to the list.
+export function dropIndex(from, dy, pitch, count) {
+  if (!pitch || count < 1) return from;
+  return Math.max(0, Math.min(count - 1, from + Math.round(dy / pitch)));
+}
+
+// Uploads the server takes, by extension or MIME type.
+export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+export function uploadProblem(file) {
+  if (!file) return 'Pick a file.';
+  const okType = /\.(mp3|wav|m4a)$/i.test(file.name || '') || /^audio\/(mpeg|mp3|wav|x-wav|wave|mp4|x-m4a|aac)$/i.test(file.type || '');
+  if (!okType) return 'Use an MP3, WAV or M4A file.';
+  if (file.size > MAX_UPLOAD_BYTES) return `That file is ${Math.round(file.size / 1048576)} MB; the limit is 25 MB.`;
+  return '';
+}
+
 // Server error codes → words a coach can act on.
 const ERROR_WORDS = {
   forbidden_origin: 'This address is not allowed to make changes. Open the app from its normal address.',
@@ -170,10 +220,21 @@ const ERROR_WORDS = {
   voice_search_failed: 'Couldn’t reach fish.audio to search. Try again.',
   invalid_query: 'Search for 2 to 60 letters.',
   too_many_custom_voices: 'That’s the most voices you can add. Remove one first.',
+  unsupported_audio: 'That isn’t an MP3, WAV or M4A file.',
+  audio_unreadable: 'That file wouldn’t play. Export it again as an MP3 and retry.',
+  file_too_large: 'That file is too big. The limit is 25 MB.',
+  payload_too_large: 'That file is too big. The limit is 25 MB.',
+  file_required: 'Pick a file to upload.',
+  songs_full: `A player can have up to ${MAX_ITEMS} songs. Remove one first.`,
+  sounds_full: 'The soundboard is full. Remove a sound first.',
+  sound_not_found: 'That sound is already gone.',
+  builtin_sound: 'Built-in sounds can’t be removed.',
+  order_invalid: 'That batting order didn’t match the roster. Refresh and try again.',
 };
 
 export function describeApiError(status, code) {
   if (code && ERROR_WORDS[code]) return ERROR_WORDS[code];
+  if (status === 413) return ERROR_WORDS.file_too_large; // nginx answers 413 with HTML, no code
   if (status === 429) return ERROR_WORDS.rate_limited;
   if (status === 0) return 'No connection to the Dugout server.';
   if (status >= 500) return `The server had a problem (${status}${code ? `: ${code}` : ''}). Try again.`;

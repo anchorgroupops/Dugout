@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   orderBattingLineup, pairFor, randomOther, rowState, pickMode, previewLine, describeApiError, needsRender, songStartLabel,
+  moveItem, dropIndex, songTitle, uploadProblem, MAX_UPLOAD_BYTES,
 } from '../src/utils/announcerPicks.js';
 
 const P = (id, first, last, number, extra = {}) => ({ id, first, last, number, status: 'ready', ...extra });
@@ -90,4 +91,72 @@ test("a song's in-point reads as a clock time, not a call mark", () => {
   assert.equal(songStartLabel(0), 'Song starts at the top');
   assert.equal(songStartLabel(undefined), 'Song starts at the top');
   assert.equal(songStartLabel(-4), 'Song starts at the top');
+});
+
+// ── Coach's own batting order ──────────────────────────────────────────────
+const TEAM = [P('a', 'Ann', 'Lee', '1'), P('b', 'Bea', 'Moe', '2'), P('c', 'Cat', 'Ng', '3')];
+const GC = { players: [{ number: '3' }, { number: '1' }, { number: '2' }], source_label: 'GC 2026-09-20 vs Rays' };
+const OPT = { balanced: { lineup: [{ slot: 1, number: '2' }, { slot: 2, number: '3' }, { slot: 3, number: '1' }] } };
+
+test('precedence: manual order, then GameChanger, then optimiser, then roster', () => {
+  const manual = orderBattingLineup(TEAM, GC, OPT, ['b', 'a', 'c']);
+  assert.deepEqual(manual.battingOrder.map(p => p.id), ['b', 'a', 'c']);
+  assert.equal(manual.lineupSource, 'Your order');
+  assert.equal(manual.manual, true);
+  const gc = orderBattingLineup(TEAM, GC, OPT, []);
+  assert.deepEqual(gc.battingOrder.map(p => p.id), ['c', 'a', 'b']);
+  assert.equal(gc.lineupSource, 'GC 2026-09-20 vs Rays');
+  assert.ok(!gc.manual);
+  assert.deepEqual(orderBattingLineup(TEAM, null, OPT, null).battingOrder.map(p => p.id), ['b', 'c', 'a']);
+  assert.deepEqual(orderBattingLineup(TEAM, null, null).battingOrder.map(p => p.id), ['a', 'b', 'c']);
+});
+
+test('a manual order drops players who left and appends players it never named', () => {
+  const r = orderBattingLineup(TEAM, GC, null, ['c', 'gone', 'a', 'c']);
+  assert.deepEqual(r.battingOrder.map(p => p.id), ['c', 'a', 'b']);
+});
+
+test('a manual order naming nobody on the roster falls through to GameChanger', () => {
+  const r = orderBattingLineup(TEAM, GC, null, ['gone', 'left']);
+  assert.equal(r.lineupSource, 'GC 2026-09-20 vs Rays');
+  assert.deepEqual(r.battingOrder.map(p => p.id), ['c', 'a', 'b']);
+});
+
+test('moveItem moves one row and clamps, without mutating', () => {
+  const ids = ['a', 'b', 'c', 'd'];
+  assert.deepEqual(moveItem(ids, 0, 2), ['b', 'c', 'a', 'd']);
+  assert.deepEqual(moveItem(ids, 3, 0), ['d', 'a', 'b', 'c']);
+  assert.deepEqual(moveItem(ids, 1, 99), ['a', 'c', 'd', 'b']);
+  assert.deepEqual(moveItem(ids, 2, 2), ids);
+  assert.deepEqual(ids, ['a', 'b', 'c', 'd']);
+  assert.deepEqual(moveItem([], 0, 1), []);
+});
+
+test('dropIndex follows the pointer by whole rows and stays in the list', () => {
+  assert.equal(dropIndex(2, 0, 60, 5), 2);
+  assert.equal(dropIndex(2, 29, 60, 5), 2);
+  assert.equal(dropIndex(2, 31, 60, 5), 3);
+  assert.equal(dropIndex(2, -125, 60, 5), 0);
+  assert.equal(dropIndex(2, 1000, 60, 5), 4);
+  assert.equal(dropIndex(1, 50, 0, 5), 1);
+});
+
+test('uploaded songs show their own name; link songs their file name', () => {
+  assert.equal(songTitle({ url: '/audio/music/a/x-1a2b3c4d.mp3', label: 'Sweet Tune' }), 'Sweet Tune');
+  assert.equal(songTitle({ url: 'https://x.test/Walk%20Up.mp3' }), 'Walk Up');
+});
+
+test('uploads are checked for type and size before they are sent', () => {
+  assert.equal(uploadProblem({ name: 'song.MP3', type: '', size: 10 }), '');
+  assert.equal(uploadProblem({ name: 'memo', type: 'audio/x-m4a', size: 10 }), '');
+  assert.match(uploadProblem({ name: 'pic.jpg', type: 'image/jpeg', size: 10 }), /MP3, WAV or M4A/);
+  assert.match(uploadProblem({ name: 'big.wav', type: 'audio/wav', size: MAX_UPLOAD_BYTES + 1 }), /25 MB/);
+  assert.match(uploadProblem(null), /Pick a file/);
+});
+
+test('upload errors read as instructions, including nginx 413 with no code', () => {
+  assert.match(describeApiError(413, undefined), /25 MB/);
+  assert.match(describeApiError(415, 'unsupported_audio'), /MP3, WAV or M4A/);
+  assert.match(describeApiError(422, 'audio_unreadable'), /wouldn’t play/);
+  assert.match(describeApiError(400, 'builtin_sound'), /Built-in/);
 });

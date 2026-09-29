@@ -3,8 +3,8 @@
  *
  * Routing:
  *   WalkupSource → WalkupGain ─┐
- *                                ├─→ MasterGain → Destination
- *   ClipSource   → ClipGain ───┘
+ *   ClipSource   → ClipGain ───┼─→ MasterGain → Destination
+ *   EffectSource(s) ───────────┘   (soundboard: see playEffect)
  *
  * Playback flow (walk-up = call + song):
  *   1. The announcer call plays first, from t = 0
@@ -15,7 +15,8 @@
  * Both sources and the gain ramp are scheduled up front on the AudioContext
  * clock (planWalkup gives the numbers), so there are no timers to drift.
  *
- * Exactly one thing plays at a time. Every play() takes a new generation
+ * Exactly one walk-up / preview plays at a time (soundboard effects are a
+ * separate channel on top of it). Every play() takes a new generation
  * number; anything scheduled by an older play (a fetch still in flight, an
  * `ended` handler, the progress ticker) checks it and does nothing once it
  * is stale, and haltAudio() stops a song that is scheduled but not yet
@@ -326,6 +327,78 @@ export async function play({ key, label = '', detail = '', songUrl = '', clipUrl
   }
 }
 
+// ── Soundboard effects ─────────────────────────────────────────────────────
+// A second, independent channel. Effects go straight to the master gain, so
+// the walk-up's duck ramp never touches them; they never read or bump
+// `generation`, never set the store, and never stop the walk-up. Any number
+// of different effects can overlap; tapping one that is still playing
+// restarts it. Decoded effects live in their own small cache so they can't
+// evict the up-next batter's song and call from BUFFER_CACHE.
+const MAX_EFFECT_CACHE = 24;
+const EFFECT_CACHE = new Map();
+const effectSources = new Map(); // url → the source playing it
+const effectTaps = new Map();    // url → tap count, so a slow first load can't play over a later tap
+
+async function loadEffect(url) {
+  if (EFFECT_CACHE.has(url)) return EFFECT_CACHE.get(url);
+  if (!_isAllowedAudioUrl(url)) throw new Error('link not allowed');
+  const audioCtx = getContext();
+  const resp = await fetchWithTimeout(url);
+  if (!resp.ok) throw new Error(resp.status === 404 ? 'file missing' : `server said ${resp.status}`);
+  const arrayBuf = await resp.arrayBuffer();
+  if (arrayBuf.byteLength > MAX_AUDIO_BYTES) throw new Error('file too large');
+  let audioBuf;
+  try {
+    audioBuf = await audioCtx.decodeAudioData(arrayBuf);
+  } catch {
+    throw new Error('not a playable audio file');
+  }
+  if (EFFECT_CACHE.size >= MAX_EFFECT_CACHE) EFFECT_CACHE.delete(EFFECT_CACHE.keys().next().value);
+  EFFECT_CACHE.set(url, audioBuf);
+  return audioBuf;
+}
+
+/** Decode soundboard effects ahead of time so the first tap is instant. Never throws. */
+export async function preloadEffects(urls) {
+  await Promise.all((urls || []).filter(Boolean).map(url => loadEffect(url).catch(() => null)));
+}
+
+/**
+ * Fire a soundboard effect over whatever is playing.
+ * @returns {Promise<{ok: boolean, duration?: number, error?: string}>}
+ */
+export async function playEffect(url) {
+  const audioCtx = getContext(); // before any await: must run inside the tap
+  const tap = (effectTaps.get(url) || 0) + 1;
+  effectTaps.set(url, tap);
+  const prev = effectSources.get(url);
+  if (prev) { stopSource(prev); effectSources.delete(url); }
+  let buf;
+  try {
+    buf = await loadEffect(url);
+  } catch (e) {
+    return { ok: false, error: e?.message || 'failed' };
+  }
+  if (effectTaps.get(url) !== tap) return { ok: true, duration: buf.duration }; // a later tap took over
+  const src = audioCtx.createBufferSource();
+  src.buffer = buf;
+  src.connect(masterGain);
+  src.onended = () => {
+    if (effectSources.get(url) === src) effectSources.delete(url);
+    try { src.disconnect(); } catch { /* ok */ }
+  };
+  effectSources.set(url, src);
+  src.start();
+  return { ok: true, duration: buf.duration };
+}
+
+/** Stop every effect (teardown). The walk-up is left alone. */
+export function stopEffects() {
+  effectSources.forEach(stopSource);
+  effectSources.clear();
+  effectTaps.clear();
+}
+
 /** Play one clip on its own (previews, PA announcements). */
 export function playClip(url, { key = url, label = '', detail = '' } = {}) {
   return play({ key, label, detail, clipUrl: url });
@@ -346,7 +419,9 @@ export function dismissError() {
 /** Stop playback and release the AudioContext (app teardown only). */
 export function cleanup() {
   stop();
+  stopEffects();
   BUFFER_CACHE.clear();
+  EFFECT_CACHE.clear();
   if (ctx && ctx.state !== 'closed') ctx.close().catch(() => {});
   ctx = null;
   masterGain = null;

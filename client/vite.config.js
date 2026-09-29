@@ -40,7 +40,7 @@ export default defineConfig(({ mode }) => ({
         // manifest with the current hashes.
         navigateFallback: '/index.html',
         // Never answer a navigation to an API/data/clip URL with index.html.
-        navigateFallbackDenylist: [/^\/api\//, /^\/data\//, /^\/announcer-clips\//],
+        navigateFallbackDenylist: [/^\/api\//, /^\/data\//, /^\/announcer-clips\//, /^\/audio\//],
         runtimeCaching: [
           {
             // JS/CSS chunks: NetworkFirst with 3s timeout. If network responds
@@ -84,12 +84,13 @@ export default defineConfig(({ mode }) => ({
             },
           },
           {
-            // Walk-up music hooks — CacheFirst because hook clips are immutable
-            // (the URL contains the song slug). Keeps the bumper instant even
-            // when field Wi-Fi drops mid-game.
+            // Walk-up music hooks and soundboard effects — CacheFirst because
+            // the files are immutable (song slug / random suffix / versioned
+            // built-in in the URL). Keeps them instant when field Wi-Fi drops.
             urlPattern: ({ url }) =>
               url.pathname.startsWith('/audio/music/') ||
-              url.pathname.startsWith('/audio/walkup/'),
+              url.pathname.startsWith('/audio/walkup/') ||
+              url.pathname.startsWith('/audio/soundboard/'),
             handler: 'CacheFirst',
             options: {
               cacheName: 'walkup-music',

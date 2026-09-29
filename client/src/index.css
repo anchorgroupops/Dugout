@@ -2255,6 +2255,72 @@ body:has(.announcer-modal-overlay) .navbar {
 .announcer-voice-actions .announcer-btn { min-height: var(--touch-min); white-space: nowrap; }
 .announcer-item-row--off .announcer-item-text strong { color: var(--text-muted); }
 .announcer-item-row--off .announcer-btn-round { opacity: 0.4; }
+.announcer-btn--on { border-color: var(--primary-color); color: var(--primary-color); }
+
+/* Coach's batting order: Reorder toggle, the "you set this order" bar, and
+   rows dragged by a big grip (no long-press; the grip is the handle). */
+.announcer-reorder-toggle { margin-left: auto; min-height: var(--touch-min); font-size: var(--text-sm); }
+.announcer-lineup-source--manual { color: #f5d27a; background: rgba(240, 180, 41, 0.14); border-color: rgba(240, 180, 41, 0.4); }
+.announcer-order-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-xs); flex-wrap: wrap;
+  font-size: var(--text-sm); color: var(--text-muted);
+}
+.announcer-order-bar .announcer-btn { min-height: var(--touch-min); font-size: var(--text-sm); }
+.announcer-reorder-list { user-select: none; -webkit-user-select: none; }
+.announcer-reorder-row {
+  display: flex; align-items: center; gap: var(--space-sm); min-height: 60px; padding: 0 0 0 0.75rem;
+  border-radius: var(--radius-md, 12px); overflow: hidden; position: relative;
+  transition: transform 160ms ease, box-shadow 160ms ease;
+}
+.announcer-reorder-row .announcer-jersey { min-width: 2.6rem; flex-shrink: 0; }
+.announcer-reorder-row--lifted {
+  transition: box-shadow 160ms ease; z-index: 5; border-color: var(--primary-color);
+  background: var(--surface-hover); box-shadow: 0 14px 34px rgba(0, 0, 0, 0.55);
+}
+.announcer-reorder-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 1.02rem; }
+.announcer-reorder-grip {
+  width: 60px; align-self: stretch; min-height: 60px; flex-shrink: 0; cursor: grab; touch-action: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: rgba(130, 203, 195, 0.08); color: var(--primary-color);
+  border: none; border-left: 1px solid var(--surface-border);
+}
+.announcer-reorder-list--dragging .announcer-reorder-grip { cursor: grabbing; }
+.announcer-move-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-xs); }
+.announcer-move-row .announcer-btn { justify-content: center; min-height: var(--touch-min); }
+
+/* Uploads: a real button on phones; on a computer, drop a file on the sheet. */
+.announcer-sheet--drop { outline: 2px dashed var(--primary-color); outline-offset: -8px; }
+.announcer-section--drop { background: rgba(130, 203, 195, 0.1); border-radius: 10px; }
+.announcer-drop-hint {
+  position: sticky; top: 0; z-index: 2; display: flex; align-items: center; justify-content: center; gap: 0.4rem;
+  padding: 0.6rem; margin-bottom: var(--space-sm); border-radius: 10px;
+  background: var(--primary-color); color: var(--bg-color); font-weight: 700;
+}
+
+/* Soundboard: always one tap away in the now-playing bar. */
+.announcer-bar-sounds { background: rgba(240, 180, 41, 0.16); color: #f5d27a; border-color: rgba(240, 180, 41, 0.5); }
+.announcer-sound-status { display: flex; align-items: center; gap: var(--space-xs); flex-wrap: wrap; font-size: var(--text-sm); color: var(--text-muted); }
+.announcer-sound-status > span { flex: 1; min-width: 10rem; }
+.announcer-sound-status-live strong { color: var(--primary-color); }
+.announcer-sound-status .announcer-btn { min-height: var(--touch-min); font-size: var(--text-sm); }
+.announcer-sound-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)); gap: var(--space-xs);
+  margin: var(--space-sm) 0;
+}
+.announcer-sound-tile {
+  min-height: 76px; padding: 0.5rem 0.35rem; border-radius: 12px; cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.35rem;
+  background: var(--surface-base); color: var(--text-main); border: 1px solid var(--surface-border);
+  font: inherit; font-size: var(--text-sm); font-weight: 700; line-height: 1.15; text-align: center; overflow-wrap: anywhere;
+  user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent; transition: transform 80ms ease, background 120ms ease;
+}
+.announcer-sound-tile:active:not(:disabled) { transform: scale(0.95); }
+.announcer-sound-tile--firing { background: var(--primary-color); color: var(--bg-color); border-color: var(--primary-color); }
+.announcer-sound-tile--add { border-style: dashed; color: var(--text-muted); background: transparent; }
+.announcer-sound-tile--edit { border-color: rgba(179, 74, 57, 0.6); }
+.announcer-sound-tile--armed { background: var(--danger); border-color: var(--danger); color: #fff; }
+.announcer-sound-tile--locked { opacity: 0.45; border-color: var(--surface-border); cursor: default; }
 
 
 /* ─── Team-password gate (SIGN-021) ─── */

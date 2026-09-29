@@ -231,6 +231,10 @@ ALLOWED_HOSTS = {
 MAX_JSON_BODY_BYTES = int(os.getenv("MAX_JSON_BODY_BYTES", "131072"))
 # Worker TTS uploads are raw WAV (~1 MB for a few seconds); announcer_engine caps them at 10 MB.
 MAX_AUDIO_UPLOAD_BYTES = 10 * 1024 * 1024 + 64 * 1024
+# Coach uploads (walk-up songs, calls, soundboard): announcer_media caps the
+# file at 25 MB; the extra 64 KB is multipart overhead.
+MAX_MEDIA_UPLOAD_BYTES = 25 * 1024 * 1024 + 64 * 1024
+_MEDIA_UPLOAD_PATH_RE = re.compile(r"^/api/announcer/((songs|calls)/[A-Za-z0-9_-]+|soundboard)/upload$")
 MUTATE_RATE_WINDOW_SEC = int(os.getenv("MUTATE_RATE_WINDOW_SEC", "60"))
 MUTATE_RATE_MAX = int(os.getenv("MUTATE_RATE_MAX", "12"))
 _MUTATE_RATE_BUCKETS: dict[str, list[float]] = {}
@@ -1764,6 +1768,9 @@ def _security_before_request():
     max_bytes = MAX_JSON_BODY_BYTES
     if request.path.startswith("/api/announcer/render-complete/"):
         max_bytes = MAX_AUDIO_UPLOAD_BYTES
+        request.max_content_length = max_bytes
+    elif _MEDIA_UPLOAD_PATH_RE.match(request.path):
+        max_bytes = MAX_MEDIA_UPLOAD_BYTES
         request.max_content_length = max_bytes
     content_length = request.content_length
     if content_length is not None and content_length > max_bytes:
@@ -5229,6 +5236,9 @@ def handle_announcer_render_all():
                     **({"voice_id": voice_id} if voice_id else {})}), 202
 
 
+_LOCAL_SONG_URL_RE = re.compile(r"^/audio/(music/[A-Za-z0-9_-]+|walkup)/[A-Za-z0-9_-]+\.(mp3|m4a|ogg|wav)$")
+
+
 @app.route('/api/announcer/phonetics/<player_id>', methods=['POST'])
 def handle_announcer_phonetics(player_id):
     """Update phonetic spelling and TTS instruction for a player."""
@@ -5271,14 +5281,20 @@ def handle_announcer_phonetics(player_id):
             url = str((s or {}).get("url") or "").strip()[:500]
             if not url:
                 continue
-            if urlparse(url).scheme not in ("http", "https"):
+            # Uploaded songs live on this server (/audio/music/...), so a
+            # same-origin path is as valid as an http(s) link.
+            if urlparse(url).scheme not in ("http", "https") and not _LOCAL_SONG_URL_RE.match(url):
                 return jsonify({"error": "song url must be HTTP(S)"}), 400
             try:
                 start = max(0.0, min(float(s.get("start") or 0), 300.0))
             except (TypeError, ValueError):
                 start = 0.0
             sid = str(s.get("id") or "").strip()[:16] or uuid.uuid4().hex[:8]
-            songs.append({"id": sid, "url": url, "start": start})
+            entry = {"id": sid, "url": url, "start": start}
+            label = re.sub(r"\s+", " ", str(s.get("label") or "")).strip()[:80]
+            if label:
+                entry["label"] = label
+            songs.append(entry)
         updates["songs"] = songs
         # Keep the single-song fields in step for anything that still reads them.
         updates["walkup_song_url"] = songs[0]["url"] if songs else ""
@@ -5922,7 +5938,173 @@ def serve_music_clip(player_id, filename):
     target = serve_music_path(player_id, filename)
     if not target:
         return '', 404
-    return send_from_directory(str(target.parent), target.name, mimetype='audio/mpeg')
+    from announcer_media import mimetype_for
+    return send_from_directory(str(target.parent), target.name, mimetype=mimetype_for(target.name))
+
+
+# ---------------------------------------------------------------------------
+# Coach uploads (songs, calls, soundboard) and the manual batting order.
+# Multipart can't pass _guard_mutating_request (JSON-only), so upload routes
+# check the Origin here; _security_before_request has already applied the
+# team-password gate, the write token and the rate limit.
+# ---------------------------------------------------------------------------
+
+def _guard_multipart_origin():
+    origin = _request_origin()
+    if not origin:
+        return jsonify({"error": "origin_required"}), 403
+    if origin not in WRITE_ORIGINS:
+        logging.warning("[Security] Blocked upload from disallowed origin: %s", _sanitize_log(origin))
+        return jsonify({"error": "forbidden_origin"}), 403
+    return None
+
+
+def _uploaded_file():
+    """(filename, bytes) of the multipart `file` field, or (None, None)."""
+    f = request.files.get("file")
+    if not f:
+        return None, None
+    return (f.filename or ""), f.read()
+
+
+@app.route('/api/announcer/songs/<player_id>/upload', methods=['POST'])
+def handle_announcer_song_upload(player_id):
+    """Add an uploaded MP3/WAV/M4A to a player's walk-up songs (plays from the top)."""
+    blocked = _guard_multipart_origin() or _validate_player_id(player_id)
+    if blocked:
+        return blocked
+    import announcer_engine as ae
+    import announcer_media as am
+    player = ae.get_player_by_id(player_id)
+    if not player:
+        return jsonify({"error": "player_not_found"}), 404
+    if len(player.get("songs") or []) >= ae.MAX_SONGS:
+        return jsonify({"error": "songs_full", "max": ae.MAX_SONGS}), 409
+    filename, data = _uploaded_file()
+    if data is None:
+        return jsonify({"error": "file_required"}), 400
+    try:
+        song = am.save_song_upload(player_id, filename, data, request.form.get("label", ""))
+    except am.UploadError as e:
+        return jsonify({"error": e.code}), e.status
+    with ae._ROSTER_LOCK:
+        current = ae.get_player_by_id(player_id)
+        songs = list((current or {}).get("songs") or [])
+        if not current or len(songs) >= ae.MAX_SONGS:
+            return jsonify({"error": "songs_full", "max": ae.MAX_SONGS}), 409
+        songs.append(song)
+        updated = ae.update_player(player_id, {
+            "songs": songs, "walkup_song_url": songs[0]["url"], "intro_timestamp": songs[0]["start"],
+        })
+    logging.info("[Announcer] song uploaded: player=%s url=%s", _sanitize_log(player_id), song["url"])
+    return jsonify({"status": "ok", "song": song, "player": updated}), 201
+
+
+@app.route('/api/announcer/calls/<player_id>/upload', methods=['POST'])
+def handle_announcer_call_upload(player_id):
+    """Add a pre-recorded call (MP3/WAV/M4A) to a player's calls."""
+    blocked = _guard_multipart_origin() or _validate_player_id(player_id)
+    if blocked:
+        return blocked
+    import announcer_engine as ae
+    import announcer_media as am
+    if not ae.get_player_by_id(player_id):
+        return jsonify({"error": "player_not_found"}), 404
+    _filename, data = _uploaded_file()
+    if data is None:
+        return jsonify({"error": "file_required"}), 400
+    try:
+        clip_url = am.save_call_upload(player_id, data)
+    except am.UploadError as e:
+        return jsonify({"error": e.code}), e.status
+    with ae._ROSTER_LOCK:
+        current = ae.get_player_by_id(player_id) or {}
+        # A player with no call at all is ready once she has this one. An
+        # in-flight render (SIGN-019) and existing calls keep their status.
+        updates = {}
+        if not (current.get("intros") or []) and current.get("status") != "rendering":
+            updates = {"status": "ready", "error_message": "", "wrap_version": ae.STADIUM_WRAP_VERSION}
+        updated = ae.add_intro(player_id, clip_url, "upload", False, updates)
+    if not updated:
+        return jsonify({"error": "player_not_found"}), 404
+    logging.info("[Announcer] call uploaded: player=%s clip=%s", _sanitize_log(player_id), clip_url)
+    return jsonify({"status": "ok", "clip_url": clip_url, "player": updated}), 201
+
+
+@app.route('/api/announcer/soundboard', methods=['GET'])
+def handle_soundboard_list():
+    """Built-in effects (rendered on first listing) followed by uploaded ones."""
+    import announcer_media as am
+    return jsonify({"sounds": am.list_sounds(), "max_uploaded": am.MAX_SOUNDS})
+
+
+@app.route('/api/announcer/soundboard/upload', methods=['POST'])
+def handle_soundboard_upload():
+    """Add an effect: multipart `file` (MP3/WAV/M4A) and optional `label` (24 chars)."""
+    blocked = _guard_multipart_origin()
+    if blocked:
+        return blocked
+    import announcer_media as am
+    filename, data = _uploaded_file()
+    if data is None:
+        return jsonify({"error": "file_required"}), 400
+    try:
+        sound = am.add_sound(filename, data, request.form.get("label", ""))
+    except am.UploadError as e:
+        return jsonify({"error": e.code}), e.status
+    return jsonify({"status": "ok", "sound": sound}), 201
+
+
+@app.route('/api/announcer/soundboard/<sound_id>', methods=['DELETE'])
+def handle_soundboard_delete(sound_id):
+    """Remove an uploaded effect and its file. Built-ins can't be removed."""
+    blocked = _guard_mutating_request() or _validate_path_slug(sound_id, "sound_id")
+    if blocked:
+        return blocked
+    import announcer_media as am
+    try:
+        am.remove_sound(sound_id)
+    except am.UploadError as e:
+        return jsonify({"error": e.code}), e.status
+    return jsonify({"status": "removed", "id": sound_id})
+
+
+@app.route('/audio/soundboard/<filename>', methods=['GET'])
+def serve_soundboard_audio(filename):
+    """Serve a soundboard effect (nginx gates it behind the team password)."""
+    import announcer_media as am
+    target = am.soundboard_path(filename)
+    if not target:
+        return '', 404
+    return send_from_directory(str(target.parent), target.name, mimetype=am.mimetype_for(target.name))
+
+
+@app.route('/api/announcer/batting-order', methods=['PUT'])
+def handle_batting_order_put():
+    """Save the coach's batting order, {"order": [player ids]}. It wins over GameChanger's."""
+    blocked = _guard_mutating_request()
+    if blocked:
+        return blocked
+    import announcer_engine as ae
+    import announcer_media as am
+    data = request.get_json(silent=True) or {}
+    known = {p.get("id") for p in ae.load_announcer_roster() if p.get("id")}
+    try:
+        record = am.save_batting_order(data.get("order"), known or None)
+    except am.UploadError as e:
+        return jsonify({"error": e.code}), e.status
+    return jsonify({"status": "ok", **record})
+
+
+@app.route('/api/announcer/batting-order', methods=['DELETE'])
+def handle_batting_order_delete():
+    """Drop the coach's order; the GameChanger / optimiser order applies again."""
+    blocked = _guard_mutating_request()
+    if blocked:
+        return blocked
+    import announcer_media as am
+    am.clear_batting_order()
+    return jsonify({"status": "reset"})
 
 
 @app.route('/api/music/scan/<player_id>', methods=['POST'])
@@ -6177,6 +6359,23 @@ def handle_announcer_next_songs():
 
 @app.route('/api/announcer/game-lineup', methods=['GET'])
 def handle_announcer_game_lineup():
+    """The game lineup plus the coach's own order (`manual_order`, [] if none).
+
+    The PWA's batting order is manual_order > GameChanger > optimiser > roster.
+    """
+    payload = _announcer_game_lineup_payload()
+    try:
+        from announcer_media import read_batting_order
+        manual = read_batting_order()
+    except Exception as e:  # never lose the lineup over a bad order file
+        logging.warning("[Announcer] batting order unreadable: %s", e)
+        manual = None
+    payload["manual_order"] = manual["order"] if manual else []
+    payload["manual_updated_at"] = manual["updated_at"] if manual else None
+    return jsonify(payload)
+
+
+def _announcer_game_lineup_payload() -> dict:
     """Return the batting order for the current/most-recent game.
 
     Priority:
@@ -6241,12 +6440,12 @@ def handle_announcer_game_lineup():
                     })
 
             if players:
-                return jsonify({
+                return {
                     "source": "gc_game",
                     "source_label": f"GC {data.get('date', game_file.stem[:10])} vs {data.get('opponent', '?')}",
                     "game_date": data.get("date", game_file.stem[:10]),
                     "players": players,
-                })
+                }
         except Exception:
             continue
 
@@ -6270,16 +6469,16 @@ def handle_announcer_game_lineup():
                         "number": num,
                         "slot": p.get("slot", len(players) + 1),
                     })
-                return jsonify({
+                return {
                     "source": "optimizer",
                     "source_label": f"Optimizer ({strategy})",
                     "game_date": None,
                     "players": players,
-                })
+                }
         except Exception:
             pass
 
-    return jsonify({"source": "none", "source_label": "Roster order", "game_date": None, "players": []})
+    return {"source": "none", "source_label": "Roster order", "game_date": None, "players": []}
 
 
 # ---------------------------------------------------------------------------
