@@ -313,16 +313,21 @@ class TestWriteJsonFile:
 class TestPickScoreboardTarget:
     """_pick_scoreboard_target(games, now, today_str) → game dict or None."""
 
+    # A fixed mid-afternoon "now": with the real clock, "+2 hours" written
+    # late in the evening ET lands on tomorrow's date and the today-game
+    # branch never matches (failed nightly after 22:00 ET).
+    _FIXED_NOW = datetime(2026, 9, 28, 14, 0, tzinfo=ET)
+
     def _now(self):
-        return datetime.now(ET)
+        return self._FIXED_NOW
 
     def _ts(self, offset_hours=0):
-        """ISO timestamp offset_hours from now."""
-        t = datetime.now(timezone.utc) + timedelta(hours=offset_hours)
+        """ISO timestamp offset_hours from the fixed now."""
+        t = self._FIXED_NOW.astimezone(timezone.utc) + timedelta(hours=offset_hours)
         return t.isoformat()
 
     def _today(self):
-        return datetime.now(ET).date().isoformat()
+        return self._FIXED_NOW.date().isoformat()
 
     def test_empty_games_returns_none(self):
         assert _pick([], self._now(), self._today()) is None

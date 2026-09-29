@@ -11,6 +11,8 @@
 """
 from unittest.mock import MagicMock
 
+from datetime import datetime, timedelta, timezone
+
 import sync_daemon as sd
 
 
@@ -79,7 +81,9 @@ def _fake_live_game():
     return {
         "id": "game-live",
         "game_status": "in_progress",
-        "start_ts": "2026-09-28T20:00:00.000Z",
+        # 30 minutes ago, so the game is "live" whenever the test runs
+        # (a pinned date went stale the next evening).
+        "start_ts": (datetime.now(timezone.utc) - timedelta(minutes=30)).isoformat(),
         "opponent_team": {"name": "Riptide"},
         "home_away": "home",
         "score": {"team": 5, "opponent_team": 3},
