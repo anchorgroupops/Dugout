@@ -6097,6 +6097,8 @@ def handle_batting_order_put():
     import announcer_engine as ae
     import announcer_media as am
     data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "bad_request"}), 400
     active = [p["id"] for p in ae.load_announcer_roster()
               if p.get("id") and p.get("is_active") is not False and not p.get("is_ghost")]
     try:

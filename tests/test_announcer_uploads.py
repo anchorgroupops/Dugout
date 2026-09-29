@@ -406,3 +406,11 @@ class TestBattingOrder:
         am.BATTING_ORDER_FILE.write_text("{not json")
         body = env.client.get("/api/announcer/game-lineup").get_json()
         assert body["manual_order"] == []
+
+
+def test_batting_order_rejects_non_object_body(env):
+    # A bare JSON list used to raise inside the route (500); it is a 400 now.
+    r = env.client.put("/api/announcer/batting-order", data="[1,2]",
+                       headers={"Origin": ORIGIN, "Content-Type": "application/json"})
+    assert r.status_code == 400
+    assert r.get_json() == {"error": "bad_request"}
