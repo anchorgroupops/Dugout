@@ -8,10 +8,12 @@
  *
  * Playback flow (walk-up = call + song):
  *   1. The announcer call plays first, from t = 0
- *   2. The song comes in OVERLAP seconds before the call ends, at its
- *      in-point (the per-song `start`, seconds into the track), ducked to
- *      DUCK_LEVEL under the call's tail
+ *   2. The song comes in `gap` seconds after the call ends (the player's
+ *      song_gap; negative = under the call's tail, default DEFAULT_GAP), at
+ *      its in-point (the per-song `start`, seconds into the track). While it
+ *      overlaps the call it is ducked to DUCK_LEVEL
  *   3. When the call ends the song ramps to full over DUCK_RAMP_MS and plays on
+ *   4. Stop fades both over FADE_MS (fadeOut); a second press cuts at once
  * Both sources and the gain ramp are scheduled up front on the AudioContext
  * clock (planWalkup gives the numbers), so there are no timers to drift.
  *
@@ -31,7 +33,12 @@
 
 const DUCK_LEVEL = 0.4; // keep 40% of the music under the call
 const DUCK_RAMP_MS = 300;
-const OVERLAP = 0.5; // seconds the song comes in before the call ends
+// Where the song comes in relative to the end of the call, in seconds:
+// negative = under the call's tail (overlap), positive = silence after it.
+export const DEFAULT_GAP = -0.5;
+export const GAP_MIN = -3;
+export const GAP_MAX = 3;
+export const FADE_MS = 1500;
 const FETCH_TIMEOUT_MS = 15000;
 // Decoded audio is large (a 3-minute song is ~60 MB of float PCM), so keep
 // only a handful of buffers; the service worker caches the compressed files.
@@ -66,7 +73,7 @@ export function subscribe(fn) {
 
 /**
  * Current playback state:
- *   status  'idle' | 'loading' | 'playing' | 'error'
+ *   status  'idle' | 'loading' | 'playing' | 'fading' | 'error'
  *   key     caller's id for what is playing (e.g. a player id)
  *   label / detail  what the bar shows
  *   warning a part that failed while the rest plays ("song didn't load")
@@ -205,24 +212,47 @@ export async function warm(urls, concurrency = 3) {
   await Promise.all(Array.from({ length: Math.min(concurrency, queue.length) }, worker));
 }
 
+/** A per-player gap setting clamped to what the engine accepts; anything unusable is the default. */
+export function clampGap(raw) {
+  const n = Number(raw);
+  if (raw === null || raw === undefined || raw === '' || !Number.isFinite(n)) return DEFAULT_GAP;
+  return Math.max(GAP_MIN, Math.min(GAP_MAX, n));
+}
+
 /**
  * Where each part of a walk-up sits on the timeline, in seconds from the tap.
- * The call starts at 0; the song starts OVERLAP seconds before the call ends
- * (at 0 if the call is shorter than that, or if there is no call), playing
- * from `inPoint` seconds into the track. An in-point that is negative, not a
- * number, or past the end of the song plays the song from the top.
+ * The call starts at 0; the song starts `gap` seconds after the call ends
+ * (a negative gap brings it in under the call's tail, never before 0), playing
+ * from `inPoint` seconds into the track. With no call the song starts at 0
+ * whatever the gap. An in-point that is negative, not a number, or past the
+ * end of the song plays the song from the top.
  *
  * @returns {{ songAt: number, songOffset: number, callEnd: number, total: number }}
  *   total is when the last part ends (drives the progress bar).
  */
-export function planWalkup({ clipDuration = 0, songDuration = 0, inPoint = 0, overlap = OVERLAP } = {}) {
+export function planWalkup({ clipDuration = 0, songDuration = 0, inPoint = 0, gap = DEFAULT_GAP } = {}) {
   const callEnd = Math.max(0, Number(clipDuration) || 0);
   const songLen = Math.max(0, Number(songDuration) || 0);
   let songOffset = Math.max(0, Number(inPoint) || 0);
   if (songOffset >= songLen) songOffset = 0;
-  const songAt = Math.max(0, callEnd - Math.max(0, overlap));
+  const songAt = callEnd ? Math.max(0, callEnd + clampGap(gap)) : 0;
   const songEnd = songLen ? songAt + (songLen - songOffset) : 0;
   return { songAt, songOffset, callEnd, total: Math.max(callEnd, songEnd) };
+}
+
+/**
+ * What the one big button does next, from the playback status. Pure, so the
+ * button's state machine is tested without an AudioContext:
+ *   idle    -> play the up-next batter
+ *   loading / playing -> fade out
+ *   fading  -> stop dead (the second press during a fade)
+ *   error   -> retry
+ */
+export function mainAction(status) {
+  if (status === 'loading' || status === 'playing') return 'fade';
+  if (status === 'fading') return 'stop';
+  if (status === 'error') return 'retry';
+  return 'play';
 }
 
 /**
@@ -238,8 +268,9 @@ export function planWalkup({ clipDuration = 0, songDuration = 0, inPoint = 0, ov
  * @param {string} [o.songUrl]
  * @param {string} [o.clipUrl]
  * @param {number} [o.songStart=0] the song's in-point: seconds into the track it starts from
+ * @param {number} [o.songGap=DEFAULT_GAP] seconds between the call ending and the song (negative = overlap)
  */
-export async function play({ key, label = '', detail = '', songUrl = '', clipUrl = '', songStart = 0 }) {
+export async function play({ key, label = '', detail = '', songUrl = '', clipUrl = '', songStart = 0, songGap = DEFAULT_GAP }) {
   haltAudio();
   const gen = ++generation;
   const audioCtx = getContext(); // before any await: must run inside the tap
@@ -273,6 +304,7 @@ export async function play({ key, label = '', detail = '', songUrl = '', clipUrl
     clipDuration: clipBuf ? clipBuf.duration : 0,
     songDuration: walkupBuf ? walkupBuf.duration : 0,
     inPoint: songStart,
+    gap: songGap,
   });
   const duration = plan.total;
   const now = audioCtx.currentTime;
@@ -291,9 +323,10 @@ export async function play({ key, label = '', detail = '', songUrl = '', clipUrl
     if (--running <= 0) finish();
   };
 
+  clipGain.gain.cancelScheduledValues?.(now);
   clipGain.gain.setValueAtTime(1.0, now);
   walkupGain.gain.cancelScheduledValues?.(now);
-  if (walkupBuf && clipBuf) {
+  if (walkupBuf && clipBuf && plan.songAt < plan.callEnd) {
     // Ducked under the call's tail, back to full as the call ends.
     const callEnd = now + plan.callEnd;
     walkupGain.gain.setValueAtTime(DUCK_LEVEL, now);
@@ -411,6 +444,38 @@ export function stop() {
   setState(IDLE);
 }
 
+/**
+ * Fade the walk-up out over `ms` and then stop it. Only the coach's Stop tap
+ * uses this; switching batters still cuts at once (play() -> haltAudio()).
+ * The ramp starts from each gain's value *right now*, not its last scheduled
+ * point (mid-song that point is the post-duck ramp to 1.0, so ramping from it
+ * would jump). Takes a new generation so the fading sources' `ended` events
+ * are ignored, and the timer checks it too: a Play on the next batter during
+ * the fade replaces the audio itself and this fade's timer then does nothing.
+ */
+export function fadeOut(ms = FADE_MS) {
+  if (state.status !== 'playing' && state.status !== 'loading') { stop(); return; }
+  if (!ctx || state.status === 'loading') { stop(); return; } // nothing audible yet
+  const gen = ++generation;
+  if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
+  const t = ctx.currentTime;
+  for (const g of [walkupGain, clipGain]) {
+    if (!g) continue;
+    try {
+      const v = g.gain.value;
+      g.gain.cancelScheduledValues?.(t);
+      g.gain.setValueAtTime(v, t);
+      g.gain.linearRampToValueAtTime(0, t + ms / 1000);
+    } catch { /* ok */ }
+  }
+  setState({ ...state, status: 'fading' });
+  setTimeout(() => {
+    if (gen !== generation) return; // something newer took over
+    haltAudio();
+    setState(IDLE);
+  }, ms);
+}
+
 /** Clear a finished error so the bar goes back to idle. */
 export function dismissError() {
   if (state.status === 'error') setState(IDLE);
@@ -430,7 +495,7 @@ export function cleanup() {
 }
 
 export function getIsPlaying() {
-  return state.status === 'playing' || state.status === 'loading';
+  return state.status === 'playing' || state.status === 'loading' || state.status === 'fading';
 }
 
 /** Set the master volume (0.0 to 1.0). */
