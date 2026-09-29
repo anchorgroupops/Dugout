@@ -370,8 +370,7 @@ class TestPickScoreboardTarget:
         assert result is live
 
     def test_past_game_not_returned_as_today(self):
-        yesterday_ts = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
-        g = {"game_status": "final", "start_ts": yesterday_ts}
+        g = {"game_status": "final", "start_ts": self._ts(-24)}  # yesterday, from the fixed clock
         result = _pick([g], self._now(), self._today())
         assert result is None
 
