@@ -479,7 +479,7 @@ class TestEmptyExportGuard:
         csv_path = tmp_path / "season_stats_20260928.csv"
         csv_path.write_text(
             '﻿"","","","Batting"\r\n"Number","Last","First","GP"\r\n"","","",""',
-            encoding="utf-8",
+            encoding="utf-8", newline="",
         )
 
         with pytest.raises(RuntimeError, match="no player rows"):
