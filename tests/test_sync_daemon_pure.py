@@ -289,6 +289,7 @@ class TestWriteJsonFile:
         _write_json(p, {"new": True})
         assert json.loads(p.read_text()) == {"new": True}
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="Windows has no POSIX mode bits")
     def test_file_permissions_are_644(self, tmp_path):
         import stat
         p = tmp_path / "out.json"
@@ -415,7 +416,7 @@ class TestCandidateSecretsCsvPaths:
         monkeypatch.setenv("SECRETS_CSV", "/tmp/my_secrets.csv")
         result = sync_daemon._candidate_secrets_csv_paths()
         paths = [str(p) for p in result]
-        assert "/tmp/my_secrets.csv" in paths
+        assert str(Path("/tmp/my_secrets.csv")) in paths
 
     def test_no_duplicates(self, monkeypatch):
         monkeypatch.delenv("SECRETS_CSV", raising=False)

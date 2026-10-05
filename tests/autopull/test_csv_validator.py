@@ -160,7 +160,7 @@ _LEGACY_BASELINE = ["Batting", "Fielding", "Pitching", '﻿""']
 
 def _gc_csv(tmp_path: Path, body: str, trailer: str = _GC_TRAILER) -> Path:
     p = tmp_path / "season_stats_gc.csv"
-    p.write_text(_GC_SECTION + _GC_HEADER + body + trailer, encoding="utf-8")
+    p.write_text(_GC_SECTION + _GC_HEADER + body + trailer, encoding="utf-8", newline="")
     return p
 
 
@@ -170,7 +170,7 @@ class TestGcExportLayout:
         # header row, one blank row — no players.
         p = tmp_path / "fall.csv"
         p.write_text(_GC_SECTION + _GC_HEADER + _GC_BLANK.rstrip("\r\n"),
-                     encoding="utf-8")
+                     encoding="utf-8", newline="")
         result = cv.validate(p, known_columns=_LEGACY_BASELINE)
         assert result.accepted is False
         assert "no data rows" in result.reason.lower()
@@ -214,7 +214,7 @@ class TestGcExportLayout:
         p.write_text(
             _GC_SECTION + '"Jersey","Name","Foo","Bar","Baz","Qux","","","",""\r\n'
             '"7","Tester","1","2","3","4","","","",""\r\n',
-            encoding="utf-8",
+            encoding="utf-8", newline="",
         )
         result = cv.validate(p, known_columns=_GC_KNOWN)
         assert result.accepted is False

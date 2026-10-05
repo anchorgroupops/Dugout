@@ -15,6 +15,17 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "tools"))
 
 import db_sync
 
+# A socket in a directory that does not exist: connect() fails instantly with
+# the same OperationalError as an unreachable host. The real default host
+# (192.168.7.222) and 127.0.0.1:1 each block on a TCP connect (~21 s / ~2 s on
+# Windows), which stalled the full suite.
+_UNREACHABLE_DB_URL = "postgresql:///noexist?host=/nonexistent-socket-dir"
+
+
+@pytest.fixture(autouse=True)
+def _no_live_db(monkeypatch):
+    monkeypatch.setenv("LIBRARIAN_DB_URL", _UNREACHABLE_DB_URL)
+
 
 class TestDbUrl:
     def test_returns_default_when_env_unset(self, monkeypatch):
@@ -35,14 +46,14 @@ class TestIsAvailable:
         assert isinstance(result, bool)
 
     def test_returns_false_when_no_db(self, monkeypatch):
-        monkeypatch.setenv("LIBRARIAN_DB_URL", "postgresql://bad:bad@127.0.0.1:1/noexist")
+        monkeypatch.setenv("LIBRARIAN_DB_URL", _UNREACHABLE_DB_URL)
         result = db_sync.is_available()
         assert result is False
 
 
 class TestEnsureTables:
     def test_returns_false_when_no_db(self, monkeypatch):
-        monkeypatch.setenv("LIBRARIAN_DB_URL", "postgresql://bad:bad@127.0.0.1:1/noexist")
+        monkeypatch.setenv("LIBRARIAN_DB_URL", _UNREACHABLE_DB_URL)
         result = db_sync.ensure_tables()
         assert result is False
 
@@ -53,7 +64,7 @@ class TestEnsureTables:
 
 class TestLogSyncRun:
     def test_returns_false_when_no_db(self, monkeypatch):
-        monkeypatch.setenv("LIBRARIAN_DB_URL", "postgresql://bad:bad@127.0.0.1:1/noexist")
+        monkeypatch.setenv("LIBRARIAN_DB_URL", _UNREACHABLE_DB_URL)
         result = db_sync.log_sync_run("nb-1", "My Notebook", 5, 0, 1200)
         assert result is False
 
@@ -72,7 +83,7 @@ class TestLogSyncRun:
 
 class TestLogSource:
     def test_returns_false_when_no_db(self, monkeypatch):
-        monkeypatch.setenv("LIBRARIAN_DB_URL", "postgresql://bad:bad@127.0.0.1:1/noexist")
+        monkeypatch.setenv("LIBRARIAN_DB_URL", _UNREACHABLE_DB_URL)
         result = db_sync.log_source("nb-1", "https://example.com/vid", "Title")
         assert result is False
 

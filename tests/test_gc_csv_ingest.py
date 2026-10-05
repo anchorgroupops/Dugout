@@ -732,7 +732,7 @@ class TestMainExitCodes:
         csv_path = tmp_path / "empty.csv"
         csv_path.write_text(
             '﻿"","","","Batting"\r\n"Number","Last","First","GP"\r\n"","","",""',
-            encoding="utf-8",
+            encoding="utf-8", newline="",
         )
         assert self._run(monkeypatch, tmp_path, [str(csv_path), "--team", "sharks"]) == 1
         assert json.loads((team_dir / "team.json").read_text()) == {"roster": [{"first": "Alex"}]}
