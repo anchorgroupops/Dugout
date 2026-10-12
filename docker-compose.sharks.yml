@@ -58,6 +58,8 @@ services:
       context: .
       dockerfile: Dockerfile.scraper
     container_name: sharks_sync
+    # Pinned to the image's `sharks` user; host data/ and logs/ are owned 999:999.
+    user: "999:999"
     restart: unless-stopped
     environment:
       - PYTHONDONTWRITEBYTECODE=1
@@ -118,6 +120,8 @@ services:
       context: .
       dockerfile: Dockerfile.scraper
     container_name: sharks_api
+    # Pinned to the image's `sharks` user; host data/ and logs/ are owned 999:999.
+    user: "999:999"
     restart: unless-stopped
     command:
       - gunicorn

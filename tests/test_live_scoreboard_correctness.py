@@ -1,76 +1,16 @@
 """Regression tests for two live-scoring defects found in a hardening audit:
 
-1. `_fetch_gc_live_events` overwrote `outs`/`runners` with every event it
-   walked past, so when the stream had no `on_deck`/`next_batter` field (the
-   common case) the loop walked all the way to the oldest event and returned
-   *that* event's outs/runners as "current".
+1. (Retired) `_fetch_gc_live_events` called an unauthenticated GC endpoint
+   that never answered; live play-by-play now comes from the dugout-tablet
+   worker and is covered by tests/test_live_tablet_routes.py.
 2. `/api/scoreboard` unconditionally overwrote a live game's score with
    whatever local `games/*.json` snapshot matched by date/gc_game_id — those
    files are CSV-import snapshots (final scores), so a live game could show a
    stale or wrong score as current.
 """
-from unittest.mock import MagicMock
-
 from datetime import datetime, timedelta, timezone
 
 import sync_daemon as sd
-
-
-# ---------------------------------------------------------------------------
-# 1. _fetch_gc_live_events must not overwrite outs/runners with older events
-# ---------------------------------------------------------------------------
-
-def test_live_events_uses_most_recent_outs_and_runners(monkeypatch):
-    events = [
-        {
-            "type": "at_bat",
-            "data": {
-                "outs": 0,
-                "runners": [{"base": "1"}],
-                "description": "Old at-bat, 0 outs, runner on first",
-            },
-        },
-        {
-            "type": "at_bat",
-            "data": {
-                "outs": 2,
-                "runners": [{"base": "3"}],
-                "description": "Current at-bat, 2 outs, runner on third",
-                "batter": {"name": "Jane Doe", "number": "7"},
-            },
-        },
-    ]
-    resp = MagicMock(status_code=200)
-    resp.json.return_value = events
-    monkeypatch.setattr(sd.requests, "get", lambda *a, **k: resp)
-
-    result = sd._fetch_gc_live_events("game-123")
-
-    assert result["outs"] == 2
-    assert result["runners"] == {"first": False, "second": False, "third": True}
-    assert result["last_play"] == "Current at-bat, 2 outs, runner on third"
-
-
-def test_live_events_single_event_still_works(monkeypatch):
-    events = [
-        {
-            "type": "at_bat",
-            "data": {
-                "outs": 1,
-                "runners": [{"base": "2"}],
-                "description": "Solo event",
-                "batter": {"name": "A", "number": "1"},
-            },
-        },
-    ]
-    resp = MagicMock(status_code=200)
-    resp.json.return_value = events
-    monkeypatch.setattr(sd.requests, "get", lambda *a, **k: resp)
-
-    result = sd._fetch_gc_live_events("game-1")
-
-    assert result["outs"] == 1
-    assert result["runners"] == {"first": False, "second": True, "third": False}
 
 
 # ---------------------------------------------------------------------------

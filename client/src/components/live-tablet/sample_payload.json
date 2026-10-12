@@ -1,0 +1,140 @@
+{
+ "status": "live",
+ "armed": true,
+ "armed_until": "2026-10-12T01:30:00+00:00",
+ "updated_at": "2026-10-11T22:59:55+00:00",
+ "age_s": 5,
+ "error": null,
+ "field": {
+  "width": 320,
+  "height": 320,
+  "home": [
+   160,
+   292
+  ]
+ },
+ "game": {
+  "opponent": "Riptide Rebels",
+  "sharks_home": false,
+  "inning": 3,
+  "half": "bottom",
+  "outs": 0,
+  "balls": 2,
+  "strikes": 1,
+  "score": {
+   "sharks": 7,
+   "opponent": 13
+  },
+  "sharks_batting": false,
+  "bases": {
+   "1": null,
+   "2": null,
+   "3": {
+    "id": "id036",
+    "name": "Rival 3",
+    "number": "",
+    "team": "opponent"
+   }
+  },
+  "pitcher": {
+   "id": "id002",
+   "name": "Shark 5",
+   "number": "9",
+   "team": "sharks"
+  },
+  "last_play": "Walk"
+ },
+ "batter": {
+  "id": "id121",
+  "name": "Rival 9",
+  "number": "",
+  "team": "opponent",
+  "today": [
+   {
+    "inning": 1,
+    "result": "Walk"
+   },
+   {
+    "inning": 2,
+    "result": "Single"
+   }
+  ],
+  "history": {
+   "games": 2,
+   "pa": 5,
+   "hits": 2,
+   "in_play": 3
+  },
+  "spray": [
+   {
+    "x": 211,
+    "y": 138,
+    "result": "Single",
+    "hit": true,
+    "play_type": "fly_ball",
+    "today": true,
+    "date": "2026-10-11"
+   },
+   {
+    "x": 211,
+    "y": 138,
+    "result": "Single",
+    "hit": true,
+    "play_type": "fly_ball",
+    "today": false,
+    "date": "2026-09-15"
+   },
+   {
+    "x": 212,
+    "y": 139,
+    "result": "Fly Out",
+    "hit": false,
+    "play_type": "fly_ball",
+    "today": false,
+    "date": "2026-09-15"
+   }
+  ]
+ },
+ "on_deck": {
+  "id": "id038",
+  "name": "Rival 5",
+  "number": "",
+  "team": "opponent",
+  "today": [
+   {
+    "inning": 1,
+    "result": "Single"
+   },
+   {
+    "inning": 2,
+    "result": "Walk"
+   }
+  ],
+  "history": {
+   "games": 2,
+   "pa": 4,
+   "hits": 2,
+   "in_play": 2
+  },
+  "spray": [
+   {
+    "x": 107,
+    "y": 139,
+    "result": "Single",
+    "hit": true,
+    "play_type": "ground_ball",
+    "today": true,
+    "date": "2026-10-11"
+   },
+   {
+    "x": 107,
+    "y": 139,
+    "result": "Single",
+    "hit": true,
+    "play_type": "ground_ball",
+    "today": false,
+    "date": "2026-09-15"
+   }
+  ]
+ }
+}
