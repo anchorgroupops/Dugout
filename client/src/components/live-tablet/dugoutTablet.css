@@ -1,0 +1,67 @@
+/* Dugout tablet: dark, high contrast, readable at 2 m outdoors. */
+.dt-root { background: #000; color: #fff; min-height: 70vh; display: flex; flex-direction: column; gap: 8px; padding: 10px; box-sizing: border-box; font-family: inherit; }
+.dt-root.full { position: fixed; inset: 0; min-height: 100vh; overflow: auto; z-index: 1000; }
+
+.dt-banner { padding: 8px 14px; font-size: 22px; font-weight: 800; border-radius: 8px; text-align: center; }
+.dt-banner.starting { background: #1e3a5f; color: #fff; }
+.dt-banner.stale { background: #ffb000; color: #000; }
+.dt-banner.error { background: #d00000; color: #fff; }
+
+.dt-main { flex: 1; display: flex; gap: 14px; min-height: 0; }
+.dt-left { flex: 0 0 55%; min-width: 0; display: flex; }
+.dt-right { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+
+.dt-field-wrap { flex: 1; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.dt-field { width: 100%; height: auto; max-height: calc(100vh - 110px); border-radius: 10px; background: #0b1f14; }
+.dt-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 18px; font-weight: 700; align-items: center; }
+.dt-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.dt-legend i { width: 16px; height: 16px; border-radius: 50%; display: inline-block; }
+.dt-leg-hit { background: #fff; }
+.dt-leg-out { border: 3px solid #fff; box-sizing: border-box; }
+.dt-leg-today { border: 3px dashed #fff; box-sizing: border-box; }
+.dt-zones { color: #ffd23f; margin-left: auto; }
+.dt-nobatter { margin: auto; font-size: 32px; font-weight: 800; color: #ffd23f; }
+
+.dt-score { display: flex; align-items: stretch; justify-content: space-between; gap: 8px; background: #111; border-radius: 10px; padding: 8px 12px; }
+.dt-score-team { display: flex; flex-direction: column; align-items: center; min-width: 0; flex: 1; }
+.dt-score-team span { font-size: 22px; font-weight: 800; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.dt-score-team b { font-size: 84px; line-height: 1; font-weight: 900; color: #ffd23f; }
+.dt-inning { align-self: center; font-size: 56px; font-weight: 900; line-height: 1; text-align: center; min-width: 90px; }
+.dt-half { color: #ffd23f; margin-right: 4px; font-size: 44px; }
+
+.dt-state { display: flex; align-items: center; justify-content: space-between; background: #111; border-radius: 10px; padding: 8px 12px; }
+.dt-counts { display: flex; flex-direction: column; gap: 6px; }
+.dt-count { display: flex; align-items: center; gap: 8px; }
+.dt-count-label { font-size: 36px; font-weight: 900; width: 36px; }
+.dt-dot { width: 40px; height: 40px; border-radius: 50%; border: 4px solid #666; box-sizing: border-box; display: inline-block; }
+.dt-dot.ball.on { background: #38d430; border-color: #38d430; }
+.dt-dot.strike.on { background: #ffd23f; border-color: #ffd23f; }
+.dt-dot.out.on { background: #ff3b30; border-color: #ff3b30; }
+.dt-diamond { width: 150px; height: 138px; }
+
+.dt-batter { background: #111; border-radius: 10px; padding: 8px 12px; }
+.dt-batter.compact { padding: 6px 12px; }
+.dt-batter-top { display: flex; align-items: center; gap: 10px; }
+.dt-tag { font-size: 18px; font-weight: 800; color: #9ad; letter-spacing: 1px; }
+.dt-badge { font-size: 16px; font-weight: 900; padding: 2px 10px; border-radius: 999px; }
+.dt-badge.opp { background: #ff3b30; color: #fff; }
+.dt-badge.sharks { background: #00a6c0; color: #000; }
+.dt-name { font-size: 40px; font-weight: 900; line-height: 1.1; overflow-wrap: anywhere; }
+.dt-batter.compact .dt-name { font-size: 26px; }
+.dt-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.dt-chip { background: #2a2a2a; border: 2px solid #ffd23f; color: #fff; font-size: 20px; font-weight: 800; padding: 2px 10px; border-radius: 8px; }
+.dt-chip.dim { border-color: #555; color: #bbb; }
+.dt-history { font-size: 22px; font-weight: 700; color: #ddd; margin-top: 4px; }
+.dt-pitcher { font-size: 22px; font-weight: 800; color: #ccc; }
+
+.dt-idle { margin: auto; display: flex; flex-direction: column; align-items: center; gap: 24px; }
+.dt-idle-title { font-size: 44px; font-weight: 900; }
+.dt-start { font-size: 40px; font-weight: 900; padding: 22px 48px; border-radius: 16px; border: 0; background: #ffd23f; color: #000; cursor: pointer; }
+.dt-stop { align-self: flex-end; font-size: 20px; font-weight: 800; padding: 8px 20px; border-radius: 10px; border: 2px solid #888; background: #222; color: #fff; cursor: pointer; margin-top: auto; }
+.dt-start:disabled, .dt-stop:disabled { opacity: 0.5; }
+
+@media (orientation: portrait) {
+  .dt-main { flex-direction: column; }
+  .dt-left { flex: none; }
+  .dt-field { max-height: 55vh; }
+}

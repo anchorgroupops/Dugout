@@ -3332,7 +3332,7 @@ class TestCachedLiveEvents:
         # Inject an expired cache entry
         sd._LIVE_EVENTS_CACHE[game_id] = (_t.time() - 10, {"old": "data"})
         fresh_data = {"new": "events"}
-        with patch("sync_daemon._fetch_gc_live_events", return_value=fresh_data):
+        with patch("sync_daemon._live_play_from_worker", return_value=fresh_data):
             result = sd._cached_live_events(game_id)
         assert result == fresh_data
         del sd._LIVE_EVENTS_CACHE[game_id]

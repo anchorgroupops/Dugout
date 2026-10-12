@@ -12,7 +12,7 @@ import hmac
 import ipaddress
 import socket
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from urllib.parse import urlparse
 
@@ -65,6 +65,7 @@ N8N_WEBHOOK_URL = os.getenv("N8N_WEBHOOK_URL", "").strip()
 # fallbacks behind GC_TEAM_ID / GC_SEASON_SLUG; they used to be hard-coded to
 # the Spring 2026 team, so a box without a .env kept serving last season.
 from team_registry import RegistryError, find_season_csv, own_team, pick_team_file, season_label
+import live_tablet
 try:
     _OWN_TEAM = own_team()
     GC_TEAM_ID_DEFAULT, GC_SEASON_SLUG_DEFAULT = _OWN_TEAM.id, _OWN_TEAM.season_slug
@@ -461,6 +462,7 @@ APP_SESSION_MAX_AGE = 180 * 24 * 60 * 60
 APP_LOGIN_FAIL_DELAY_SEC = 0.3
 APP_AUTH_EXEMPT_PATHS = frozenset({
     "/api/auth/login", "/api/auth/check", "/api/auth/logout", "/api/health", "/api/deploy",
+    "/api/live/status",
 })
 
 
@@ -2726,7 +2728,7 @@ def _cached_live_events(gc_game_id: str) -> dict | None:
     cached = _LIVE_EVENTS_CACHE.get(gc_game_id)
     if cached and cached[0] > now:
         return cached[1]
-    data = _fetch_gc_live_events(gc_game_id)
+    data = _live_play_from_worker(gc_game_id)
     _LIVE_EVENTS_CACHE[gc_game_id] = (now + _LIVE_EVENTS_CACHE_TTL, data)
     return data
 
@@ -2887,113 +2889,83 @@ def _build_opponent_scouting(opp_slug: str, live_batting: list) -> dict:
     }
 
 
-def _fetch_gc_live_events(gc_game_id: str) -> dict | None:
-    """Attempt to fetch live play-by-play from GC events API.
-    Returns current batter, on-deck batter, runners, outs, last play — or None on failure."""
-    gc_api_base = "https://api.team-manager.gc.com"
+def _live_play_from_worker(gc_game_id: str) -> dict | None:
+    """Live play-by-play for the scoreboard, from the dugout-tablet worker.
 
-    try:
-        resp = requests.get(
-            f"{gc_api_base}/game-streams/{gc_game_id}/events",
-            timeout=8,
-        )
-        if resp.status_code != 200:
-            return None
-
-        events = resp.json()
-        if not isinstance(events, list) or not events:
-            return None
-
-        current_batter = None
-        next_batter = None
-        runners = []
-        outs = 0
-        last_play = ""
-        outs_found = False
-        runners_found = False
-
-        # Walk backwards through events to find current at-bat and game state.
-        # Some streams expose `on_deck`/`next_batter` on plate-appearance events;
-        # capture either alongside `current_batter`. `outs`/`runners` must only
-        # be taken from the FIRST (most recent) event that has them — without
-        # the found-flags this loop kept walking into older events whenever
-        # `next_batter` was missing (the common case) and overwrote outs/runners
-        # with the oldest event's values instead of the current game state.
-        for ev in reversed(events):
-            ev_type = str(ev.get("type", "")).lower()
-            ev_data = ev.get("data") or ev
-
-            if not current_batter and ev_type in ("at_bat", "plate_appearance", "batter_up"):
-                batter_info = ev_data.get("batter") or ev_data.get("player") or {}
-                current_batter = {
-                    "name": batter_info.get("name", ""),
-                    "number": str(batter_info.get("number", "")),
-                }
-                # Some GC streams attach the on-deck batter to the same event.
-                on_deck_info = (ev_data.get("on_deck")
-                                or ev_data.get("next_batter")
-                                or ev_data.get("on_deck_batter") or {})
-                if isinstance(on_deck_info, dict) and (on_deck_info.get("name") or on_deck_info.get("number")):
-                    next_batter = {
-                        "name": on_deck_info.get("name", ""),
-                        "number": str(on_deck_info.get("number", "")),
-                    }
-
-            if not outs_found and ev_data.get("outs") is not None:
-                outs = int(ev_data.get("outs", 0))
-                outs_found = True
-
-            if not runners_found and ev_data.get("runners") is not None:
-                raw_runners = ev_data.get("runners") or []
-                # Normalize to {first, second, third} booleans regardless of API shape
-                if isinstance(raw_runners, list):
-                    occupied: set[str] = set()
-                    for r in raw_runners:
-                        if isinstance(r, dict):
-                            base = str(r.get("base", r.get("base_number", ""))).lower()
-                            if base in ("1", "first", "1b"):
-                                occupied.add("first")
-                            elif base in ("2", "second", "2b"):
-                                occupied.add("second")
-                            elif base in ("3", "third", "3b"):
-                                occupied.add("third")
-                        elif isinstance(r, (int, str)):
-                            b = str(r)
-                            if b in ("1", "first"):
-                                occupied.add("first")
-                            elif b in ("2", "second"):
-                                occupied.add("second")
-                            elif b in ("3", "third"):
-                                occupied.add("third")
-                    runners = {"first": "first" in occupied, "second": "second" in occupied, "third": "third" in occupied}
-                elif isinstance(raw_runners, dict):
-                    runners = {
-                        "first": bool(raw_runners.get("first") or raw_runners.get("1")),
-                        "second": bool(raw_runners.get("second") or raw_runners.get("2")),
-                        "third": bool(raw_runners.get("third") or raw_runners.get("3")),
-                    }
-                runners_found = True
-
-            if not last_play and ev_data.get("description"):
-                last_play = str(ev_data["description"])[:200]
-
-            if current_batter and last_play and next_batter:
-                break
-
-        if not current_batter and not last_play:
-            return None
-
-        return {
-            "current_batter": current_batter,
-            "next_batter": next_batter,
-            "outs": outs,
-            "runners": runners,
-            "last_play": last_play,
-            "event_count": len(events),
-        }
-    except Exception as e:
-        logging.debug("[Scoreboard] Events API error: %s", e)
+    gc_live_worker (sharks_sync) parses GC's authenticated game stream into
+    data/live_tablet/state.json while a game is armed. Returns None unless that
+    state is fresh, so a stale or unarmed feed never masquerades as live.
+    """
+    payload = live_tablet.build_tablet_payload(DATA_DIR, datetime.now(timezone.utc))
+    game = payload.get("game")
+    if payload.get("status") != "live" or not game:
         return None
+
+    def _who(p):
+        return {"name": p["name"], "number": p["number"]} if p else None
+
+    bases = game.get("bases") or {}
+    return {
+        "current_batter": _who(payload.get("batter")),
+        "next_batter": _who(payload.get("on_deck")),
+        "outs": game.get("outs", 0),
+        "balls": game.get("balls", 0),
+        "strikes": game.get("strikes", 0),
+        "runners": {"first": bool(bases.get("1")), "second": bool(bases.get("2")),
+                    "third": bool(bases.get("3"))},
+        "last_play": game.get("last_play", ""),
+    }
+
+
+def _live_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+@app.route('/api/live/tablet', methods=['GET'])
+def handle_live_tablet():
+    """Dugout tablet feed (docs/live_tablet_contract.md). Session-gated."""
+    resp = jsonify(live_tablet.build_tablet_payload(DATA_DIR, _live_now()))
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+@app.route('/api/live/status', methods=['GET'])
+def handle_live_status():
+    """Worker heartbeat for curl checks. Exempt from the team-password gate,
+    so it carries codes and counts only."""
+    resp = jsonify(live_tablet.public_status(DATA_DIR, _live_now()))
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+@app.route('/api/live/arm', methods=['POST'])
+def handle_live_arm():
+    """Start live GC polling for up to 4 h. Session, Origin, write token and
+    the mutating rate limit are all enforced by _security_before_request."""
+    blocked = _guard_mutating_request()
+    if blocked:
+        return blocked
+    body = request.get_json(silent=True) or {}
+    try:
+        hours = float(body.get("hours", live_tablet.ARM_DEFAULT_HOURS))
+    except (TypeError, ValueError):
+        return jsonify({"error": "hours_must_be_number"}), 400
+    if hours != hours:  # NaN
+        return jsonify({"error": "hours_must_be_number"}), 400
+    doc = live_tablet.arm(DATA_DIR, _live_now(), hours)
+    logging.info("[Live] Armed until %s by %s", doc["expires_at"], _sanitize_log(_client_ip()))
+    return jsonify({"armed": True, "armed_until": doc["expires_at"]})
+
+
+@app.route('/api/live/disarm', methods=['POST'])
+def handle_live_disarm():
+    blocked = _guard_mutating_request()
+    if blocked:
+        return blocked
+    live_tablet.disarm(DATA_DIR)
+    logging.info("[Live] Disarmed by %s", _sanitize_log(_client_ip()))
+    return jsonify({"armed": False})
+
 
 @app.route('/api/standings', methods=['GET'])
 def handle_standings():
@@ -7005,6 +6977,10 @@ def main():
     else:
         logging.info("RUN_API_SERVER=0 -> Flask dev API thread disabled (expect Gunicorn service).")
 
+    # Dugout tablet: idle until POST /api/live/arm, then polls GC (read-only).
+    import gc_live_worker
+    gc_live_worker.start_thread(DATA_DIR)
+
     # Bootstrap a DB snapshot from current enriched/team data on startup.
     try:
         bootstrap_file = SHARKS_DIR / "team_enriched.json"
@@ -7067,6 +7043,12 @@ def main():
 
             _last_state = state
             logging.info(f"Current State: {state}. Next cycle in {sleep_duration} seconds.")
+
+            if live_tablet.read_arm(DATA_DIR, datetime.now(timezone.utc)):
+                # GC SOP: one GC session at a time; the tablet worker owns it while armed.
+                logging.info("[Sync] Live tablet armed — GC sync cycle paused.")
+                time.sleep(sleep_duration)
+                continue
 
             success = run_sync_cycle()
             

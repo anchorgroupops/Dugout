@@ -49,6 +49,15 @@
 - No more than 1 scrape per 15 minutes
 - Never run concurrent scraper instances
 
+### Exception: dugout tablet live feed (`tools/gc_live_worker.py`)
+
+- Runs only while a coach has armed it (`POST /api/live/arm`); the arm expires on its own after at most 4 h.
+- One read-only GET of the current game's event log every 15 s, plus a player-name refresh about every 2 min.
+- On arming it backfills completed games it has not seen, at most 12 per session, with 3 s between requests.
+- The regular sync cycle pauses while armed, so only one GC session is open at a time.
+- Fails closed. A 401, 403 or 429 stops polling at once, and 4 consecutive other failures do the same. It does not retry until a coach re-arms.
+- It reuses the GC web app's own request headers in memory only. They are never logged or written to disk.
+
 ## Error Handling
 
 | Error | Action |
