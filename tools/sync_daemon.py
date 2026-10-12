@@ -1389,6 +1389,10 @@ def check_live_override():
 
 def run_sync_cycle():
     """Executes one full sync of schedule and stats, catching ALL exceptions."""
+    if live_tablet.read_arm(DATA_DIR, datetime.now(timezone.utc)):
+        # GC SOP: one GC session at a time; the tablet worker owns it while armed.
+        logging.info("[Sync] Live tablet armed — sync cycle skipped.")
+        return True
     try:
         logging.info("--- Starting Sync Cycle ---")
         _set_sync_stage("starting")
@@ -7043,12 +7047,6 @@ def main():
 
             _last_state = state
             logging.info(f"Current State: {state}. Next cycle in {sleep_duration} seconds.")
-
-            if live_tablet.read_arm(DATA_DIR, datetime.now(timezone.utc)):
-                # GC SOP: one GC session at a time; the tablet worker owns it while armed.
-                logging.info("[Sync] Live tablet armed — GC sync cycle paused.")
-                time.sleep(sleep_duration)
-                continue
 
             success = run_sync_cycle()
             

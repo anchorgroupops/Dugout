@@ -387,6 +387,13 @@ def main(argv: list[str] | None = None) -> int:
     from dotenv import load_dotenv
     load_dotenv(Path(__file__).resolve().parents[2] / ".env")
     cfg = config_mod.load(require_gmail=True)
+    # GC SOP: one GC session at a time. While the dugout tablet is armed its
+    # live worker owns GC, so this run is skipped; the next cron run catches up.
+    from tools import live_tablet
+    if live_tablet.read_arm(cfg.data_root, datetime.now().astimezone()):
+        log.info("autopull skipped: dugout tablet is armed")
+        print(json.dumps({"outcome": "skipped", "reason": "live_tablet_armed"}))
+        return 0
     # One lazy browser/login shared by every team in the sweep — the session
     # only launches if at least one team actually runs.
     import functools

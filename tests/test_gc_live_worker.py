@@ -39,6 +39,7 @@ class FakeGC:
         self.fail_events_with = fail_events_with
         self.calls = []
         self.refreshes = 0
+        self.ok_count = 0
 
     def refresh(self):
         self.refreshes += 1
@@ -49,6 +50,7 @@ class FakeGC:
             raise w.GCHttpError(self.fail_events_with)
         for prefix, value in self.routes.items():
             if path.startswith(prefix):
+                self.ok_count += 1
                 return value
         raise w.GCHttpError(404)
 
@@ -220,3 +222,45 @@ def test_status_never_holds_headers_or_names(tmp_path):
     raw = (live_tablet.live_dir(tmp_path) / "status.json").read_text()
     assert set(json.loads(raw)) <= {"phase", "error", "last_http", "events_seen", "last_poll_at"}
     assert "Shark" not in raw and "Rival" not in raw
+
+
+def test_first_call_refused_reports_replay_rejected(tmp_path):
+    live_tablet.arm(tmp_path, NOW)
+    worker, _ = _worker(tmp_path, polls_before_disarm=99)
+    gc = FakeGC({})                     # every path 404s, nothing ever succeeds
+    worker._poll_game(gc)
+    st = _status(tmp_path)
+    assert st["phase"] == "stopped" and st["error"] == "replay_rejected_404"
+    assert len(gc.calls) == 1
+
+
+class FakeSession:
+    def __init__(self, gc):
+        self.gc = gc
+        self.closed = False
+
+    def team_ids(self):
+        return "pub", "season"
+
+    def page(self):
+        return None
+
+    def close(self):
+        self.closed = True
+
+
+def test_session_continues_to_live_when_backfill_errors(tmp_path, monkeypatch):
+    live_tablet.arm(tmp_path, NOW)
+    routes = _routes()
+    del routes[f"/teams/{SHARKS}/game-summaries"]   # summaries 404 after schedule worked
+    gc = FakeGC(routes)
+    gc.ok_count = 1
+    session = FakeSession(gc)
+    monkeypatch.setattr(w, "GCClient", lambda page: gc)
+    gc.bootstrap = lambda *a: None
+    worker, _ = _worker(tmp_path)
+    worker.session_factory = lambda: session
+    worker.tick()
+    assert _status(tmp_path)["phase"] == "disarmed"
+    assert (live_tablet.live_dir(tmp_path) / "state.json").exists()
+    assert session.closed

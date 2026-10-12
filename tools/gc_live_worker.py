@@ -66,6 +66,7 @@ class GCClient:
         self._requests: list = []
         self._headers: dict | None = None
         self.team_uuid: str | None = None
+        self.ok_count = 0
 
     def bootstrap(self, public_id: str, season_slug: str) -> None:
         self._capture(lambda: self.page.goto(f"{GC_WEB}/teams/{public_id}/{season_slug}/schedule",
@@ -82,9 +83,14 @@ class GCClient:
         self.page.on("request", on_request)
         try:
             navigate()
-            self.page.wait_for_load_state("networkidle", timeout=30_000)
+            try:
+                # GC's SPA may never go fully idle; headers are what we need.
+                self.page.wait_for_load_state("networkidle", timeout=30_000)
+            except Exception:
+                pass
         finally:
             self.page.remove_listener("request", on_request)
+        fallback = None
         for req in self._requests:
             url = req.url
             if not url.startswith(GC_API):
@@ -97,8 +103,15 @@ class GCClient:
                     hdrs = req.all_headers()
                 except Exception:
                     continue
-                self._headers = {k: v for k, v in hdrs.items()
-                                 if k.lower() not in _DROP_HEADERS and not k.startswith(":")}
+                kept = {k: v for k, v in hdrs.items()
+                        if k.lower() not in _DROP_HEADERS and not k.startswith(":")}
+                # Prefer a request that carried auth (key names only, never values).
+                if any("token" in k.lower() or k.lower() == "authorization" for k in kept):
+                    self._headers = kept
+                elif fallback is None:
+                    fallback = kept
+        if self._headers is None:
+            self._headers = fallback
         self._requests.clear()
         if self._headers is None or not self.team_uuid:
             raise RuntimeError("no_api_headers")
@@ -107,6 +120,7 @@ class GCClient:
         resp = self.page.context.request.get(GC_API + path, headers=self._headers, timeout=20_000)
         if resp.status != 200:
             raise GCHttpError(resp.status)
+        self.ok_count += 1
         return resp.json()
 
 
@@ -191,7 +205,13 @@ class LiveWorker:
             except RuntimeError as e:
                 self._set_status(phase="stopped", error=str(e))
                 return
-            self._backfill(gc)
+            try:
+                self._backfill(gc)
+            except GCHttpError as e:
+                # History is optional; only refusals that also doom live polling stop here.
+                if gc.ok_count == 0 or e.status in (401, 403, 429):
+                    self._stop_http(gc, e)
+                    return
             self._poll_game(gc)
         finally:
             if session is not None:
@@ -199,6 +219,12 @@ class LiveWorker:
                     session.close()
                 except Exception:
                     pass
+
+    def _stop_http(self, gc, e: GCHttpError):
+        # Refused before any GC call worked: the header-replay method itself is
+        # being rejected (e.g. by the WAF), not a passing GC failure.
+        error = f"replay_rejected_{e.status}" if gc.ok_count == 0 else str(e)
+        self._set_status(phase="stopped", last_http=e.status, error=error)
 
     def _poll_game(self, gc: GCClient):
         fails, game, stream_id, meta, players, n = 0, None, None, None, {}, 0
@@ -208,7 +234,8 @@ class LiveWorker:
             try:
                 if game is None:
                     self._set_status(phase="finding_game")
-                    game = pick_game(gc.get(f"/teams/{gc.team_uuid}/schedule?fetch_place_details=true"), now)
+                    schedule = gc.get(f"/teams/{gc.team_uuid}/schedule?fetch_place_details=true")
+                    game = pick_game(schedule, now)
                     self._set_status(last_http=200)
                     if game is None:
                         self._set_status(error="no_game_found")
@@ -251,8 +278,8 @@ class LiveWorker:
                         continue
                     except Exception:
                         pass
-                if fails >= MAX_FAILS or e.status in (401, 403, 429):
-                    self._set_status(phase="stopped")
+                if fails >= MAX_FAILS or e.status in (401, 403, 429) or gc.ok_count == 0:
+                    self._stop_http(gc, e)
                     return
             except Exception as e:  # timeouts, bad JSON: count, don't crash
                 fails += 1
@@ -288,7 +315,8 @@ class LiveWorker:
             start = live_tablet._parse_iso(((item.get("event") or {}).get("start") or {})
                                            .get("datetime", "").replace("Z", "+00:00"))
             sharks_home = (summ.get("home_away") or pre.get("home_away")) == "home"
-            opp = pre.get("opponent_id") or (summ.get("game_stream") or {}).get("opponent_id")
+            opp = (pre.get("opponent_id") or summ.get("opponent_id")
+                   or (summ.get("game_stream") or {}).get("opponent_id"))
             meta = {
                 "event_id": summ["event_id"],
                 "date": start.astimezone(ET).date().isoformat() if start else None,
@@ -316,7 +344,7 @@ class _SessionAdapter:
     def __init__(self):
         from tools.autopull import cli, config as config_mod
         import team_registry
-        self._shared = cli.SharedGCSession(config_mod.load(require_gmail=False))
+        self._shared = cli.SharedGCSession(config_mod.load(require_gmail=True))
         self._ids = team_registry.current_gc_ids()
 
     def team_ids(self):
