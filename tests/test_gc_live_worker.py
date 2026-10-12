@@ -101,6 +101,19 @@ def test_pick_game_window():
     assert w.pick_game(sched, NOW) is None
 
 
+def _two_games(second_start):
+    first = _schedule(NOW - timedelta(minutes=30))
+    second = _schedule(second_start)
+    second[0]["event"]["id"] = "ev-two"
+    return first + second
+
+
+def test_pick_game_prefers_game_in_progress():
+    # Game 2 is nearer in time but has not started: stay on game 1.
+    assert w.pick_game(_two_games(NOW + timedelta(minutes=10)), NOW)["event"]["id"] == "ev-today"
+    assert w.pick_game(_two_games(NOW - timedelta(minutes=1)), NOW)["event"]["id"] == "ev-two"
+
+
 def test_tick_does_nothing_unarmed(tmp_path):
     called = []
     worker = w.LiveWorker(tmp_path, session_factory=lambda: called.append(1), clock=Clock(NOW))
@@ -264,3 +277,43 @@ def test_session_continues_to_live_when_backfill_errors(tmp_path, monkeypatch):
     assert _status(tmp_path)["phase"] == "disarmed"
     assert (live_tablet.live_dir(tmp_path) / "state.json").exists()
     assert session.closed
+
+
+def test_doubleheader_moves_to_game_two_once_it_starts(tmp_path):
+    live_tablet.arm(tmp_path, NOW)
+    worker, _ = _worker(tmp_path, polls_before_disarm=w.PLAYERS_EVERY + 2)
+    routes = _routes()
+    routes[f"/teams/{SHARKS}/schedule"] = _two_games(NOW + timedelta(seconds=60))
+    routes["/events/ev-two/best-game-stream-id"] = {"game_stream_id": "gs-two"}
+    worker._poll_game(FakeGC(routes))
+    state = json.loads((live_tablet.live_dir(tmp_path) / "state.json").read_text())
+    assert state["meta"]["event_id"] == "ev-two"
+    games = live_tablet.live_dir(tmp_path) / "games"
+    assert sorted(p.name for p in games.glob("*.json")) == ["ev-today.json", "ev-two.json"]
+
+
+def test_live_poll_comes_before_backfill(tmp_path):
+    live_tablet.arm(tmp_path, NOW)
+    summaries = [{"event_id": "ev-old", "game_status": "completed",
+                  "game_stream": {"id": "gs-old", "opponent_id": "team-opp"}}]
+    worker, _ = _worker(tmp_path, polls_before_disarm=3)
+    gc = FakeGC(_routes(summaries))
+    worker._poll_game(gc, worker._backfill_steps(gc))
+    first_live = next(i for i, c in enumerate(gc.calls) if c.startswith("/game-streams/gs-today"))
+    assert first_live < gc.calls.index(f"/teams/{SHARKS}/game-summaries")
+    assert (live_tablet.live_dir(tmp_path) / "games" / "ev-old.json").exists()
+
+
+def test_rearm_during_failing_session_does_not_restart_it(tmp_path):
+    live_tablet.arm(tmp_path, NOW)
+    starts = []
+
+    def factory():
+        starts.append(1)
+        live_tablet.arm(tmp_path, NOW + timedelta(minutes=1))   # coach taps Start again
+        raise RuntimeError("login failed")
+
+    worker = w.LiveWorker(tmp_path, session_factory=factory, clock=Clock(NOW))
+    worker.tick()
+    worker.tick()
+    assert len(starts) == 1

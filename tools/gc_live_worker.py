@@ -124,20 +124,28 @@ class GCClient:
         return resp.json()
 
 
+def game_start(item: dict) -> datetime | None:
+    ev = (item or {}).get("event") or {}
+    return live_tablet._parse_iso(((ev.get("start") or {}).get("datetime") or "").replace("Z", "+00:00"))
+
+
 def pick_game(schedule: list, now: datetime) -> dict | None:
-    """The game whose start is nearest to now within the playing window."""
-    best, best_gap = None, None
+    """The game in the playing window that started most recently, else the
+    next to start. In a doubleheader this moves to game 2 once it begins."""
+    started, upcoming = [], []
     for item in schedule or []:
         ev = (item or {}).get("event") or {}
         if ev.get("event_type") != "game" or ev.get("status") == "canceled":
             continue
-        start = live_tablet._parse_iso(((ev.get("start") or {}).get("datetime") or "").replace("Z", "+00:00"))
+        start = game_start(item)
         if not start or not (start - GAME_WINDOW_BEFORE <= now <= start + GAME_WINDOW_AFTER):
             continue
-        gap = abs((now - start).total_seconds())
-        if best_gap is None or gap < best_gap:
-            best, best_gap = item, gap
-    return best
+        (started if start <= now else upcoming).append((start, item))
+    if started:
+        return max(started, key=lambda p: p[0])[1]
+    if upcoming:
+        return min(upcoming, key=lambda p: p[0])[1]
+    return None
 
 
 def players_from_plays(plays: dict) -> dict:
@@ -190,6 +198,11 @@ class LiveWorker:
         except Exception as e:  # never let the thread die
             log.warning("[Live] session ended: %s", type(e).__name__)
             self._set_status(phase="stopped", error=type(e).__name__)
+        # Re-arming mid-session only extends it; it must not restart a session
+        # that has just failed.
+        arm = self.armed()
+        if arm:
+            self._done_for = arm.get("armed_at")
 
     def run_session(self):
         """One armed period: login, find game, poll until disarmed or failed."""
@@ -205,14 +218,7 @@ class LiveWorker:
             except RuntimeError as e:
                 self._set_status(phase="stopped", error=str(e))
                 return
-            try:
-                self._backfill(gc)
-            except GCHttpError as e:
-                # History is optional; only refusals that also doom live polling stop here.
-                if gc.ok_count == 0 or e.status in (401, 403, 429):
-                    self._stop_http(gc, e)
-                    return
-            self._poll_game(gc)
+            self._poll_game(gc, self._backfill_steps(gc))
         finally:
             if session is not None:
                 try:
@@ -226,47 +232,56 @@ class LiveWorker:
         error = f"replay_rejected_{e.status}" if gc.ok_count == 0 else str(e)
         self._set_status(phase="stopped", last_http=e.status, error=error)
 
-    def _poll_game(self, gc: GCClient):
+    def _poll_game(self, gc: GCClient, backfill=None):
+        """Poll the live game every POLL_S. `backfill` is stepped one past game
+        per cycle, so history never holds up live data."""
         fails, game, stream_id, meta, players, n = 0, None, None, None, {}, 0
         refreshed = False
+        schedule_path = f"/teams/{gc.team_uuid}/schedule?fetch_place_details=true"
         while self.armed():
             now = self.clock()
+            wait = POLL_S
             try:
+                if game is not None and n and n % PLAYERS_EVERY == 0:
+                    nxt = pick_game(gc.get(schedule_path), now)
+                    if nxt and nxt["event"]["id"] != game["event"]["id"]:
+                        game, stream_id, players, n = nxt, None, {}, 0
                 if game is None:
                     self._set_status(phase="finding_game")
-                    schedule = gc.get(f"/teams/{gc.team_uuid}/schedule?fetch_place_details=true")
-                    game = pick_game(schedule, now)
+                    game = pick_game(gc.get(schedule_path), now)
                     self._set_status(last_http=200)
                     if game is None:
                         self._set_status(error="no_game_found")
-                        self.sleep(120)
-                        continue
-                if stream_id is None:
+                        wait = 120
+                if game is not None and stream_id is None:
                     event_id = game["event"]["id"]
                     stream_id = (gc.get(f"/events/{event_id}/best-game-stream-id") or {}).get("game_stream_id")
-                    if not stream_id:
+                    if stream_id:
+                        pre = game.get("pregame_data") or {}
+                        sharks_home = pre.get("home_away") == "home"
+                        meta = {
+                            "event_id": event_id, "date": now.astimezone(ET).date().isoformat(),
+                            "opponent_name": pre.get("opponent_name") or "",
+                            "sharks_team_id": gc.team_uuid,
+                            "home_id": gc.team_uuid if sharks_home else pre.get("opponent_id"),
+                            "away_id": pre.get("opponent_id") if sharks_home else gc.team_uuid,
+                        }
+                    else:
                         self._set_status(error="no_stream_yet")
-                        self.sleep(60)
-                        continue
-                    pre = game.get("pregame_data") or {}
-                    sharks_home = pre.get("home_away") == "home"
-                    meta = {
-                        "event_id": event_id, "date": now.astimezone(ET).date().isoformat(),
-                        "opponent_name": pre.get("opponent_name") or "",
-                        "sharks_team_id": gc.team_uuid,
-                        "home_id": gc.team_uuid if sharks_home else pre.get("opponent_id"),
-                        "away_id": pre.get("opponent_id") if sharks_home else gc.team_uuid,
-                    }
-                if n % PLAYERS_EVERY == 0:
-                    players = players_from_plays(gc.get(f"/game-stream-processing/{stream_id}/plays")) or players
-                events = gc.get(f"/game-streams/{stream_id}/events")
-                doc = build_doc(meta, players, events, self.clock())
-                ldir = live_tablet.live_dir(self.data_dir)
-                live_tablet.write_json_atomic(ldir / "games" / f"{meta['event_id']}.json", doc)
-                live_tablet.write_json_atomic(ldir / "state.json", doc)
-                fails, n, refreshed = 0, n + 1, False
-                self._set_status(phase="polling", error=None, last_http=200,
-                                 last_poll_at=doc["fetched_at"], events_seen=len(events or []))
+                        wait = 60
+                if stream_id:
+                    if n % PLAYERS_EVERY == 0:
+                        players = players_from_plays(gc.get(f"/game-stream-processing/{stream_id}/plays")) or players
+                    events = gc.get(f"/game-streams/{stream_id}/events")
+                    doc = build_doc(meta, players, events, self.clock())
+                    ldir = live_tablet.live_dir(self.data_dir)
+                    live_tablet.write_json_atomic(ldir / "games" / f"{meta['event_id']}.json", doc)
+                    live_tablet.write_json_atomic(ldir / "state.json", doc)
+                    fails, n, refreshed = 0, n + 1, False
+                    self._set_status(phase="polling", error=None, last_http=200,
+                                     last_poll_at=doc["fetched_at"], events_seen=len(events or []))
+                if backfill is not None and next(backfill, None) is None:
+                    backfill = None
             except GCHttpError as e:
                 fails += 1
                 self._set_status(last_http=e.status, error=str(e))
@@ -287,16 +302,18 @@ class LiveWorker:
                 if fails >= MAX_FAILS:
                     self._set_status(phase="stopped")
                     return
-            self.sleep(POLL_S)
+            self.sleep(wait)
         self._set_status(phase="disarmed")
 
-
     def _backfill(self, gc: GCClient):
+        for _ in self._backfill_steps(gc):
+            pass
+
+    def _backfill_steps(self, gc: GCClient):
         """Parse completed games not yet on disk, so opponents carry spray
-        history. At SOP pace; a game GC won't serve is skipped, but auth or
-        rate-limit refusals end the session like any other poll."""
+        history; yields after each game. At SOP pace; a game GC won't serve
+        is skipped, but auth or rate-limit refusals are raised to the poller."""
         games_dir = live_tablet.live_dir(self.data_dir) / "games"
-        self._set_status(phase="backfill")
         summaries = gc.get(f"/teams/{gc.team_uuid}/game-summaries")
         todo = [s for s in summaries or []
                 if s.get("game_status") == "completed" and (s.get("game_stream") or {}).get("id")
@@ -312,8 +329,7 @@ class LiveWorker:
             stream_id = summ["game_stream"]["id"]
             item = schedule.get(summ["event_id"]) or {}
             pre = item.get("pregame_data") or {}
-            start = live_tablet._parse_iso(((item.get("event") or {}).get("start") or {})
-                                           .get("datetime", "").replace("Z", "+00:00"))
+            start = game_start(item)
             sharks_home = (summ.get("home_away") or pre.get("home_away")) == "home"
             opp = (pre.get("opponent_id") or summ.get("opponent_id")
                    or (summ.get("game_stream") or {}).get("opponent_id"))
@@ -333,9 +349,11 @@ class LiveWorker:
             except GCHttpError as e:
                 if e.status in (401, 403, 429):
                     raise
+                yield True
                 continue
             live_tablet.write_json_atomic(games_dir / f"{meta['event_id']}.json",
                                           build_doc(meta, players, events, self.clock()))
+            yield True
 
 
 class _SessionAdapter:
