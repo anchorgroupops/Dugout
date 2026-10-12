@@ -1,6 +1,6 @@
 /* Dugout tablet: dark, high contrast, readable at 2 m outdoors. */
-.dt-root { background: #000; color: #fff; min-height: 70vh; display: flex; flex-direction: column; gap: 8px; padding: 10px; box-sizing: border-box; font-family: inherit; }
-.dt-root.full { position: fixed; inset: 0; min-height: 100vh; overflow: auto; z-index: 1000; }
+.dt-root { background: #000; color: #fff; margin-bottom: var(--space-md, 16px); border-radius: 12px; display: flex; flex-direction: column; gap: 8px; padding: 10px; box-sizing: border-box; font-family: inherit; }
+.dt-root.full { position: fixed; inset: 0; min-height: 100vh; margin: 0; border-radius: 0; overflow: auto; z-index: 1000; }
 
 .dt-banner { padding: 8px 14px; font-size: 22px; font-weight: 800; border-radius: 8px; text-align: center; }
 .dt-banner.starting { background: #1e3a5f; color: #fff; }

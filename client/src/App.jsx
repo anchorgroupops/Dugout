@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Users, Activity, RefreshCw, ListOrdered, Calendar, Trophy, Dumbbell, Volume2, Target, AlertTriangle, MoreHorizontal, Download, Globe, GlobeLock, Clock, Radio, Mic, ClipboardList, Lock, MonitorSmartphone } from 'lucide-react';
+import { Users, Activity, RefreshCw, ListOrdered, Calendar, Trophy, Dumbbell, Volume2, Target, AlertTriangle, MoreHorizontal, Download, Globe, GlobeLock, Clock, Radio, Mic, ClipboardList, Lock } from 'lucide-react';
 import { formatDateTime, formatRelative } from './utils/formatDate';
 import { usePWAInstall } from './utils/usePWAInstall';
 import { useOnlineStatus } from './utils/useOnlineStatus';
@@ -530,7 +530,6 @@ function App() {
     { id: 'practice', label: 'Practice', icon: <Dumbbell size={18} /> },
     { id: 'evals', label: 'Eval', icon: <ClipboardList size={18} /> },
     { id: 'announcer', label: 'Announcer', icon: <Mic size={18} /> },
-    { id: 'dugout', label: 'Dugout', icon: <MonitorSmartphone size={18} /> },
   ];
 
   // Mobile: 4 primary bottom tabs + "More" overflow
@@ -548,14 +547,18 @@ function App() {
     { id: 'games', label: 'Games', icon: <Calendar size={20} /> },
     { id: 'league', label: 'League', icon: <Trophy size={20} /> },
     { id: 'evals', label: 'Eval', icon: <ClipboardList size={20} /> },
-    { id: 'dugout', label: 'Dugout', icon: <MonitorSmartphone size={20} /> },
   ];
 
   const renderContent = () => {
     if (data.loading) return <div className="loader"></div>;
 
     switch(currentView) {
-      case 'scoreboard': return <Scoreboard isMobile={isMobile} isLandscape={isLandscape} team={data.team} schedule={data.schedule} />;
+      case 'scoreboard': return (
+        <>
+          <DugoutTablet />
+          <Scoreboard isMobile={isMobile} isLandscape={isLandscape} team={data.team} schedule={data.schedule} />
+        </>
+      );
       case 'scout': return <Scouting isMobile={isMobile} isLandscape={isLandscape} />;
       case 'roster': return (
         <Roster
@@ -590,7 +593,6 @@ function App() {
         />
       );
       case 'announcer': return <Announcer lineups={data.lineups} />;
-      case 'dugout': return <DugoutTablet />;
       case 'evals': return (
         <Evals team={data.team} isMobile={isMobile} isLandscape={isLandscape} />
       );
@@ -633,7 +635,7 @@ function App() {
               <img src="/sharks-logo-round.png" alt="Sharks" className="logo-avatar" width="52" height="52" />
               <span className="brand" style={{ fontSize: '1.125rem' }}>
                 {(() => {
-                  const labels = { scoreboard: 'Live', scout: 'Scout', swot: 'SWOT', lineups: 'Lineups', practice: 'Practice', roster: 'Roster', games: 'Games', league: 'League', announcer: 'Announcer', evals: 'Eval', dugout: 'Dugout' };
+                  const labels = { scoreboard: 'Live', scout: 'Scout', swot: 'SWOT', lineups: 'Lineups', practice: 'Practice', roster: 'Roster', games: 'Games', league: 'League', announcer: 'Announcer', evals: 'Eval' };
                   return labels[currentView] || 'Sharks';
                 })()}
               </span>
