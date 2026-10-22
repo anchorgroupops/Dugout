@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import tempfile
 import time
@@ -10,6 +11,8 @@ from zoneinfo import ZoneInfo
 
 import requests
 import os
+
+from team_registry import current_gc_ids
 
 try:
     from playwright.sync_api import sync_playwright
@@ -209,11 +212,26 @@ def _parse_boxscore_text(body_text: str, sharks_side: str) -> tuple[list[dict], 
     return _choose_sharks_lineup(lineups, sharks_side=sharks_side)
 
 
-def _existing_game_sources() -> dict[tuple[str, str], tuple[Path, str]]:
-    out: dict[tuple[str, str], tuple[Path, str]] = {}
+def _sharks_score(game: dict) -> tuple[int, int]:
+    """(sharks, opponent). GC's public feed reports score.team as the queried
+    team's runs whether it played home or away, so no side swap is needed."""
+    score = game.get("score") or {}
+    return _safe_int(score.get("team")), _safe_int(score.get("opponent_team"))
+
+
+def _existing_game_sources() -> tuple[dict[str, tuple[Path, str]], dict[tuple[str, str], tuple[Path, str, str]]]:
+    """Existing game files, keyed by GC game id and by (date, opponent slug).
+
+    The GC id is the stable key: opponent names drift between syncs
+    ("Palm Coast Wayfinders" vs "Wayfinders"), which used to fork one game
+    into two files. (date, slug) is the fallback; it also carries the file's
+    gc id so a same-day doubleheader can't be matched to the other game.
+    """
+    by_gc_id: dict[str, tuple[Path, str]] = {}
+    by_key: dict[tuple[str, str], tuple[Path, str, str]] = {}
     if not GAMES_DIR.exists():
-        return out
-    for f in GAMES_DIR.glob("*.json"):
+        return by_gc_id, by_key
+    for f in sorted(GAMES_DIR.glob("*.json")):
         if f.name == "index.json":
             continue
         try:
@@ -221,20 +239,31 @@ def _existing_game_sources() -> dict[tuple[str, str], tuple[Path, str]]:
             date = str(data.get("date", "")).strip()
             opp = _slug(str(data.get("opponent", "")))
             src = str(data.get("source", ""))
+            gc_id = str(data.get("gc_game_id", "")).strip()
+            if gc_id:
+                if gc_id in by_gc_id:
+                    logging.warning("[web-mobile] %s and %s share gc_game_id %s; keeping the first",
+                                    by_gc_id[gc_id][0].name, f.name, gc_id)
+                else:
+                    by_gc_id[gc_id] = (f, src)
             if date and opp:
-                out[(date, opp)] = (f, src)
+                by_key[(date, opp)] = (f, src, gc_id)
         except Exception:
             continue
-    return out
+    return by_gc_id, by_key
 
 
 def sync_recent_games(
-    team_id: str = "NuGgx6WvP7TO",
-    season_slug: str = "2026-spring-sharks",
+    team_id: str = "",
+    season_slug: str = "",
     sharks_team_name: str = "Sharks",
     max_games: int = 8,
     force: bool = False,
 ) -> dict:
+    if not (team_id and season_slug):
+        team_id, season_slug = current_gc_ids()  # never mix a caller id with a registry season
+    if not (team_id and season_slug):
+        raise RuntimeError("no GC team id / season slug: set GC_TEAM_ID + GC_SEASON_SLUG or config/teams.yaml")
     if sync_playwright is None:
         raise RuntimeError("playwright not installed")
 
@@ -245,7 +274,7 @@ def sync_recent_games(
     completed.sort(key=lambda g: str(g.get("start_ts", "")), reverse=True)
     targets = completed[: max(1, int(max_games or 1))]
 
-    existing = _existing_game_sources()
+    existing_by_id, existing = _existing_game_sources()
     saved = 0
     skipped_existing = 0
     failed = 0
@@ -269,15 +298,22 @@ def sync_recent_games(
             except Exception:
                 game_date = datetime.now(ET).date().isoformat()
 
-            key = (game_date, _slug(opponent))
-            if key in existing and not force:
-                existing_file, existing_source = existing[key]
-                if existing_source == "scorebook_pdf":
+            match = existing_by_id.get(game_id)
+            if not match:
+                keyed = existing.get((game_date, _slug(opponent)))
+                if keyed and keyed[2] in ("", game_id):
+                    match = keyed[:2]
+            existing_source = ""
+            if match:
+                existing_file, existing_source = match
+                if existing_source == "scorebook_pdf" and not force:
                     skipped_existing += 1
                     continue
                 output_file = existing_file
             else:
                 output_file = GAMES_DIR / f"{game_date}_{_slug(opponent)}.json"
+                if output_file.exists():  # doubleheader: that name belongs to the other game
+                    output_file = GAMES_DIR / f"{game_date}_{_slug(opponent)}_{game_id[:8]}.json"
 
             box_url = f"{GC_BASE}/teams/{team_id}/{season_slug}/schedule/{game_id}/box-score"
             try:
@@ -290,15 +326,19 @@ def sync_recent_games(
                     failed += 1
                     continue
 
-                if sharks_side == "home":
-                    sharks_score = _safe_int(((game.get("score") or {}).get("team")))
-                    opp_score = _safe_int(((game.get("score") or {}).get("opponent_team")))
-                else:
-                    sharks_score = _safe_int(((game.get("score") or {}).get("opponent_team")))
-                    opp_score = _safe_int(((game.get("score") or {}).get("team")))
+                # The text parse has been seen returning one roster for both sides;
+                # keep the score but don't publish batting lines we can't attribute.
+                unparsed = [r["number"] for r in sharks_rows] == [r["number"] for r in opp_rows]
+                if unparsed:
+                    if existing_source == "scorebook_pdf":  # --force must not trade a scorebook for empty batting
+                        skipped_existing += 1
+                        continue
+                    sharks_rows, opp_rows = [], []
+
+                sharks_score, opp_score = _sharks_score(game)
 
                 out = {
-                    "game_id": f"{game_date}_{_slug(opponent)}",
+                    "game_id": output_file.stem,
                     "gc_game_id": game_id,
                     "date": game_date,
                     "opponent": opponent,
@@ -311,6 +351,8 @@ def sync_recent_games(
                     "sharks_batting": sharks_rows,
                     "opponent_batting": opp_rows,
                 }
+                if unparsed:
+                    out["batting_unparsed"] = True
 
                 _atomic_write_json(output_file, out)
                 outputs.append(str(output_file))
@@ -334,9 +376,10 @@ def sync_recent_games(
 def main() -> int:
     import argparse
 
+    default_team, default_season = current_gc_ids()
     parser = argparse.ArgumentParser(description="Scrape GC mobile web box scores into data/sharks/games")
-    parser.add_argument("--team-id", default="NuGgx6WvP7TO")
-    parser.add_argument("--season-slug", default="2026-spring-sharks")
+    parser.add_argument("--team-id", default=default_team)
+    parser.add_argument("--season-slug", default=default_season)
     parser.add_argument("--sharks-name", default="Sharks")
     parser.add_argument("--max-games", type=int, default=8)
     parser.add_argument("--force", action="store_true")
