@@ -1,5 +1,5 @@
 # Stage 1: Build the React application
-FROM node:26.11.1-alpine AS build-stage
+FROM node:26.12.0-alpine AS build-stage
 
 WORKDIR /app
 
@@ -18,7 +18,7 @@ COPY . .
 RUN VITE_SKIP_DATA_SYNC=1 npm run build
 
 # Stage 2: Serve with Nginx
-FROM nginx:1.31.6-alpine
+FROM nginx:1.31.7-alpine
 
 LABEL org.opencontainers.image.title="dugout-client" \
       org.opencontainers.image.description="Sharks softball dashboard frontend" \
