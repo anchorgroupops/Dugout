@@ -26,6 +26,10 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    ignore:
+      # Pillow 13 requires Python >=3.11; Dockerfile.scraper's playwright jammy image is 3.10.
+      - dependency-name: "Pillow"
+        update-types: ["version-update:semver-major"]
     groups:
       pip-minor-patch:
         update-types: ["minor", "patch"]
