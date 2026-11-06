@@ -39,7 +39,7 @@ anthropic>=2.3.0,<3
 PyYAML>=6.0.3,<7
 
 # Walk-up song search + download (YouTube via yt-dlp, requires ffmpeg for MP3 extraction)
-yt-dlp>=2026.8.19
+yt-dlp>=2026.10.26
 
 # TTS providers — free tier chain (install whichever are available on the host)
 # Edge TTS: Microsoft neural voices, no API key, works on Pi
