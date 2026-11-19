@@ -1,5 +1,5 @@
 # NOTE: Pair with a .dockerignore to exclude .git/, __pycache__/, *.env, data/, logs/, .venv/
-FROM mcr.microsoft.com/playwright/python:v1.64.1-noble
+FROM mcr.microsoft.com/playwright/python:v1.65.2-noble
 
 # OCI metadata labels
 LABEL org.opencontainers.image.title="sharks-scraper" \
