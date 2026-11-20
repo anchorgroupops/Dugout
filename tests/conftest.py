@@ -38,6 +38,33 @@ def _isolate_gc_login_state(tmp_path, monkeypatch):
     yield
 
 
+@pytest.fixture(autouse=True)
+def _no_real_playwright_in_sync_daemon_tests(request, monkeypatch):
+    """test_sync_daemon_new.py must never start a real Playwright driver.
+    Two run_sync_cycle tests reach opponent_discovery and
+    gc_web_mobile_scraper, which bind sync_playwright at import time; on CI
+    (Playwright 1.65, no browsers installed) the driver hangs forever.
+    Tests that need a fake session still override this via sys.modules."""
+    if request.node.path.name == "test_sync_daemon_new.py":
+        import types
+        from unittest.mock import MagicMock, NonCallableMock
+        blocked = MagicMock(
+            side_effect=RuntimeError("real Playwright blocked in tests"))
+        # Modules that did `from playwright.sync_api import sync_playwright`
+        for mod in list(sys.modules.values()):
+            try:
+                current = getattr(mod, "sync_playwright", None)
+            except Exception:
+                continue
+            if callable(current) and not isinstance(current, NonCallableMock):
+                monkeypatch.setattr(mod, "sync_playwright", blocked)
+        fake = types.ModuleType("playwright.sync_api")
+        fake.sync_playwright = blocked
+        monkeypatch.setitem(sys.modules, "playwright", types.ModuleType("playwright"))
+        monkeypatch.setitem(sys.modules, "playwright.sync_api", fake)
+    yield
+
+
 @pytest.fixture
 def sample_batting_row():
     return {
